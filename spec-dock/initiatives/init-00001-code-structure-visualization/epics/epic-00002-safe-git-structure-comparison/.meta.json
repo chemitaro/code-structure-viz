@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "type": "epic",
+  "id": "epic-00002",
+  "title": "Establish Safe Git Structure Comparison",
+  "slug": "safe-git-structure-comparison",
+  "created_at": "2026-08-24T10:12:07+09:00",
+  "updated_at": "2026-08-24T10:12:07+09:00",
+  "parent_id": "init-00001",
+  "initiative_id": "init-00001",
+  "epic_id": null,
+  "_spec_dock": {
+    "managed": true,
+    "do_not_edit": true,
+    "edit_via": "spec-dock"
+  },
+  "github": {
+    "issue_number": 2,
+    "repo_owner": "chemitaro",
+    "repo_name": "code-structure-viz"
+  }
+}
