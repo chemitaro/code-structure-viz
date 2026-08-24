@@ -26,24 +26,25 @@ coding agent が domain を省略した一回の command で Python、SQLAlchemy
 - 親 Initiative は三 domain の code structure を静的に可視化する。
 - 親 Epic は安全な Git comparison と agent-first Artifact contract を一つの product outcome として統合する。
 - この slice の declared dependency は ISSUE-04, ISSUE-06。依存 Issue の public contract だけを利用し、unfinished sibling の内部実装には依存しない。
-- canonical authority は exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` の accepted ADR と interview、および本 package の親 R/D/P である。
+- canonical authority は exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` の accepted ADR、interview、親 R/D/P と本 Issue の current canonical textである。
 
 | 親 requirement | この Issue の所有範囲 |
 | --- | --- |
-| EPIC-REQ-001 | all domain の snapshot-and-diff orchestration を end-to-end で提供する。 |
-| EPIC-REQ-002 | static analysis、read-only Git、redaction、fail-closed を維持する。 |
-| EPIC-REQ-003 | versioned semantic JSON、domain-specific PlantUML、manifest を生成する。 |
-| EPIC-REQ-004 | complete/not_applicable/incomplete と exit contract を slice の範囲で実装する。 |
+| EPIC-REQ-001 | all-domain orchestration を end-to-end で提供する。 |
+| EPIC-REQ-002 | static analysis、read-only Git、safe endpoint/source、redaction、fail-closed を維持する。 |
+| EPIC-REQ-003 | all selected domains の identity/member/relation/matching semantics を domain ownership のまま保つ。 |
+| EPIC-REQ-004 | per-domain versioned semantic JSON、domain-specific PlantUML、`run-manifest/v1` descriptor、determinism/no-overwrite を提供する。 |
+| EPIC-REQ-005 | domain status、0/1/2/3/130 exit、run-level changed-path budget、domain-local entity budgetを slice の範囲で実装・検証する。 |
 
 ## 観測可能な要件
 
 | ID | 観測面 | 要件 |
 | --- | --- | --- |
 | I07-REQ-001 | CLI と observable outcome | coding agent が domain を省略した一回の command で Python、SQLAlchemy、Next の適用可否・成功・不完全を区別し、成功 Artifact を保持した集約 manifest と正しい exit code を得られる。 |
-| I07-REQ-002 | source acquisition | diff で domain 無指定なら python、sqlalchemy、next を deterministic order で実行する。snapshot も同じ default を採用し、明示 domain で絞り込める。 |
-| I07-REQ-003 | semantic behavior | common envelope は run/domain status、artifact descriptor、diagnostic、coverage、graph primitive だけを共有し、domain identity/member/relation/matching を統一 model へ押し込まない。 |
-| I07-REQ-004 | Artifact/output | format 未指定時は complete/incomplete domain ごとに versioned semantic JSON と domain-specific PlantUML を生成する。not_applicable domain は status/diagnostic のみ。 |
-| I07-REQ-005 | failure behavior | adapter exception を core process crash に伝播させず domain diagnostic へ正規化する。ただし protocol corruption や security invariant violation は affected domain を incomplete にする。 |
+| I07-REQ-002 | source acquisition | domain無指定ではpython、sqlalchemy、nextをdeterministic orderで選び、one runのpreflight、endpoint resolution、working-tree freeze、start-HEAD anchor、metadata-only FileChangeSet、changed-path admissionを共有する。 |
+| I07-REQ-003 | semantic behavior | common contractはrun/domain status、Artifact descriptor、diagnostic、coverage、provenance、budget、safe graph summary countsだけを共有する。domain identity/member/relation/matchingを統合せず、`code-structure-viz.semantic/v1`の`domain: all` payloadを生成しない。 |
+| I07-REQ-004 | Artifact/output | 各complete domainはown semantic JSONとdomain-specific PlantUMLを生成する。not_applicableはstatus/diagnosticのみ。side failureまたはentity budgetによるincomplete domainはaffected JSON/PlantUMLを生成しない。aggregateは`code-structure-viz.run-manifest/v1`だけとする。 |
+| I07-REQ-005 | failure behavior | 各domainは共通presence truth tableに従う。run-level changed-path overrunはexit 1で全Artifact/final manifestなし、domain-local entity overrunはaffected domain incomplete・exit 3でsibling Artifactとaggregate manifestを保持する。 |
 | I07-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
 | I07-REQ-007 | slice-specific boundary | 一つの output transaction で domain Artifact と run manifest を staging し、fingerprint と collision gate 後に公開する。 |
 
@@ -52,16 +53,16 @@ coding agent が domain を省略した一回の command で Python、SQLAlchemy
 coding agent が domain を省略した一回の command で Python、SQLAlchemy、Next の適用可否・成功・不完全を区別し、成功 Artifact を保持した集約 manifest と正しい exit code を得られる。
 ### I07-REQ-002
 
-diff で domain 無指定なら python、sqlalchemy、next を deterministic order で実行する。snapshot も同じ default を採用し、明示 domain で絞り込める。
+domain無指定ではpython、sqlalchemy、nextをdeterministic orderで選び、one runのpreflight、endpoint resolution、working-tree freeze、start-HEAD anchor、metadata-only FileChangeSet、changed-path admissionを共有する。
 ### I07-REQ-003
 
-common envelope は run/domain status、artifact descriptor、diagnostic、coverage、graph primitive だけを共有し、domain identity/member/relation/matching を統一 model へ押し込まない。
+common contractはrun/domain status、Artifact descriptor、diagnostic、coverage、provenance、budget、safe graph summary countsだけを共有する。domain identity/member/relation/matchingを統合せず、`code-structure-viz.semantic/v1`の`domain: all` payloadを生成しない。
 ### I07-REQ-004
 
-format 未指定時は complete/incomplete domain ごとに versioned semantic JSON と domain-specific PlantUML を生成する。not_applicable domain は status/diagnostic のみ。
+各complete domainはown semantic JSONとdomain-specific PlantUMLを生成する。not_applicableはstatus/diagnosticのみ。side failureまたはentity budgetによるincomplete domainはaffected JSON/PlantUMLを生成しない。aggregateは`code-structure-viz.run-manifest/v1`だけとする。
 ### I07-REQ-005
 
-adapter exception を core process crash に伝播させず domain diagnostic へ正規化する。ただし protocol corruption や security invariant violation は affected domain を incomplete にする。
+各domainは共通presence truth tableに従う。run-level changed-path overrunはexit 1で全Artifact/final manifestなし、domain-local entity overrunはaffected domain incomplete・exit 3でsibling Artifactとaggregate manifestを保持する。
 ### I07-REQ-006
 
 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。
@@ -80,24 +81,36 @@ code-structure-viz diff --repo . --domain python --domain sqlalchemy --from orig
 
 ### source acquisition contract
 
-- diff で domain 無指定なら python、sqlalchemy、next を deterministic order で実行する。snapshot も同じ default を採用し、明示 domain で絞り込める。
-- core preflight、endpoint resolution、working-tree freeze、resolved config は一 run で共有するが、各 adapter は domain-owned source selection と semantic model を保持する。
-- Next target 不在なら Node を要求しない。domain applicability preflight は source presence と safe static indicator だけで行い、application を実行しない。
-- 一つの output transaction で domain Artifact と run manifest を staging し、fingerprint と collision gate 後に公開する。
+- domain無指定ならpython、sqlalchemy、nextをdeterministic orderで実行する。snapshotも同じdefault、明示domainで絞り込める。
+- core preflight、endpoint resolution、working-tree freeze、resolved config、metadata-only FileChangeSet、changed-path admissionはone runで共有するが、各adapterはdomain-owned source selectionとsemantic modelを保持する。
+- `--to working-tree` を `--from` なしで指定した場合、run開始時にworking treeをfreezeし、同時点の`HEAD^{commit}`をimplicit-base merge-baseのendpoint commit anchorにする。priorityはexplicit PR target、configured comparison target/upstream、`origin/HEAD`、local `main`/`develop`/`master`。provenanceはrequested endpoints、frozen digest、start HEAD anchor、selected candidate、merge-base、`resolution_method: "implicit-base-from-start-head-anchor"`を持つ。initial-commit fallback、auto fetch、checkoutを行わない。
+- Next target evidence不在ならNodeを要求しない。target evidenceがあるNode/adapter failureはincompleteで、not_applicableへ変換しない。
+- `FileChangeSet` hunkはmetadataだけを持つ。許可項目はrepository-relative old/new path、file status、old/new start line、old/new line count、ordinal、これらのcanonical tupleから生成したcontent-independent SHA-256 `hunk_id`である。raw patch/context/added/deleted lines、source body、comment、literal、secret、absolute pathをmodel、JSON、PlantUML、manifest、diagnostic、logへ保持・公開しない。
+- implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
 
 ### semantic contract
 
-- common envelope は run/domain status、artifact descriptor、diagnostic、coverage、graph primitive だけを共有し、domain identity/member/relation/matching を統一 model へ押し込まない。
-- domain status は `complete`、`not_applicable`、`incomplete`。overall は全 selected domain が complete/not_applicable なら complete、少なくとも一つ incomplete かつ core run が成立すれば incomplete。
-- FileChangeSet は run-level evidence、SemanticChangeSet は domain-level ownership。cross-domain relation を初期 release で推測しない。
-- resolved config、version、endpoint、fingerprint、domain status、coverage、diagnostic、各 Artifact relative path/SHA-256 を一つの manifest に集約する。
+- domain statusは`complete`、`not_applicable`、`incomplete`。all selected domainsがcomplete/not_applicableならoverall complete、少なくとも一つincompleteならoverall incomplete。
+- Python、SQLAlchemy、Nextのdiffは同じpresence truth tableとcanonical empty-side contractを使う。
+
+| before domain evidence | after domain evidence | status | comparison / publication | exit |
+| --- | --- | --- | --- | --- |
+| absent | absent | `not_applicable` | statusとsafe diagnosticのみ。semantic JSON/PlantUMLなし。 | 0 |
+| present・analysis成功 | present・analysis成功 | `complete` | real snapshot同士を比較し、domain diff JSON/PlantUMLを公開する。 | 0 |
+| present・analysis成功 | absent | `complete` | real beforeとcanonical empty-sideを比較し、全entity/member/relationをremovedとして公開する。 | 0 |
+| absent | present・analysis成功 | `complete` | canonical empty-sideとreal afterを比較し、全entity/member/relationをaddedとして公開する。 | 0 |
+| target evidenceあり | いずれかのsideでacquisition/static analysis失敗 | `incomplete` | added/removedを推測せず、affected domain diff JSON/PlantUMLを公開しない。safe manifest diagnostic/coverage/provenanceのみ。 | 3 |
+
+- internal canonical empty-side は `code-structure-viz.empty-side/v1` の canonical UTF-8 JSONである。`domain`、`document_kind: "internal-diff-side"`、空の `entities`/`members`/`relations` を持ち、endpointやside名を含めない。同一domain/versionではSHA-256が一定で、manifestのbefore/after side descriptorに`kind: "canonical-empty-side"`として記録する。standalone snapshot、semantic Artifact、empty diagramとして公開しない。
+- FileChangeSetはrun-level evidence、SemanticChangeSetはdomain-level ownership。domain identity/member/relation/matchingとcross-domain relationを統合・推測しない。
+- aggregate manifestのgraph summaryはdomainごとのentity/member/relation/changed-seed countsなどsafe primitiveだけとし、semantic recordsを複製しない。
 
 ### output contract
 
-- format 未指定時は complete/incomplete domain ごとに versioned semantic JSON と domain-specific PlantUML を生成する。not_applicable domain は status/diagnostic のみ。
-- exit 0 は overall complete、1 は core fatal analysis/environment、2 は usage/config、3 は domain incomplete、130 は interrupt。
-- exit 3 でも complete domain の Artifact と manifest を保持する。fatal fingerprint drift や unresolved endpoint では success Artifact を公開しない。
-- manifest の Artifact path は output directory 相対、SHA-256 は公開 bytes に対して計算し、absolute path を含めない。
+- all-domain runは`code-structure-viz.semantic/v1`の`domain: all`を生成しない。complete domainごとにown semantic JSONとdomain-specific PlantUMLを生成する。
+- `not_applicable` domainはstatus/diagnosticのみ。side acquisition/analysis failureまたはentity budget超過による`incomplete` domainはaffected semantic JSON/PlantUMLを公開しない。別のpartial-safe snapshot caseがdomain contract上Artifactを許す場合もstatus `incomplete`をpayload/manifestに明示する。
+- aggregateは`code-structure-viz.run-manifest/v1`だけで、run/domain status、Artifact descriptors、diagnostics、coverage、endpoint/empty-side provenance、budget requested/resolved/count、safe graph summary countsを持つ。rootにentities/members/relations/matchingを持たない。
+- output transactionはdomain payloadとmanifestをstagingし、fingerprint/collision/integrity gate後に公開する。exit 3ではsuccessful siblingsとsafe manifestを保持し、run-level fatalではfinal manifestも公開しない。
 
 ## スコープ
 
@@ -129,30 +142,33 @@ code-structure-viz diff --repo . --domain python --domain sqlalchemy --from orig
 
 ## 失敗・境界条件
 
-- adapter exception を core process crash に伝播させず domain diagnostic へ正規化する。ただし protocol corruption や security invariant violation は affected domain を incomplete にする。
-- output collision、invalid config、Git/Python minimum 未満、endpoint unresolved、fingerprint drift は run-level fatal/usage とし、既存 output を変更しない。
-- SIGINT は temporary output を cleanup し exit 130。すでに存在した output と target repository は変更しない。
-- partial failure の stdout/stderr は agent が parse できる一貫した summary と diagnostic channel を維持する。
-
-- `not_applicable` は target 不在、`incomplete` は target があるが安全に解析できない状態であり、相互に変換しない。
-- failure diagnostic は stable code、severity、domain、safe repository-relative location、recoverability、human-readable message を持つ。source body と secret は含めない。
-- stop condition: 三 domain の applicability、partial success retention、aggregate manifest、exit code、atomicity、minimum/latest CI が acceptance で成立するまで Initiative を完了扱いにしない。
+- adapter exceptionはcore crashへ伝播させずdomain diagnosticへ正規化する。protocol corruption/security invariant violationはaffected domain incomplete。
+- domain presenceは上記truth tableに従い、before-only/after-onlyをcomplete全removed/added、both-absentをnot_applicable、side failureをincompleteとする。
+- implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
+- entity-per-diagram budgetはdomain-local gateでdefault 500。overrideなしで超過したdomainは`incomplete`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。valid core runではsafe run manifestを公開し、requested/resolved limit、actual count、diagnosticを記録する。all-domainではsuccessful sibling Artifactを保持する。positive integerの`--max-entities N`は通常公開を許可し、同じ値とcountをmanifestへ記録する。invalid overrideはexit 2。
+- output collision、invalid config、minimum runtime不足、endpoint unresolved、fingerprint driftはrun-level fatal/usage。SIGINTはstaging cleanup、exit 130。
+- all-domain semantic payloadを作らず、metadata-only hunk/redactionを全domain descriptorとdiagnosticで再検証する。
+- stop condition: 三domainのpresence matrix、two-level budget publication、per-domain output、aggregate `run-manifest/v1`、partial success、endpoint provenance、exit/atomicity、minimum/latest CIがacceptanceで成立するまでInitiativeを完了扱いにしない。
 
 ## 受け入れ条件
 
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
-| I07-AC-001 | domain 無指定で三 domain を順に実行し、一つの aggregate manifest を出力する。 | I07-AT-001 |
-| I07-AC-002 | Next incomplete、Python/SQLAlchemy complete で Artifact を保持し exit 3 にする。 | I07-AT-002 |
-| I07-AC-003 | Next target なしは Node 未導入でも not_applicable、overall exit 0。 | I07-AT-003 |
-| I07-AC-004 | endpoint/fingerprint/output collision の run-level failure で success Artifact を公開しない。 | I07-AT-004 |
-| I07-AC-005 | 0/1/2/3/130 と stdout/stderr/manifest の組合せを table-driven に検証する。 | I07-AT-005 |
-| I07-AC-006 | macOS/Linux、Python 3.12 と latest stable、Git 2.39 と latest、Next 選択時 Node 22 と latest を CI で確認する。 | I07-AT-006 |
-| I07-AC-007 | uv lock/npm lock、license inventory、offline runtime install fixture を検証する。 | I07-AT-007 |
+| I07-AC-001 | domain無指定で三domainを順に実行し、per-domain semantic JSON/PlantUMLと一つの`run-manifest/v1`を出力し、`domain: all` semantic payloadを生成しない。 | I07-AT-001 |
+| I07-AC-002 | Next incomplete、Python/SQLAlchemy completeでsuccessful Artifactとaggregate manifestを保持しexit 3にする。 | I07-AT-002 |
+| I07-AC-003 | Next both-absentはNode未導入でもnot_applicable、domain Artifactなし、overall exit 0。 | I07-AT-003 |
+| I07-AC-004 | endpoint/fingerprint/output collisionのrun-level failureでsemantic JSON、PlantUML、final manifestを公開しない。 | I07-AT-004 |
+| I07-AC-005 | 0/1/2/3/130とstdout/stderr/manifest/publicationの組合せをtable-drivenに検証する。 | I07-AT-005 |
+| I07-AC-006 | macOS/Linux、Python 3.12とlatest stable、Git 2.39とlatest、Next選択時Node 22とlatestをCIで確認する。 | I07-AT-006 |
+| I07-AC-007 | uv lock/npm lock、license inventory、offline runtime install fixtureを検証する。 | I07-AT-007 |
+| I07-AC-008 | 各domainのboth-absent/both-present/before-only/after-only/side failureを組み合わせ、domain/overall status、empty-side digest、publication、exitがtruth tableどおりになる。 | I07-AT-008 |
+| I07-AC-009 | changed-path overrunはexit 1・final manifestなし、entity overrunはaffected domain incomplete・exit 3・sibling/manifest保持、valid overridesはrequested/resolved/countを記録する。 | I07-AT-009 |
+| I07-AC-010 | `--to working-tree`だけのrunでstart HEAD anchor、frozen digest、candidate、merge-base、resolution methodを全domain provenanceへ共有する。 | I07-AT-010 |
+| I07-AC-011 | FileChangeSetとaggregate manifestがrange/status/content-independent hunk IDだけを持ち、raw patch/context/source/comment/literal/secret/absolute pathを出さない。 | I07-AT-011 |
 
-- **I07-AC-001〜I07-AC-007 がすべて満たされ、planned test command が clean checkout で成功すること。**
+- **I07-AC-001〜I07-AC-011 がすべて満たされ、planned test command が clean checkout で成功すること。**
 - Requirement、Design、Plan の trace table が一致し、unresolved acceptance gap がないこと。
-- release boundary: Next.js 対応と multi-domain orchestration の完了をもって Initiative 完了。Python+SQLAlchemy intermediate release からの additive extension とする。
+- release boundary: Next.js対応とmulti-domain orchestrationの完了をもってInitiative完了。Python+SQLAlchemy intermediate releaseからのadditive extensionとする。
 
 ## 制約・前提
 

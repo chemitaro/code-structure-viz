@@ -26,14 +26,15 @@ coding agent が DB や application を起動せず、SQLAlchemy declarative ORM
 - 親 Initiative は三 domain の code structure を静的に可視化する。
 - 親 Epic は安全な Git comparison と agent-first Artifact contract を一つの product outcome として統合する。
 - この slice の declared dependency は ISSUE-01。依存 Issue の public contract だけを利用し、unfinished sibling の内部実装には依存しない。
-- canonical authority は exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` の accepted ADR と interview、および本 package の親 R/D/P である。
+- canonical authority は exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` の accepted ADR、interview、親 R/D/P と本 Issue の current canonical textである。
 
 | 親 requirement | この Issue の所有範囲 |
 | --- | --- |
 | EPIC-REQ-001 | sqlalchemy domain の snapshot を end-to-end で提供する。 |
-| EPIC-REQ-002 | static analysis、read-only Git、redaction、fail-closed を維持する。 |
-| EPIC-REQ-003 | versioned semantic JSON、domain-specific PlantUML、manifest を生成する。 |
-| EPIC-REQ-004 | complete/not_applicable/incomplete と exit contract を slice の範囲で実装する。 |
+| EPIC-REQ-002 | static analysis、read-only Git、safe endpoint/source、redaction、fail-closed を維持する。 |
+| EPIC-REQ-003 | sqlalchemy の identity/member/relation/matching semantics を domain ownership のまま保つ。 |
+| EPIC-REQ-004 | per-domain versioned semantic JSON、domain-specific PlantUML、`run-manifest/v1` descriptor、determinism/no-overwrite を提供する。 |
+| EPIC-REQ-005 | domain status、0/1/2/3/130 exitとdomain-local entity budgetを実装・検証する。run-level changed-path budgetはdiff専用であり、本snapshot sliceでは適用しない。 |
 
 ## 観測可能な要件
 
@@ -43,7 +44,7 @@ coding agent が DB や application を起動せず、SQLAlchemy declarative ORM
 | I03-REQ-002 | source acquisition | Python source を ISSUE-01 の安全な reader/AST pipeline で読み、declarative base、mapped class、association `Table` の静的 pattern だけを対象にする。 |
 | I03-REQ-003 | semantic behavior | table identity は normalized schema 名と table 名。schema 無指定は explicit null namespace とし、module path は provenance であって table identity ではない。 |
 | I03-REQ-004 | Artifact/output | semantic JSON は domain `sqlalchemy`、document kind `snapshot` と table/row identity、source location、coverage、diagnostic を持つ。 |
-| I03-REQ-005 | failure behavior | declarative target 候補があるのに DB/runtime evaluation を必要とする場合は unknown/incomplete とし、評価して補完しない。 |
+| I03-REQ-005 | failure behavior | declarative target候補があるのにDB/runtime evaluationを必要とする場合はunknown/incompleteとし、評価して補完しない。entity budget超過はdomain incomplete exit 3でaffected semantic JSON/PlantUMLを公開しない。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--max-changed-paths`指定はusage error、exit 2とする。 |
 | I03-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
 
 ### I03-REQ-001
@@ -60,7 +61,7 @@ table identity は normalized schema 名と table 名。schema 無指定は expl
 semantic JSON は domain `sqlalchemy`、document kind `snapshot` と table/row identity、source location、coverage、diagnostic を持つ。
 ### I03-REQ-005
 
-declarative target 候補があるのに DB/runtime evaluation を必要とする場合は unknown/incomplete とし、評価して補完しない。
+declarative target候補があるのにDB/runtime evaluationを必要とする場合はunknown/incompleteとし、評価して補完しない。entity budget超過はdomain incomplete exit 3でaffected semantic JSON/PlantUMLを公開しない。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--max-changed-paths`指定はusage error、exit 2とする。
 ### I03-REQ-006
 
 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。
@@ -124,28 +125,28 @@ code-structure-viz snapshot --repo . --domain sqlalchemy --target path:src/model
 
 ## 失敗・境界条件
 
-- declarative target 候補があるのに DB/runtime evaluation を必要とする場合は unknown/incomplete とし、評価して補完しない。
-- 同一 schema.table identity が競合する場合は duplicate diagnostic として incomplete。勝手に module path を identity へ追加して解消しない。
-- entity budget 超過は無切り捨て nonzero、明示 `--max-entities` override のみ許可する。
-
-- `not_applicable` は target 不在、`incomplete` は target があるが安全に解析できない状態であり、相互に変換しない。
-- failure diagnostic は stable code、severity、domain、safe repository-relative location、recoverability、human-readable message を持つ。source body と secret は含めない。
-- stop condition: table/row identity、redaction、not_applicable/incomplete、DB 非接続の acceptance が成立するまで temporal ER matching と ghost row へ進まない。
+- declarative target候補があるのにDB/runtime evaluationを必要とする場合はunknown/incompleteとし、評価して補完しない。
+- 同一schema.table identityが競合する場合はduplicate diagnosticとしてincomplete。module pathをidentityへ追加して勝手に解消しない。
+- entity-per-diagram budgetはdomain-local gateでdefault 500。overrideなしで超過したdomainは`incomplete`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。valid core runではsafe run manifestを公開し、requested/resolved limit、actual count、diagnosticを記録する。all-domainではsuccessful sibling Artifactを保持する。positive integerの`--max-entities N`は通常公開を許可し、同じ値とcountをmanifestへ記録する。invalid overrideはexit 2。
+- `not_applicable`はORM target evidence不在、`incomplete`はcandidateがあるが安全に解析できない状態であり、相互に変換しない。
+- diagnosticはsource body、SQL default literal、DB URL、secret、absolute pathを含めない。
+- stop condition: table/row identity、redaction、not_applicable/incomplete、DB非接続、entity budget acceptanceが成立するまでtemporal ER matchingとghost rowへ進まない。
 
 ## 受け入れ条件
 
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
-| I03-AC-001 | declarative model と association table を table/row semantic JSON と ER PlantUML にする。 | I03-AT-001 |
-| I03-AC-002 | FK と relationship、constraint/index、inheritance を別 kind として保持する。 | I03-AT-002 |
-| I03-AC-003 | runtime-only factory、duplicate table identity、broken declarative source を incomplete にする。 | I03-AT-003 |
-| I03-AC-004 | DB connector と target import を呼ばず、default/URL/secret literal を Artifact へ出さない。 | I03-AT-004 |
-| I03-AC-005 | source declaration order が semantics に影響しない row ordering と hash を確認する。 | I03-AT-005 |
-| I03-AC-006 | ORM target なしは not_applicable、候補あり解析不能は incomplete を区別する。 | I03-AT-006 |
+| I03-AC-001 | declarative modelとassociation tableをtable/row semantic JSONとER PlantUMLにする。 | I03-AT-001 |
+| I03-AC-002 | FKとrelationship、constraint/index、inheritanceを別kindとして保持する。 | I03-AT-002 |
+| I03-AC-003 | runtime-only factory、duplicate table identity、broken declarative sourceをincompleteにする。 | I03-AT-003 |
+| I03-AC-004 | DB connectorとtarget importを呼ばず、default/URL/secret literalをArtifactへ出さない。 | I03-AT-004 |
+| I03-AC-005 | source declaration orderがsemanticsに影響しないrow orderingとhashを確認する。 | I03-AT-005 |
+| I03-AC-006 | ORM targetなしはnot_applicable、候補あり解析不能はincompleteを区別する。 | I03-AT-006 |
+| I03-AC-007 | 501 entitiesはdomain incomplete・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid 600 overrideはrequested/resolved/count付きで成功する。snapshotへの`--max-changed-paths`はexit 2・Artifactなしとする。 | I03-AT-007 |
 
-- **I03-AC-001〜I03-AC-006 がすべて満たされ、planned test command が clean checkout で成功すること。**
+- **I03-AC-001〜I03-AC-007 がすべて満たされ、planned test command が clean checkout で成功すること。**
 - Requirement、Design、Plan の trace table が一致し、unresolved acceptance gap がないこと。
-- release boundary: ISSUE-01 の common snapshot/output contract を拡張する SQLAlchemy snapshot slice。ISSUE-04 完了までは ER diff を約束しない。
+- release boundary: ISSUE-01のcommon snapshot/output contractを拡張するSQLAlchemy snapshot slice。ISSUE-04完了まではER diffを約束しない。
 
 ## 制約・前提
 

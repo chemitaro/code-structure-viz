@@ -22,9 +22,9 @@ ID: "init-00001"
 | Design ID | Requirement trace | Initiative-level decision |
 | --- | --- | --- |
 | INIT-DES-001 | INIT-REQ-001, INIT-REQ-007 | 一つの Epic 配下で domain snapshot/diff slice と all-domain orchestration を順に統合する。 |
-| INIT-DES-002 | INIT-REQ-002, INIT-REQ-003 | read-only source layer、immutable snapshot、FileChangeSet/SemanticChangeSet 分離を product spine とする。 |
-| INIT-DES-003 | INIT-REQ-001, INIT-REQ-004 | minimal core + domain-owned adapter model + versioned Artifact envelope を採用する。 |
-| INIT-DES-004 | INIT-REQ-005 | typed outcome state、atomic output transaction、partial success retention を横断 contract にする。 |
+| INIT-DES-002 | INIT-REQ-002, INIT-REQ-003 | read-only source layer、immutable real/empty-side snapshot、metadata-only FileChangeSet、SemanticChangeSet 分離を product spine とする。 |
+| INIT-DES-003 | INIT-REQ-001, INIT-REQ-004 | minimal core + domain-owned adapter model + per-domain semantic Artifact + `run-manifest/v1` aggregate を採用し、`domain: all` semantic payload を禁止する。 |
+| INIT-DES-004 | INIT-REQ-005 | typed outcome state、run-level changed-path admission、domain-local entity gate、atomic output transaction、partial success retention を横断 contract にする。 |
 | INIT-DES-005 | INIT-REQ-006 | Python core と optional first-party Node adapter、lockfile/license/offline CI を分離する。 |
 | INIT-DES-006 | INIT-REQ-008 | product HTML を architecture から除外し、specification HTML を evidence として別管理する。 |
 
@@ -32,8 +32,8 @@ ID: "init-00001"
 
 ### Current
 
-- baseline commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` に production implementation はなく、SpecDock canonical nodes は template state。
-- accepted ADR は product ownership、endpoint、adapter boundary、Artifact、dual snapshot、安全性、HTML exclusion、vertical slice を固定済み。
+- exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` は one Initiative、exactly one Epic、seven active vertical Issues、interview、8 accepted ADR と canonical R/D/P を含む。
+- production package、CLI、adapter、schema implementation はまだ存在しない。実装開始前に domain presence、budget publication、all-domain envelope、working-tree anchor、hunk redaction、trace を authority layer で一意にする。
 - legacy references は read-only/source-static/Git safety/test ideas の evidence だが、license、package、CLI compatibility を継承しない。
 
 ### Target architecture
@@ -95,23 +95,65 @@ Target は one Epic、seven vertical Issues で段階的に成立する。Python
 ### immutable snapshot and diff
 
 ```text
-SourceView(endpoint A) -> DomainSnapshot A --+
-                                            +-> DomainSemanticDiff -> impact union graph
-SourceView(endpoint B) -> DomainSnapshot B --+
+SourceView(endpoint A) -> real DomainSnapshot A --------+
+internal empty-side A (domain absent) ------------------+-> DomainSemanticDiff -> impact union graph
+SourceView(endpoint B) -> real DomainSnapshot B --------+
+internal empty-side B (domain absent) ------------------+
 
-Git status/hunk/R/C -> FileChangeSet evidence -----> candidate/provenance only
+Git status/range/R/C -> metadata-only FileChangeSet -----> candidate/provenance only
 ```
 
-DomainSnapshot は content-addressed immutable document。DomainSemanticDiff は二つの snapshot digest を参照し、raw source や mutable repository path を持たない。
+DomainSnapshot は content-addressed immutable document。DomainSemanticDiff は二つの side descriptor と snapshot digest を参照し、raw source、patch body、mutable repository path を持たない。target evidence が存在する side の acquisition/analysis failure を empty-side に置換しない。
+
+### diff domain presence truth table
+
+この表は `python`、`sqlalchemy`、`next` の各 diff と domain 無指定 run に同じ意味で適用する。`present` は静的な target evidence が存在すること、`absent` はその evidence が存在しないことを表す。source acquisition または static analysis の失敗を `absent` と解釈してはならない。
+
+| before | after | domain status | semantic comparison | publication | single-domain exit / all-domain effect |
+| --- | --- | --- | --- | --- | --- |
+| absent | absent | `not_applicable` | 比較しない。 | status と safe diagnostic だけを run manifest に記録し、その domain の semantic JSON と PlantUML は公開しない。 | exit 0。all-domain overall を `incomplete` にしない。 |
+| present、解析成功 | present、解析成功 | `complete` | 二つの実 snapshot を比較する。 | domain semantic diff JSON、domain-specific PlantUML、run manifest descriptor を公開する。 | exit 0。 |
+| present、解析成功 | absent | `complete` | 実 before snapshot と internal canonical empty-side snapshot を比較し、before の全 entity/member/relation を `removed` とする。 | domain semantic diff JSON、domain-specific PlantUML、run manifest descriptor を公開する。empty-side 自体は公開しない。 | exit 0。 |
+| absent | present、解析成功 | `complete` | internal canonical empty-side snapshot と実 after snapshot を比較し、after の全 entity/member/relation を `added` とする。 | domain semantic diff JSON、domain-specific PlantUML、run manifest descriptor を公開する。empty-side 自体は公開しない。 | exit 0。 |
+| target evidence あり | いずれかの side で source acquisition または static analysis 失敗 | `incomplete` | added/removed を推測しない。 | affected domain の semantic JSON と PlantUMLを公開しない。safe diagnostic、coverage、side provenance を run manifest に記録し、成功 sibling Artifact は保持する。 | single-domain exit 3。all-domain overall `incomplete`、exit 3。 |
+
+internal canonical empty-side snapshot の canonical bytes は、key sort・UTF-8・余分な空白なしで直列化した `code-structure-viz.empty-side/v1` document とする。document は `domain`、`document_kind: "internal-diff-side"`、空の `entities`/`members`/`relations` だけを持ち、endpoint や side 名を含めない。同じ domain と contract version では常に同じ SHA-256 になる。manifest の該当 side descriptor は `kind: "canonical-empty-side"`、schema、domain、SHA-256 を記録する。この internal document を成功した standalone snapshot、empty semantic Artifact、empty diagram として公開してはならない。
+
+### `--to working-tree` implicit anchor
+
+`--to working-tree` を `--from` なしで指定した場合は、run 開始時に working tree を repository 外へ freeze し、同じ開始時点の `HEAD^{commit}` を implicit-base candidate の merge-base 計算に使う endpoint commit anchor とする。candidate priority は explicit PR target、configured comparison target/upstream、`origin/HEAD`、local `main`/`develop`/`master` の順であり、`merge-base(candidate, start_head_anchor)` を最初に安全に解決できた結果を before endpoint とする。initial commit fallback、auto fetch、checkout は行わない。
+
+provenance は requested `from`/`to`、frozen working-tree SHA-256 digest、start HEAD anchor、selected base candidate、resolved merge-base、`resolution_method: "implicit-base-from-start-head-anchor"` を必須とする。run 終了時 fingerprint が変化した場合は success Artifact を公開しない。
+
+### budget outcome contract
+
+| budget | gate / default | override なしの超過 | publication | valid override |
+| --- | --- | --- | --- | --- |
+| implicit changed paths | domain comparison 前の run-level admission gate。default 1,000。implicit comparison の actual changed-path count に適用する。 | fatal analysis/environment、exit 1。domain analysis を開始しない。safe machine-readable diagnostic を stderr に出す。 | semantic JSON、PlantUML、final run manifest を一切公開せず、staging を破棄する。 | positive integer の `--max-changed-paths N` で通常処理を許可する。公開 manifest に requested value、resolved value、actual changed-path count、config source を記録する。 |
+| entities per diagram | domain semantic result 生成後かつ renderer/publication 前の domain-local gate。default 500。 | affected domain を `incomplete` とし、単一 domain run も all-domain run も exit 3。切り捨てない。 | affected domain の semantic JSON と PlantUML は公開しない。successful sibling Artifact と aggregate run manifest は保持し、diagnostic、requested/resolved limit、actual entity count を記録する。 | positive integer の `--max-entities N` で通常公開を許可し、manifest に requested value、resolved value、actual entity count、config source を記録する。 |
+
+override の zero、negative、non-integer、型不正、unknown config key は usage/config error、exit 2 であり、Artifact を公開しない。depth の default は upstream/downstream 各 1 で、depth は graph context を制限するだけで budget 超過の truncation 手段にはしない。
+
+### FileChangeSet hunk safety contract
+
+`FileChangeSet` の hunk evidence は metadata だけである。各 hunk は repository-relative old/new path、file status、old/new start line、old/new line count、同一 file 内の ordinal、および content-independent な `hunk_id` を持てる。`hunk_id` はこれら metadata の canonical tuple から SHA-256 で生成し、source bytes を入力にしない。
+
+raw patch line、context line、added/deleted line、source body、comment、literal、secret、absolute path を memory-owned model、semantic JSON、PlantUML、manifest、diagnostic、logへ保持または公開してはならない。Git diff streamを range extraction に読む実装は、metadata を抽出した時点で本文を破棄し、serializer へ本文型を渡さない。negative acceptance test は secret-like patch、comment、literal、absolute temporary path が全 output channel に存在しないことを確認する。
+
+### all-domain output boundary
+
+all-domain orchestration は `code-structure-viz.semantic/v1` の `domain: all` payload を生成しない。各 adapter が own domain の semantic JSON と domain-specific PlantUML を所有する。aggregate は `code-structure-viz.run-manifest/v1` だけであり、run status、domain status、Artifact descriptor、diagnostic、coverage、provenance、budget values/counts、safe graph summary counts を持つ。run manifest の root または domain summary に domain-owned `entities`、`members`、`relations`、matching record を統合しない。cross-domain identity または relation を推測しない。
 
 ### outcome aggregation
 
-| domain state | 意味 | overall effect |
+| state | 意味 | overall/publication effect |
 | --- | --- | --- |
-| complete | selected target を contract 範囲で完了 | complete 候補 |
-| not_applicable | target が存在しない | complete を妨げない |
-| incomplete | target はあるが安全な解析が完了しない | overall exit 3、成功 sibling Artifact 保持 |
-| core fatal | run-level source/config/output invariant failure | exit 1/2、success Artifact 非公開 |
+| `complete` | selected target を contract 範囲で完了。片側 domain 不在の全 added/removed を含む。 | domain Artifact を公開。all-domain overall complete 候補。 |
+| `not_applicable` | diff の両 endpoint、または snapshot target に domain evidence がない。 | status/diagnostic のみ。semantic JSON/PlantUML なし。overall complete を妨げない。 |
+| `incomplete` | target evidence はあるが安全な acquisition/analysis または domain-local entity gate を完了できない。 | affected domain Artifact なし、safe manifest entry あり、successful siblings 保持、exit 3。 |
+| run-level fatal | endpoint/fingerprint/output invariant または implicit changed-path admission failure。 | exit 1、semantic/PlantUML/final manifest 非公開。 |
+| usage/config | CLI/config/override type error。 | exit 2、Artifact 非公開。 |
+| interrupt | user interrupt。 | staging cleanup、exit 130。 |
 
 ## 変更対象
 
@@ -132,7 +174,7 @@ baseline には上記 production roots が存在しないため、すべて plan
 
 ## testability
 
-- source execution trap、Git state before/after、secret/absolute path scan、dual-snapshot golden、matching ambiguity、budget、determinism、output atomicity を first-class acceptance とする。
+- source execution trap、Git state before/after、secret/absolute path/raw hunk scan、dual real/empty-side snapshot golden、matching ambiguity、two-level budget publication matrix、`--to working-tree` start-HEAD anchor、per-domain-only semantic output、determinism、output atomicity を first-class acceptance とする。
 - domain fixture と contract fixture を分離し、common test が domain model の private field に依存しない。
 - CI は macOS/Linux、Python minimum/latest、Git minimum/latest capable fixture、Node minimum/latest Next lane を持つ。
 - end-to-end command の stdout/stderr、exit、manifest、Artifact bytes を同時に検証する。

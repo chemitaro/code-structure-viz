@@ -26,24 +26,25 @@ coding agent が before/after declarative ORM semantics を比較し、table と
 - 親 Initiative は三 domain の code structure を静的に可視化する。
 - 親 Epic は安全な Git comparison と agent-first Artifact contract を一つの product outcome として統合する。
 - この slice の declared dependency は ISSUE-02, ISSUE-03。依存 Issue の public contract だけを利用し、unfinished sibling の内部実装には依存しない。
-- canonical authority は exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` の accepted ADR と interview、および本 package の親 R/D/P である。
+- canonical authority は exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` の accepted ADR、interview、親 R/D/P と本 Issue の current canonical textである。
 
 | 親 requirement | この Issue の所有範囲 |
 | --- | --- |
 | EPIC-REQ-001 | sqlalchemy domain の diff を end-to-end で提供する。 |
-| EPIC-REQ-002 | static analysis、read-only Git、redaction、fail-closed を維持する。 |
-| EPIC-REQ-003 | versioned semantic JSON、domain-specific PlantUML、manifest を生成する。 |
-| EPIC-REQ-004 | complete/not_applicable/incomplete と exit contract を slice の範囲で実装する。 |
+| EPIC-REQ-002 | static analysis、read-only Git、safe endpoint/source、redaction、fail-closed を維持する。 |
+| EPIC-REQ-003 | sqlalchemy の identity/member/relation/matching semantics を domain ownership のまま保つ。 |
+| EPIC-REQ-004 | per-domain versioned semantic JSON、domain-specific PlantUML、`run-manifest/v1` descriptor、determinism/no-overwrite を提供する。 |
+| EPIC-REQ-005 | domain status、0/1/2/3/130 exit、run-level changed-path budget、domain-local entity budgetを slice の範囲で実装・検証する。 |
 
 ## 観測可能な要件
 
 | ID | 観測面 | 要件 |
 | --- | --- | --- |
 | I04-REQ-001 | CLI と observable outcome | coding agent が before/after declarative ORM semantics を比較し、table と column/constraint/index/relationship の row-level delta、ghost removal、影響 context を説明できる。 |
-| I04-REQ-002 | source acquisition | ISSUE-02 の named endpoint、read-only Git、external working-tree freeze、fingerprint、FileChangeSet を再利用する。 |
+| I04-REQ-002 | source acquisition | ISSUE-02のnamed endpoint、`--to working-tree` start-HEAD anchor、read-only Git、external freeze、fingerprint、metadata-only FileChangeSet、run-level changed-path gateを再利用する。 |
 | I04-REQ-003 | semantic behavior | table entity と column/constraint/index/relationship row の added/removed/modified/moved を before/after value とともに保持する。 |
 | I04-REQ-004 | Artifact/output | ER diff JSON は table delta と typed row delta を分離し、各 delta に before/after representation、matching evidence、source provenance を持たせる。 |
-| I04-REQ-005 | failure behavior | 一方の endpoint の model が解析不能な場合、その table/row を removed/added と断定せず domain incomplete とする。 |
+| I04-REQ-005 | failure behavior | SQLAlchemy targetが片側だけに存在する場合はreal snapshotとcanonical empty-sideを比較して全added/removedとする。target evidenceがあるsideのacquisition/analysis failureはremoved/addedへ変換せずdomain incompleteとする。 |
 | I04-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
 
 ### I04-REQ-001
@@ -51,7 +52,7 @@ coding agent が before/after declarative ORM semantics を比較し、table と
 coding agent が before/after declarative ORM semantics を比較し、table と column/constraint/index/relationship の row-level delta、ghost removal、影響 context を説明できる。
 ### I04-REQ-002
 
-ISSUE-02 の named endpoint、read-only Git、external working-tree freeze、fingerprint、FileChangeSet を再利用する。
+ISSUE-02のnamed endpoint、`--to working-tree` start-HEAD anchor、read-only Git、external freeze、fingerprint、metadata-only FileChangeSet、run-level changed-path gateを再利用する。
 ### I04-REQ-003
 
 table entity と column/constraint/index/relationship row の added/removed/modified/moved を before/after value とともに保持する。
@@ -60,7 +61,7 @@ table entity と column/constraint/index/relationship row の added/removed/modi
 ER diff JSON は table delta と typed row delta を分離し、各 delta に before/after representation、matching evidence、source provenance を持たせる。
 ### I04-REQ-005
 
-一方の endpoint の model が解析不能な場合、その table/row を removed/added と断定せず domain incomplete とする。
+SQLAlchemy targetが片側だけに存在する場合はreal snapshotとcanonical empty-sideを比較して全added/removedとする。target evidenceがあるsideのacquisition/analysis failureはremoved/addedへ変換せずdomain incompleteとする。
 ### I04-REQ-006
 
 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。
@@ -75,23 +76,36 @@ code-structure-viz diff --repo . --domain sqlalchemy --from release/1 --to relea
 
 ### source acquisition contract
 
-- ISSUE-02 の named endpoint、read-only Git、external working-tree freeze、fingerprint、FileChangeSet を再利用する。
-- 各 endpoint で ISSUE-03 の immutable SQLAlchemy snapshot を独立生成し、片側だけの parse success を削除として補完しない。
-- domain target 不在は not_applicable、target 存在かつ一方の snapshot が安全に作れない場合は incomplete。
+- ISSUE-02のnamed endpoint、read-only Git、external working-tree freeze、fingerprint、metadata-only FileChangeSet、changed-path admissionをそのまま再利用する。
+- `--to working-tree` を `--from` なしで指定した場合、run開始時にworking treeをfreezeし、同時点の`HEAD^{commit}`をimplicit-base merge-baseのendpoint commit anchorにする。priorityはexplicit PR target、configured comparison target/upstream、`origin/HEAD`、local `main`/`develop`/`master`。provenanceはrequested endpoints、frozen digest、start HEAD anchor、selected candidate、merge-base、`resolution_method: "implicit-base-from-start-head-anchor"`を持つ。initial-commit fallback、auto fetch、checkoutを行わない。
+- 各endpointでISSUE-03のimmutable SQLAlchemy snapshotを独立生成する。domain absenceだけをcanonical empty-sideへ写像し、parse/read failureをabsenceへ変換しない。
+- `FileChangeSet` hunkはmetadataだけを持つ。許可項目はrepository-relative old/new path、file status、old/new start line、old/new line count、ordinal、これらのcanonical tupleから生成したcontent-independent SHA-256 `hunk_id`である。raw patch/context/added/deleted lines、source body、comment、literal、secret、absolute pathをmodel、JSON、PlantUML、manifest、diagnostic、logへ保持・公開しない。
+- implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
 
 ### semantic contract
 
-- table entity と column/constraint/index/relationship row の added/removed/modified/moved を before/after value とともに保持する。
-- removed row は after diagram に ghost row として残し、赤・破線・`-`、before value を表示する。modified row は before/after の安全な normalized value を併記する。
-- table/member identity の一対一 matching は exact identity を優先し、rename evidence+structural fingerprint+unique candidate の全条件を満たす場合だけ moved とする。
-- table または row relation delta を changed seed とし、before/after ER graph union 上で upstream/downstream を別々に探索する。
-- SQL default literal は両 endpoint と diff でも redacted のままとし、value comparison は presence/category の安全な差だけに限定する。
+- table entityとcolumn/constraint/index/relationship rowのadded/removed/modified/movedをbefore/after valueとともに保持する。
+
+| before domain evidence | after domain evidence | status | comparison / publication | exit |
+| --- | --- | --- | --- | --- |
+| absent | absent | `not_applicable` | statusとsafe diagnosticのみ。semantic JSON/PlantUMLなし。 | 0 |
+| present・analysis成功 | present・analysis成功 | `complete` | real snapshot同士を比較し、domain diff JSON/PlantUMLを公開する。 | 0 |
+| present・analysis成功 | absent | `complete` | real beforeとcanonical empty-sideを比較し、全entity/member/relationをremovedとして公開する。 | 0 |
+| absent | present・analysis成功 | `complete` | canonical empty-sideとreal afterを比較し、全entity/member/relationをaddedとして公開する。 | 0 |
+| target evidenceあり | いずれかのsideでacquisition/static analysis失敗 | `incomplete` | added/removedを推測せず、affected domain diff JSON/PlantUMLを公開しない。safe manifest diagnostic/coverage/provenanceのみ。 | 3 |
+
+- internal canonical empty-side は `code-structure-viz.empty-side/v1` の canonical UTF-8 JSONである。`domain`、`document_kind: "internal-diff-side"`、空の `entities`/`members`/`relations` を持ち、endpointやside名を含めない。同一domain/versionではSHA-256が一定で、manifestのbefore/after side descriptorに`kind: "canonical-empty-side"`として記録する。standalone snapshot、semantic Artifact、empty diagramとして公開しない。
+- removed rowはafter diagramにghost rowとして残し、赤・破線・`-`、before valueを表示する。modified rowはsafe normalized before/after valueを併記する。
+- exact identityを優先し、rename evidence+structural fingerprint+unique candidateの全条件を満たす場合だけmovedとする。
+- table/member relation deltaをchanged seedとし、before/after ER graph union上でupstream/downstreamを別々に探索する。deleted tableはbefore edgeを使う。
+- SQL default literalは両endpointとdiffでもredactedのままとする。
 
 ### output contract
 
-- ER diff JSON は table delta と typed row delta を分離し、各 delta に before/after representation、matching evidence、source provenance を持たせる。
-- PlantUML は table-level と row-level の visual vocabulary を同時に示し、removed row を ghost 表示する。
-- manifest は両 snapshot digest、adapter version、coverage、diagnostic、partial failure、Artifact hash を記録する。
+- ER diff JSONはbefore/after side kind/schema/digest、table delta、typed row delta、matching evidence、safe source provenance、metadata-only FileChangeSetを分離する。
+- PlantUMLはtable-levelとrow-levelのvisual vocabularyを同時に示し、removed rowをghost表示する。
+- manifestはrequested/resolved endpoint、start HEAD anchor、frozen digest、candidate、merge-base、両side digest、adapter version、coverage、budget requested/resolved/count、diagnostic、Artifact hashを記録する。
+- raw hunk body、SQL literal、source body、comment、secret、absolute pathを含めない。
 
 ## スコープ
 
@@ -123,28 +137,31 @@ code-structure-viz diff --repo . --domain sqlalchemy --from release/1 --to relea
 
 ## 失敗・境界条件
 
-- 一方の endpoint の model が解析不能な場合、その table/row を removed/added と断定せず domain incomplete とする。
-- ambiguous rename/move は removed+added。default literal の raw value が必要な matching は行わない。
-- diagram entity 500 超過は切り捨てず nonzero。明示 override と resulting count を manifest に記録する。
-
-- `not_applicable` は target 不在、`incomplete` は target があるが安全に解析できない状態であり、相互に変換しない。
-- failure diagnostic は stable code、severity、domain、safe repository-relative location、recoverability、human-readable message を持つ。source body と secret は含めない。
-- stop condition: 全 row kind の before/after delta、ghost rendering、ambiguous matching、片側解析 failure が acceptance で固定されるまで intermediate release を宣言しない。
+- diff domain presenceは上記truth tableに従う。片側domain absenceはcomplete全added/removed、side analysis failureはincompleteであり相互に変換しない。
+- ambiguous rename/moveはremoved+added。default literalのraw valueが必要なmatchingは行わない。
+- implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
+- entity-per-diagram budgetはdomain-local gateでdefault 500。overrideなしで超過したdomainは`incomplete`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。valid core runではsafe run manifestを公開し、requested/resolved limit、actual count、diagnosticを記録する。all-domainではsuccessful sibling Artifactを保持する。positive integerの`--max-entities N`は通常公開を許可し、同じ値とcountをmanifestへ記録する。invalid overrideはexit 2。
+- `--to working-tree`だけのstart-HEAD anchor/provenanceとmetadata-only hunk boundaryをISSUE-02から変更しない。
+- stop condition: 全row kind delta、ghost rendering、truth table、endpoint/hunk safety、budget/publication、ambiguous matchingがacceptanceで固定されるまでintermediate releaseを宣言しない。
 
 ## 受け入れ条件
 
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
-| I04-AC-001 | table と各 row kind の added/removed/modified を before/after 値付きで出力する。 | I04-AT-001 |
-| I04-AC-002 | removed row が ghost row、modified row が before/after 表記、記号と線種を持つ。 | I04-AT-002 |
-| I04-AC-003 | 一意 structural match だけ moved、ambiguous table/row は removed+added。 | I04-AT-003 |
-| I04-AC-004 | 片側 parse failure を削除にせず incomplete にする。 | I04-AT-004 |
-| I04-AC-005 | before/after/diff の default literal と absolute path が redacted される。 | I04-AT-005 |
-| I04-AC-006 | deleted table の before edge を union graph context に保持する。 | I04-AT-006 |
+| I04-AC-001 | tableと各row kindのadded/removed/modifiedをbefore/after値付きで出力する。 | I04-AT-001 |
+| I04-AC-002 | removed rowがghost row、modified rowがbefore/after表記、記号と線種を持つ。 | I04-AT-002 |
+| I04-AC-003 | 一意structural matchだけmoved、ambiguous table/rowはremoved+added。 | I04-AT-003 |
+| I04-AC-004 | target evidenceがある片側parse/read failureをdomain absenceやremovalへ変換せずincompleteにする。 | I04-AT-004 |
+| I04-AC-005 | before/after/diffのdefault literal、raw hunk body、secret、absolute pathがredactedされる。 | I04-AT-005 |
+| I04-AC-006 | deleted tableのbefore edgeをunion graph contextに保持する。 | I04-AT-006 |
+| I04-AC-007 | both-absent、both-present、before-only、after-only、side failureのtruth tableでstatus/delta/publication/exit/empty-side digestが一致する。 | I04-AT-007 |
+| I04-AC-008 | `--to working-tree`だけでstart HEAD anchor、frozen digest、candidate、merge-base、resolution methodを記録する。 | I04-AT-008 |
+| I04-AC-009 | reused FileChangeSetがrange/status/content-independent IDだけを持ち、raw patch/context/sourceを出さない。 | I04-AT-009 |
+| I04-AC-010 | 501 entitiesはdomain incomplete・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid overrideは通常公開する。 | I04-AT-010 |
 
-- **I04-AC-001〜I04-AC-006 がすべて満たされ、planned test command が clean checkout で成功すること。**
+- **I04-AC-001〜I04-AC-010 がすべて満たされ、planned test command が clean checkout で成功すること。**
 - Requirement、Design、Plan の trace table が一致し、unresolved acceptance gap がないこと。
-- release boundary: ISSUE-01〜04 で Python class と SQLAlchemy ER の snapshot/diff が利用可能となる intermediate release milestone。
+- release boundary: ISSUE-01〜04でPython classとSQLAlchemy ERのsnapshot/diffが利用可能となるintermediate release milestone。
 
 ## 制約・前提
 

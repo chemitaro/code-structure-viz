@@ -36,89 +36,72 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 ## 順序・依存
 
-- declared dependency: なし。Initiative/Epic canonical contract と exact baseline だけを前提とする。
-- sibling の private parser/model/renderer implementation に依存しない。必要な cross-Issue contract は `semantic-contract.md` と親 Epic Design を正本にする。
-- 並行可能: fixture authoring、schema examples、renderer golden、security trap fixture は interface acceptance 固定後に並行できる。
-- 統合順: dependency contract verification → source path → semantic model → render/output transaction → acceptance/CI。
-- stop condition: Python snapshot の CLI→source selection→AST analysis→semantic JSON/PlantUML→manifest→acceptance test が単独で成立する前に、Git diff、SQLAlchemy row model、Next bridge の実装へ進まない。
+- declared dependency: なし。
+- execution order: I01-PLAN-001 → 002 → 003 → 005 → 004 → 006。acceptance fixtureとfailure/publication contractを先に固定し、entity gateをrenderer/publicationより前に置く。
+- fixture authoring、schema example、PlantUML golden、security trapはI01-PLAN-001後に並行できる。
+- stop condition: whole/targeted snapshot、not_applicable/incomplete、entity overrun publication、static safety、determinismがacceptanceで成立するまでdiff foundationへ進まない。
 
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
-| I01-PLAN-001 | Requirement fixture と command/manifest contract test を先に追加し、failure/exit behavior を executable acceptance として固定する。 | I01-DES-001 |
-| I01-PLAN-002 | 必要最小限の CLI/config/diagnostic/Artifact boundary を planned module に実装し、dependency Issue の public contract を再利用する。 | I01-DES-002 |
-| I01-PLAN-003 | python source acquisition と domain-owned semantic analyzer/matcher を実装し、unsafe/unknown を diagnostic へ変換する。 | I01-DES-003 |
-| I01-PLAN-004 | semantic JSON と PlantUML renderer、redaction、deterministic ordering、SHA-256 manifest を一つの output transaction へ接続する。 | I01-DES-004 |
-| I01-PLAN-005 | negative/security/budget/determinism/partial failure test、documentation、lockfile/license/offline gate を完了し、handoff evidence を作る。 | I01-DES-005 |
+| I01-PLAN-001 | I01-AT-001〜006のCLI/status/publication/goldenを先に作り、未実装時のexpected failureを確認する。 | I01-DES-001 |
+| I01-PLAN-002 | CLI/config/diagnostic/SourceView/Artifact minimal boundaryとplanned modulesを実装する。 | I01-DES-002 |
+| I01-PLAN-003 | Python AST snapshot analyzerとdomain-owned identity/member/relation canonical modelを実装する。 | I01-DES-003 |
+| I01-PLAN-004 | per-domain semantic JSON、PlantUML、safe run manifest、atomic no-overwrite publicationを接続する。 | I01-DES-004 |
+| I01-PLAN-005 | not_applicable/incompleteとdefault 500 entity gate、valid/invalid override、publication/exitを実装する。 | I01-DES-005 |
+| I01-PLAN-006 | static execution trap、redaction、determinism、lock/license/offline/minimum/latest regressionを完了する。 | I01-DES-006 |
 
 ## 実装step
 
 ### I01-PLAN-001 acceptance-first contract
 
-- planned test files を先に作り、CLI arguments、output filenames、manifest fields、status、exit code を table-driven fixture で固定する。
-- user-visible Artifact bytes の golden は source body/secret/absolute path がないことを同時に確認する。
-- implementation 未着手時に test が expected failure になることを確認し、誤った既存 behavior を前提にしない。
+- `tests/acceptance/python/test_snapshot_cli.py`、target/failure/security/determinism/budget fixturesを先に追加する。
+- 501 entitiesでexit 3、affected JSON/PlantUMLなし、safe manifestにrequested/resolved/countがあること、600 overrideで通常公開することに加え、snapshotへの`--max-changed-paths`がexit 2・Artifactなしとなることをtable-drivenに固定する。
 
-### I01-PLAN-002 application boundary
+### I01-PLAN-002 application and source boundary
 
-- planned modules:
+planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` には未実装）:
 
-- pyproject.toml と uv.lock（planned）
-- src/code_structure_viz/cli/main.py::main（planned）
-- src/code_structure_viz/core/config.py::resolve_config（planned）
-- src/code_structure_viz/core/diagnostics.py::Diagnostic（planned）
-- src/code_structure_viz/artifacts/writer.py::ArtifactPublisher（planned）
-- src/code_structure_viz/artifacts/manifest.py::RunManifest（planned）
-- src/code_structure_viz/adapters/python/analyzer.py::PythonSnapshotAnalyzer（planned）
-- src/code_structure_viz/adapters/python/model.py（planned）
-- src/code_structure_viz/adapters/python/renderer.py（planned）
+- `pyproject.toml`、`uv.lock`
+- `src/code_structure_viz/cli/main.py::main`
+- `src/code_structure_viz/core/config.py::resolve_config`
+- `src/code_structure_viz/core/diagnostics.py::Diagnostic`
+- `src/code_structure_viz/source/source_view.py::SourceView`
+- `src/code_structure_viz/artifacts/writer.py::ArtifactPublisher`
+- `src/code_structure_viz/artifacts/manifest.py::RunManifest`
 
-- すべて baseline commit には未実装であり、この Plan は候補 path/symbol を指示する。存在済みとみなさない。
-- dependency injection は filesystem、Git process、clock/temp directory、Node process に限定し、domain model を framework へ依存させない。
+`--output-dir`必須、CLI > config file > built-in、unknown/type error exit 2、target repositoryへのdefault writeなしを固定する。
 
-### I01-PLAN-003 source and semantic implementation
+### I01-PLAN-003 Python semantic implementation
 
-- target 無指定では ignore と scope 設定を適用した repository 内の全 `.py` source を snapshot 対象とする。
-- `path:`、`module:`、`class:` target 指定では、解決した seed から typed relation と import relation を用いて upstream/downstream を別々に探索する。
-- Python 3.12 以上の syntax を `ast` で解析し、target application を import しない。parse failure は削除や空構造へ変換せず diagnostic と coverage に残す。
-- symlink が repository 外へ解決する場合は追跡せず、安全な diagnostic を返す。binary、generated、vendor path は設定された ignore だけで除外し、暗黙の推測を行わない。
+- `src/code_structure_viz/adapters/python/analyzer.py::PythonSnapshotAnalyzer`、`model.py`をplanned targetとする。
+- whole repositoryとpath/module/class target、separate upstream/downstream traversal、normalized identity/member/relation、coverage frontierを実装する。
+- target codeをimportせず、parse/read failureをempty successへ変換しない。
 
-- class identity は normalized module path と qualified class name の組である。nested class は outer class を含む qualified name を持つ。
-- entity は class、member は field、method、property、decorator metadata、relation は inheritance、composition、typed dependency、import dependency を domain-owned kind として保持する。
-- type annotation と signature は正規化して保持するが、default literal、function body、docstring、comment は保持しない。
-- whole-repository snapshot は全構造を所有し、targeted snapshot は seed と traversal context、coverage frontier を明示する。
+### I01-PLAN-005 failure and entity admission
 
-- adapter input/output を immutable value とし、parse failure を empty collection や removed entity へ変換しない。
-- budget は collection/render 前に検査し、partial truncation を禁止する。
+- `src/code_structure_viz/core/budget.py::EntityBudgetGate`（planned）をrenderer前へ置く。
+- no override overrunはdomain incomplete/exit 3/affected payloadなし/safe manifestあり、valid overrideはnormal、invalid overrideはexit 2とする。snapshot pipelineへ`ChangedPathAdmissionGate`を接続せず、diff専用`--max-changed-paths`指定はexit 2・Artifactなしにする。
 
 ### I01-PLAN-004 Artifact publication
 
-- semantic JSON は `code-structure-viz.semantic/v1` envelope、domain `python`、document kind `snapshot` を持つ。
-- PlantUML は class と field/method を表示し、relation kind を arrow と日本語 legend で区別する。
-- run manifest は requested target、resolved scope、resolved config、tool/contract/adapter version、coverage、diagnostic、Artifact relative path、SHA-256 を記録する。
-- 対象 Python source がない場合は domain status `not_applicable` とし、空の class diagram を成功 Artifact として捏造しない。
+- `src/code_structure_viz/adapters/python/renderer.py`、semantic serializer、manifest builderを一つのOutputTransactionへ接続する。
+- staging → collision/integrity check → publishの順で、existing fileを上書きしない。pathはoutput-dir relative、digestはfinal bytes基準。
 
-- staging directory は target repository 外を優先し、final fingerprint/collision check 後に rename/copy+fsync strategy で公開する。
-- manifest の SHA-256 は final bytes を基準にし、path は output directory 相対とする。
+### I01-PLAN-006 hardening and handoff
 
-### I01-PLAN-005 hardening and handoff
-
-- `uv run ruff check .`
-- `uv run mypy src tests`
-- `uv run pytest`
-- Next adapter を含む場合は `npm --prefix adapters/next ci --offline`、`npm --prefix adapters/next run typecheck`、`npm --prefix adapters/next test`。
-- package build、minimum/latest CI、offline runtime fixture、license inventory を確認する。
-- docs は CLI examples、schema version、failure/exit behavior、scope 外を更新する。product HTML command は追加しない。
+- import/build/plugin trap、secret/literal/absolute-path scan、same-input byte equality、core-only offline install、license inventory、Python/Git minimum/latest CIを実行する。
+- product HTML command/schema/UIを追加しない。実装結果はReportへ記録しPlanを実行logにしない。
 
 ## 検証
 
 | Test ID | acceptance behavior | planned file | command |
 | --- | --- | --- | --- |
-| I01-AT-001 | whole repository の Python class/member/relation を JSON と PlantUML へ決定的に出力する。 | tests/acceptance/python/test_snapshot_cli.py | uv run pytest tests/acceptance/python/test_snapshot_cli.py -q |
-| I01-AT-002 | path/module/class target と upstream/downstream depth が frontier を正しく制限する。 | tests/integration/python/test_targeted_snapshot.py | uv run pytest tests/integration/python/test_targeted_snapshot.py -q |
-| I01-AT-003 | syntax error と unreadable file を削除扱いせず incomplete と diagnostic にする。 | tests/acceptance/python/test_snapshot_failures.py | uv run pytest tests/acceptance/python/test_snapshot_failures.py -q |
-| I01-AT-004 | fixture の import side effect、secret literal、absolute path が実行・出力されない。 | tests/security/test_python_static_boundary.py | uv run pytest tests/security/test_python_static_boundary.py -q |
-| I01-AT-005 | 同一入力の二回実行で semantic/PlantUML bytes と manifest artifact SHA が一致する。 | tests/acceptance/python/test_snapshot_determinism.py | uv run pytest tests/acceptance/python/test_snapshot_determinism.py -q |
-| I01-AT-006 | 501 entity は無切り捨て failure、明示 600 override は成功する。 | tests/acceptance/python/test_snapshot_budget.py | uv run pytest tests/acceptance/python/test_snapshot_budget.py -q |
+| I01-AT-001 | whole repository Python snapshot | tests/acceptance/python/test_snapshot_cli.py | uv run pytest tests/acceptance/python/test_snapshot_cli.py -q |
+| I01-AT-002 | target and traversal | tests/integration/python/test_targeted_snapshot.py | uv run pytest tests/integration/python/test_targeted_snapshot.py -q |
+| I01-AT-003 | parse/read failure | tests/acceptance/python/test_snapshot_failures.py | uv run pytest tests/acceptance/python/test_snapshot_failures.py -q |
+| I01-AT-004 | static/redaction safety | tests/security/test_python_static_boundary.py | uv run pytest tests/security/test_python_static_boundary.py -q |
+| I01-AT-005 | determinism | tests/acceptance/python/test_snapshot_determinism.py | uv run pytest tests/acceptance/python/test_snapshot_determinism.py -q |
+| I01-AT-006 | entity budget publication and diff-only option rejection | tests/acceptance/python/test_snapshot_budget.py | uv run pytest tests/acceptance/python/test_snapshot_budget.py -q |
 
 ### issue gate commands
 
@@ -134,12 +117,24 @@ uv run mypy src tests
 uv run pytest
 ```
 
+### Requirement → Design → Plan → acceptance → test trace
+
+| Requirement | Design | Plan | acceptance | test |
+| --- | --- | --- | --- | --- |
+| I01-REQ-001 | I01-DES-001 | I01-PLAN-001 | I01-AC-001 | I01-AT-001 |
+| I01-REQ-002 | I01-DES-002 | I01-PLAN-002 | I01-AC-002 | I01-AT-002 |
+| I01-REQ-003 | I01-DES-003 | I01-PLAN-003 | I01-AC-001, I01-AC-002 | I01-AT-001, I01-AT-002 |
+| I01-REQ-004 | I01-DES-004 | I01-PLAN-004 | I01-AC-001, I01-AC-005 | I01-AT-001, I01-AT-005 |
+| I01-REQ-005 | I01-DES-005 | I01-PLAN-005 | I01-AC-003, I01-AC-006 | I01-AT-003, I01-AT-006 |
+| I01-REQ-006 | I01-DES-006 | I01-PLAN-006 | I01-AC-004, I01-AC-005 | I01-AT-004, I01-AT-005 |
+
 ### regression boundary
 
-- dependency Issue の acceptance suite を再実行し、public JSON/manifest/exit contract を破っていないことを確認する。
-- target repository の HEAD、branch、refs、index、status、tracked/untracked bytes が command 前後で一致する。
-- same-input deterministic rerun と output collision negative test を実行する。
-- visual vocabulary は color、記号、line style、legend を golden/semantic test で検査する。
+- dependency Issueのacceptance suiteを再実行し、public endpoint/source/schema/manifest/exit contractを破っていないことを確認する。
+- target repositoryのHEAD、branch、refs、index、status、tracked/untracked bytesがcommand前後で一致する。
+- same-input deterministic rerun、output collision、invalid override、interrupt cleanupを確認する。
+- Artifact、diagnostic、stdout/stderr/logをsource body、raw hunk、comment、literal、secret、absolute pathでnegative scanする。
+- visual vocabularyはcolorだけでなく記号、line style、legendをgolden/semantic testで検査する。
 
 ## rollback
 

@@ -22,19 +22,20 @@ package_sequence_key: "ISSUE-03"
 
 | Design ID | Requirement trace | 判断 |
 | --- | --- | --- |
-| I03-DES-001 | I03-REQ-001 | CLI/application boundary と domain port を分離し、observable outcome を一 run transaction にまとめる。 |
-| I03-DES-002 | I03-REQ-002 | source acquisition は immutable SourceView と provenance を返し、parser が repository state を直接読まない。 |
-| I03-DES-003 | I03-REQ-003 | domain-owned identity/member/relation model を common envelope から分離する。 |
-| I03-DES-004 | I03-REQ-004 | ArtifactPublisher が JSON/PlantUML/manifest の staging、collision check、SHA-256、atomic publication を所有する。 |
-| I03-DES-005 | I03-REQ-005 | typed diagnostic と complete/not_applicable/incomplete state machine で failure を空結果へ潰さない。 |
+| I03-DES-001 | I03-REQ-001 | SQLAlchemy snapshot application serviceがsource selection、static analyzer、ER renderer、manifestをone runで調整する。 |
+| I03-DES-002 | I03-REQ-002 | Python SourceView/AST readerを再利用し、DB、mapper、target importへ到達しないdeclarative pattern boundaryを置く。 |
+| I03-DES-003 | I03-REQ-003 | schema/table identityとtyped row identitiesをSQLAlchemy adapterが所有する。 |
+| I03-DES-004 | I03-REQ-004 | domain `sqlalchemy` snapshot JSON、ER PlantUML、safe provenanceをOutputTransactionへ渡す。 |
+| I03-DES-005 | I03-REQ-005 | unknown/runtime-only/duplicate identityとdomain-local entity budgetをtyped incompleteへ写像する。 |
+| I03-DES-006 | I03-REQ-006 | DB/import execution trap、literal redaction、canonical row order、same-input digest invariantを検証する。 |
 
 ## Current / Target
 
 ### Current（verified baseline）
 
-- exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` は SpecDock 0.2.3、template 状態の canonical R/D/P、interview、8 accepted ADR を含む。
-- CodeStructureViz の production package、CLI、domain adapter、semantic schema、acceptance fixtures は存在しない。
-- `pyclassuml` と `tree-git-diff` は legacy evidence であり、CodeStructureViz の dependency ではない。
+- exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` は本Issueのcanonical Requirement/Design/Plan、accepted ADR、interviewを含む。
+- production package、CLI、domain adapter、schema implementation、acceptance fixturesは未実装であり、以下のpath/symbolはすべてplannedである。
+- 本Designは親の横断contractをslice固有の構造へ具体化し、依存Issueのpublic contractを変更せずに後続sliceへ渡す。
 
 ### Target
 
@@ -92,45 +93,20 @@ render_plantuml(DomainResult, VisualVocabulary) -> bytes
 
 ## data / failure
 
-### semantic envelope
+### ER snapshot model
 
-- `schema`: `code-structure-viz.semantic/v1`
-- `document_kind`: `snapshot` または `diff`
-- `domain`: `sqlalchemy`
-- `status`: `complete`、`not_applicable`、`incomplete`
-- `entities`、`members`、`relations`: domain-owned payload
-- `coverage`: selected/discovered/analyzed/skipped/unknown counts と frontier
-- `diagnostics`: stable code、severity、scope、recoverability、safe location
-- `provenance`: tool/contract/adapter version、endpoint digest、resolved config digest
+`SqlAlchemySnapshot`はtable entityとcolumn/constraint/index/relationship rowを分離する。table identityはnormalized schema + table name。source module/pathはprovenanceでありidentityへ混ぜない。SQL defaultはpresence/categoryだけを保持しraw literalをanalyzer boundaryで破棄する。
 
-### visual vocabulary
+### applicability, failure, and entity gate
 
-| 意味 | 色 | 記号/線 |
-| --- | --- | --- |
-| added | green | `+` |
-| removed | red | `-` と dashed |
-| modified | yellow | `~` |
-| moved | blue | `→` |
-| unknown | gray | `?` |
+- declarative target evidence不在は`not_applicable`。candidateがあるがruntime evaluation、duplicate identity、parse/type resolution failureを安全に解消できない場合は`incomplete`。
+- safe partial snapshotをpublishする場合はpayload status/coverage/diagnosticにincompleteを明示し、unknown rowをcompleteと偽らない。
+- `EntityBudgetGate`（planned）はrender前にdefault 500を検査する。超過はdomain incomplete、exit 3、affected semantic JSON/PlantUMLなし、safe run manifestへrequested/resolved/count/diagnosticを記録する。valid overrideは通常公開、invalid valueはexit 2。snapshot pipelineは`ChangedPathAdmissionGate`を構築・実行せず、diff専用`--max-changed-paths`を受けた場合はusage error、exit 2、Artifactなしとする。
+- core preflight/output collisionはexit 1/2でArtifactを公開しない。
 
-色は補助であり、dark mode でも legend、記号、線種、text label を維持する。
+### safety and determinism
 
-### state and failure taxonomy
-
-```text
-requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> verified -> published
-                 |              |              |           |          |
-                 +-> usage/fatal+-> incomplete +-> incomplete+-> fatal+-> fatal
-```
-
-- usage/config: invalid option、unknown config key、type error。exit 2。
-- core fatal: invalid repository、endpoint unresolved、fingerprint drift、output collision、minimum runtime 不足。exit 1。
-- domain incomplete: target があるが parse/protocol/semantic coverage を安全に完了できない。exit 3。
-- interrupt: staging を cleanup、exit 130。
-
-- declarative target 候補があるのに DB/runtime evaluation を必要とする場合は unknown/incomplete とし、評価して補完しない。
-- 同一 schema.table identity が競合する場合は duplicate diagnostic として incomplete。勝手に module path を identity へ追加して解消しない。
-- entity budget 超過は無切り捨て nonzero、明示 `--max-entities` override のみ許可する。
+AST/static patternだけを使いDB connector、Alembic、mapper configuration、application importを呼ばない。同じsource bytes/config/adapter versionではtable/row/relation/diagnostic/orderとSHA-256を一致させる。
 
 ## 変更対象
 
@@ -145,7 +121,7 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 追加で planned:
 
 - tests/fixtures/generate-sqlalchemy-er-snapshots/ に source-only fixture を置き、fixture の application code を実行しない。
-- docs/contracts/ に schema と CLI behavior を配置する。ただし本 package は repository へ直接変更を行わない。
+- docs/contracts/ に schema と CLI behavior を配置する。これらはplanned implementation targetであり、本Designは実装済みとは扱わない。
 - lockfile と license inventory を同じ Issue の acceptance に含める。
 
 変更しない領域:
@@ -167,16 +143,18 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 | Test ID | 分類 | planned test file | command |
 | --- | --- | --- | --- |
 | I03-AT-001 | normal | tests/acceptance/sqlalchemy/test_snapshot_cli.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_cli.py -q |
-| I03-AT-002 | semantic | tests/integration/sqlalchemy/test_semantic_rows.py | uv run pytest tests/integration/sqlalchemy/test_semantic_rows.py -q |
+| I03-AT-002 | semantic kinds | tests/integration/sqlalchemy/test_er_semantics.py | uv run pytest tests/integration/sqlalchemy/test_er_semantics.py -q |
 | I03-AT-003 | negative | tests/acceptance/sqlalchemy/test_snapshot_failures.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_failures.py -q |
-| I03-AT-004 | security | tests/security/test_sqlalchemy_static_boundary.py | uv run pytest tests/security/test_sqlalchemy_static_boundary.py -q |
+| I03-AT-004 | security/redaction | tests/security/test_sqlalchemy_static_boundary.py | uv run pytest tests/security/test_sqlalchemy_static_boundary.py -q |
 | I03-AT-005 | determinism | tests/acceptance/sqlalchemy/test_snapshot_determinism.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_determinism.py -q |
 | I03-AT-006 | applicability | tests/acceptance/sqlalchemy/test_applicability.py | uv run pytest tests/acceptance/sqlalchemy/test_applicability.py -q |
+| I03-AT-007 | entity budget / diff-only option rejection | tests/acceptance/sqlalchemy/test_snapshot_budget.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_budget.py -q |
 
-- unit test は domain parser/matcher/serializer の pure function を対象にする。
-- integration test は temporary Git repository と immutable fixture source を使い、Git state の before/after fingerprint を比較する。
-- acceptance test は実際の CLI process、output directory、manifest/checksum、exit code、stdout/stderr を観測する。
-- security test は import/build/plugin/DB execution trap、secret literal、absolute path、unsafe symlink、Git mutation allowlist を検査する。
+- unit testはdomain parser/matcher/serializerとcanonicalizationのpure functionを対象にする。
+- integration testはtemporary Git repositoryまたはimmutable source fixtureを使い、Git stateとsource bytesのbefore/afterを比較する。
+- acceptance testは実CLI process、output directory、manifest/checksum、exit code、stdout/stderr、published file setを観測する。
+- security testはimport/build/plugin/DB execution trap、source/secret/literal/absolute path/raw hunkのnegative scan、unsafe symlink、Git mutation allowlistを検査する。
+- table-driven casesはstatusだけでなくpublication、manifest presence/absence、digest、requested/resolved budget values、actual countsまでassertする。
 
 ## risk
 

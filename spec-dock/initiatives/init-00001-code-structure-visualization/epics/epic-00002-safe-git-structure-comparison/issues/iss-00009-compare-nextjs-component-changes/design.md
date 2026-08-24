@@ -22,19 +22,20 @@ package_sequence_key: "ISSUE-06"
 
 | Design ID | Requirement trace | 判断 |
 | --- | --- | --- |
-| I06-DES-001 | I06-REQ-001 | CLI/application boundary と domain port を分離し、observable outcome を一 run transaction にまとめる。 |
-| I06-DES-002 | I06-REQ-002 | source acquisition は immutable SourceView と provenance を返し、parser が repository state を直接読まない。 |
-| I06-DES-003 | I06-REQ-003 | domain-owned identity/member/relation model を common envelope から分離する。 |
-| I06-DES-004 | I06-REQ-004 | ArtifactPublisher が JSON/PlantUML/manifest の staging、collision check、SHA-256、atomic publication を所有する。 |
-| I06-DES-005 | I06-REQ-005 | typed diagnostic と complete/not_applicable/incomplete state machine で failure を空結果へ潰さない。 |
+| I06-DES-001 | I06-REQ-001 | Next diff application serviceがshared comparison spineとfirst-party adapter/differ/rendererをone runで調整する。 |
+| I06-DES-002 | I06-REQ-002 | ISSUE-02のstart-HEAD endpoint、freeze、metadata-only FileChangeSet、changed-path admissionをconsumeし、両side adapterを独立実行する。 |
+| I06-DES-003 | I06-REQ-003 | DomainPresenceResolverとcanonical empty-sideをNext component/member/relation differへ接続する。 |
+| I06-DES-004 | I06-REQ-004 | Next diff serializerがside/adapter descriptors、semantic changes、impact、matching、safe provenanceを分離する。 |
+| I06-DES-005 | I06-REQ-005 | side adapter/config/protocol failure、entity overrun、matching ambiguityをfabricated deltaなしのtyped outcomeへ写像する。 |
+| I06-DES-006 | I06-REQ-006 | runtime behavior非推測、build非実行、raw-hunk/source redaction、read-only Git、determinismを検証する。 |
 
 ## Current / Target
 
 ### Current（verified baseline）
 
-- exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` は SpecDock 0.2.3、template 状態の canonical R/D/P、interview、8 accepted ADR を含む。
-- CodeStructureViz の production package、CLI、domain adapter、semantic schema、acceptance fixtures は存在しない。
-- `pyclassuml` と `tree-git-diff` は legacy evidence であり、CodeStructureViz の dependency ではない。
+- exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` は本Issueのcanonical Requirement/Design/Plan、accepted ADR、interviewを含む。
+- production package、CLI、domain adapter、schema implementation、acceptance fixturesは未実装であり、以下のpath/symbolはすべてplannedである。
+- 本Designは親の横断contractをslice固有の構造へ具体化し、依存Issueのpublic contractを変更せずに後続sliceへ渡す。
 
 ### Target
 
@@ -92,45 +93,21 @@ render_plantuml(DomainResult, VisualVocabulary) -> bytes
 
 ## data / failure
 
-### semantic envelope
+### shared comparison and adapter boundary
 
-- `schema`: `code-structure-viz.semantic/v1`
-- `document_kind`: `snapshot` または `diff`
-- `domain`: `next`
-- `status`: `complete`、`not_applicable`、`incomplete`
-- `entities`、`members`、`relations`: domain-owned payload
-- `coverage`: selected/discovered/analyzed/skipped/unknown counts と frontier
-- `diagnostics`: stable code、severity、scope、recoverability、safe location
-- `provenance`: tool/contract/adapter version、endpoint digest、resolved config digest
+ISSUE-02のendpoint/freeze/FileChangeSet/changed-path contractをconsumeし、ISSUE-05 adapterをbefore/after SourceViewへ別processで実行する。`--to working-tree` onlyではstart HEAD anchorを全side provenanceへ使う。
 
-### visual vocabulary
+### Next domain presence and empty-side
 
-| 意味 | 色 | 記号/線 |
-| --- | --- | --- |
-| added | green | `+` |
-| removed | red | `-` と dashed |
-| modified | yellow | `~` |
-| moved | blue | `→` |
-| unknown | gray | `?` |
+`NextSide`はreal snapshot、canonical empty-side、analysis-failedのunion。empty-sideは`code-structure-viz.empty-side/v1` domain `next`のcanonical digestでstandalone publishしない。before-only/after-onlyは全removed/added、both-absentはnot_applicable、adapter/config/protocol/static-analysis failureを含むpairはincompleteでaffected diff payloadなし。
 
-色は補助であり、dark mode でも legend、記号、線種、text label を維持する。
+### semantic diff and unknown
 
-### state and failure taxonomy
+component/prop/import/JSX render/use-client boundary deltaだけをseedにする。impact graphはbefore/after static relation unionで、removed componentはbefore edgeを使う。nonliteral dynamic behaviorはunknownでruntime relationを生成しない。matchingはexact identityまたはhigh-confidence unique candidateだけ。
 
-```text
-requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> verified -> published
-                 |              |              |           |          |
-                 +-> usage/fatal+-> incomplete +-> incomplete+-> fatal+-> fatal
-```
+### budget, hunk safety, publication
 
-- usage/config: invalid option、unknown config key、type error。exit 2。
-- core fatal: invalid repository、endpoint unresolved、fingerprint drift、output collision、minimum runtime 不足。exit 1。
-- domain incomplete: target があるが parse/protocol/semantic coverage を安全に完了できない。exit 3。
-- interrupt: staging を cleanup、exit 130。
-
-- 片側 adapter failure、config unresolved、protocol mismatch は incomplete。removed/added への誤変換を禁止する。
-- nonliteral dynamic import は unknown relation diagnostic。domain 全体を fatal にしないが coverage に未解決件数を記録する。
-- entity budget 超過は無切り捨て nonzero、明示 override のみ許可する。
+run-level changed-path overrunはexit 1、diagnostic only、final manifestなし。domain entity overrunはexit 3、affected JSON/PlantUMLなし、safe manifest countあり。HunkMetadataはrange/status/content-independent IDだけで、raw patch/source/comment/literal/secret/absolute pathをbridge/adapter/model/Artifact/logへ渡さない。
 
 ## 変更対象
 
@@ -145,7 +122,7 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 追加で planned:
 
 - tests/fixtures/compare-nextjs-component-changes/ に source-only fixture を置き、fixture の application code を実行しない。
-- docs/contracts/ に schema と CLI behavior を配置する。ただし本 package は repository へ直接変更を行わない。
+- docs/contracts/ に schema と CLI behavior を配置する。これらはplanned implementation targetであり、本Designは実装済みとは扱わない。
 - lockfile と license inventory を同じ Issue の acceptance に含める。
 
 変更しない領域:
@@ -167,16 +144,21 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 | Test ID | 分類 | planned test file | command |
 | --- | --- | --- | --- |
 | I06-AT-001 | normal | tests/acceptance/next/test_diff_cli.py | uv run pytest tests/acceptance/next/test_diff_cli.py -q |
-| I06-AT-002 | semantic | adapters/next/test/semantic-seed.test.ts | npm --prefix adapters/next test -- semantic-seed |
-| I06-AT-003 | matching | adapters/next/test/move-matching.test.ts | npm --prefix adapters/next test -- move-matching |
-| I06-AT-004 | negative | tests/acceptance/next/test_diff_failures.py | uv run pytest tests/acceptance/next/test_diff_failures.py -q |
-| I06-AT-005 | impact | tests/integration/next/test_impact_union_graph.py | uv run pytest tests/integration/next/test_impact_union_graph.py -q |
-| I06-AT-006 | unknown | adapters/next/test/dynamic-unknown.test.ts | npm --prefix adapters/next test -- dynamic-unknown |
+| I06-AT-002 | semantic seed | tests/acceptance/next/test_semantic_seed.py | uv run pytest tests/acceptance/next/test_semantic_seed.py -q |
+| I06-AT-003 | matching | tests/integration/next/test_component_matching.py | uv run pytest tests/integration/next/test_component_matching.py -q |
+| I06-AT-004 | side failure | tests/acceptance/next/test_diff_failures.py | uv run pytest tests/acceptance/next/test_diff_failures.py -q |
+| I06-AT-005 | impact union | tests/integration/next/test_component_impact.py | uv run pytest tests/integration/next/test_component_impact.py -q |
+| I06-AT-006 | unknown dynamic | adapters/next/test/dynamic-unknown.test.ts | npm --prefix adapters/next test -- dynamic-unknown |
+| I06-AT-007 | domain presence | tests/acceptance/next/test_diff_domain_presence.py | uv run pytest tests/acceptance/next/test_diff_domain_presence.py -q |
+| I06-AT-008 | working-tree anchor | tests/acceptance/next/test_working_tree_anchor.py | uv run pytest tests/acceptance/next/test_working_tree_anchor.py -q |
+| I06-AT-009 | hunk safety | tests/security/test_next_diff_hunk_redaction.py | uv run pytest tests/security/test_next_diff_hunk_redaction.py -q |
+| I06-AT-010 | entity budget | tests/acceptance/next/test_diff_entity_budget.py | uv run pytest tests/acceptance/next/test_diff_entity_budget.py -q |
 
-- unit test は domain parser/matcher/serializer の pure function を対象にする。
-- integration test は temporary Git repository と immutable fixture source を使い、Git state の before/after fingerprint を比較する。
-- acceptance test は実際の CLI process、output directory、manifest/checksum、exit code、stdout/stderr を観測する。
-- security test は import/build/plugin/DB execution trap、secret literal、absolute path、unsafe symlink、Git mutation allowlist を検査する。
+- unit testはdomain parser/matcher/serializerとcanonicalizationのpure functionを対象にする。
+- integration testはtemporary Git repositoryまたはimmutable source fixtureを使い、Git stateとsource bytesのbefore/afterを比較する。
+- acceptance testは実CLI process、output directory、manifest/checksum、exit code、stdout/stderr、published file setを観測する。
+- security testはimport/build/plugin/DB execution trap、source/secret/literal/absolute path/raw hunkのnegative scan、unsafe symlink、Git mutation allowlistを検査する。
+- table-driven casesはstatusだけでなくpublication、manifest presence/absence、digest、requested/resolved budget values、actual countsまでassertする。
 
 ## risk
 

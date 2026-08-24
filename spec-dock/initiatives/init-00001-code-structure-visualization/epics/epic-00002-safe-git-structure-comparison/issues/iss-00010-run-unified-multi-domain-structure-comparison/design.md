@@ -22,20 +22,21 @@ package_sequence_key: "ISSUE-07"
 
 | Design ID | Requirement trace | 判断 |
 | --- | --- | --- |
-| I07-DES-001 | I07-REQ-001 | CLI/application boundary と domain port を分離し、observable outcome を一 run transaction にまとめる。 |
-| I07-DES-002 | I07-REQ-002 | source acquisition は immutable SourceView と provenance を返し、parser が repository state を直接読まない。 |
-| I07-DES-003 | I07-REQ-003 | domain-owned identity/member/relation model を common envelope から分離する。 |
-| I07-DES-004 | I07-REQ-004 | ArtifactPublisher が JSON/PlantUML/manifest の staging、collision check、SHA-256、atomic publication を所有する。 |
-| I07-DES-005 | I07-REQ-005 | typed diagnostic と complete/not_applicable/incomplete state machine で failure を空結果へ潰さない。 |
-| I07-DES-006 | I07-REQ-006 | security invariant と budget を adapter entry/exit で検証し、unsafe result を公開しない。 |
+| I07-DES-001 | I07-REQ-001 | RunCoordinatorとFirstPartyDomainRegistryがthree domain outcomesをdeterministic orderで調整する。 |
+| I07-DES-002 | I07-REQ-002 | one runのpreflight、start-HEAD endpoint/freeze、metadata-only FileChangeSet、changed-path admissionを全domainへ共有する。 |
+| I07-DES-003 | I07-REQ-003 | domain semanticsを統合せず、run/domain lifecycleとsafe summaryだけをcommon contractにする。 |
+| I07-DES-004 | I07-REQ-004 | per-domain semantic JSON/PlantUMLと`code-structure-viz.run-manifest/v1`だけをOutputTransactionで公開する。 |
+| I07-DES-005 | I07-REQ-005 | domain presence truth table、run/domain budget、partial success、exit/publication matrixをtyped RunOutcomeへ写像する。 |
+| I07-DES-006 | I07-REQ-006 | static/read-only/redaction/determinism/platform/package/offline invariantsをfull regressionで検証する。 |
+| I07-DES-007 | I07-REQ-007 | staging descriptor setをfingerprint/collision/integrity gate後にatomic publishし、run fatalとdomain incompleteを別rollback pathにする。 |
 
 ## Current / Target
 
 ### Current（verified baseline）
 
-- exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` は SpecDock 0.2.3、template 状態の canonical R/D/P、interview、8 accepted ADR を含む。
-- CodeStructureViz の production package、CLI、domain adapter、semantic schema、acceptance fixtures は存在しない。
-- `pyclassuml` と `tree-git-diff` は legacy evidence であり、CodeStructureViz の dependency ではない。
+- exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` は本Issueのcanonical Requirement/Design/Plan、accepted ADR、interviewを含む。
+- production package、CLI、domain adapter、schema implementation、acceptance fixturesは未実装であり、以下のpath/symbolはすべてplannedである。
+- 本Designは親の横断contractをslice固有の構造へ具体化し、依存Issueのpublic contractを変更せずに後続sliceへ渡す。
 
 ### Target
 
@@ -95,46 +96,45 @@ render_plantuml(DomainResult, VisualVocabulary) -> bytes
 
 ## data / failure
 
-### semantic envelope
+### per-domain results and aggregate run manifest
 
-- `schema`: `code-structure-viz.semantic/v1`
-- `document_kind`: `snapshot` または `diff`
-- `domain`: `all`
-- `status`: `complete`、`not_applicable`、`incomplete`
-- `entities`、`members`、`relations`: domain-owned payload
-- `coverage`: selected/discovered/analyzed/skipped/unknown counts と frontier
-- `diagnostics`: stable code、severity、scope、recoverability、safe location
-- `provenance`: tool/contract/adapter version、endpoint digest、resolved config digest
+`RunCoordinator`は`DomainResult<python|sqlalchemy|next>`を保持するがdomain-owned entity/member/relation/matchingをcopyまたは共通型へ変換しない。`code-structure-viz.semantic/v1`の`domain: all`は生成しない。
 
-### visual vocabulary
+`code-structure-viz.run-manifest/v1`（planned）は次だけを持つ。
 
-| 意味 | 色 | 記号/線 |
-| --- | --- | --- |
-| added | green | `+` |
-| removed | red | `-` と dashed |
-| modified | yellow | `~` |
-| moved | blue | `→` |
-| unknown | gray | `?` |
-
-色は補助であり、dark mode でも legend、記号、線種、text label を維持する。
-
-### state and failure taxonomy
-
-```text
-requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> verified -> published
-                 |              |              |           |          |
-                 +-> usage/fatal+-> incomplete +-> incomplete+-> fatal+-> fatal
+```json
+{
+  "schema": "code-structure-viz.run-manifest/v1",
+  "run_status": "complete|incomplete",
+  "endpoints": {"requested": {}, "resolved": {}, "provenance": {}},
+  "budgets": {"changed_paths": {}, "entities_by_domain": {}},
+  "domains": [{
+    "domain": "python|sqlalchemy|next",
+    "status": "complete|not_applicable|incomplete",
+    "artifacts": [{"path": "domains/python/diff.semantic.json", "media_type": "application/vnd.code-structure-viz.semantic+json;version=1", "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}],
+    "coverage": {},
+    "diagnostics": [],
+    "provenance": {},
+    "graph_summary": {"entity_count": 0, "member_count": 0, "relation_count": 0, "changed_seed_count": 0}
+  }]
+}
 ```
 
-- usage/config: invalid option、unknown config key、type error。exit 2。
-- core fatal: invalid repository、endpoint unresolved、fingerprint drift、output collision、minimum runtime 不足。exit 1。
-- domain incomplete: target があるが parse/protocol/semantic coverage を安全に完了できない。exit 3。
-- interrupt: staging を cleanup、exit 130。
+rootまたはdomain summaryにsemantic entities/members/relations/matchingを置かない。Artifact descriptorはper-domain payloadを参照するだけ。
 
-- adapter exception を core process crash に伝播させず domain diagnostic へ正規化する。ただし protocol corruption や security invariant violation は affected domain を incomplete にする。
-- output collision、invalid config、Git/Python minimum 未満、endpoint unresolved、fingerprint drift は run-level fatal/usage とし、既存 output を変更しない。
-- SIGINT は temporary output を cleanup し exit 130。すでに存在した output と target repository は変更しない。
-- partial failure の stdout/stderr は agent が parse できる一貫した summary と diagnostic channel を維持する。
+### domain presence aggregation
+
+各diff domainはreal/empty-side/analysis-failedのsame truth tableを使う。both-absentはnot_applicable、before-only/after-onlyはcomplete全removed/added、side failureはincompleteでaffected payloadなし。all selected domainsがcomplete/not_applicableならoverall complete。one or more incompleteならoverall incomplete/exit 3。
+
+### two-level budget and publication
+
+- implicit changed-path overrunはdomain fan-out前のrun fatal、exit 1、safe diagnostic only、semantic/PlantUML/final manifestなし。
+- entity overrunはaffected domain incomplete、exit 3、affected payloadなし。successful sibling payloadとaggregate manifestをpublishし、requested/resolved/countを記録する。
+- valid overridesはnormal processing、invalid valuesはexit 2。
+
+### endpoint, hunk, and transaction safety
+
+`--to working-tree` onlyではstart HEAD anchor/frozen digest/candidate/merge-base/resolution methodをone shared provenanceへ固定する。FileChangeSetはmetadata-only HunkMetadataだけ。OutputTransactionはdomain descriptorsとmanifestをstagingし、run fatalでは全破棄、domain incompleteではsafe subset+manifestをatomic publishする。
 
 ## 変更対象
 
@@ -151,7 +151,7 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 追加で planned:
 
 - tests/fixtures/run-unified-multi-domain-structure-comparison/ に source-only fixture を置き、fixture の application code を実行しない。
-- docs/contracts/ に schema と CLI behavior を配置する。ただし本 package は repository へ直接変更を行わない。
+- docs/contracts/ に schema と CLI behavior を配置する。これらはplanned implementation targetであり、本Designは実装済みとは扱わない。
 - lockfile と license inventory を同じ Issue の acceptance に含める。
 
 変更しない領域:
@@ -172,18 +172,23 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 
 | Test ID | 分類 | planned test file | command |
 | --- | --- | --- | --- |
-| I07-AT-001 | normal | tests/acceptance/test_multi_domain_cli.py | uv run pytest tests/acceptance/test_multi_domain_cli.py -q |
+| I07-AT-001 | per-domain output | tests/acceptance/test_multi_domain_cli.py | uv run pytest tests/acceptance/test_multi_domain_cli.py -q |
 | I07-AT-002 | partial failure | tests/acceptance/test_partial_domain_failure.py | uv run pytest tests/acceptance/test_partial_domain_failure.py -q |
 | I07-AT-003 | applicability | tests/acceptance/test_multi_domain_applicability.py | uv run pytest tests/acceptance/test_multi_domain_applicability.py -q |
-| I07-AT-004 | fatal | tests/acceptance/test_run_atomicity.py | uv run pytest tests/acceptance/test_run_atomicity.py -q |
+| I07-AT-004 | run fatal atomicity | tests/acceptance/test_run_atomicity.py | uv run pytest tests/acceptance/test_run_atomicity.py -q |
 | I07-AT-005 | exit contract | tests/acceptance/test_exit_codes.py | uv run pytest tests/acceptance/test_exit_codes.py -q |
 | I07-AT-006 | platform | .github/workflows/ci.yml | uv run pytest && npm --prefix adapters/next test |
 | I07-AT-007 | packaging | tests/packaging/test_offline_install.py | uv run pytest tests/packaging/test_offline_install.py -q |
+| I07-AT-008 | presence matrix | tests/acceptance/test_multi_domain_presence_matrix.py | uv run pytest tests/acceptance/test_multi_domain_presence_matrix.py -q |
+| I07-AT-009 | budget matrix | tests/acceptance/test_multi_domain_budget_matrix.py | uv run pytest tests/acceptance/test_multi_domain_budget_matrix.py -q |
+| I07-AT-010 | working-tree anchor | tests/acceptance/test_multi_domain_working_tree_anchor.py | uv run pytest tests/acceptance/test_multi_domain_working_tree_anchor.py -q |
+| I07-AT-011 | hunk/output redaction | tests/security/test_multi_domain_hunk_redaction.py | uv run pytest tests/security/test_multi_domain_hunk_redaction.py -q |
 
-- unit test は domain parser/matcher/serializer の pure function を対象にする。
-- integration test は temporary Git repository と immutable fixture source を使い、Git state の before/after fingerprint を比較する。
-- acceptance test は実際の CLI process、output directory、manifest/checksum、exit code、stdout/stderr を観測する。
-- security test は import/build/plugin/DB execution trap、secret literal、absolute path、unsafe symlink、Git mutation allowlist を検査する。
+- unit testはdomain parser/matcher/serializerとcanonicalizationのpure functionを対象にする。
+- integration testはtemporary Git repositoryまたはimmutable source fixtureを使い、Git stateとsource bytesのbefore/afterを比較する。
+- acceptance testは実CLI process、output directory、manifest/checksum、exit code、stdout/stderr、published file setを観測する。
+- security testはimport/build/plugin/DB execution trap、source/secret/literal/absolute path/raw patch linesのnegative scan、unsafe symlink、Git mutation allowlistを検査する。
+- table-driven casesはstatusだけでなくpublication、manifest presence/absence、digest、requested/resolved budget values、actual countsまでassertする。
 
 ## risk
 

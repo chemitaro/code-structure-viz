@@ -22,19 +22,20 @@ package_sequence_key: "ISSUE-01"
 
 | Design ID | Requirement trace | 判断 |
 | --- | --- | --- |
-| I01-DES-001 | I01-REQ-001 | CLI/application boundary と domain port を分離し、observable outcome を一 run transaction にまとめる。 |
-| I01-DES-002 | I01-REQ-002 | source acquisition は immutable SourceView と provenance を返し、parser が repository state を直接読まない。 |
-| I01-DES-003 | I01-REQ-003 | domain-owned identity/member/relation model を common envelope から分離する。 |
-| I01-DES-004 | I01-REQ-004 | ArtifactPublisher が JSON/PlantUML/manifest の staging、collision check、SHA-256、atomic publication を所有する。 |
-| I01-DES-005 | I01-REQ-005 | typed diagnostic と complete/not_applicable/incomplete state machine で failure を空結果へ潰さない。 |
+| I01-DES-001 | I01-REQ-001 | CLI/application boundaryとPython domain portを分離し、snapshot outcomeをone run transactionにまとめる。 |
+| I01-DES-002 | I01-REQ-002 | immutable SourceViewとtarget selectionを返し、parserがmutable repository stateを直接読まない。 |
+| I01-DES-003 | I01-REQ-003 | Python-owned identity/member/relation modelをcommon envelopeから分離する。 |
+| I01-DES-004 | I01-REQ-004 | ArtifactPublisherがper-domain JSON/PlantUML/run manifestのstaging、collision、SHA-256、atomic publicationを所有する。 |
+| I01-DES-005 | I01-REQ-005 | core preflightとdomain-local entity budgetを別gateにし、incomplete publicationを型で表す。 |
+| I01-DES-006 | I01-REQ-006 | static execution trap、redaction、canonical ordering、same-input digest invariantをadapter entry/serializerで検証する。 |
 
 ## Current / Target
 
 ### Current（verified baseline）
 
-- exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` は SpecDock 0.2.3、template 状態の canonical R/D/P、interview、8 accepted ADR を含む。
-- CodeStructureViz の production package、CLI、domain adapter、semantic schema、acceptance fixtures は存在しない。
-- `pyclassuml` と `tree-git-diff` は legacy evidence であり、CodeStructureViz の dependency ではない。
+- exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` は本Issueのcanonical Requirement/Design/Plan、accepted ADR、interviewを含む。
+- production package、CLI、domain adapter、schema implementation、acceptance fixturesは未実装であり、以下のpath/symbolはすべてplannedである。
+- 本Designは親の横断contractをslice固有の構造へ具体化し、依存Issueのpublic contractを変更せずに後続sliceへ渡す。
 
 ### Target
 
@@ -96,45 +97,25 @@ render_plantuml(DomainResult, VisualVocabulary) -> bytes
 
 ## data / failure
 
-### semantic envelope
+### semantic snapshot model
 
-- `schema`: `code-structure-viz.semantic/v1`
-- `document_kind`: `snapshot` または `diff`
-- `domain`: `python`
-- `status`: `complete`、`not_applicable`、`incomplete`
-- `entities`、`members`、`relations`: domain-owned payload
-- `coverage`: selected/discovered/analyzed/skipped/unknown counts と frontier
-- `diagnostics`: stable code、severity、scope、recoverability、safe location
-- `provenance`: tool/contract/adapter version、endpoint digest、resolved config digest
+`PythonSnapshot`は`code-structure-viz.semantic/v1`、domain `python`、document kind `snapshot`を持つimmutable valueである。identityはnormalized module path + qualified class name。field/method/property/decoratorとtyped/import relationsをdomain-owned recordsとしてcanonical sortする。default literal、body、docstring、commentをmodelへ入れない。
 
-### visual vocabulary
-
-| 意味 | 色 | 記号/線 |
-| --- | --- | --- |
-| added | green | `+` |
-| removed | red | `-` と dashed |
-| modified | yellow | `~` |
-| moved | blue | `→` |
-| unknown | gray | `?` |
-
-色は補助であり、dark mode でも legend、記号、線種、text label を維持する。
-
-### state and failure taxonomy
+### state, publication, and entity budget
 
 ```text
-requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> verified -> published
-                 |              |              |           |          |
-                 +-> usage/fatal+-> incomplete +-> incomplete+-> fatal+-> fatal
+request -> core preflight -> SourceView -> Python analysis -> entity gate -> render -> stage -> publish
+             | fatal/usage                     | incomplete      | incomplete | fatal
 ```
 
-- usage/config: invalid option、unknown config key、type error。exit 2。
-- core fatal: invalid repository、endpoint unresolved、fingerprint drift、output collision、minimum runtime 不足。exit 1。
-- domain incomplete: target があるが parse/protocol/semantic coverage を安全に完了できない。exit 3。
-- interrupt: staging を cleanup、exit 130。
+- core preflight failureはexit 1または2でfile Artifactを公開しない。
+- target evidence不在は`not_applicable`、status/diagnosticのみ。parse/read failureでsafe partial snapshotを生成できる場合はpayload自体に`incomplete`を明示しexit 3。
+- `EntityBudgetGate`（planned）はsemantic entity countをrender前に検査する。default 500超過はdomain incomplete、exit 3、semantic JSON/PlantUMLなし、safe run manifestへrequested/resolved/count/diagnosticを記録する。valid `--max-entities`は通常公開を許可する。invalid valueはexit 2。snapshot pipelineは`ChangedPathAdmissionGate`を構築・実行せず、diff専用`--max-changed-paths`を受けた場合はusage error、exit 2、Artifactなしとする。
+- `OutputTransaction`はcollision/fingerprint/integrityをpublish前に検査し、failed stagingをcleanupする。
 
-- repository、Python version、config、output collision の core preflight failure は Artifact を公開せず exit 1 または 2 とする。
-- 一部 source の parse/read failure で安全な残りを表現できる場合は domain `incomplete`、成功した Artifact と diagnostic を保持し exit 3 とする。
-- entity 数が既定 500 を超える場合は切り捨てず nonzero とし、`--max-entities` の明示 override を診断に記録する。
+### safety and determinism
+
+SourceViewはrepository-relative pathとcontent digestだけをdomain serializerへ渡す。same source bytes、target、resolved config、adapter versionではentity/member/relation/diagnostic/Artifact descriptor順序とpublished bytesのSHA-256が一致する。
 
 ## 変更対象
 
@@ -153,7 +134,7 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 追加で planned:
 
 - tests/fixtures/generate-python-structure-snapshots/ に source-only fixture を置き、fixture の application code を実行しない。
-- docs/contracts/ に schema と CLI behavior を配置する。ただし本 package は repository へ直接変更を行わない。
+- docs/contracts/ に schema と CLI behavior を配置する。これらはplanned implementation targetであり、本Designは実装済みとは扱わない。
 - lockfile と license inventory を同じ Issue の acceptance に含める。
 
 変更しない領域:
@@ -179,12 +160,13 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 | I01-AT-003 | negative | tests/acceptance/python/test_snapshot_failures.py | uv run pytest tests/acceptance/python/test_snapshot_failures.py -q |
 | I01-AT-004 | security | tests/security/test_python_static_boundary.py | uv run pytest tests/security/test_python_static_boundary.py -q |
 | I01-AT-005 | determinism | tests/acceptance/python/test_snapshot_determinism.py | uv run pytest tests/acceptance/python/test_snapshot_determinism.py -q |
-| I01-AT-006 | budget | tests/acceptance/python/test_snapshot_budget.py | uv run pytest tests/acceptance/python/test_snapshot_budget.py -q |
+| I01-AT-006 | entity budget / diff-only option rejection | tests/acceptance/python/test_snapshot_budget.py | uv run pytest tests/acceptance/python/test_snapshot_budget.py -q |
 
-- unit test は domain parser/matcher/serializer の pure function を対象にする。
-- integration test は temporary Git repository と immutable fixture source を使い、Git state の before/after fingerprint を比較する。
-- acceptance test は実際の CLI process、output directory、manifest/checksum、exit code、stdout/stderr を観測する。
-- security test は import/build/plugin/DB execution trap、secret literal、absolute path、unsafe symlink、Git mutation allowlist を検査する。
+- unit testはdomain parser/matcher/serializerとcanonicalizationのpure functionを対象にする。
+- integration testはtemporary Git repositoryまたはimmutable source fixtureを使い、Git stateとsource bytesのbefore/afterを比較する。
+- acceptance testは実CLI process、output directory、manifest/checksum、exit code、stdout/stderr、published file setを観測する。
+- security testはimport/build/plugin/DB execution trap、source/secret/literal/absolute path/raw hunkのnegative scan、unsafe symlink、Git mutation allowlistを検査する。
+- table-driven casesはstatusだけでなくpublication、manifest presence/absence、digest、requested/resolved budget values、actual countsまでassertする。
 
 ## risk
 

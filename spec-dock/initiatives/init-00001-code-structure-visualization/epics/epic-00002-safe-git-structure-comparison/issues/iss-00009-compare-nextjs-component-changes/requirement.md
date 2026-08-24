@@ -26,24 +26,25 @@ coding agent が before/after Next.js semantic snapshot から component/props/i
 - 親 Initiative は三 domain の code structure を静的に可視化する。
 - 親 Epic は安全な Git comparison と agent-first Artifact contract を一つの product outcome として統合する。
 - この slice の declared dependency は ISSUE-02, ISSUE-05。依存 Issue の public contract だけを利用し、unfinished sibling の内部実装には依存しない。
-- canonical authority は exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` の accepted ADR と interview、および本 package の親 R/D/P である。
+- canonical authority は exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` の accepted ADR、interview、親 R/D/P と本 Issue の current canonical textである。
 
 | 親 requirement | この Issue の所有範囲 |
 | --- | --- |
 | EPIC-REQ-001 | next domain の diff を end-to-end で提供する。 |
-| EPIC-REQ-002 | static analysis、read-only Git、redaction、fail-closed を維持する。 |
-| EPIC-REQ-003 | versioned semantic JSON、domain-specific PlantUML、manifest を生成する。 |
-| EPIC-REQ-004 | complete/not_applicable/incomplete と exit contract を slice の範囲で実装する。 |
+| EPIC-REQ-002 | static analysis、read-only Git、safe endpoint/source、redaction、fail-closed を維持する。 |
+| EPIC-REQ-003 | next の identity/member/relation/matching semantics を domain ownership のまま保つ。 |
+| EPIC-REQ-004 | per-domain versioned semantic JSON、domain-specific PlantUML、`run-manifest/v1` descriptor、determinism/no-overwrite を提供する。 |
+| EPIC-REQ-005 | domain status、0/1/2/3/130 exit、run-level changed-path budget、domain-local entity budgetを slice の範囲で実装・検証する。 |
 
 ## 観測可能な要件
 
 | ID | 観測面 | 要件 |
 | --- | --- | --- |
 | I06-REQ-001 | CLI と observable outcome | coding agent が before/after Next.js semantic snapshot から component/props/import/render/boundary change と影響 context を比較できる。 |
-| I06-REQ-002 | source acquisition | ISSUE-02 の named endpoint、read-only Git、working-tree freeze、fingerprint、FileChangeSet を使い、両 endpoint で ISSUE-05 adapter を独立実行する。 |
+| I06-REQ-002 | source acquisition | ISSUE-02のnamed endpoint、`--to working-tree` start-HEAD anchor、read-only Git、freeze、fingerprint、metadata-only FileChangeSet、run-level changed-path gateを使い、両sideでISSUE-05 adapterを独立実行する。 |
 | I06-REQ-003 | semantic behavior | module/exported component/prop/import/relation/use client boundary の semantic delta を changed seed とする。format、comment、import order だけは seed にしない。 |
 | I06-REQ-004 | Artifact/output | Next diff JSON は before/after adapter contract/version/config digest、component/member/relation change、matching evidence、impact context を持つ。 |
-| I06-REQ-005 | failure behavior | 片側 adapter failure、config unresolved、protocol mismatch は incomplete。removed/added への誤変換を禁止する。 |
+| I06-REQ-005 | failure behavior | Next targetが片側だけに存在する場合はreal snapshotとcanonical empty-sideを比較して全added/removedとする。片側adapter/config/protocol/static analysis failureはdomain absenceやremoved/addedへ変換せずincompleteとする。 |
 | I06-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
 
 ### I06-REQ-001
@@ -51,7 +52,7 @@ coding agent が before/after Next.js semantic snapshot から component/props/i
 coding agent が before/after Next.js semantic snapshot から component/props/import/render/boundary change と影響 context を比較できる。
 ### I06-REQ-002
 
-ISSUE-02 の named endpoint、read-only Git、working-tree freeze、fingerprint、FileChangeSet を使い、両 endpoint で ISSUE-05 adapter を独立実行する。
+ISSUE-02のnamed endpoint、`--to working-tree` start-HEAD anchor、read-only Git、freeze、fingerprint、metadata-only FileChangeSet、run-level changed-path gateを使い、両sideでISSUE-05 adapterを独立実行する。
 ### I06-REQ-003
 
 module/exported component/prop/import/relation/use client boundary の semantic delta を changed seed とする。format、comment、import order だけは seed にしない。
@@ -60,7 +61,7 @@ module/exported component/prop/import/relation/use client boundary の semantic 
 Next diff JSON は before/after adapter contract/version/config digest、component/member/relation change、matching evidence、impact context を持つ。
 ### I06-REQ-005
 
-片側 adapter failure、config unresolved、protocol mismatch は incomplete。removed/added への誤変換を禁止する。
+Next targetが片側だけに存在する場合はreal snapshotとcanonical empty-sideを比較して全added/removedとする。片側adapter/config/protocol/static analysis failureはdomain absenceやremoved/addedへ変換せずincompleteとする。
 ### I06-REQ-006
 
 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。
@@ -75,23 +76,34 @@ code-structure-viz diff --repo . --domain next --from release/1 --to head --upst
 
 ### source acquisition contract
 
-- ISSUE-02 の named endpoint、read-only Git、working-tree freeze、fingerprint、FileChangeSet を使い、両 endpoint で ISSUE-05 adapter を独立実行する。
-- before/after の tsconfig/jsconfig と source set を各 snapshot provenance に固定し、after config を before source 解決へ流用しない。
-- Node adapter が片側で unavailable/invalid response の場合は component removal/addition を推測せず incomplete。
+- ISSUE-02のnamed endpoint、read-only Git、external working-tree freeze、fingerprint、metadata-only FileChangeSet、changed-path admissionを再利用し、両sideでISSUE-05 adapterを独立実行する。
+- `--to working-tree` を `--from` なしで指定した場合、run開始時にworking treeをfreezeし、同時点の`HEAD^{commit}`をimplicit-base merge-baseのendpoint commit anchorにする。priorityはexplicit PR target、configured comparison target/upstream、`origin/HEAD`、local `main`/`develop`/`master`。provenanceはrequested endpoints、frozen digest、start HEAD anchor、selected candidate、merge-base、`resolution_method: "implicit-base-from-start-head-anchor"`を持つ。initial-commit fallback、auto fetch、checkoutを行わない。
+- domain absenceだけをcanonical empty-sideへ写像し、Node/adapter/config/protocol/static-analysis failureをabsenceへ変換しない。
+- `FileChangeSet` hunkはmetadataだけを持つ。許可項目はrepository-relative old/new path、file status、old/new start line、old/new line count、ordinal、これらのcanonical tupleから生成したcontent-independent SHA-256 `hunk_id`である。raw patch/context/added/deleted lines、source body、comment、literal、secret、absolute pathをmodel、JSON、PlantUML、manifest、diagnostic、logへ保持・公開しない。
+- implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
 
 ### semantic contract
 
-- module/exported component/prop/import/relation/use client boundary の semantic delta を changed seed とする。format、comment、import order だけは seed にしない。
-- props、static import、literal dynamic import、JSX render、client/server boundary を member/relation-level に色分けする。
-- component moved は one-to-one、module rename/name evidence、structural fingerprint、unique candidate の全条件を満たす場合だけ採用し、曖昧なら removed+added。
-- impact graph は before/after static relation union。removed component は before import/render edge を使い、upstream/downstream を別 depth で探索する。
-- non-literal dynamic behavior と runtime component tree は unknown/coverage limitation のまま比較し、推測による relation delta を作らない。
+- module/exported component/prop/import/relation/use client boundaryのsemantic deltaをchanged seedとする。format、comment、import orderだけはseedにしない。
+
+| before domain evidence | after domain evidence | status | comparison / publication | exit |
+| --- | --- | --- | --- | --- |
+| absent | absent | `not_applicable` | statusとsafe diagnosticのみ。semantic JSON/PlantUMLなし。 | 0 |
+| present・analysis成功 | present・analysis成功 | `complete` | real snapshot同士を比較し、domain diff JSON/PlantUMLを公開する。 | 0 |
+| present・analysis成功 | absent | `complete` | real beforeとcanonical empty-sideを比較し、全entity/member/relationをremovedとして公開する。 | 0 |
+| absent | present・analysis成功 | `complete` | canonical empty-sideとreal afterを比較し、全entity/member/relationをaddedとして公開する。 | 0 |
+| target evidenceあり | いずれかのsideでacquisition/static analysis失敗 | `incomplete` | added/removedを推測せず、affected domain diff JSON/PlantUMLを公開しない。safe manifest diagnostic/coverage/provenanceのみ。 | 3 |
+
+- internal canonical empty-side は `code-structure-viz.empty-side/v1` の canonical UTF-8 JSONである。`domain`、`document_kind: "internal-diff-side"`、空の `entities`/`members`/`relations` を持ち、endpointやside名を含めない。同一domain/versionではSHA-256が一定で、manifestのbefore/after side descriptorに`kind: "canonical-empty-side"`として記録する。standalone snapshot、semantic Artifact、empty diagramとして公開しない。
+- component identity/matchingはexact identityを優先し、rename evidence、structural fingerprint、unique candidateを満たすときだけmovedとする。
+- impact graphはbefore/after static relation unionで、removed componentはbefore edgeを使う。nonliteral dynamic behaviorはunknownでruntime relationを捏造しない。
 
 ### output contract
 
-- Next diff JSON は before/after adapter contract/version/config digest、component/member/relation change、matching evidence、impact context を持つ。
-- PlantUML は component と props/import/relation を `+ - ~ → ?` と green/red/yellow/blue/gray、removed dashed で表示する。
-- adapter 部分 failure でも Python/SQLAlchemy 等の sibling Artifact を消さないための domain status を返せる。
+- Next diff JSONはbefore/after side kind/schema/digest、adapter contract/version/config digest、component/member/relation change、matching evidence、impact context、metadata-only FileChangeSetを持つ。
+- PlantUMLはcomponent、props、imports/render/client boundaryをmember/relation-level vocabularyで示す。
+- manifestはrequested/resolved endpoint、start HEAD anchor、frozen digest、candidate、merge-base、side digests、budget requested/resolved/count、coverage、diagnostic、Artifact hashを記録する。
+- raw hunk、source body、comment、literal、secret、absolute pathを含めない。
 
 ## スコープ
 
@@ -123,28 +135,31 @@ code-structure-viz diff --repo . --domain next --from release/1 --to head --upst
 
 ## 失敗・境界条件
 
-- 片側 adapter failure、config unresolved、protocol mismatch は incomplete。removed/added への誤変換を禁止する。
-- nonliteral dynamic import は unknown relation diagnostic。domain 全体を fatal にしないが coverage に未解決件数を記録する。
-- entity budget 超過は無切り捨て nonzero、明示 override のみ許可する。
-
-- `not_applicable` は target 不在、`incomplete` は target があるが安全に解析できない状態であり、相互に変換しない。
-- failure diagnostic は stable code、severity、domain、safe repository-relative location、recoverability、human-readable message を持つ。source body と secret は含めない。
-- stop condition: Next member/relation seed、union impact、adapter partial failure、unknown dynamic behavior が acceptance で固定されるまで全 domain 集約へ進まない。
+- diff domain presenceは上記truth tableに従う。片側target absenceはcomplete全added/removed、side adapter/config/protocol/static-analysis failureはincomplete。
+- nonliteral dynamic importはunknown relation diagnosticとcoverageへ残し、runtime relationを生成しない。
+- implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
+- entity-per-diagram budgetはdomain-local gateでdefault 500。overrideなしで超過したdomainは`incomplete`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。valid core runではsafe run manifestを公開し、requested/resolved limit、actual count、diagnosticを記録する。all-domainではsuccessful sibling Artifactを保持する。positive integerの`--max-entities N`は通常公開を許可し、同じ値とcountをmanifestへ記録する。invalid overrideはexit 2。
+- `--to working-tree` start-HEAD anchor/provenanceとmetadata-only hunk boundaryをISSUE-02から変更しない。
+- stop condition: Next member/relation seed、truth table、union impact、endpoint/hunk safety、budget/publication、unknown dynamic behaviorがacceptanceで固定されるまでall-domain集約へ進まない。
 
 ## 受け入れ条件
 
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
-| I06-AC-001 | component/prop/import/render/boundary change を member-level JSON と PlantUML にする。 | I06-AT-001 |
-| I06-AC-002 | format/comment/import-order only は seed にならず static relation change は seed になる。 | I06-AT-002 |
-| I06-AC-003 | 一意 component move だけ moved、ambiguous candidate は removed+added。 | I06-AT-003 |
-| I06-AC-004 | 片側 adapter/config failure を removal にせず incomplete にする。 | I06-AT-004 |
-| I06-AC-005 | removed component の before edge を union graph context に保持する。 | I06-AT-005 |
-| I06-AC-006 | nonliteral dynamic behavior を unknown とし runtime relation を生成しない。 | I06-AT-006 |
+| I06-AC-001 | component/prop/import/render/boundary changeをmember-level JSONとPlantUMLにする。 | I06-AT-001 |
+| I06-AC-002 | format/comment/import-order onlyはseedにならずstatic relation changeはseedになる。 | I06-AT-002 |
+| I06-AC-003 | 一意component moveだけmoved、ambiguous candidateはremoved+added。 | I06-AT-003 |
+| I06-AC-004 | target evidenceがある片側adapter/config/protocol failureをdomain absenceやremovalへ変換せずincompleteにする。 | I06-AT-004 |
+| I06-AC-005 | removed componentのbefore edgeをunion graph contextに保持する。 | I06-AT-005 |
+| I06-AC-006 | nonliteral dynamic behaviorをunknownとしruntime relationを生成しない。 | I06-AT-006 |
+| I06-AC-007 | both-absent、both-present、before-only、after-only、side failureのtruth tableでstatus/delta/publication/exit/empty-side digestが一致する。 | I06-AT-007 |
+| I06-AC-008 | `--to working-tree`だけでstart HEAD anchor、frozen digest、candidate、merge-base、resolution methodを記録する。 | I06-AT-008 |
+| I06-AC-009 | reused FileChangeSetがrange/status/content-independent IDだけを持ち、raw patch/context/sourceを出さない。 | I06-AT-009 |
+| I06-AC-010 | 501 entitiesはdomain incomplete・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid overrideは通常公開する。 | I06-AT-010 |
 
-- **I06-AC-001〜I06-AC-006 がすべて満たされ、planned test command が clean checkout で成功すること。**
+- **I06-AC-001〜I06-AC-010 がすべて満たされ、planned test command が clean checkout で成功すること。**
 - Requirement、Design、Plan の trace table が一致し、unresolved acceptance gap がないこと。
-- release boundary: Next domain diff preview。ISSUE-07 の統合前でも `--domain next` の単独利用が可能な acceptance boundary。
+- release boundary: Next domain diff preview。ISSUE-07統合前でも`--domain next`の単独利用が可能なacceptance boundary。
 
 ## 制約・前提
 

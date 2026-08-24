@@ -22,20 +22,21 @@ package_sequence_key: "ISSUE-02"
 
 | Design ID | Requirement trace | 判断 |
 | --- | --- | --- |
-| I02-DES-001 | I02-REQ-001 | CLI/application boundary と domain port を分離し、observable outcome を一 run transaction にまとめる。 |
-| I02-DES-002 | I02-REQ-002 | source acquisition は immutable SourceView と provenance を返し、parser が repository state を直接読まない。 |
-| I02-DES-003 | I02-REQ-003 | domain-owned identity/member/relation model を common envelope から分離する。 |
-| I02-DES-004 | I02-REQ-004 | ArtifactPublisher が JSON/PlantUML/manifest の staging、collision check、SHA-256、atomic publication を所有する。 |
-| I02-DES-005 | I02-REQ-005 | typed diagnostic と complete/not_applicable/incomplete state machine で failure を空結果へ潰さない。 |
-| I02-DES-006 | I02-REQ-006 | security invariant と budget を adapter entry/exit で検証し、unsafe result を公開しない。 |
+| I02-DES-001 | I02-REQ-001 | Comparison application serviceがendpoint/source/domain/outputをone observable runとして調整する。 |
+| I02-DES-002 | I02-REQ-002 | ComparisonEndpointResolverとWorkingTreeFreezerがstart HEAD anchorを含むimmutable side provenanceを生成する。 |
+| I02-DES-003 | I02-REQ-003 | DomainPresenceResolverがreal snapshot、canonical empty-side、not_applicable、analysis failureを混同せずside pairを構成する。 |
+| I02-DES-004 | I02-REQ-004 | Python diff serializerがside descriptors、metadata-only FileChangeSet、SemanticChangeSet、impact、matchingを別fieldで出力する。 |
+| I02-DES-005 | I02-REQ-005 | run-level changed-path admissionとdomain-local entity gateを別state transitionとしてexit/publicationへ写像する。 |
+| I02-DES-006 | I02-REQ-006 | read-only Git allowlist、static execution trap、redaction、canonical ordering、fingerprint/atomicityを検証する。 |
+| I02-DES-007 | I02-REQ-007 | HunkMetadataをrange/status/ordinal/content-independent IDだけのvalue objectにし、raw patch bodyの型とserializer経路を設けない。 |
 
 ## Current / Target
 
 ### Current（verified baseline）
 
-- exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` は SpecDock 0.2.3、template 状態の canonical R/D/P、interview、8 accepted ADR を含む。
-- CodeStructureViz の production package、CLI、domain adapter、semantic schema、acceptance fixtures は存在しない。
-- `pyclassuml` と `tree-git-diff` は legacy evidence であり、CodeStructureViz の dependency ではない。
+- exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` は本Issueのcanonical Requirement/Design/Plan、accepted ADR、interviewを含む。
+- production package、CLI、domain adapter、schema implementation、acceptance fixturesは未実装であり、以下のpath/symbolはすべてplannedである。
+- 本Designは親の横断contractをslice固有の構造へ具体化し、依存Issueのpublic contractを変更せずに後続sliceへ渡す。
 
 ### Target
 
@@ -96,45 +97,51 @@ render_plantuml(DomainResult, VisualVocabulary) -> bytes
 
 ## data / failure
 
-### semantic envelope
+### endpoint and side provenance
 
-- `schema`: `code-structure-viz.semantic/v1`
-- `document_kind`: `snapshot` または `diff`
-- `domain`: `python`
-- `status`: `complete`、`not_applicable`、`incomplete`
-- `entities`、`members`、`relations`: domain-owned payload
-- `coverage`: selected/discovered/analyzed/skipped/unknown counts と frontier
-- `diagnostics`: stable code、severity、scope、recoverability、safe location
-- `provenance`: tool/contract/adapter version、endpoint digest、resolved config digest
+`ComparisonEndpointResolver`（planned）はrequested `from`/`to`、resolved commit、start HEAD、base candidate、merge-base、resolution methodを返す。`--to working-tree`だけの場合、`WorkingTreeFreezer`がrun開始時working treeをfreezeし、同時点の`HEAD^{commit}`をmerge-base anchorにする。SourceViewはfrozen digestだけを公開しtemporary absolute pathを漏らさない。
 
-### visual vocabulary
+### domain presence and canonical empty-side
 
-| 意味 | 色 | 記号/線 |
-| --- | --- | --- |
-| added | green | `+` |
-| removed | red | `-` と dashed |
-| modified | yellow | `~` |
-| moved | blue | `→` |
-| unknown | gray | `?` |
+`DomainPresenceResolver`（planned）は各sideを`real`、`canonical-empty-side`、`analysis-failed`に分類する。canonical empty-sideは`code-structure-viz.empty-side/v1`のdomain別canonical JSONで、empty arraysとversioned identityを持ちSHA-256を計算する。endpoint/side名をbytesへ含めずstandalone Artifactとしてpublishしない。
 
-色は補助であり、dark mode でも legend、記号、線種、text label を維持する。
+| side classification | DomainDiffResult |
+| --- | --- |
+| absent / absent | `not_applicable`; payloadなし |
+| real / real | `complete`; normal semantic diff |
+| real / canonical-empty | `complete`; all removed |
+| canonical-empty / real | `complete`; all added |
+| analysis-failedを含む | `incomplete`; added/removedを生成せずaffected payloadなし |
 
-### state and failure taxonomy
+### metadata-only FileChangeSet
 
-```text
-requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> verified -> published
-                 |              |              |           |          |
-                 +-> usage/fatal+-> incomplete +-> incomplete+-> fatal+-> fatal
+```json
+{
+  "status": "A|M|D|R|C|T|U|?",
+  "old_path": "repository/relative-or-null",
+  "new_path": "repository/relative-or-null",
+  "hunks": [{
+    "old_start": 1,
+    "old_line_count": 2,
+    "new_start": 1,
+    "new_line_count": 3,
+    "ordinal": 0,
+    "hunk_id": "sha256-of-canonical-metadata"
+  }]
+}
 ```
 
-- usage/config: invalid option、unknown config key、type error。exit 2。
-- core fatal: invalid repository、endpoint unresolved、fingerprint drift、output collision、minimum runtime 不足。exit 1。
-- domain incomplete: target があるが parse/protocol/semantic coverage を安全に完了できない。exit 3。
-- interrupt: staging を cleanup、exit 130。
+`hunk_id`はpath/status/ranges/ordinalだけから生成する。Git diff parserはline rangesを抽出後にpatch bodyを破棄し、raw/context/added/deleted linesをmodel、log、diagnostic、Artifactへ渡さない。
 
-- endpoint unresolved、missing Git object、fingerprint drift、implicit path budget 超過では semantic success Artifact を公開せず nonzero とする。
-- 一部 Python source の安全な解析が不可能でも unaffected snapshot/diff が成立する場合は incomplete、成功 Artifact と diagnostic を保持し exit 3 とする。
-- moved 候補が複数ある場合は unknown moved を捏造せず removed+added と matching diagnostic を返す。
+### budget and publication state machine
+
+- `ChangedPathAdmissionGate`（planned）はdomain comparison前にimplicit actual countをdefault 1,000と比較する。超過はrun fatal exit 1、diagnostic only、semantic/PlantUML/final manifestなし。valid overrideはmanifestへrequested/resolved/countを記録する。
+- `EntityBudgetGate`（planned）はPython diff entity countをrender前にdefault 500と比較する。超過はdomain incomplete exit 3、affected JSON/PlantUMLなし、safe manifestあり。valid overrideは通常公開。
+- invalid overrideはusage/config exit 2。OutputTransactionはrun fatalでstaging全体を破棄し、domain incompleteではsafe manifestだけをpublishする。
+
+### semantic diff and failure
+
+semantic seedはmember/relation deltaだけ。impact graphはbefore/after unionで、deleted entityはbefore edgeを使う。matching ambiguityはremoved+added。source acquisition/static analysis failureはempty-sideへ変換しない。
 
 ## 変更対象
 
@@ -152,7 +159,7 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 追加で planned:
 
 - tests/fixtures/compare-python-structure-changes-safely/ に source-only fixture を置き、fixture の application code を実行しない。
-- docs/contracts/ に schema と CLI behavior を配置する。ただし本 package は repository へ直接変更を行わない。
+- docs/contracts/ に schema と CLI behavior を配置する。これらはplanned implementation targetであり、本Designは実装済みとは扱わない。
 - lockfile と license inventory を同じ Issue の acceptance に含める。
 
 変更しない領域:
@@ -173,18 +180,22 @@ requested -> preflight -> source_acquired -> analyzed -> rendered -> staged -> v
 
 | Test ID | 分類 | planned test file | command |
 | --- | --- | --- | --- |
-| I02-AT-001 | normal | tests/acceptance/python/test_diff_cli.py | uv run pytest tests/acceptance/python/test_diff_cli.py -q |
-| I02-AT-002 | boundary | tests/integration/python/test_impact_union_graph.py | uv run pytest tests/integration/python/test_impact_union_graph.py -q |
-| I02-AT-003 | negative | tests/acceptance/git/test_diff_fail_closed.py | uv run pytest tests/acceptance/git/test_diff_fail_closed.py -q |
-| I02-AT-004 | security | tests/security/test_git_read_only.py | uv run pytest tests/security/test_git_read_only.py -q |
-| I02-AT-005 | semantic | tests/acceptance/python/test_semantic_seed.py | uv run pytest tests/acceptance/python/test_semantic_seed.py -q |
+| I02-AT-001 | endpoint matrix | tests/acceptance/python/test_diff_cli.py | uv run pytest tests/acceptance/python/test_diff_cli.py -q |
+| I02-AT-002 | impact boundary | tests/integration/python/test_impact_union_graph.py | uv run pytest tests/integration/python/test_impact_union_graph.py -q |
+| I02-AT-003 | fail closed | tests/acceptance/git/test_diff_fail_closed.py | uv run pytest tests/acceptance/git/test_diff_fail_closed.py -q |
+| I02-AT-004 | Git safety | tests/security/test_git_read_only.py | uv run pytest tests/security/test_git_read_only.py -q |
+| I02-AT-005 | semantic seed | tests/acceptance/python/test_semantic_seed.py | uv run pytest tests/acceptance/python/test_semantic_seed.py -q |
 | I02-AT-006 | matching | tests/integration/python/test_move_matching.py | uv run pytest tests/integration/python/test_move_matching.py -q |
-| I02-AT-007 | budget | tests/acceptance/git/test_changed_path_budget.py | uv run pytest tests/acceptance/git/test_changed_path_budget.py -q |
+| I02-AT-007 | changed-path budget | tests/acceptance/git/test_changed_path_budget.py | uv run pytest tests/acceptance/git/test_changed_path_budget.py -q |
+| I02-AT-008 | domain presence | tests/acceptance/python/test_domain_presence_diff.py | uv run pytest tests/acceptance/python/test_domain_presence_diff.py -q |
+| I02-AT-009 | hunk redaction | tests/security/test_file_change_hunk_redaction.py | uv run pytest tests/security/test_file_change_hunk_redaction.py -q |
+| I02-AT-010 | entity budget | tests/acceptance/python/test_diff_entity_budget.py | uv run pytest tests/acceptance/python/test_diff_entity_budget.py -q |
 
-- unit test は domain parser/matcher/serializer の pure function を対象にする。
-- integration test は temporary Git repository と immutable fixture source を使い、Git state の before/after fingerprint を比較する。
-- acceptance test は実際の CLI process、output directory、manifest/checksum、exit code、stdout/stderr を観測する。
-- security test は import/build/plugin/DB execution trap、secret literal、absolute path、unsafe symlink、Git mutation allowlist を検査する。
+- unit testはdomain parser/matcher/serializerとcanonicalizationのpure functionを対象にする。
+- integration testはtemporary Git repositoryまたはimmutable source fixtureを使い、Git stateとsource bytesのbefore/afterを比較する。
+- acceptance testは実CLI process、output directory、manifest/checksum、exit code、stdout/stderr、published file setを観測する。
+- security testはimport/build/plugin/DB execution trap、source/secret/literal/absolute path/raw hunkのnegative scan、unsafe symlink、Git mutation allowlistを検査する。
+- table-driven casesはstatusだけでなくpublication、manifest presence/absence、digest、requested/resolved budget values、actual countsまでassertする。
 
 ## risk
 

@@ -26,50 +26,49 @@ coding agent が named endpoint で before/after Python semantic snapshot を安
 - 親 Initiative は三 domain の code structure を静的に可視化する。
 - 親 Epic は安全な Git comparison と agent-first Artifact contract を一つの product outcome として統合する。
 - この slice の declared dependency は ISSUE-01。依存 Issue の public contract だけを利用し、unfinished sibling の内部実装には依存しない。
-- canonical authority は exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` の accepted ADR と interview、および本 package の親 R/D/P である。
+- canonical authority は exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` の accepted ADR、interview、親 R/D/P と本 Issue の current canonical textである。
 
 | 親 requirement | この Issue の所有範囲 |
 | --- | --- |
 | EPIC-REQ-001 | python domain の diff を end-to-end で提供する。 |
-| EPIC-REQ-002 | static analysis、read-only Git、redaction、fail-closed を維持する。 |
-| EPIC-REQ-003 | versioned semantic JSON、domain-specific PlantUML、manifest を生成する。 |
-| EPIC-REQ-004 | complete/not_applicable/incomplete と exit contract を slice の範囲で実装する。 |
+| EPIC-REQ-002 | static analysis、read-only Git、safe endpoint/source、redaction、fail-closed を維持する。 |
+| EPIC-REQ-003 | python の identity/member/relation/matching semantics を domain ownership のまま保つ。 |
+| EPIC-REQ-004 | per-domain versioned semantic JSON、domain-specific PlantUML、`run-manifest/v1` descriptor、determinism/no-overwrite を提供する。 |
+| EPIC-REQ-005 | domain status、0/1/2/3/130 exit、run-level changed-path budget、domain-local entity budgetを slice の範囲で実装・検証する。 |
 
 ## 観測可能な要件
 
 | ID | 観測面 | 要件 |
 | --- | --- | --- |
 | I02-REQ-001 | CLI と observable outcome | coding agent が named endpoint で before/after Python semantic snapshot を安全に固定し、意味のある class/member/relation change と影響 context だけを比較できる。 |
-| I02-REQ-002 | source acquisition | flag なしは implicit base→開始時 frozen working-tree、`--from REF` は REF→frozen working-tree、`--to REF` はその endpoint に対して解決した implicit base→REF、両方指定は exact REF→REF とする。 |
-| I02-REQ-003 | semantic behavior | before と after の immutable Python semantic snapshot を ISSUE-01 の schema で生成し、その snapshot digest を diff の入力 identity とする。 |
-| I02-REQ-004 | Artifact/output | semantic diff JSON は before/after snapshot digest、FileChangeSet、SemanticChangeSet、seed、upstream/downstream context、matching evidence を分離する。 |
-| I02-REQ-005 | failure behavior | endpoint unresolved、missing Git object、fingerprint drift、implicit path budget 超過では semantic success Artifact を公開せず nonzero とする。 |
+| I02-REQ-002 | source acquisition | flagなしはimplicit base→開始時frozen working-tree、`--from REF`はREF→frozen working-tree、`--to REF`はendpoint commit anchorに対して解決したimplicit base→REF、両方指定はexact REF→REFとする。`--to working-tree`だけの場合はrun開始時HEADをanchorにする。 |
+| I02-REQ-003 | semantic behavior | before/afterのimmutable Python semantic sideを比較する。domainが片側だけに存在するときはreal snapshotとinternal canonical empty-sideを比較して全added/removedとし、両側不在はnot_applicable、target evidenceがあるsideのacquisition/analysis failureはincompleteとする。 |
+| I02-REQ-004 | Artifact/output | semantic diff JSONはbefore/after side descriptorとdigest、metadata-only FileChangeSet、SemanticChangeSet、seed、upstream/downstream context、matching evidenceを分離し、raw hunk本文を保持しない。 |
+| I02-REQ-005 | failure behavior | endpoint unresolved、missing Git object、fingerprint drift、implicit changed-path admission超過はrun-level fatal exit 1でsemantic JSON、PlantUML、final run manifestを公開しない。entity budget超過またはside analysis failureはdomain incomplete exit 3でaffected domain Artifactを公開しない。 |
 | I02-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
-| I02-REQ-007 | slice-specific boundary | FileChangeSet は A/M/D/R/C/T/U/? と hunk を evidence として保持するが、SemanticChangeSet の真実源にしない。implicit changed path は既定 1,000、超過時は `--max-changed-paths` 明示 override を要求する。 |
+| I02-REQ-007 | slice-specific boundary | FileChangeSetはA/M/D/R/C/T/U/?とold/new line-range metadata、content-independent hunk IDだけをevidenceとして保持する。implicit changed-path default 1,000とentity default 500は別gateで、valid explicit overrideとactual countをmanifestへ記録する。 |
 
 ### I02-REQ-001
 
 coding agent が named endpoint で before/after Python semantic snapshot を安全に固定し、意味のある class/member/relation change と影響 context だけを比較できる。
 ### I02-REQ-002
 
-flag なしは implicit base→開始時 frozen working-tree、`--from REF` は REF→frozen working-tree、`--to REF` はその endpoint に対して解決した implicit base→REF、両方指定は exact REF→REF とする。
+flagなしはimplicit base→開始時frozen working-tree、`--from REF`はREF→frozen working-tree、`--to REF`はendpoint commit anchorに対して解決したimplicit base→REF、両方指定はexact REF→REFとする。`--to working-tree`だけの場合はrun開始時HEADをanchorにする。
 ### I02-REQ-003
 
-before と after の immutable Python semantic snapshot を ISSUE-01 の schema で生成し、その snapshot digest を diff の入力 identity とする。
+before/afterのimmutable Python semantic sideを比較する。domainが片側だけに存在するときはreal snapshotとinternal canonical empty-sideを比較して全added/removedとし、両側不在はnot_applicable、target evidenceがあるsideのacquisition/analysis failureはincompleteとする。
 ### I02-REQ-004
 
-semantic diff JSON は before/after snapshot digest、FileChangeSet、SemanticChangeSet、seed、upstream/downstream context、matching evidence を分離する。
+semantic diff JSONはbefore/after side descriptorとdigest、metadata-only FileChangeSet、SemanticChangeSet、seed、upstream/downstream context、matching evidenceを分離し、raw hunk本文を保持しない。
 ### I02-REQ-005
 
-endpoint unresolved、missing Git object、fingerprint drift、implicit path budget 超過では semantic success Artifact を公開せず nonzero とする。
+endpoint unresolved、missing Git object、fingerprint drift、implicit changed-path admission超過はrun-level fatal exit 1でsemantic JSON、PlantUML、final run manifestを公開しない。entity budget超過またはside analysis failureはdomain incomplete exit 3でaffected domain Artifactを公開しない。
 ### I02-REQ-006
 
 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。
 ### I02-REQ-007
 
-FileChangeSet は A/M/D/R/C/T/U/? と hunk を evidence として保持するが、SemanticChangeSet の真実源にしない。implicit changed path は既定 1,000、超過時は `--max-changed-paths` 明示 override を要求する。
-
-
+FileChangeSetはA/M/D/R/C/T/U/?とold/new line-range metadata、content-independent hunk IDだけをevidenceとして保持する。implicit changed-path default 1,000とentity default 500は別gateで、valid explicit overrideとactual countをmanifestへ記録する。
 ### CLI examples
 
 ```bash
@@ -80,26 +79,38 @@ code-structure-viz diff --repo . --domain python --from v1.0.0 --to v1.1.0 --ups
 
 ### source acquisition contract
 
-- flag なしは implicit base→開始時 frozen working-tree、`--from REF` は REF→frozen working-tree、`--to REF` はその endpoint に対して解決した implicit base→REF、両方指定は exact REF→REF とする。
-- `--to head` は開始時 HEAD commit、`--to working-tree` は開始時 frozen working tree、`--from working-tree` は usage error とする。
-- implicit base は `--pr-target`、configured comparison target/upstream、`origin/HEAD`、local main/develop/master candidate の順で endpoint commit との merge-base を試し、解決不能なら fail closed とする。
-- before commit source は Git object database から read-only に読み、working-tree 側の必要 source は repository 外 temporary area へ copy する。開始・終了 fingerprint が異なる場合は final output directory を変更しない。
-- FileChangeSet は A/M/D/R/C/T/U/? と hunk を evidence として保持するが、SemanticChangeSet の真実源にしない。implicit changed path は既定 1,000、超過時は `--max-changed-paths` 明示 override を要求する。
+- flagなしはimplicit base→開始時frozen working-tree、`--from REF`はREF→frozen working-tree、`--to REF`はresolved endpoint commit anchorに対して解決したimplicit base→REF、両方指定はexact REF→REFとする。
+- `--to head`は開始時HEAD commit、`--to working-tree`は開始時frozen working tree、`--from working-tree`はusage error、exit 2とする。
+- `--to working-tree` を `--from` なしで指定した場合、run開始時にworking treeをfreezeし、同時点の`HEAD^{commit}`をimplicit-base merge-baseのendpoint commit anchorにする。priorityはexplicit PR target、configured comparison target/upstream、`origin/HEAD`、local `main`/`develop`/`master`。provenanceはrequested endpoints、frozen digest、start HEAD anchor、selected candidate、merge-base、`resolution_method: "implicit-base-from-start-head-anchor"`を持つ。initial-commit fallback、auto fetch、checkoutを行わない。
+- before commit sourceはGit object databaseからread-onlyに読み、working-tree sourceはrepository外temporary areaへfreezeする。開始/終了fingerprint driftではfinal outputを変更しない。
+- `FileChangeSet` hunkはmetadataだけを持つ。許可項目はrepository-relative old/new path、file status、old/new start line、old/new line count、ordinal、これらのcanonical tupleから生成したcontent-independent SHA-256 `hunk_id`である。raw patch/context/added/deleted lines、source body、comment、literal、secret、absolute pathをmodel、JSON、PlantUML、manifest、diagnostic、logへ保持・公開しない。
+- implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
 
 ### semantic contract
 
-- before と after の immutable Python semantic snapshot を ISSUE-01 の schema で生成し、その snapshot digest を diff の入力 identity とする。
-- class、field、method、property、decorator metadata、relation の semantic delta がある entity だけを changed seed とする。空白、comment、import order だけの変化は seed にしない。
-- impact graph は before/after relation の union。upstream と downstream を別 frontier とし、既定 depth は各 1。削除 class は before relation から context を復元する。
-- moved は high-confidence one-to-one、rename/name evidence、structural fingerprint、unique candidate をすべて満たす場合だけ採用し、それ以外は removed+added とする。
-- diff diagram は seed と指定 depth の context だけを所有し、whole structure を再掲しない。
+- before/after sideはimmutable digestで識別する。both-presentはreal snapshots、before-only/after-onlyはreal snapshotとcanonical empty-sideを比較する。
+
+| before domain evidence | after domain evidence | status | comparison / publication | exit |
+| --- | --- | --- | --- | --- |
+| absent | absent | `not_applicable` | statusとsafe diagnosticのみ。semantic JSON/PlantUMLなし。 | 0 |
+| present・analysis成功 | present・analysis成功 | `complete` | real snapshot同士を比較し、domain diff JSON/PlantUMLを公開する。 | 0 |
+| present・analysis成功 | absent | `complete` | real beforeとcanonical empty-sideを比較し、全entity/member/relationをremovedとして公開する。 | 0 |
+| absent | present・analysis成功 | `complete` | canonical empty-sideとreal afterを比較し、全entity/member/relationをaddedとして公開する。 | 0 |
+| target evidenceあり | いずれかのsideでacquisition/static analysis失敗 | `incomplete` | added/removedを推測せず、affected domain diff JSON/PlantUMLを公開しない。safe manifest diagnostic/coverage/provenanceのみ。 | 3 |
+
+- internal canonical empty-side は `code-structure-viz.empty-side/v1` の canonical UTF-8 JSONである。`domain`、`document_kind: "internal-diff-side"`、空の `entities`/`members`/`relations` を持ち、endpointやside名を含めない。同一domain/versionではSHA-256が一定で、manifestのbefore/after side descriptorに`kind: "canonical-empty-side"`として記録する。standalone snapshot、semantic Artifact、empty diagramとして公開しない。
+- class、field、method、property、decorator metadata、relationのsemantic deltaがあるentityだけをchanged seedとする。空白、comment、import orderだけの変化はseedにしない。
+- impact graphはbefore/after relationのunion。upstream/downstreamを別frontierとし、default depthは各1。削除classはbefore relationからcontextを復元する。
+- movedはhigh-confidence one-to-one、rename/name evidence、structural fingerprint、unique candidateをすべて満たす場合だけ採用し、それ以外はremoved+addedとする。
+- diff diagramはseedと指定depthのcontextだけを所有する。
 
 ### output contract
 
-- semantic diff JSON は before/after snapshot digest、FileChangeSet、SemanticChangeSet、seed、upstream/downstream context、matching evidence を分離する。
-- Python PlantUML は class と field/method を member-level で added `+`、removed `-`、modified `~`、moved `→`、unknown `?` と色・線種の両方で示す。
-- manifest は requested/resolved endpoint、base method、start HEAD、worktree fingerprint、resolved config、Artifact hash を保持する。
-- working tree U path は file evidence へ残すが、その path が関係する semantic domain は incomplete とする。
+- semantic diff JSONはbefore/after side kind/schema/digest、metadata-only FileChangeSet、SemanticChangeSet、seed、upstream/downstream context、matching evidenceを分離する。
+- Python PlantUMLはclassとfield/methodをmember-levelでadded `+`、removed `-`、modified `~`、moved `→`、unknown `?`と色・線種の両方で示す。
+- manifestはrequested/resolved endpoint、base method、start HEAD anchor、candidate、merge-base、frozen worktree digest、resolved config、budget requested/resolved/count、Artifact hashを保持する。
+- working tree U pathはsafe file metadataへ残すが、そのpathが関係するsemantic domainはincompleteとする。
+- raw patch/context/source/comment/literal/secret/absolute pathは全Artifactとdiagnosticに含めない。
 
 ## スコープ
 
@@ -131,29 +142,32 @@ code-structure-viz diff --repo . --domain python --from v1.0.0 --to v1.1.0 --ups
 
 ## 失敗・境界条件
 
-- endpoint unresolved、missing Git object、fingerprint drift、implicit path budget 超過では semantic success Artifact を公開せず nonzero とする。
-- 一部 Python source の安全な解析が不可能でも unaffected snapshot/diff が成立する場合は incomplete、成功 Artifact と diagnostic を保持し exit 3 とする。
-- moved 候補が複数ある場合は unknown moved を捏造せず removed+added と matching diagnostic を返す。
-
-- `not_applicable` は target 不在、`incomplete` は target があるが安全に解析できない状態であり、相互に変換しない。
-- failure diagnostic は stable code、severity、domain、safe repository-relative location、recoverability、human-readable message を持つ。source body と secret は含めない。
-- stop condition: before/after snapshot の独立再生成、endpoint/fingerprint provenance、semantic seed、impact union、failure matrix が acceptance test で固定されるまで SQLAlchemy/Next diff の共通化へ進まない。
+- moved候補が複数ある場合はunknown movedを捏造せずremoved+addedとmatching diagnosticを返す。
+- diff domain presenceは上記truth tableに従う。analysis failureをdomain absenceへ変換しない。
+- implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
+- entity-per-diagram budgetはdomain-local gateでdefault 500。overrideなしで超過したdomainは`incomplete`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。valid core runではsafe run manifestを公開し、requested/resolved limit、actual count、diagnosticを記録する。all-domainではsuccessful sibling Artifactを保持する。positive integerの`--max-entities N`は通常公開を許可し、同じ値とcountをmanifestへ記録する。invalid overrideはexit 2。
+- endpoint unresolved、missing object、fingerprint drift、output collisionはrun-level fatal exit 1。invalid CLI/config/overrideはexit 2。interruptはexit 130。
+- diagnosticはstable code、severity、domain、safe repository-relative location、recoverability、human-readable messageを持ち、source body、raw hunk、secretを含めない。
+- stop condition: independent side generation、empty-side provenance、endpoint/fingerprint provenance、metadata-only FileChangeSet、semantic seed、impact union、budget/publication matrixがacceptanceで固定されるまでSQLAlchemy/Next diffへ進まない。
 
 ## 受け入れ条件
 
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
-| I02-AC-001 | 全 `--from`/`--to` 組合せで requested/resolved endpoint と snapshot digest が一致する。 | I02-AT-001 |
-| I02-AC-002 | deleted class の before edge と union graph で upstream/downstream depth 1 を別々に選ぶ。 | I02-AT-002 |
-| I02-AC-003 | base 解決不能、U path、missing object、fingerprint drift で fail closed になる。 | I02-AT-003 |
-| I02-AC-004 | 全 Git invocation が read-only allowlist 内で、refs/index/worktree fingerprint を変更しない。 | I02-AT-004 |
-| I02-AC-005 | whitespace/comment/import-order only は seed 0、member/relation delta は seed になる。 | I02-AT-005 |
-| I02-AC-006 | 一意な rename+fingerprint だけ moved、ambiguous candidate は removed+added になる。 | I02-AT-006 |
-| I02-AC-007 | implicit 1,001 path は無切り捨て failure、明示 override は manifest に残る。 | I02-AT-007 |
+| I02-AC-001 | 全`--from`/`--to`組合せをtable-drivenに検証し、`--to working-tree`のみではstart HEAD anchor、frozen digest、candidate、merge-base、resolution methodが一致する。 | I02-AT-001 |
+| I02-AC-002 | deleted classのbefore edgeとunion graphでupstream/downstream depth 1を別々に選ぶ。 | I02-AT-002 |
+| I02-AC-003 | base解決不能、U path、missing object、fingerprint driftでfail closedになる。 | I02-AT-003 |
+| I02-AC-004 | 全Git invocationがread-only allowlist内で、refs/index/worktree fingerprintを変更しない。 | I02-AT-004 |
+| I02-AC-005 | whitespace/comment/import-order onlyはseed 0、member/relation deltaはseedになる。 | I02-AT-005 |
+| I02-AC-006 | 一意なrename+fingerprintだけmoved、ambiguous candidateはremoved+addedになる。 | I02-AT-006 |
+| I02-AC-007 | implicit 1,001 pathsはexit 1・diagnostic only・semantic/PlantUML/final manifestなし、valid overrideはrequested/resolved/count付きで成功する。 | I02-AT-007 |
+| I02-AC-008 | both-absent、both-present、before-only、after-only、side failureのtruth tableでstatus、delta、publication、exit、empty-side digestが一致する。 | I02-AT-008 |
+| I02-AC-009 | FileChangeSet hunkがrange/status/content-independent IDだけを持ち、raw patch/context/source/comment/literal/secret/absolute pathを全channelへ出さない。 | I02-AT-009 |
+| I02-AC-010 | 501 diagram entitiesはdomain incomplete・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid 600 overrideは通常公開する。 | I02-AT-010 |
 
-- **I02-AC-001〜I02-AC-007 がすべて満たされ、planned test command が clean checkout で成功すること。**
+- **I02-AC-001〜I02-AC-010 がすべて満たされ、planned test command が clean checkout で成功すること。**
 - Requirement、Design、Plan の trace table が一致し、unresolved acceptance gap がないこと。
-- release boundary: ISSUE-01 と合わせて Python domain preview。Git comparison foundation は後続 domain diff が再利用するが、Python 固有 matching は adapter 内に残す。
+- release boundary: ISSUE-01と合わせてPython domain preview。shared Git comparison contractを後続diff slicesへ渡す。
 
 ## 制約・前提
 

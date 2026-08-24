@@ -26,14 +26,15 @@ coding agent または人間が、対象 Python repository を実行せずに cl
 - 親 Initiative は三 domain の code structure を静的に可視化する。
 - 親 Epic は安全な Git comparison と agent-first Artifact contract を一つの product outcome として統合する。
 - この slice の declared dependency は なし。依存 Issue の public contract だけを利用し、unfinished sibling の内部実装には依存しない。
-- canonical authority は exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` の accepted ADR と interview、および本 package の親 R/D/P である。
+- canonical authority は exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` の accepted ADR、interview、親 R/D/P と本 Issue の current canonical textである。
 
 | 親 requirement | この Issue の所有範囲 |
 | --- | --- |
 | EPIC-REQ-001 | python domain の snapshot を end-to-end で提供する。 |
-| EPIC-REQ-002 | static analysis、read-only Git、redaction、fail-closed を維持する。 |
-| EPIC-REQ-003 | versioned semantic JSON、domain-specific PlantUML、manifest を生成する。 |
-| EPIC-REQ-004 | complete/not_applicable/incomplete と exit contract を slice の範囲で実装する。 |
+| EPIC-REQ-002 | static analysis、read-only Git、safe endpoint/source、redaction、fail-closed を維持する。 |
+| EPIC-REQ-003 | python の identity/member/relation/matching semantics を domain ownership のまま保つ。 |
+| EPIC-REQ-004 | per-domain versioned semantic JSON、domain-specific PlantUML、`run-manifest/v1` descriptor、determinism/no-overwrite を提供する。 |
+| EPIC-REQ-005 | domain status、0/1/2/3/130 exitとdomain-local entity budgetを実装・検証する。run-level changed-path budgetはdiff専用であり、本snapshot sliceでは適用しない。 |
 
 ## 観測可能な要件
 
@@ -43,7 +44,7 @@ coding agent または人間が、対象 Python repository を実行せずに cl
 | I01-REQ-002 | source acquisition | target 無指定では ignore と scope 設定を適用した repository 内の全 `.py` source を snapshot 対象とする。 |
 | I01-REQ-003 | semantic behavior | class identity は normalized module path と qualified class name の組である。nested class は outer class を含む qualified name を持つ。 |
 | I01-REQ-004 | Artifact/output | semantic JSON は `code-structure-viz.semantic/v1` envelope、domain `python`、document kind `snapshot` を持つ。 |
-| I01-REQ-005 | failure behavior | repository、Python version、config、output collision の core preflight failure は Artifact を公開せず exit 1 または 2 とする。 |
+| I01-REQ-005 | failure behavior | repository、Python version、config、output collisionのcore preflight failureはArtifactを公開せずexit 1または2とする。entity-per-diagram budget超過はdomain `incomplete`、exit 3で、affected semantic JSON/PlantUMLを公開せずsafe run manifestへcountとdiagnosticを残す。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--max-changed-paths`指定はusage error、exit 2とする。 |
 | I01-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
 
 ### I01-REQ-001
@@ -60,7 +61,7 @@ class identity は normalized module path と qualified class name の組であ�
 semantic JSON は `code-structure-viz.semantic/v1` envelope、domain `python`、document kind `snapshot` を持つ。
 ### I01-REQ-005
 
-repository、Python version、config、output collision の core preflight failure は Artifact を公開せず exit 1 または 2 とする。
+repository、Python version、config、output collisionのcore preflight failureはArtifactを公開せずexit 1または2とする。entity-per-diagram budget超過はdomain `incomplete`、exit 3で、affected semantic JSON/PlantUMLを公開せずsafe run manifestへcountとdiagnosticを残す。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--max-changed-paths`指定はusage error、exit 2とする。
 ### I01-REQ-006
 
 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。
@@ -125,28 +126,27 @@ code-structure-viz snapshot --repo . --domain python --target module:domain.orde
 
 ## 失敗・境界条件
 
-- repository、Python version、config、output collision の core preflight failure は Artifact を公開せず exit 1 または 2 とする。
-- 一部 source の parse/read failure で安全な残りを表現できる場合は domain `incomplete`、成功した Artifact と diagnostic を保持し exit 3 とする。
-- entity 数が既定 500 を超える場合は切り捨てず nonzero とし、`--max-entities` の明示 override を診断に記録する。
-
-- `not_applicable` は target 不在、`incomplete` は target があるが安全に解析できない状態であり、相互に変換しない。
-- failure diagnostic は stable code、severity、domain、safe repository-relative location、recoverability、human-readable message を持つ。source body と secret は含めない。
-- stop condition: Python snapshot の CLI→source selection→AST analysis→semantic JSON/PlantUML→manifest→acceptance test が単独で成立する前に、Git diff、SQLAlchemy row model、Next bridge の実装へ進まない。
+- repository、Python version、config、output collisionのcore preflight failureはArtifactを公開せずexit 1または2とする。
+- 一部sourceのparse/read failureで安全なpartial snapshotを表現できる場合はdomain `incomplete`、明示的にincompleteであるsemantic Artifactとdiagnosticを保持しexit 3とする。target不在へ変換しない。
+- entity-per-diagram budgetはdomain-local gateでdefault 500。overrideなしで超過したdomainは`incomplete`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。valid core runではsafe run manifestを公開し、requested/resolved limit、actual count、diagnosticを記録する。all-domainではsuccessful sibling Artifactを保持する。positive integerの`--max-entities N`は通常公開を許可し、同じ値とcountをmanifestへ記録する。invalid overrideはexit 2。
+- `not_applicable`はPython target evidence不在、`incomplete`はtarget evidenceがあるが安全に完了できない状態であり、相互に変換しない。
+- diagnosticはstable code、severity、domain、safe repository-relative location、recoverability、human-readable messageを持ち、source body、secret、absolute pathを含めない。
+- stop condition: Python snapshotのCLI→source selection→AST analysis→semantic JSON/PlantUML→manifest→acceptance testが単独で成立する前にGit diff、SQLAlchemy row model、Next bridgeへ進まない。
 
 ## 受け入れ条件
 
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
-| I01-AC-001 | whole repository の Python class/member/relation を JSON と PlantUML へ決定的に出力する。 | I01-AT-001 |
-| I01-AC-002 | path/module/class target と upstream/downstream depth が frontier を正しく制限する。 | I01-AT-002 |
-| I01-AC-003 | syntax error と unreadable file を削除扱いせず incomplete と diagnostic にする。 | I01-AT-003 |
-| I01-AC-004 | fixture の import side effect、secret literal、absolute path が実行・出力されない。 | I01-AT-004 |
-| I01-AC-005 | 同一入力の二回実行で semantic/PlantUML bytes と manifest artifact SHA が一致する。 | I01-AT-005 |
-| I01-AC-006 | 501 entity は無切り捨て failure、明示 600 override は成功する。 | I01-AT-006 |
+| I01-AC-001 | whole repositoryのPython class/member/relationをJSONとPlantUMLへ決定的に出力する。 | I01-AT-001 |
+| I01-AC-002 | path/module/class targetとupstream/downstream depthがfrontierを正しく制限する。 | I01-AT-002 |
+| I01-AC-003 | syntax errorとunreadable fileをtarget不在や削除扱いせずincompleteとdiagnosticにする。 | I01-AT-003 |
+| I01-AC-004 | fixtureのimport side effect、secret literal、absolute pathが実行・出力されない。 | I01-AT-004 |
+| I01-AC-005 | 同一入力の二回実行でsemantic/PlantUML bytesとmanifest Artifact SHAが一致する。 | I01-AT-005 |
+| I01-AC-006 | 501 entitiesはdomain incomplete・exit 3・affected JSON/PlantUMLなし・manifestにcountを記録し、明示600 overrideは成功してrequested/resolved/countを記録する。snapshotへの`--max-changed-paths`はsilent no-opにせずexit 2・Artifactなしとする。 | I01-AT-006 |
 
 - **I01-AC-001〜I01-AC-006 がすべて満たされ、planned test command が clean checkout で成功すること。**
 - Requirement、Design、Plan の trace table が一致し、unresolved acceptance gap がないこと。
-- release boundary: internal foundation を兼ねる最初の利用可能 slice。ただし release milestone とはせず、Python diff 完了後に Python domain preview とする。
+- release boundary: internal foundationを兼ねる最初の利用可能slice。ただしrelease milestoneとはせず、Python diff完了後にPython domain previewとする。
 
 ## 制約・前提
 

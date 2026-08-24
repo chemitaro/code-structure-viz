@@ -36,92 +36,80 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 ## 順序・依存
 
-- declared dependency: ISSUE-01
-- sibling の private parser/model/renderer implementation に依存しない。必要な cross-Issue contract は `semantic-contract.md` と親 Epic Design を正本にする。
-- 並行可能: fixture authoring、schema examples、renderer golden、security trap fixture は interface acceptance 固定後に並行できる。
-- 統合順: dependency contract verification → source path → semantic model → render/output transaction → acceptance/CI。
-- stop condition: before/after snapshot の独立再生成、endpoint/fingerprint provenance、semantic seed、impact union、failure matrix が acceptance test で固定されるまで SQLAlchemy/Next diff の共通化へ進まない。
+- declared dependency: ISSUE-01。
+- execution order: I02-PLAN-001 → 002 → 007 → 003 → 005 → 004 → 006。endpoint/freezeとmetadata-only hunkをsemantic comparison前に固定する。
+- fixture authoring、endpoint matrix、empty-side golden、hunk redaction、renderer goldenはI02-PLAN-001後に並行できる。
+- stop condition: all endpoint combinations、five-row domain presence、two-level budget、metadata-only hunk、union impact、matching、read-only Gitがacceptanceで成立するまでconsumer diff sliceへhand offしない。
 
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
-| I02-PLAN-001 | Requirement fixture と command/manifest contract test を先に追加し、failure/exit behavior を executable acceptance として固定する。 | I02-DES-001 |
-| I02-PLAN-002 | 必要最小限の CLI/config/diagnostic/Artifact boundary を planned module に実装し、dependency Issue の public contract を再利用する。 | I02-DES-002 |
-| I02-PLAN-003 | python source acquisition と domain-owned semantic analyzer/matcher を実装し、unsafe/unknown を diagnostic へ変換する。 | I02-DES-003 |
-| I02-PLAN-004 | semantic JSON と PlantUML renderer、redaction、deterministic ordering、SHA-256 manifest を一つの output transaction へ接続する。 | I02-DES-004 |
-| I02-PLAN-005 | negative/security/budget/determinism/partial failure test、documentation、lockfile/license/offline gate を完了し、handoff evidence を作る。 | I02-DES-005 |
-| I02-PLAN-006 | CI minimum/latest lane と full regression を通し、rollback/forward recovery 条件を review する。 | I02-DES-006 |
+| I02-PLAN-001 | I02-AT-001〜010のtable-driven CLI/status/publication fixturesを先に固定する。 | I02-DES-001 |
+| I02-PLAN-002 | ComparisonEndpointResolver、WorkingTreeFreezer、ReadOnlyGitRepositoryとstart-HEAD provenanceを実装する。 | I02-DES-002 |
+| I02-PLAN-003 | DomainPresenceResolver、canonical empty-side、Python semantic differ/impact/matcherを実装する。 | I02-DES-003 |
+| I02-PLAN-004 | side/FileChangeSet/SemanticChangeSetを分離したJSON、PlantUML、manifest publicationを接続する。 | I02-DES-004 |
+| I02-PLAN-005 | run-level changed-path gateとdomain-local entity gateをexit/publication matrixへ接続する。 | I02-DES-005 |
+| I02-PLAN-006 | read-only/static/redaction/determinism/atomicity/CI/package regressionを完了する。 | I02-DES-006 |
+| I02-PLAN-007 | HunkMetadata parser/value/serializerをrange/status/content-independent IDだけに限定しnegative testを通す。 | I02-DES-007 |
 
 ## 実装step
 
 ### I02-PLAN-001 acceptance-first contract
 
-- planned test files を先に作り、CLI arguments、output filenames、manifest fields、status、exit code を table-driven fixture で固定する。
-- user-visible Artifact bytes の golden は source body/secret/absolute path がないことを同時に確認する。
-- implementation 未着手時に test が expected failure になることを確認し、誤った既存 behavior を前提にしない。
+- endpoint matrixにflagなし、from-only、to-ref-only、to-head-only、to-working-tree-only、from+to、invalid from-working-treeを含める。
+- five-row domain presence、changed-path/entity budgets、hunk redaction、manifest presence/absenceをexpected file setまで固定する。
 
-### I02-PLAN-002 application boundary
+### I02-PLAN-002 endpoint and immutable source
 
-- planned modules:
+planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` には未実装）:
 
-- src/code_structure_viz/source/endpoints.py::ComparisonEndpointResolver（planned）
-- src/code_structure_viz/source/freezer.py::WorkingTreeFreezer（planned）
-- src/code_structure_viz/source/git_repository.py::ReadOnlyGitRepository（planned）
-- src/code_structure_viz/source/file_changes.py::FileChangeSet（planned）
-- src/code_structure_viz/semantic/diff.py::SemanticDiffer（planned）
-- src/code_structure_viz/semantic/impact.py::ImpactExplorer（planned）
-- src/code_structure_viz/adapters/python/matcher.py::PythonMoveMatcher（planned）
-- src/code_structure_viz/adapters/python/diff_renderer.py（planned）
+- `src/code_structure_viz/source/endpoints.py::ComparisonEndpointResolver`
+- `src/code_structure_viz/source/freezer.py::WorkingTreeFreezer`
+- `src/code_structure_viz/source/git_repository.py::ReadOnlyGitRepository`
+- `src/code_structure_viz/source/source_view.py::SourceView`
 
-- すべて baseline commit には未実装であり、この Plan は候補 path/symbol を指示する。存在済みとみなさない。
-- dependency injection は filesystem、Git process、clock/temp directory、Node process に限定し、domain model を framework へ依存させない。
+`--to working-tree` onlyではfreezeとstart HEAD解決を同じrun-start boundaryで行い、candidate priority、merge-base、resolution methodをprovenanceへ記録する。auto fetch/checkout/fallbackは禁止する。
 
-### I02-PLAN-003 source and semantic implementation
+### I02-PLAN-007 metadata-only FileChangeSet
 
-- flag なしは implicit base→開始時 frozen working-tree、`--from REF` は REF→frozen working-tree、`--to REF` はその endpoint に対して解決した implicit base→REF、両方指定は exact REF→REF とする。
-- `--to head` は開始時 HEAD commit、`--to working-tree` は開始時 frozen working tree、`--from working-tree` は usage error とする。
-- implicit base は `--pr-target`、configured comparison target/upstream、`origin/HEAD`、local main/develop/master candidate の順で endpoint commit との merge-base を試し、解決不能なら fail closed とする。
-- before commit source は Git object database から read-only に読み、working-tree 側の必要 source は repository 外 temporary area へ copy する。開始・終了 fingerprint が異なる場合は final output directory を変更しない。
-- FileChangeSet は A/M/D/R/C/T/U/? と hunk を evidence として保持するが、SemanticChangeSet の真実源にしない。implicit changed path は既定 1,000、超過時は `--max-changed-paths` 明示 override を要求する。
+- `src/code_structure_viz/source/file_changes.py::FileChangeSet`、`HunkMetadata`をplanned targetとする。
+- Git diff streamからold/new ranges/status/ordinalを抽出し、content-independent canonical metadata SHA-256を`hunk_id`にする。raw patch/context/added/deleted linesをvalue objectへ保存しない。
+- secret-like patch fixtureでArtifact、manifest、diagnostic、stdout/stderr、logをnegative scanする。
 
-- before と after の immutable Python semantic snapshot を ISSUE-01 の schema で生成し、その snapshot digest を diff の入力 identity とする。
-- class、field、method、property、decorator metadata、relation の semantic delta がある entity だけを changed seed とする。空白、comment、import order だけの変化は seed にしない。
-- impact graph は before/after relation の union。upstream と downstream を別 frontier とし、既定 depth は各 1。削除 class は before relation から context を復元する。
-- moved は high-confidence one-to-one、rename/name evidence、structural fingerprint、unique candidate をすべて満たす場合だけ採用し、それ以外は removed+added とする。
-- diff diagram は seed と指定 depth の context だけを所有し、whole structure を再掲しない。
+### I02-PLAN-003 domain presence and Python semantic diff
 
-- adapter input/output を immutable value とし、parse failure を empty collection や removed entity へ変換しない。
-- budget は collection/render 前に検査し、partial truncation を禁止する。
+- `src/code_structure_viz/semantic/diff.py::DomainPresenceResolver`、`CanonicalEmptySide`、`SemanticDiffer`、`ImpactExplorer`、Python matcherをplanned targetとする。
+- absent/absent=not_applicable、real/empty=all removed、empty/real=all added、analysis failure=incomplete no affected payloadを実装する。
+- empty-side canonical bytes/digestをdomain/versionごとにgolden固定しstandalone publishしない。
+
+### I02-PLAN-005 budget and failure mapping
+
+- implicit changed paths default 1,000をdomain fan-out前に検査し、overrunはexit 1/diagnostic only/final manifestなし。
+- Python diagram entities default 500をrender前に検査し、overrunはexit 3/affected payloadなし/safe manifestあり。valid overridesはrequested/resolved/count、invalid valuesはexit 2。
 
 ### I02-PLAN-004 Artifact publication
 
-- semantic diff JSON は before/after snapshot digest、FileChangeSet、SemanticChangeSet、seed、upstream/downstream context、matching evidence を分離する。
-- Python PlantUML は class と field/method を member-level で added `+`、removed `-`、modified `~`、moved `→`、unknown `?` と色・線種の両方で示す。
-- manifest は requested/resolved endpoint、base method、start HEAD、worktree fingerprint、resolved config、Artifact hash を保持する。
-- working tree U path は file evidence へ残すが、その path が関係する semantic domain は incomplete とする。
-
-- staging directory は target repository 外を優先し、final fingerprint/collision check 後に rename/copy+fsync strategy で公開する。
-- manifest の SHA-256 は final bytes を基準にし、path は output directory 相対とする。
+- side descriptors/digests、metadata-only FileChangeSet、SemanticChangeSet、seed、union impact、matching evidenceを別fieldでserializeする。
+- staging/collision/fingerprint/integrity gate後にpublishし、run fatalでは全stagingを破棄、domain incompleteではsafe manifestのみpublishする。
 
 ### I02-PLAN-006 hardening and handoff
 
-- `uv run ruff check .`
-- `uv run mypy src tests`
-- `uv run pytest`
-- Next adapter を含む場合は `npm --prefix adapters/next ci --offline`、`npm --prefix adapters/next run typecheck`、`npm --prefix adapters/next test`。
-- package build、minimum/latest CI、offline runtime fixture、license inventory を確認する。
-- docs は CLI examples、schema version、failure/exit behavior、scope 外を更新する。product HTML command は追加しない。
+- read-only Git allowlist、refs/index/worktree byte equality、static execution trap、same-input output equality、minimum/latest/offline/license regressionを通す。
+- shared contract fixturesをISSUE-04/06/07がconsumeできる形でversioned docs/testsへhand offする。
 
 ## 検証
 
 | Test ID | acceptance behavior | planned file | command |
 | --- | --- | --- | --- |
-| I02-AT-001 | 全 `--from`/`--to` 組合せで requested/resolved endpoint と snapshot digest が一致する。 | tests/acceptance/python/test_diff_cli.py | uv run pytest tests/acceptance/python/test_diff_cli.py -q |
-| I02-AT-002 | deleted class の before edge と union graph で upstream/downstream depth 1 を別々に選ぶ。 | tests/integration/python/test_impact_union_graph.py | uv run pytest tests/integration/python/test_impact_union_graph.py -q |
-| I02-AT-003 | base 解決不能、U path、missing object、fingerprint drift で fail closed になる。 | tests/acceptance/git/test_diff_fail_closed.py | uv run pytest tests/acceptance/git/test_diff_fail_closed.py -q |
-| I02-AT-004 | 全 Git invocation が read-only allowlist 内で、refs/index/worktree fingerprint を変更しない。 | tests/security/test_git_read_only.py | uv run pytest tests/security/test_git_read_only.py -q |
-| I02-AT-005 | whitespace/comment/import-order only は seed 0、member/relation delta は seed になる。 | tests/acceptance/python/test_semantic_seed.py | uv run pytest tests/acceptance/python/test_semantic_seed.py -q |
-| I02-AT-006 | 一意な rename+fingerprint だけ moved、ambiguous candidate は removed+added になる。 | tests/integration/python/test_move_matching.py | uv run pytest tests/integration/python/test_move_matching.py -q |
-| I02-AT-007 | implicit 1,001 path は無切り捨て failure、明示 override は manifest に残る。 | tests/acceptance/git/test_changed_path_budget.py | uv run pytest tests/acceptance/git/test_changed_path_budget.py -q |
+| I02-AT-001 | endpoint matrix and start-HEAD anchor | tests/acceptance/python/test_diff_cli.py | uv run pytest tests/acceptance/python/test_diff_cli.py -q |
+| I02-AT-002 | union impact | tests/integration/python/test_impact_union_graph.py | uv run pytest tests/integration/python/test_impact_union_graph.py -q |
+| I02-AT-003 | fail closed | tests/acceptance/git/test_diff_fail_closed.py | uv run pytest tests/acceptance/git/test_diff_fail_closed.py -q |
+| I02-AT-004 | Git immutability | tests/security/test_git_read_only.py | uv run pytest tests/security/test_git_read_only.py -q |
+| I02-AT-005 | semantic seeds | tests/acceptance/python/test_semantic_seed.py | uv run pytest tests/acceptance/python/test_semantic_seed.py -q |
+| I02-AT-006 | move matching | tests/integration/python/test_move_matching.py | uv run pytest tests/integration/python/test_move_matching.py -q |
+| I02-AT-007 | changed-path admission | tests/acceptance/git/test_changed_path_budget.py | uv run pytest tests/acceptance/git/test_changed_path_budget.py -q |
+| I02-AT-008 | domain presence/empty-side | tests/acceptance/python/test_domain_presence_diff.py | uv run pytest tests/acceptance/python/test_domain_presence_diff.py -q |
+| I02-AT-009 | hunk redaction | tests/security/test_file_change_hunk_redaction.py | uv run pytest tests/security/test_file_change_hunk_redaction.py -q |
+| I02-AT-010 | entity budget publication | tests/acceptance/python/test_diff_entity_budget.py | uv run pytest tests/acceptance/python/test_diff_entity_budget.py -q |
 
 ### issue gate commands
 
@@ -133,17 +121,33 @@ uv run pytest tests/security/test_git_read_only.py -q
 uv run pytest tests/acceptance/python/test_semantic_seed.py -q
 uv run pytest tests/integration/python/test_move_matching.py -q
 uv run pytest tests/acceptance/git/test_changed_path_budget.py -q
+uv run pytest tests/acceptance/python/test_domain_presence_diff.py -q
+uv run pytest tests/security/test_file_change_hunk_redaction.py -q
+uv run pytest tests/acceptance/python/test_diff_entity_budget.py -q
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
 ```
 
+### Requirement → Design → Plan → acceptance → test trace
+
+| Requirement | Design | Plan | acceptance | test |
+| --- | --- | --- | --- | --- |
+| I02-REQ-001 | I02-DES-001 | I02-PLAN-001 | I02-AC-001, I02-AC-002 | I02-AT-001, I02-AT-002 |
+| I02-REQ-002 | I02-DES-002 | I02-PLAN-002 | I02-AC-001, I02-AC-003, I02-AC-004 | I02-AT-001, I02-AT-003, I02-AT-004 |
+| I02-REQ-003 | I02-DES-003 | I02-PLAN-003 | I02-AC-002, I02-AC-005, I02-AC-008 | I02-AT-002, I02-AT-005, I02-AT-008 |
+| I02-REQ-004 | I02-DES-004 | I02-PLAN-004 | I02-AC-001, I02-AC-008, I02-AC-009 | I02-AT-001, I02-AT-008, I02-AT-009 |
+| I02-REQ-005 | I02-DES-005 | I02-PLAN-005 | I02-AC-003, I02-AC-007, I02-AC-008, I02-AC-010 | I02-AT-003, I02-AT-007, I02-AT-008, I02-AT-010 |
+| I02-REQ-006 | I02-DES-006 | I02-PLAN-006 | I02-AC-004, I02-AC-005, I02-AC-006, I02-AC-009 | I02-AT-004, I02-AT-005, I02-AT-006, I02-AT-009 |
+| I02-REQ-007 | I02-DES-007 | I02-PLAN-007 | I02-AC-007, I02-AC-009 | I02-AT-007, I02-AT-009 |
+
 ### regression boundary
 
-- dependency Issue の acceptance suite を再実行し、public JSON/manifest/exit contract を破っていないことを確認する。
-- target repository の HEAD、branch、refs、index、status、tracked/untracked bytes が command 前後で一致する。
-- same-input deterministic rerun と output collision negative test を実行する。
-- visual vocabulary は color、記号、line style、legend を golden/semantic test で検査する。
+- dependency Issueのacceptance suiteを再実行し、public endpoint/source/schema/manifest/exit contractを破っていないことを確認する。
+- target repositoryのHEAD、branch、refs、index、status、tracked/untracked bytesがcommand前後で一致する。
+- same-input deterministic rerun、output collision、invalid override、interrupt cleanupを確認する。
+- Artifact、diagnostic、stdout/stderr/logをsource body、raw patch lines、comment、literal、secret、absolute pathでnegative scanする。
+- visual vocabularyはcolorだけでなく記号、line style、legendをgolden/semantic testで検査する。
 
 ## rollback
 
@@ -155,7 +159,7 @@ uv run pytest
 
 ## exit / handoff
 
-- I02-AC-001〜I02-AC-007 の acceptance evidence が揃う。
+- I02-AC-001〜I02-AC-010 の acceptance evidence が揃う。
 - Requirement→Design→Plan→test trace に gap がない。
 - planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。

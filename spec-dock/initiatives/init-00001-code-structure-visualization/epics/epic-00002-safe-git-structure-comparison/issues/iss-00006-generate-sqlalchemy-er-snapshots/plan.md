@@ -36,106 +36,102 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 ## 順序・依存
 
-- declared dependency: ISSUE-01
-- sibling の private parser/model/renderer implementation に依存しない。必要な cross-Issue contract は `semantic-contract.md` と親 Epic Design を正本にする。
-- 並行可能: fixture authoring、schema examples、renderer golden、security trap fixture は interface acceptance 固定後に並行できる。
-- 統合順: dependency contract verification → source path → semantic model → render/output transaction → acceptance/CI。
-- stop condition: table/row identity、redaction、not_applicable/incomplete、DB 非接続の acceptance が成立するまで temporal ER matching と ghost row へ進まない。
+- declared dependency: ISSUE-01。
+- execution order: I03-PLAN-001 → 002 → 003 → 005 → 004 → 006。SQLAlchemy semanticsだけをadditiveに拡張し、ISSUE-01のcore contractをforkしない。
+- static fixtures、row schema examples、renderer golden、DB/import trapsはacceptance contract固定後に並行できる。
+- stop condition: table/row identity、not_applicable/incomplete、literal redaction、entity budget、determinismが成立するまでER diffへ進まない。
 
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
-| I03-PLAN-001 | Requirement fixture と command/manifest contract test を先に追加し、failure/exit behavior を executable acceptance として固定する。 | I03-DES-001 |
-| I03-PLAN-002 | 必要最小限の CLI/config/diagnostic/Artifact boundary を planned module に実装し、dependency Issue の public contract を再利用する。 | I03-DES-002 |
-| I03-PLAN-003 | sqlalchemy source acquisition と domain-owned semantic analyzer/matcher を実装し、unsafe/unknown を diagnostic へ変換する。 | I03-DES-003 |
-| I03-PLAN-004 | semantic JSON と PlantUML renderer、redaction、deterministic ordering、SHA-256 manifest を一つの output transaction へ接続する。 | I03-DES-004 |
-| I03-PLAN-005 | negative/security/budget/determinism/partial failure test、documentation、lockfile/license/offline gate を完了し、handoff evidence を作る。 | I03-DES-005 |
+| I03-PLAN-001 | I03-AT-001〜007のsnapshot/status/publication fixturesを先に固定する。 | I03-DES-001 |
+| I03-PLAN-002 | ISSUE-01 SourceViewとdeclarative detector/analyzer boundaryをplanned modulesへ実装する。 | I03-DES-002 |
+| I03-PLAN-003 | schema.table identity、typed rows、relations、redacted defaultsのcanonical modelを実装する。 | I03-DES-003 |
+| I03-PLAN-004 | SQLAlchemy semantic JSON、ER PlantUML、run manifest、atomic publicationを接続する。 | I03-DES-004 |
+| I03-PLAN-005 | applicability/failureとdomain-local entity gateをstatus/exit/publicationへ接続する。 | I03-DES-005 |
+| I03-PLAN-006 | DB/import/static/redaction/determinism/package/CI regressionを完了する。 | I03-DES-006 |
 
 ## 実装step
 
 ### I03-PLAN-001 acceptance-first contract
 
-- planned test files を先に作り、CLI arguments、output filenames、manifest fields、status、exit code を table-driven fixture で固定する。
-- user-visible Artifact bytes の golden は source body/secret/absolute path がないことを同時に確認する。
-- implementation 未着手時に test が expected failure になることを確認し、誤った既存 behavior を前提にしない。
+- normal/semantic/failure/security/determinism/applicability/entity-budget fixturesを先に作る。
+- target不在とcandidate解析不能を別expected output setで固定し、501 entities/override casesとsnapshotへの`--max-changed-paths` exit 2/no-Artifact caseを追加する。
 
-### I03-PLAN-002 application boundary
+### I03-PLAN-002 static source boundary
 
-- planned modules:
+planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` には未実装）:
 
-- src/code_structure_viz/adapters/sqlalchemy/detector.py::DeclarativeDetector（planned）
-- src/code_structure_viz/adapters/sqlalchemy/analyzer.py::SqlAlchemySnapshotAnalyzer（planned）
-- src/code_structure_viz/adapters/sqlalchemy/model.py（planned）
-- src/code_structure_viz/adapters/sqlalchemy/redaction.py::SqlDefaultRedactor（planned）
-- src/code_structure_viz/adapters/sqlalchemy/renderer.py（planned）
+- `src/code_structure_viz/adapters/sqlalchemy/detector.py::DeclarativeDetector`
+- `src/code_structure_viz/adapters/sqlalchemy/analyzer.py::SqlAlchemySnapshotAnalyzer`
+- ISSUE-01 `SourceView`/AST reader public contract
 
-- すべて baseline commit には未実装であり、この Plan は候補 path/symbol を指示する。存在済みとみなさない。
-- dependency injection は filesystem、Git process、clock/temp directory、Node process に限定し、domain model を framework へ依存させない。
+DB connection、Alembic/runtime metadata、application importをcallできないport boundaryとexecution trapを置く。
 
-### I03-PLAN-003 source and semantic implementation
+### I03-PLAN-003 ER semantic model
 
-- Python source を ISSUE-01 の安全な reader/AST pipeline で読み、declarative base、mapped class、association `Table` の静的 pattern だけを対象にする。
-- DB 接続、engine、Session、Alembic、`MetaData.create_all()`、import side effect、runtime mapper inspection を使用しない。
-- modern `DeclarativeBase`/`Mapped`/`mapped_column` と、静的に同定できる classic declarative/`Column` pattern を扱う。曖昧な factory return は推測しない。
-- repository 内 source が ORM target を持たない場合は `not_applicable`。target 候補があるが syntax/alias 解決で安全に解析できない場合は `incomplete`。
+- `adapters/sqlalchemy/model.py`、`redaction.py::SqlDefaultRedactor`をplanned targetとする。
+- table identity、column/constraint/index/relationship rows、FK vs relationship、association/inheritanceをtyped recordsにする。
+- raw defaults、URL、literalをmodelへ入れずpresence/categoryだけを比較可能にする。
 
-- table identity は normalized schema 名と table 名。schema 無指定は explicit null namespace とし、module path は provenance であって table identity ではない。
-- table entity に column、primary/foreign/unique/check constraint、index、relationship、inheritance、association table を typed row member として保持する。
-- row identity は domain kind と declarative name/structural key。order は semantics から除外し、source order だけの変更を semantic change にしない。
-- column type、nullable、PK/FK/unique、index、relationship target/cardinality/back_populates を安全に正規化する。SQL/default literal は `redacted` と presence/category だけを保持する。
-- ForeignKey と `relationship()` は別 relation kind とし、同一の意味へ畳み込まない。
+### I03-PLAN-005 failure and entity gate
 
-- adapter input/output を immutable value とし、parse failure を empty collection や removed entity へ変換しない。
-- budget は collection/render 前に検査し、partial truncation を禁止する。
+- no target=not_applicable、runtime-only/duplicate/broken source=incompleteを実装する。
+- default 500 entity overrunはexit 3/affected payloadなし/safe manifest countあり、valid overrideはnormal、invalid valueはexit 2。snapshot pipelineへ`ChangedPathAdmissionGate`を接続せず、diff専用`--max-changed-paths`指定はexit 2・Artifactなしにする。
 
 ### I03-PLAN-004 Artifact publication
 
-- semantic JSON は domain `sqlalchemy`、document kind `snapshot` と table/row identity、source location、coverage、diagnostic を持つ。
-- PlantUML ER は table を entity、column/constraint/index/relationship を row として表示し、FK と ORM relationship の線・label を分離する。
-- source default literal、connection URL、absolute path は出力せず、redaction count と rule version を manifest に記録する。
+- `adapters/sqlalchemy/renderer.py`、semantic serializer、manifest descriptorをOutputTransactionへ接続する。
+- canonical row order、no overwrite、final bytes SHA-256、repository-relative source provenanceを固定する。
 
-- staging directory は target repository 外を優先し、final fingerprint/collision check 後に rename/copy+fsync strategy で公開する。
-- manifest の SHA-256 は final bytes を基準にし、path は output directory 相対とする。
+### I03-PLAN-006 hardening and handoff
 
-### I03-PLAN-005 hardening and handoff
-
-- `uv run ruff check .`
-- `uv run mypy src tests`
-- `uv run pytest`
-- Next adapter を含む場合は `npm --prefix adapters/next ci --offline`、`npm --prefix adapters/next run typecheck`、`npm --prefix adapters/next test`。
-- package build、minimum/latest CI、offline runtime fixture、license inventory を確認する。
-- docs は CLI examples、schema version、failure/exit behavior、scope 外を更新する。product HTML command は追加しない。
+- DB/import traps、default/URL/secret/absolute-path scans、same-input digest、core-only offline/license/minimum/latest regressionを通し、ISSUE-04へsnapshot contractをhand offする。
 
 ## 検証
 
 | Test ID | acceptance behavior | planned file | command |
 | --- | --- | --- | --- |
-| I03-AT-001 | declarative model と association table を table/row semantic JSON と ER PlantUML にする。 | tests/acceptance/sqlalchemy/test_snapshot_cli.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_cli.py -q |
-| I03-AT-002 | FK と relationship、constraint/index、inheritance を別 kind として保持する。 | tests/integration/sqlalchemy/test_semantic_rows.py | uv run pytest tests/integration/sqlalchemy/test_semantic_rows.py -q |
-| I03-AT-003 | runtime-only factory、duplicate table identity、broken declarative source を incomplete にする。 | tests/acceptance/sqlalchemy/test_snapshot_failures.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_failures.py -q |
-| I03-AT-004 | DB connector と target import を呼ばず、default/URL/secret literal を Artifact へ出さない。 | tests/security/test_sqlalchemy_static_boundary.py | uv run pytest tests/security/test_sqlalchemy_static_boundary.py -q |
-| I03-AT-005 | source declaration order が semantics に影響しない row ordering と hash を確認する。 | tests/acceptance/sqlalchemy/test_snapshot_determinism.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_determinism.py -q |
-| I03-AT-006 | ORM target なしは not_applicable、候補あり解析不能は incomplete を区別する。 | tests/acceptance/sqlalchemy/test_applicability.py | uv run pytest tests/acceptance/sqlalchemy/test_applicability.py -q |
+| I03-AT-001 | declarative snapshot | tests/acceptance/sqlalchemy/test_snapshot_cli.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_cli.py -q |
+| I03-AT-002 | ER kinds | tests/integration/sqlalchemy/test_er_semantics.py | uv run pytest tests/integration/sqlalchemy/test_er_semantics.py -q |
+| I03-AT-003 | failure mapping | tests/acceptance/sqlalchemy/test_snapshot_failures.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_failures.py -q |
+| I03-AT-004 | static/redaction | tests/security/test_sqlalchemy_static_boundary.py | uv run pytest tests/security/test_sqlalchemy_static_boundary.py -q |
+| I03-AT-005 | determinism | tests/acceptance/sqlalchemy/test_snapshot_determinism.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_determinism.py -q |
+| I03-AT-006 | applicability | tests/acceptance/sqlalchemy/test_applicability.py | uv run pytest tests/acceptance/sqlalchemy/test_applicability.py -q |
+| I03-AT-007 | entity budget publication and diff-only option rejection | tests/acceptance/sqlalchemy/test_snapshot_budget.py | uv run pytest tests/acceptance/sqlalchemy/test_snapshot_budget.py -q |
 
 ### issue gate commands
 
 ```bash
 uv run pytest tests/acceptance/sqlalchemy/test_snapshot_cli.py -q
-uv run pytest tests/integration/sqlalchemy/test_semantic_rows.py -q
+uv run pytest tests/integration/sqlalchemy/test_er_semantics.py -q
 uv run pytest tests/acceptance/sqlalchemy/test_snapshot_failures.py -q
 uv run pytest tests/security/test_sqlalchemy_static_boundary.py -q
 uv run pytest tests/acceptance/sqlalchemy/test_snapshot_determinism.py -q
 uv run pytest tests/acceptance/sqlalchemy/test_applicability.py -q
+uv run pytest tests/acceptance/sqlalchemy/test_snapshot_budget.py -q
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
 ```
 
+### Requirement → Design → Plan → acceptance → test trace
+
+| Requirement | Design | Plan | acceptance | test |
+| --- | --- | --- | --- | --- |
+| I03-REQ-001 | I03-DES-001 | I03-PLAN-001 | I03-AC-001 | I03-AT-001 |
+| I03-REQ-002 | I03-DES-002 | I03-PLAN-002 | I03-AC-001, I03-AC-003, I03-AC-004 | I03-AT-001, I03-AT-003, I03-AT-004 |
+| I03-REQ-003 | I03-DES-003 | I03-PLAN-003 | I03-AC-001, I03-AC-002, I03-AC-005 | I03-AT-001, I03-AT-002, I03-AT-005 |
+| I03-REQ-004 | I03-DES-004 | I03-PLAN-004 | I03-AC-001, I03-AC-005 | I03-AT-001, I03-AT-005 |
+| I03-REQ-005 | I03-DES-005 | I03-PLAN-005 | I03-AC-003, I03-AC-006, I03-AC-007 | I03-AT-003, I03-AT-006, I03-AT-007 |
+| I03-REQ-006 | I03-DES-006 | I03-PLAN-006 | I03-AC-004, I03-AC-005 | I03-AT-004, I03-AT-005 |
+
 ### regression boundary
 
-- dependency Issue の acceptance suite を再実行し、public JSON/manifest/exit contract を破っていないことを確認する。
-- target repository の HEAD、branch、refs、index、status、tracked/untracked bytes が command 前後で一致する。
-- same-input deterministic rerun と output collision negative test を実行する。
-- visual vocabulary は color、記号、line style、legend を golden/semantic test で検査する。
+- dependency Issueのacceptance suiteを再実行し、public endpoint/source/schema/manifest/exit contractを破っていないことを確認する。
+- target repositoryのHEAD、branch、refs、index、status、tracked/untracked bytesがcommand前後で一致する。
+- same-input deterministic rerun、output collision、invalid override、interrupt cleanupを確認する。
+- Artifact、diagnostic、stdout/stderr/logをsource body、raw hunk、comment、literal、secret、absolute pathでnegative scanする。
+- visual vocabularyはcolorだけでなく記号、line style、legendをgolden/semantic testで検査する。
 
 ## rollback
 
@@ -147,7 +143,7 @@ uv run pytest
 
 ## exit / handoff
 
-- I03-AC-001〜I03-AC-006 の acceptance evidence が揃う。
+- I03-AC-001〜I03-AC-007 の acceptance evidence が揃う。
 - Requirement→Design→Plan→test trace に gap がない。
 - planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。

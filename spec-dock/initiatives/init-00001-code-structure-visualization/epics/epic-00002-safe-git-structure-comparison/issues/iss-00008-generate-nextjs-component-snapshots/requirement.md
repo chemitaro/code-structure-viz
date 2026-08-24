@@ -26,14 +26,15 @@ coding agent が first-party TypeScript adapter を通じ、Next.js repository �
 - 親 Initiative は三 domain の code structure を静的に可視化する。
 - 親 Epic は安全な Git comparison と agent-first Artifact contract を一つの product outcome として統合する。
 - この slice の declared dependency は ISSUE-01。依存 Issue の public contract だけを利用し、unfinished sibling の内部実装には依存しない。
-- canonical authority は exact commit `7951ddabc2e6a3d66edb77eada7c6c16923264f7` の accepted ADR と interview、および本 package の親 R/D/P である。
+- canonical authority は exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` の accepted ADR、interview、親 R/D/P と本 Issue の current canonical textである。
 
 | 親 requirement | この Issue の所有範囲 |
 | --- | --- |
 | EPIC-REQ-001 | next domain の snapshot を end-to-end で提供する。 |
-| EPIC-REQ-002 | static analysis、read-only Git、redaction、fail-closed を維持する。 |
-| EPIC-REQ-003 | versioned semantic JSON、domain-specific PlantUML、manifest を生成する。 |
-| EPIC-REQ-004 | complete/not_applicable/incomplete と exit contract を slice の範囲で実装する。 |
+| EPIC-REQ-002 | static analysis、read-only Git、safe endpoint/source、redaction、fail-closed を維持する。 |
+| EPIC-REQ-003 | next の identity/member/relation/matching semantics を domain ownership のまま保つ。 |
+| EPIC-REQ-004 | per-domain versioned semantic JSON、domain-specific PlantUML、`run-manifest/v1` descriptor、determinism/no-overwrite を提供する。 |
+| EPIC-REQ-005 | domain status、0/1/2/3/130 exitとdomain-local entity budgetを実装・検証する。run-level changed-path budgetはdiff専用であり、本snapshot sliceでは適用しない。 |
 
 ## 観測可能な要件
 
@@ -43,7 +44,7 @@ coding agent が first-party TypeScript adapter を通じ、Next.js repository �
 | I05-REQ-002 | source acquisition | Python core は repository-owned Node bridge を明示 protocol で起動し、TypeScript compiler API を使う。Node.js 22 LTS 以上は Next domain target が存在し、adapter を実行するときだけ要求する。 |
 | I05-REQ-003 | semantic behavior | component identity は repository-relative module path と exported component name。default export は stable exported name metadata を持ち、route path は identity ではなく attribute とする。 |
 | I05-REQ-004 | Artifact/output | Node adapter は `code-structure-viz.next-adapter/v1` request/response JSON を stdin/stdout で交換し、Python core が `code-structure-viz.semantic/v1` envelope へ格納する。 |
-| I05-REQ-005 | failure behavior | non-literal dynamic behavior は relation を捏造せず unknown diagnostic と coverage limitation にする。 |
+| I05-REQ-005 | failure behavior | non-literal dynamic behaviorはrelationを捏造せずunknown diagnosticとcoverage limitationにする。Node/protocol/static analysis failureはincomplete、entity budget超過はdomain incomplete exit 3でaffected semantic JSON/PlantUMLを公開しない。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--max-changed-paths`指定はusage error、exit 2とする。 |
 | I05-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
 
 ### I05-REQ-001
@@ -60,7 +61,7 @@ component identity は repository-relative module path と exported component na
 Node adapter は `code-structure-viz.next-adapter/v1` request/response JSON を stdin/stdout で交換し、Python core が `code-structure-viz.semantic/v1` envelope へ格納する。
 ### I05-REQ-005
 
-non-literal dynamic behavior は relation を捏造せず unknown diagnostic と coverage limitation にする。
+non-literal dynamic behaviorはrelationを捏造せずunknown diagnosticとcoverage limitationにする。Node/protocol/static analysis failureはincomplete、entity budget超過はdomain incomplete exit 3でaffected semantic JSON/PlantUMLを公開しない。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--max-changed-paths`指定はusage error、exit 2とする。
 ### I05-REQ-006
 
 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。
@@ -124,28 +125,28 @@ code-structure-viz snapshot --repo . --domain next --target path:app/dashboard -
 
 ## 失敗・境界条件
 
-- non-literal dynamic behavior は relation を捏造せず unknown diagnostic と coverage limitation にする。
-- TypeScript parse/type resolution が一部失敗して安全な component subset が得られる場合は incomplete、得られない場合も target 不在へ変換しない。
-- adapter stdout に protocol 外 text、schema mismatch、unexpected absolute path があれば response 全体を拒否し diagnostic にする。
-
-- `not_applicable` は target 不在、`incomplete` は target があるが安全に解析できない状態であり、相互に変換しない。
-- failure diagnostic は stable code、severity、domain、safe repository-relative location、recoverability、human-readable message を持つ。source body と secret は含めない。
-- stop condition: first-party adapter protocol、TS/TSX coverage、JS/JSX safe subset、client boundary、Node optionality が acceptance で成立するまで Next diff へ進まない。
+- non-literal dynamic behaviorはrelationを捏造せずunknown diagnosticとcoverage limitationにする。
+- TypeScript parse/type resolutionが一部失敗してsafe partial snapshotが得られる場合は明示的なincomplete Artifact、得られない場合もtarget不在へ変換しない。
+- adapter stdoutにprotocol外text、schema mismatch、unexpected absolute pathがあればresponse全体を拒否しincomplete diagnosticにする。
+- entity-per-diagram budgetはdomain-local gateでdefault 500。overrideなしで超過したdomainは`incomplete`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。valid core runではsafe run manifestを公開し、requested/resolved limit、actual count、diagnosticを記録する。all-domainではsuccessful sibling Artifactを保持する。positive integerの`--max-entities N`は通常公開を許可し、同じ値とcountをmanifestへ記録する。invalid overrideはexit 2。
+- Next target evidenceがない場合だけnot_applicableとしNode probeを行わない。target evidenceがあるNode/adapter failureはincomplete。
+- stop condition: first-party adapter protocol、TS/TSX coverage、JS/JSX safe subset、client boundary、Node optionality、entity budgetがacceptanceで成立するまでNext diffへ進まない。
 
 ## 受け入れ条件
 
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
-| I05-AC-001 | App/Pages Router の TS/TSX component、props、static relation、use client を出力する。 | I05-AT-001 |
-| I05-AC-002 | versioned stdin/stdout JSON と Python envelope mapping を contract fixture で検証する。 | I05-AT-002 |
-| I05-AC-003 | JS/JSX safe subset は解析し、unsafe dynamic behavior は unknown にする。 | I05-AT-003 |
-| I05-AC-004 | Node missing、schema mismatch、protocol noise、tsconfig alias failure を incomplete にする。 | I05-AT-004 |
-| I05-AC-005 | build/config/plugin/application module を実行せず、literal/body/absolute path を出力しない。 | I05-AT-005 |
-| I05-AC-006 | Next target なしでは Node probe を行わず not_applicable。 | I05-AT-006 |
+| I05-AC-001 | App/Pages RouterのTS/TSX component、props、static relation、use clientを出力する。 | I05-AT-001 |
+| I05-AC-002 | versioned stdin/stdout JSONとPython envelope mappingをcontract fixtureで検証する。 | I05-AT-002 |
+| I05-AC-003 | JS/JSX safe subsetは解析し、unsafe dynamic behaviorはunknownにする。 | I05-AT-003 |
+| I05-AC-004 | Node missing、schema mismatch、protocol noise、tsconfig alias failureをincompleteにする。 | I05-AT-004 |
+| I05-AC-005 | build/config/plugin/application moduleを実行せず、literal/body/absolute pathを出力しない。 | I05-AT-005 |
+| I05-AC-006 | Next targetなしではNode probeを行わずnot_applicable。 | I05-AT-006 |
+| I05-AC-007 | 501 entitiesはdomain incomplete・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid 600 overrideはrequested/resolved/count付きで成功する。snapshotへの`--max-changed-paths`はexit 2・Artifactなしとする。 | I05-AT-007 |
 
-- **I05-AC-001〜I05-AC-006 がすべて満たされ、planned test command が clean checkout で成功すること。**
+- **I05-AC-001〜I05-AC-007 がすべて満たされ、planned test command が clean checkout で成功すること。**
 - Requirement、Design、Plan の trace table が一致し、unresolved acceptance gap がないこと。
-- release boundary: Next snapshot preview。Python/SQLAlchemy の install/runtime requirement へ Node を持ち込まない optional adapter separation を完成させる。
+- release boundary: Next snapshot preview。Python/SQLAlchemyのinstall/runtime requirementへNodeを持ち込まないoptional adapter separationを完成させる。
 
 ## 制約・前提
 
