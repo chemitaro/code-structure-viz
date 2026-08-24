@@ -84,10 +84,10 @@ snapshot CLI request
 | I01-REQ-001 | vertical CLI outcome | `code-structure-viz snapshot --domain python` が、safe source acquisition、Python analysis、requested payload、manifest、stream、exitまでを一回のrunとして完結する。 |
 | I01-REQ-002 | CLI/config/source selection | CLI grammar、重複、default、config precedence、path safety、whole source scopeを本書のclosed contractどおりに検証する。 |
 | I01-REQ-003 | SourceView/target resolution | run-start working treeをrepository外へ固定し、valid commitと真正なunborn branchをread-onlyで一意判定する。明示targetはsource/class不在より優先して解決し、未解決・曖昧・failed seedを必ず`payload_unavailable`にする。 |
-| I01-REQ-004 | Python semantic behavior | class identity、nested class、field/method/property/decorator、inheritance/composition/typed/import dependency、safe type/signatureをPython-owned modelで表し、member/relationのexact sort tuple、dedupe winner、type text grammarを一意にする。 |
-| I01-REQ-005 | Artifact/stream contract | exact filename、canonical JSON bytes、manifest descriptor、stdout exact bytes/result/summary、diagnostic cardinality/contextを含むstderr JSONL、parameter/escape/visual-dedupeまで閉じたPlantUML vocabularyをversioned contractとして提供する。 |
+| I01-REQ-004 | Python semantic behavior | class identity、nested class、field/method/property/decorator、inheritance/composition/typed/import dependency、safe type/signatureをPython-owned modelで表し、member/relationのexact sort tuple、dedupe winner、type text grammarに加え、annotation `TypeReference`の抽出・採用・解決順位・builtin/typing/type-parameter除外を一意にする。 |
+| I01-REQ-005 | Artifact/stream contract | exact filename、canonical JSON bytes、manifest descriptor、stdout exact bytes/result/summary、diagnostic cardinality/contextを含むstderr JSONL、parameter/escape/visual-dedupeとclassless selected module layoutまで閉じたPlantUML vocabularyをversioned contractとして提供する。 |
 | I01-REQ-006 | failure/budget/safety/determinism | whole-mode absence、explicit-target failure、isolated failure、unsafe/global failure、non-UTF-8 Git path、invalid HEAD、entity overrun、collision、drift、interruptを区別し、target execution・canonical path捏造・secret/absolute path leak・truncation・overwriteを許さない。 |
-| I01-REQ-007 | implementation acceptance | repository-owned package、lockfile、schema/docs、fixture/golden、unit/integration/acceptance/security/packaging test、minimum/latest CIがclean checkoutで再現できる。 |
+| I01-REQ-007 | implementation acceptance | repository-owned package、lockfile、schema/docs、fixture/golden、unit/integration/acceptance/security/packaging test、minimum/latest CIがclean checkoutで再現できる。JSON Schemaはtest/build-time contract gateで検証し、runtimeはschema loader/validatorと第三者runtime dependencyを持たない。 |
 
 ## CLI contract
 
@@ -151,7 +151,7 @@ code-structure-viz snapshot --repo . --output-dir /tmp/csv-stdout --domain pytho
 3. `--config`がなく、`<repo>/.code-structure-viz.toml`があれば読む。
 4. CLIのdepth/max-entitiesを最後に上書きする。
 
-user-global config、environment variable、current working directoryの別config、implicit profileを読まない。explicit configとrepository configはいずれもordinary non-symlink fileだけを許し、explicit configはrepository外でも明示指定なら読める。unknown table/key、duplicate TOML key、型不正、unsafe path、schema不一致はexit 2、stdout空、Artifact 0件とする。
+user-global config、environment variable、current working directoryの別config、implicit profileを読まない。explicit configとrepository configはいずれもordinary non-symlink fileだけを許し、explicit configはrepository外でも明示指定なら読める。unknown table/key、duplicate TOML key、型不正、unsafe path、schema不一致はexit 2、stdout空、Artifact 0件とする。unknown keyのraw spelling、quoted spelling、NFC value、dotted pathはstdout、stderr、manifest、logへ出さない。`CSV-CONFIG-003`のmessageはexact constant `Configuration contains an unknown key.`、`domain/path/symbol/line`はすべて`null`である。複数unknown keyから最初のfailureを選ぶ比較値はprocess内だけで使用し、diagnosticへ埋め込まない。
 
 ### exact v1 shape
 
@@ -249,12 +249,73 @@ syntaxが不正、absolute/backslash/`..`、`.py`以外、empty segment、Python
   - class/member decoratorのsafe symbolic callee名とcall有無。argument/keyword/literalは保持しない。
 - signatureはparameter name/kind/annotation/`has_default`、async、return annotationを構造化する。default値、docstring、comment、function bodyは保持しない。
 - type expressionはDesignのclosed grammarだけをcanonical stringへ変換する。tupleは`()` / `(T,)` / `(T1, T2)`、subscript argumentは`Base[T1, T2]`、unionはnested `|`をleft-to-rightにflattenして`A | B | C`とし冗長parenthesisを保持しない。literal/Annotated metadataはclosed redaction ruleで`?`へ変換し、unsupported annotation siteは一site一件の`CSV-PY-011`を生成する。
+
+### annotation TypeReference contract
+
+annotationからrelation候補へ変換する`TypeReference`はsource textを保持せず、supported ASTのsymbolだけから作る。抽出とrelationへの採用は次のclosed tableに従う。
+
+| annotation shape | reference extraction | relationへの採用 |
+| --- | --- | --- |
+| `Name` / dotted `Attribute` | current roleでsafe symbol一件を抽出する。annotation rootのdefault roleは`head`、`Subscript` slice配下は`argument` | fieldでは`composition`、parameter/return/propertyでは`typed_dependency`、inheritance baseではそのbase expressionのouter `head`だけを`inheritance` |
+| symbolic-base `Subscript` | baseを`head`、sliceをleft-to-rightに`argument`として再帰抽出。slice `Tuple`はargument container | field/parameter/return/propertyはretained `head`と`argument`を採用。inheritanceはouter base `head`だけを採用しgeneric argumentはv1 relationにしない |
+| tuple / `A | B` | element/union leafをleft-to-rightに再帰抽出 | site kindのruleで各retained referenceを採用 |
+| alias-resolved `Literal[...]` | helperと全literal argumentをreferenceにしない | relationなし。type textだけarityを`?`で保持 |
+| alias-resolved `Annotated[T, ...]` | helperとmetadataをreferenceにせず、first argument `T`だけ再帰抽出 | `T`のretained referenceだけをsite kindのruleで採用 |
+| `None` / Ellipsis / literal / unsupported subtree | referenceなし | relationなし。unsupported siteはtype text `?`と`CSV-PY-011` |
+
+`Literal` / `Annotated` special form判定はgeneric `Subscript` extractionより先に行う。baseのfirst segmentにexact `ImportBinding`があれば一度だけ展開し、なければoriginal dotted baseをそのままcanonical baseとする。canonical baseがexact `typing.Literal` / `typing_extensions.Literal` / `typing.Annotated` / `typing_extensions.Annotated`のいずれかである場合だけspecial formとする。未importのunqualified `Literal` / `Annotated`を推測でspecial formにしない。
+
+除外はresolutionより前後のevidenceを使い、次へ閉じる。
+
+- lexical PEP 695 type parameter、およびsimple name assignmentのcalleeがexplicit alias resolutionで`typing.TypeVar`、`typing.ParamSpec`、`typing.TypeVarTuple`または同じ`typing_extensions`名へ解決するlegacy type parameterはrelation候補から除外する。call argument/literalは読まない。
+- explicit local classまたはimport bindingに解決しないunqualified symbolが次のexact `builtin-annotation-name-v1`に一致する場合は除外する。
+
+```text
+BaseException, Exception, bool, bytearray, bytes, complex, dict, float,
+frozenset, int, list, memoryview, object, range, set, slice, str, tuple, type
+```
+
+- alias展開後またはoriginal dotted symbolがexact prefix `builtins.`、`typing.`、`typing_extensions.`を持つ場合、そのsymbol自体はrelation targetにしない。subscript argumentは上表どおり独立に処理する。
+- 除外referenceはrelation、coverage frontier、`CSV-PY-008`を生成しない。
+
+retained symbolは**candidate construction**と**classification**の二段階で解決する。source orderやdictionary iterationで分岐しない。
+
+candidate construction:
+
+| priority | evidence / action | candidate |
+| --- | --- | --- |
+| 0 | enclosing class chainをlongestからemptyへ縮め、`<current-module>.<prefix>.<spelling>`のexact classを探す。同じmoduleのtop-level classはempty prefixで探す | exact internal class candidate。ここで成立した場合は後続候補を見ない |
+| 1 | first segmentにexact explicit `ImportBinding`がある | binding canonical name + remaining segments。`explicit_import=true` |
+| 2 | original dotted spellingをlongest exact module prefix + qualified remainderへ分割できる | original absolute candidate |
+| 3 | 上記なし | original normalized dotted spelling candidate |
+
+candidate construction前に、original spellingがsingle segmentでactive lexical type parameter registryにmatchした場合は即時excludedとし、candidateを構築しない。その他のcandidateへclassificationを次の順で適用する。
+
+| order | predicate | public result |
+| --- | --- | --- |
+| A | candidateがexact SourceView class | `resolution=internal`, `kind=class`, `id=<class-id>`, `name=<module>.<qualified_name>` |
+| B | candidateがmodule bindingそのものかつexact SourceView module | `resolution=internal`, `kind=module`, `id=python:module:<module>`, `name=<module>` |
+| C | A/Bではなく、unqualified exact builtin set、またはcanonical prefix `builtins.` / `typing.` / `typing_extensions.`にmatch | excluded。relation、frontier、diagnosticなし |
+| D | `explicit_import=true` | `resolution=external`。module bindingそのものは`kind=module`、suffixまたはsymbol bindingは`kind=symbol`、`id=null`, `name=<alias-expanded absolute dotted name>` |
+| E | その他 | `resolution=unknown`, `kind=symbol`, `id=null`, `name=<original normalized dotted spelling>`。current module prefixを補わない |
+
+この順序により、same-module/local class `list`はAでinternalになり、`from typing import Generic as G`の`G`はCで除外され、`from ext.models import Foo as F`の`F`はDでexternalになる。unknownだけがoccurrence単位の`CSV-PY-008`と`unresolved_reference` frontierを生成し、explicit import evidenceを持つexternalはwarningにしない。
+
+closed example:
+
+| annotation/import context | retained relation target |
+| --- | --- |
+| `field: Missing` | unknown symbol `Missing` + `CSV-PY-008` |
+| `field: list[Foo]`、same-module `Foo` classあり | `list`は除外、internal class `<module>.Foo`だけ |
+| `class Box(Generic[T])`、`Generic`は`typing.Generic` alias、`T`はrecognized type parameter | relationなし |
+| `from ext.models import Foo as F`; `field: F` | external symbol `ext.models.Foo`、warningなし |
+
 - relationは以下の4種だけである。
   - `inheritance`: classからbase class/symbol。
   - `composition`: owner classからfield annotation内class/symbol。
   - `typed_dependency`: owner classからmethod/property parameter/return annotation内class/symbol。
   - `import_dependency`: importing moduleからimported module。
-- import alias、relative import、namespace moduleを静的に解決する。star/conditional/dynamicな解決不能部分を事実として補完せず、external/unknown referenceとcoverageへ残す。
+- import alias、relative import、namespace moduleを静的に解決する。star/conditional/dynamicな解決不能部分を事実として補完せず、external/unknown referenceとcoverageへ残す。annotation symbolは上記TypeReference tableのpriorityだけで解決し、same-module/nested/import aliasの順位を実装都合で入れ替えない。
 - entity、member、relationはDesignのexplicit enum rankとexact tupleでsortする。member declaration ordinalはfull source locationとsyntactic origin rankのcanonical orderで割り当て、merged fieldのpublic rangeはcanonical first occurrenceを採る。relation identityが同じ複数occurrenceはfull source locationとorigin rankからなるcanonical occurrence key最小のrangeをwinnerにし、collector/source iteration orderで勝者を変えない。same occurrenceにcollectorが矛盾するpayloadを付けた場合はwinnerを発明せずinternal invariant failureとする。
 - semantic JSONはidentityの異なるrelationを保持する。PlantUMLで同じkind/source/target/fixed labelへ落ちる複数relationだけをvisual lineとして一行へ畳み、semantic relationを削除しない。
 
@@ -274,7 +335,7 @@ manifestは自身のdigestを内包しない。semantic/PlantUML descriptorだ�
 
 ### canonical bytes
 
-- JSONはUTF-8、BOMなし、LF、schema-defined field order、配列のcanonical sort、余分なspaceなし、末尾LFちょうど1つ。
+- JSONはUTF-8、BOMなし、LF、schema-defined field order、配列のcanonical sort、余分なspaceなし、末尾LFちょうど1つ。runtime serializerはtyped constructor、closed field/type/nullability/order invariant、structural redactionだけを実行し、checked-in JSON Schemaをopen/load/parseせず、`jsonschema`その他validatorをimportしない。JSON Schema self-check、positive/negative vector、golden、captured CLI outputのvalidationはdev dependencyを使うtest/build-time gateで行う。
 - PlantUMLはUTF-8、BOMなし、LF、末尾LFちょうど1つ。timestamp、absolute path、source literalを含めない。
 - SHA-256はpublished exact bytes（末尾LFを含む）のlowercase 64 hex。
 - same source bytes/path set、HEAD、target、resolved config、tool/contract/adapter versionでは、payload bytes、diagnostic order、descriptor order、path、SHA-256が同じでなければならない。
@@ -306,14 +367,15 @@ selected domain/formatに含まれないselector、invalid grammar、duplicate�
 
 ### PlantUML
 
-- classをmodule package内に配置し、field/property/methodを表示する。
+- `coverage.selected_modules`の各moduleをUTF-8順に必ず一つのdeclared package aliasとして配置し、classを持つmoduleはfield/property/methodをclass blockへ表示する。classを持たないselected moduleもpackage aliasを省略しない。
 - method parameterはDesignのclosed grammarで、parameter kind、annotation、`has_default`、`/`、`*`、`*args`、`**kwargs`、implicit receiver除外をexact bytesへ写像する。default literalは表示せず` = …`だけを使う。
 - package/class/member/typeに由来するtextはDesignのNFC code-point escape tableだけで変換し、raw quote、backslash、line separator、control/format character、PlantUML directiveを注入できないようにする。
+- classless selected moduleのpackage blockは、module alias `M_<sha256("python:module:" + module)>`を宣言し、そのblock内にexactly one `note "classなし" as N_EMPTY_<sha256("python:module-empty:" + module)>`を置く。全package blockをrelationより先に出すため、classless module間のinternal `import_dependency`も宣言済みmodule alias同士の一行として描く。
 - internal inheritance、composition、typed dependency、module import dependencyを異なるarrowと日本語label/legendで区別する。
 - 同じsemantic snapshot内で複数relationが同一visual key（kind、rendered source、rendered target、fixed label）へ落ちる場合、representative relation sort key最小の一行だけを描く。relation kindが異なるlineは畳まない。semantic JSONのrelation arrayは変更しない。
 - semanticsはcolorだけに依存しない。v1 snapshotはdiff color vocabularyを実装しない。
 - external/unknown relationはsemantic JSON/coverageに保持し、PlantUMLへ架空classとして補完しない。
-- zero-class completeでは明示noteを持つvalid diagram、not_applicable/payload_unavailableではdiagramなし。
+- zero-class completeではglobal `N_EMPTY`へ置換せず、selected moduleごとのclassless package/noteを持つvalid diagramを生成する。not_applicable/payload_unavailableではdiagramなし。
 
 ## status / failure / exit contract
 
@@ -367,15 +429,15 @@ priority invariants:
 
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
-| I01-AC-001 | whole repository fixtureのclass/member/relationをexact semantic JSONとPlantUMLへ出す。member/relation sort tuple、field merge range、relation dedupe winner、tuple/union/subscript type text、method parameter grammar、escape、duplicate visual line policyとmanifest descriptor/hashがgoldenに一致する。 | I01-AT-001 |
-| I01-AC-002 | path/module/class target、multiple target union、depth 0/1/2、upstream/downstream、frontierをcontractどおり処理する。whole no-Pythonだけをnot_applicableとし、no-Python/zero-class repositoryで明示targetが未解決なら必ずpayload_unavailableにする。depth-limit frontierだけではstderrを出さない。 | I01-AT-002 |
+| I01-AC-001 | whole repository fixtureのclass/member/relationをexact semantic JSONとPlantUMLへ出す。member/relation sort tuple、field merge range、relation dedupe winner、tuple/union/subscript type text、annotation TypeReference extraction/resolution/exclusion、method parameter grammar、escape、duplicate visual line policyとmanifest descriptor/hashがgoldenに一致する。 | I01-AT-001 |
+| I01-AC-002 | path/module/class target、multiple target union、depth 0/1/2、upstream/downstream、frontierをcontractどおり処理する。whole no-Pythonだけをnot_applicableとし、no-Python/zero-class repositoryで明示targetが未解決なら必ずpayload_unavailableにする。classless module targetではselected module package aliasを全て宣言し、selected module間import relationをexact PlantUML一行で描く。depth-limit frontierだけではstderrを出さない。 | I01-AT-002 |
 | I01-AC-003 | no-Python whole、zero-class whole、explicit target absence、partial_safe、payload_unavailable、unsafe symlink、normalization/module/class collision、source driftをstatus/publication/exit matrixどおり処理する。valid commit/unborn/invalid HEADをread-onlyで判別し、non-UTF-8 Git pathはpathを捏造せずrun fatal・Artifact 0件にする。 | I01-AT-003 |
-| I01-AC-004 | import/bytecode-compile/exec/subprocess side effect trapが発火せず、AST-only parse以外のcode generationが0件であり、全channelのnegative scanでsource body、secret literal、absolute/temp path、raw non-UTF-8 bytes、surrogate/hash path、tracebackが0件。Git/target bytes/stateをtoolが変更しない。 | I01-AT-004 |
-| I01-AC-005 | 同一fixtureを別の空output pathで二回実行し、payload/manifest/stdout/stderr bytesとSHA-256が一致する。file/collector orderを反転してもmember/relation winner、diagnostic cardinality、PlantUML visual dedupeが同一で、macOS/Linux、Python 3.12/latest laneでcontract差分がない。 | I01-AT-005 |
+| I01-AC-004 | import/bytecode-compile/exec/subprocess side effect trapが発火せず、AST-only parse以外のcode generationが0件であり、全channelのnegative scanでsource body、secret literal、malicious unknown config key、absolute/temp path、raw non-UTF-8 bytes、surrogate/hash path、tracebackが0件。Git/target bytes/stateをtoolが変更しない。 | I01-AT-004 |
+| I01-AC-005 | 同一fixtureを別の空output pathで二回実行し、payload/manifest/stdout/stderr bytesとSHA-256が一致する。file/collector orderを反転してもmember/relation winner、TypeReference resolution、diagnostic cardinality、classless module alias/layout、PlantUML visual dedupeが同一で、macOS/Linux、Python 3.12/latest laneでcontract差分がない。 | I01-AT-005 |
 | I01-AC-006 | 500成功、501 payload_unavailable、600 override成功、invalid override exit 2。snapshotはimplicit base不在と1,001 non-Python changesに影響されず、diff-only optionだけをexit 2で拒否する。 | I01-AT-006 |
-| I01-AC-007 | stdout selectorのgrammar、duplicate、unselected/unrequested、exact-byte、not_applicable、partial_safe、payload_unavailable、fatal、interrupt、selectorなしsummary、stderr分離をtable-drivenに満たす。全diagnostic codeのcardinality/context goldenと、depth-only frontierのempty stderrを検証する。 | I01-AT-007 |
-| I01-AC-008 | wheel/sdistをbuildし、wheelをnetworkなし・runtime dependencyなしでfresh venvへinstallし、fixture CLIが成功する。lock/license inventory、Python 3.12/3.14、Git 2.39+、Ubuntu/macOS CIが通る。 | I01-AT-008 |
-| I01-AC-009 | checked-in JSON Schema/golden/docsとruntime outputが一致し、forbidden scope symbol/command/dependency/HTML formatが存在しない。SpecDock validationも維持する。 | I01-AT-009 |
+| I01-AC-007 | stdout selectorのgrammar、duplicate、unselected/unrequested、exact-byte、not_applicable、partial_safe、payload_unavailable、fatal、interrupt、selectorなしsummary、stderr分離をtable-drivenに満たす。全diagnostic codeのcardinality/context golden、malicious quoted unknown keyに対するconstant `CSV-CONFIG-003`、depth-only frontierのempty stderrを検証する。 | I01-AT-007 |
+| I01-AC-008 | wheel/sdistをbuildし、wheelをnetworkなし・runtime dependencyなしでfresh venvへinstallし、`jsonschema`とruntime schema resource/loaderなしでfixture CLIが成功する。lock/license inventory、Python 3.12/3.14、Git 2.39+、Ubuntu/macOS CIが通る。 | I01-AT-008 |
+| I01-AC-009 | checked-in JSON Schemaをtest/build-timeだけでself-validateし、全golden、captured CLI JSON/JSONL、negative mutation vectorへ適用してtyped runtime outputとの一致を証明する。runtimeはschema file/validatorをloadせず、forbidden scope symbol/command/dependency/HTML formatが存在しない。SpecDock validationも維持する。 | I01-AT-009 |
 
 **I01-AC-001〜I01-AC-009をすべて満たし、Planのissue gate commandがclean checkoutで成功するまでIssueをcompleteにしない。**
 
@@ -384,7 +446,7 @@ priority invariants:
 - initial platformはmacOS/Linux。native Windowsは対象外。
 - runtimeはPython 3.12以上。v1 source grammarはPython 3.12へ固定する。latest compatibility laneはPython 3.14 seriesを使う。
 - Git 2.39以上。snapshot implementationはGit version固有のwrite behaviorを利用しない。
-- runtime dependencyは0件を目標ではなくcontractとする。stdlib `argparse`、`ast`、`tokenize`、`tomllib`、`json`、`hashlib`、`pathlib`、`subprocess`等で成立させる。build/dev dependencyはlockfileでexact resolveする。
+- runtime dependencyは0件を目標ではなくcontractとする。stdlib `argparse`、`ast`、`tokenize`、`tomllib`、`json`、`hashlib`、`pathlib`、`subprocess`等で成立させる。runtimeでJSON Schema file/validatorをloadしない。`jsonschema`を含むbuild/dev dependencyはlockfileでexact resolveし、test/build-time contract gateだけで使用する。
 - product code/licenseのpublic release decisionは本Issueで発明しない。public publish jobを作らず、dependency license inventoryとlegacy provenance確認だけを完了する。
 - same-output保証は同じtool/contract/adapter versionと同じresolved inputに対するもの。schema v1を破壊する変更はv1 fieldの意味変更ではなくversion upで行う。
 
@@ -395,6 +457,6 @@ priority invariants:
 - public field、CLI option、filename、diagnostic code、status、exit、PlantUML meaningを本書/Designにない形で発明する必要がある。
 - diff、SQLAlchemy、Next、product HTML、runtime executionを実装しないとacceptanceを通せない。
 - target repositoryへのwrite、Git mutation、source execution、non-UTF-8 pathのsurrogate/hash/replacementによるcanonical path捏造、secret/absolute path leak、silent truncation、overwrite、nondeterministic bytesが発生する。
-- dependency license/provenanceを確認できない、またはruntime dependency 0件を維持できない。
+- dependency license/provenanceを確認できない、runtime dependency 0件を維持できない、またはruntime schema validation/loaderを導入しないと成立しない。
 - verified implementation baselineが「production codeなし」から変わり、planned path/symbolと衝突する。
 - parent canonical contractまたはaccepted ADRと矛盾し、Issue内だけでは解消できない。
