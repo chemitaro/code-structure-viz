@@ -1,0 +1,39 @@
+# Project-local scratch artifacts
+.workbench/
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+
+# Python bytecode and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Python test, analysis, and coverage artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Python build and packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Local logs
+*.log
+
+# OS and editor-local files
+.DS_Store
+*.swp
+*.swo
+*~
