@@ -259,7 +259,7 @@ git diff --check
 - `tests/unit/python/test_analyzer.py`
 - `tests/unit/python/test_selection.py`
 - `tests/integration/python/test_targeted_snapshot.py`
-- fixture `whole`、`canonical_model`、`annotation_references`、`module_only`、`targeted`、`target_absence`、`partial_safe`、`failed_seed`、`module_collision`、`class_collision`、`diagnostics`、`zero_class`
+- fixture `whole`、`whole_mixed_modules`、`zero_class`、`dynamic_import_ignored`、`canonical_model`、`annotation_references`、`module_only`、`targeted`、`target_absence`、`partial_safe`、`failed_seed`、`module_collision`、`class_collision`、`diagnostics`
 
 case matrix:
 
@@ -272,9 +272,9 @@ case matrix:
 - closed type grammar: `()`, `(T,)`, `(T1, T2)`, subscript tuple arguments、nested union left-to-right flatten/no redundant parentheses、forward ref、Literal arity redaction、Annotated metadata collapse、unsupported site一diagnostic。
 - TypeReference closed table: Name/Attribute、subscript base/argument、union/tuple、Literal/Annotated、inheritance head-only adoption、field/parameter/return adoption。same-module top-level/nested longest-prefix、import alias、absolute internal、unknownのpriorityとexact target.name。
 - exclusion vectors: unqualified builtin set、`builtins.`/`typing.`/`typing_extensions.` helper、PEP 695/legacy TypeVar registry。`Missing`、`list[Foo]`、`Generic[T]`、external aliasのrelation/diagnostic exact count。
-- import alias/relative/star/external/unknown。ambiguous import bindingはwinnerを選ばず、externalだけはwarning 0、unknownだけが`CSV-PY-008`。
+- static `ast.Import` / `ast.ImportFrom`だけを対象にimport alias/relative/star/conditional/external/unknownを検証する。ambiguous import bindingはwinnerを選ばず、externalだけはwarning 0、unknownだけが`CSV-PY-008`。`dynamic_import_ignored`の`__import__` / `importlib.import_module` / alias / wrapper Callはdynamic call由来のImportBinding、relation、frontier、diagnosticを各0件とし、call argument literalを読まない。
 - relation identity/direction。same identityが異なるlineにあるcaseでoccurrence key最小rangeをwinner、different member/annotationは保持、exact relation sort tuple。
-- whole mode、path/module/class target、longest module prefix、multiple target union。classless `app.a -> app.b` module targetはselected module二件、entity/member 0、internal import relation一件。
+- whole modeはsafe module index全件とsafe class index全件をseed兼selectionへ含め、depth traversalを行わない。`zero_class`はclassless module二件とinternal import relation一件、`whole_mixed_modules`はclassful/classless module三件と全class・module relationを保持する。path/module/class target、longest module prefix、multiple target union、およびclassless `app.a -> app.b` module targetのselected module二件、entity/member 0、internal import relation一件も検証する。
 - **not_applicableはtarget 0 + candidate 0だけ**。no-Python repoのpath/module/class target、zero-class repoのmissing class targetは`CSV-PY-006` per target + payload_unavailable。
 - upstream/downstream depth 0/1/2、membership zero cost、frontier、unrelated exclusion。depth-limit frontierだけではdiagnostic/stderrを作らない。
 - missing/ambiguous/failed seed payload unavailable。file/collision diagnosticとtarget diagnosticの双方のcardinality/context。
@@ -292,7 +292,7 @@ docs/contracts/python-semantic-v1.md
 
 - model constructor、enum rank、identity digest preimage、occurrence key、sort function、dedupe winnerを先に実装する。TypeReference occurrence、type-parameter registry、resolver priority、target mappingは`type_expr.py`/`analyzer.py`のpure value/functionとして固定する。
 - `ast.unparse`をpublic type/decorator outputへ直接使わない。
-- analyzer outputはfull safe index、selector outputはselected `PythonSnapshot`とcoverage。
+- analyzer outputはfull safe index、selector outputはselected `PythonSnapshot`とcoverage。whole selectorはsafe module index全件とsafe class index全件をseed兼selectionへ写像し、`selected_modules`をentityから逆算しない。import collectorは`ast.Import` / `ast.ImportFrom`だけを読み、dynamic import Callをimport evidenceへ変換しない。
 - `NotApplicable` constructorをwhole-mode predicateに限定し、targeted request型から呼べないようにする。
 - diagnostic builderはDesignのcode/cardinality/context keyで生成し、depth frontierからdiagnosticを作らない。
 - renderer/publicationはまだ接続しない。
@@ -318,6 +318,7 @@ git diff --check
 - explicit target failureをnot_applicableまたはsafe target subsetへ縮退しないとtestが通らない。
 - depth frontierに新diagnostic codeを追加しないとtestが通らない。
 - target selectionにdiff/changed-path/before-after graphが必要になる。
+- whole modeのclassless module保持、またはdynamic import Callのevidence 0件をDesignどおり実装できない。
 
 ## I01-PLAN-004 — semantic JSON / PlantUML exact bytes
 
@@ -329,7 +330,7 @@ git diff --check
 - `tests/unit/python/test_plantuml.py`
 - `schemas/semantic-v1.schema.json`
 - `docs/contracts/python-plantuml-v1.md`
-- golden `whole`、`canonical_model`、`annotation_references`、`module_only`、`targeted`、`partial_safe`のsemantic/PlantUML payload
+- golden `whole`、`whole_mixed_modules`、`zero_class`、`dynamic_import_ignored`、`canonical_model`、`annotation_references`、`module_only`、`targeted`、`partial_safe`のsemantic/PlantUML payload
 
 case:
 
@@ -341,7 +342,7 @@ case:
 - parameter grammar: positional-only `/`、keyword-only `*`、`*args`、`**kwargs`、annotation null、`has_default` exact ` = …`、receiver removal/recalculated separators。
 - escape table: backslash、quote、LF/CR/TAB、Cc/Cf/Cs/Zl/Zpのexact printable sequence。raw directive/newline/surrogate encoding failure 0件。
 - same kind/source/target/label relationはvisual line一件、different kindは別line。representative relation sort minimum、semantic JSON relation count不変。
-- alias full SHA、internal-only relation、partial_safe note。classless selected moduleごとのdeclared package alias + `N_EMPTY_` note、全package後のmodule import relation、global zero-class note禁止。
+- alias full SHA、internal-only relation、partial_safe note。classless selected moduleごとのdeclared package alias + `N_EMPTY_` note、全package後のmodule import relation、global zero-class note禁止。`zero_class` wholeは全classless module、`whole_mixed_modules` wholeはclassful/classless全moduleをpackage phaseへ出し、dynamic import Call由来のline/nodeを0件とする。
 - no timestamp/body/comment/default literal/secret/absolute/temp path。
 
 REDではgoldenをproduction outputで自動更新せず、Design exampleからreviewed expected bytesを置く。
@@ -354,7 +355,7 @@ REDではgoldenをproduction outputで自動更新せず、Design exampleからr
 src/code_structure_viz/adapters/python/{semantic_json.py,plantuml.py}
 schemas/semantic-v1.schema.json
 docs/contracts/python-plantuml-v1.md
-tests/golden/python_snapshot/{whole,canonical_model,annotation_references,module_only,targeted,partial_safe}/...
+tests/golden/python_snapshot/{whole,whole_mixed_modules,zero_class,dynamic_import_ignored,canonical_model,annotation_references,module_only,targeted,partial_safe}/...
 ```
 
 - rendererはbytesを返すpure function。
@@ -380,6 +381,9 @@ git diff --check
 
 ```bash
 uv run python -m tests.helpers.golden --update-golden whole
+uv run python -m tests.helpers.golden --update-golden whole_mixed_modules
+uv run python -m tests.helpers.golden --update-golden zero_class
+uv run python -m tests.helpers.golden --update-golden dynamic_import_ignored
 uv run python -m tests.helpers.golden --update-golden canonical_model
 uv run python -m tests.helpers.golden --update-golden annotation_references
 uv run python -m tests.helpers.golden --update-golden module_only
@@ -420,6 +424,8 @@ minimum table-driven matrix:
 | case | request/selector | domain/run | published files | stdout | stderr | exit |
 | --- | --- | --- | --- | --- | --- | --- |
 | whole | both / none | complete | JSON/Puml/manifest | summary | empty | 0 |
+| whole_mixed_modules | both / none | complete | JSON/Puml/manifest with all safe modules/classes | summary | empty | 0 |
+| dynamic_import_ignored | both / none | complete | JSON/Puml/manifest with dynamic-call evidence 0 | summary | empty | 0 |
 | canonical_model / annotation_references | both / none | complete | JSON/Puml/manifest | summary | exact model/reference warnings | 0 |
 | module_only target `app.a`, downstream 1 | both / none | complete | zero-entity JSON/Puml/manifest | summary | empty | 0 |
 | whole semantic | semantic / python:semantic-json | complete | JSON/manifest | exact JSON | empty | 0 |
@@ -427,7 +433,7 @@ minimum table-driven matrix:
 | manifest | both / manifest | complete | all | exact manifest | empty | 0 |
 | whole no-Python | both / none | not_applicable | manifest | summary | empty | 0 |
 | no-Python + explicit path/module/class | both / selected payload | incomplete/payload_unavailable | manifest | unavailable result | one `CSV-PY-006` per target, exact context | 3 |
-| zero-class whole | both / none | complete | zero JSON/Puml/manifest | summary | empty | 0 |
+| zero-class whole | both / none | complete | zero-entity JSON + two classless package/note blocks + one internal import relation + manifest | summary | empty | 0 |
 | zero-class + missing class target | both / selected payload | incomplete/payload_unavailable | manifest | unavailable result | `CSV-PY-006` | 3 |
 | partial safe | both / selected payload | incomplete/partial_safe | all | exact payload | parse + exact target-independent diagnostics | 3 |
 | failed seed | both / selected payload | incomplete/payload_unavailable | manifest | unavailable result | file/collision + target diagnostics | 3 |
@@ -521,7 +527,7 @@ git diff --check
 - `tests/acceptance/python/test_snapshot_determinism.py`
 - `tests/packaging/test_distribution.py`
 - `tests/contracts/test_scope_exclusions.py`
-- fixture `security`、`unborn_many_changes`、`canonical_model`、`annotation_references`、`module_only`、runtime invalid-HEAD/non-UTF-8/outside-symlink/malicious-config helper
+- fixture `security`、`unborn_many_changes`、`whole_mixed_modules`、`zero_class`、`dynamic_import_ignored`、`canonical_model`、`annotation_references`、`module_only`、runtime invalid-HEAD/non-UTF-8/outside-symlink/malicious-config helper
 - `THIRD_PARTY_LICENSES.md`
 - `ci/latest-python.txt`
 - `ci/toolchains/git-2.39.5.Dockerfile`
@@ -529,7 +535,7 @@ git diff --check
 
 security assertions:
 
-- monkeypatch/spyで`importlib`, `py_compile`, `compileall`, `exec`, `eval`, `runpy`, target subprocess、entry point/plugin loadingへ到達しない。production sourceのstatic scanで直接`compile(...)` callが0件であることを確認し、parser spyで`ast.parse(..., feature_version=(3, 12))`だけがAST生成経路であることを確認する。
+- monkeypatch/spyで`importlib`, `py_compile`, `compileall`, `exec`, `eval`, `runpy`, target subprocess、entry point/plugin loadingへ到達しない。production sourceのstatic scanで直接`compile(...)` callが0件であることを確認し、parser spyで`ast.parse(..., feature_version=(3, 12))`だけがAST生成経路であることを確認する。`dynamic_import_ignored`のCallを実行せず、import collectorが`ast.Import` / `ast.ImportFrom`以外からbinding/relation/frontier/diagnosticを生成しないことをspyとgoldenでassertする。
 - fixture top-level marker fileが作られない。
 - Git command logがDesign allowlistだけ。valid commit/unborn/invalid refname/existing corrupt ref/detached failureごとに必要commandだけを実行し、`check-ref-format`を省略せず、stderr text classificationをしない。
 - HEAD、refs、index、status、tracked/untracked bytesがtool実行前後で同じ。outputはrepo外。
@@ -540,7 +546,7 @@ security assertions:
 determinism assertions:
 
 - separate nonexistent output dirsへ同一requestを2回実行し、relative file set、各bytes、stdout/stderr、exitが同じ。
-- file creation order、filesystem/AST collector iteration order、CLI target/format orderの意味的同値caseでcanonical outputが同じ。member/relation winner、TypeReference resolution/target.name、diagnostic cardinality/context、classless module alias/layout、visual relation representativeを個別assertする。
+- file creation order、filesystem/AST collector iteration order、CLI target/format orderの意味的同値caseでcanonical outputが同じ。whole modeのsafe module/class selection、member/relation winner、TypeReference resolution/target.name、diagnostic cardinality/context、classless module alias/layout、visual relation representative、dynamic import Callのevidence 0件を個別assertする。
 - Python 3.12/3.14 laneでchecked-in whole/targeted goldenが同じ。
 
 scope assertions:
@@ -597,11 +603,13 @@ rm -rf .tmp/iss-00004-offline-venv .tmp/iss-00004-dist
 | fixture/case | semantic | PlantUML | manifest | stdout | stderr | exit | required classification |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | whole | golden | golden | golden | summary/exact variants | empty | 0 | complete |
+| whole_mixed_modules | all safe module/class + module relation golden | classful/classless packages + import lines golden | golden | summary/exact | empty | 0 | complete |
+| dynamic_import_ignored | static import/class only; dynamic-call binding/relation/frontier 0 | dynamic-call node/line 0 | golden | summary/exact | empty | 0 | complete |
 | canonical_model | exact sort/dedupe/type golden | parameter/escape/visual-dedupe golden | golden | summary/exact | exact code/context golden | 0 | complete |
 | annotation_references | exact target resolution/name/exclusion golden | internal relation only golden | golden | summary/exact | unknown only exact warning | 0 | complete |
 | module_only targeted | zero entity/member + one module import relation | two declared classless packages + one import line | golden | summary/exact | empty | 0 | complete |
 | targeted depth-only | golden | golden | golden | summary | **empty** | 0 | complete + frontier only |
-| zero_class whole | golden empty entities | golden note | golden | summary | empty | 0 | complete |
+| zero_class whole | zero entities + two selected modules + one internal import relation golden | two classless package/note blocks + one import line golden | golden | summary/exact | empty | 0 | complete |
 | not_applicable whole | none | none | golden | summary/result/manifest | empty | 0 | not_applicable |
 | explicit target + no Python | none | none | golden | result/summary | one target diagnostic each | 3 | payload_unavailable |
 | explicit missing class + zero_class | none | none | golden | result/summary | target diagnostic | 3 | payload_unavailable |
@@ -691,13 +699,20 @@ git diff -- . ':!spec-dock/initiatives/init-00001-code-structure-visualization/e
 | V2-P1-03 schema validation boundary | JSON Schema is test/build-time only; runtime uses typed/closed invariants and has validator/schema-loader/runtime dependency 0 | C1/C4/C5/C6 | schema positive/negative vectors + captured CLI JSON + offline wheel | AC-008/009, AT-008/009 |
 | V2-P1-04 unknown config key redaction | `CSV-CONFIG-003` constant message、all context null、raw/normalized unknown key absent from every channel | C1/C5/C6 | `unknown_config_key/stderr.jsonl` | AC-004/007/009, AT-004/007/009 |
 
-trace gap、orphan Requirement/Design/Plan/Test、同じIDの意味違い、上記10件のP1 closureのfixture/golden欠落をcontract testまたはreviewで拒否する。
+### independent Red v3 P1 closure trace
+
+| closure | canonical decision | Plan boundary | fixture/golden | acceptance/test |
+| --- | --- | --- | --- | --- |
+| V3-P1-01 whole classless module selection | whole modeはsafe module index全件 + safe class index全件をseed兼selectionとし、classless moduleとselected module間import relationを保持 | C3/C4/C5/C6 | `zero_class`, `whole_mixed_modules` semantic/PlantUML/manifest/stdout/stderr golden | AC-001/003/005, AT-001/003/005 |
+| V3-P1-02 dynamic import v1 exclusion | import semanticsは`ast.Import` / `ast.ImportFrom`だけ。dynamic import Callはbinding/relation/frontier/diagnostic 0件で実行もしない | C3/C4/C5/C6 | `dynamic_import_ignored` semantic/PlantUML/manifest/stdout/stderr golden | AC-004/005, AT-004/005 |
+
+trace gap、orphan Requirement/Design/Plan/Test、同じIDの意味違い、上記12件のP1 closureのfixture/golden欠落をcontract testまたはreviewで拒否する。
 
 ## regression boundary
 
 - target repositoryのHEAD、refs、index、status、tracked/untracked bytesをtoolが変更しない。
 - output dirはrepo外、destination absent、one directory rename。rerun to same outputはcollision fatalで既存bytes不変。
-- same-input byte equality、format/target canonicalization、member/relation occurrence winner、TypeReference extraction/resolution/exclusion/target.name、type grammar、diagnostic cardinality/context/order、classless module package alias/layout、PlantUML parameter/escape/visual dedupeを維持する。
+- same-input byte equality、format/target canonicalization、whole modeのsafe module/class全件selection、member/relation occurrence winner、TypeReference extraction/resolution/exclusion/target.name、type grammar、diagnostic cardinality/context/order、classless module package alias/layout、PlantUML parameter/escape/visual dedupeを維持する。dynamic import Callは全runでbinding/relation/frontier/diagnostic 0件を維持する。
 - no-Python wholeだけをnot_applicableとし、explicit target + no-Python/zero-classをpayload_unavailableにする。partial_safe/payload_unavailableをempty successへ潰さない。
 - entity 501をtruncateせず、changed-path 1,001やimplicit base absenceをsnapshot failureにしない。
 - selector invalid時はsource/Git/staging spy call 0件。

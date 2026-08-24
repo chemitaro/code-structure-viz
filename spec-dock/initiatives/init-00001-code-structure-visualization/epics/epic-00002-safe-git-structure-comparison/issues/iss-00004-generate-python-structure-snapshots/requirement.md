@@ -83,8 +83,8 @@ snapshot CLI request
 | --- | --- | --- |
 | I01-REQ-001 | vertical CLI outcome | `code-structure-viz snapshot --domain python` が、safe source acquisition、Python analysis、requested payload、manifest、stream、exitまでを一回のrunとして完結する。 |
 | I01-REQ-002 | CLI/config/source selection | CLI grammar、重複、default、config precedence、path safety、whole source scopeを本書のclosed contractどおりに検証する。 |
-| I01-REQ-003 | SourceView/target resolution | run-start working treeをrepository外へ固定し、valid commitと真正なunborn branchをread-onlyで一意判定する。明示targetはsource/class不在より優先して解決し、未解決・曖昧・failed seedを必ず`payload_unavailable`にする。 |
-| I01-REQ-004 | Python semantic behavior | class identity、nested class、field/method/property/decorator、inheritance/composition/typed/import dependency、safe type/signatureをPython-owned modelで表し、member/relationのexact sort tuple、dedupe winner、type text grammarに加え、annotation `TypeReference`の抽出・採用・解決順位・builtin/typing/type-parameter除外を一意にする。 |
+| I01-REQ-003 | SourceView/target resolution | run-start working treeをrepository外へ固定し、valid commitと真正なunborn branchをread-onlyで一意判定する。whole modeは全safe moduleと全safe classをseed兼selectionへ含める。明示targetはsource/class不在より優先して解決し、未解決・曖昧・failed seedを必ず`payload_unavailable`にする。 |
+| I01-REQ-004 | Python semantic behavior | class identity、nested class、field/method/property/decorator、inheritance/composition/typed/import dependency、safe type/signatureをPython-owned modelで表し、member/relationのexact sort tuple、dedupe winner、type text grammarに加え、annotation `TypeReference`の抽出・採用・解決順位・builtin/typing/type-parameter除外を一意にする。import relationはstatic `ast.Import` / `ast.ImportFrom`だけから生成し、call expressionによるdynamic importをrelation、coverage、diagnosticへ変換しない。 |
 | I01-REQ-005 | Artifact/stream contract | exact filename、canonical JSON bytes、manifest descriptor、stdout exact bytes/result/summary、diagnostic cardinality/contextを含むstderr JSONL、parameter/escape/visual-dedupeとclassless selected module layoutまで閉じたPlantUML vocabularyをversioned contractとして提供する。 |
 | I01-REQ-006 | failure/budget/safety/determinism | whole-mode absence、explicit-target failure、isolated failure、unsafe/global failure、non-UTF-8 Git path、invalid HEAD、entity overrun、collision、drift、interruptを区別し、target execution・canonical path捏造・secret/absolute path leak・truncation・overwriteを許さない。 |
 | I01-REQ-007 | implementation acceptance | repository-owned package、lockfile、schema/docs、fixture/golden、unit/integration/acceptance/security/packaging test、minimum/latest CIがclean checkoutで再現できる。JSON Schemaはtest/build-time contract gateで検証し、runtimeはschema loader/validatorと第三者runtime dependencyを持たない。 |
@@ -191,7 +191,7 @@ max_entities = 500
 - initial freeze完了時とpublication直前に、HEADと同じsource scopeのfingerprintを再確認する。drift時はrun-level fatal、exit 1、staging cleanup、final manifestを含むArtifact 0件とする。
 - target 0件のwhole modeでPython source candidateが0件の場合だけdomain `not_applicable`、exit 0、run manifestだけを公開する。empty semantic JSON/empty PlantUMLを捏造しない。
 - 明示targetが一件以上あるtargeted modeは`not_applicable`へ遷移しない。Python source candidateが0件でもtarget resolution failureを優先し、各targetを`CSV-PY-006`へ対応させてdomain `incomplete` / `payload_unavailable`、exit 3、safe manifest onlyとする。
-- Python sourceが存在し全fileにclassが0件の場合、target 0件のwhole modeはdomain `complete`、entity count 0のsemantic JSONと「classなし」を示すPlantUMLをrequested formatに従って公開する。明示class/module/path targetが未解決ならこのzero-class completeよりtarget failureを優先する。
+- Python sourceが存在し全fileにclassが0件の場合、target 0件のwhole modeはdomain `complete`とし、全safe moduleを`coverage.selected_modules`へ含める。entity count 0のsemantic JSONと、selected moduleごとのclassless package/noteおよびselected module間のinternal import relationを持つPlantUMLをrequested formatに従って公開する。明示class/module/path targetが未解決ならこのzero-class completeよりtarget failureを優先する。
 
 ## target resolution contract
 
@@ -219,11 +219,12 @@ syntaxが不正、absolute/backslash/`..`、`.py`以外、empty segment、Python
 | --- | --- | --- | --- |
 | whole（target 0件） | source 0件 | 実行しない | `not_applicable`、payloadなし、manifest only、exit 0 |
 | targeted（target 1件以上） | source 0件 | 全target未解決 | `incomplete/payload_unavailable`、targetごとの`CSV-PY-006`、manifest only、exit 3 |
-| whole | source 1件以上、解析成功、class 0件 | 実行しない | `complete`、zero-class semantic/PlantUML、exit 0 |
+| whole | source 1件以上、safe module 1件以上、class 0件 | 全safe moduleをseed兼selectionへ含める | `complete`、zero-class semantic/PlantUML、exit 0 |
+| whole | source 1件以上、safe class 1件以上 | 全safe moduleと全safe classをseed兼selectionへ含める | selection/coverage/budgetに従い`complete`または`partial_safe` |
 | targeted | source 1件以上でもrequested path/module/classが0件、曖昧、またはfailed seedだけへ対応 | failure | `incomplete/payload_unavailable`、manifest only、exit 3 |
 | targeted | 全targetが一意なsafe seedへ解決 | success | selection/coverage/budgetに従い`complete`または`partial_safe` |
 
-- target 0件はwhole modeで、safeに解析できた全classを含める。
+- target 0件のwhole modeでは、safeに解析できた全module nodeと全class nodeをseed兼selectionへ含め、depth traversalを行わない。`coverage.selected_modules`をentityから逆算せずclassless moduleも保持し、source/targetがともにselectedなinternal `import_dependency`を含む全internal relationをpayloadへ含める。
 - targetはcanonical unionとして扱い、path/module targetはそのmoduleと全class、class targetはそのclassをseedにする。
 - syntactically valid targetが0件へ解決、複数へ曖昧解決、またはfailed seed fileだけへ解決した場合はusage successやnot_applicableへせず、domain `incomplete` / `payload_unavailable`、exit 3、safe manifestのみとする。複数targetのうち一件でも失敗した時点で部分target成功へ縮退しない。
 - unresolved targetはrequestに残し、Designのtarget context規則で`CSV-PY-006`を一target一件生成する。NFC/case path identity collisionに対応するpath target、module collisionに対応するmodule/class target、class identity collisionに対応するclass targetは、group diagnosticに加えて`CSV-PY-007`を一target一件生成する。
@@ -315,7 +316,8 @@ closed example:
   - `composition`: owner classからfield annotation内class/symbol。
   - `typed_dependency`: owner classからmethod/property parameter/return annotation内class/symbol。
   - `import_dependency`: importing moduleからimported module。
-- import alias、relative import、namespace moduleを静的に解決する。star/conditional/dynamicな解決不能部分を事実として補完せず、external/unknown referenceとcoverageへ残す。annotation symbolは上記TypeReference tableのpriorityだけで解決し、same-module/nested/import aliasの順位を実装都合で入れ替えない。
+- import alias、relative import、namespace moduleはstatic `ast.Import` / `ast.ImportFrom`だけから解決する。star/conditionalな静的importの解決不能部分を事実として補完せず、既存のexternal/unknown referenceとcoverage契約へ残す。annotation symbolは上記TypeReference tableのpriorityだけで解決し、same-module/nested/import aliasの順位を実装都合で入れ替えない。
+- call expressionによるdynamic import（`__import__`、`importlib.import_module`、import aliasまたはwrapper経由を含む）はPython semantic v1の対象外である。`ast.Call`をimport evidenceとして解釈せず、import semantics由来の`ImportBinding`、`import_dependency`、`TypeReference`、coverage frontier、diagnosticを一切生成しない。dynamic importを表すpublic enum、field、frontier reason、diagnostic codeを追加しない。annotation site内のCallはdynamic importとして扱わず、既存のunsupported annotation contractだけを適用する。
 - entity、member、relationはDesignのexplicit enum rankとexact tupleでsortする。member declaration ordinalはfull source locationとsyntactic origin rankのcanonical orderで割り当て、merged fieldのpublic rangeはcanonical first occurrenceを採る。relation identityが同じ複数occurrenceはfull source locationとorigin rankからなるcanonical occurrence key最小のrangeをwinnerにし、collector/source iteration orderで勝者を変えない。same occurrenceにcollectorが矛盾するpayloadを付けた場合はwinnerを発明せずinternal invariant failureとする。
 - semantic JSONはidentityの異なるrelationを保持する。PlantUMLで同じkind/source/target/fixed labelへ落ちる複数relationだけをvisual lineとして一行へ畳み、semantic relationを削除しない。
 
@@ -422,6 +424,7 @@ priority invariants:
 - Next.js/React/TypeScript/Node adapter、bridge、protocol、Node dependency。
 - product HTML command/format/schema/UI/report/publication、Tailscale/public hosting。
 - target import/runtime reflection/bytecode、plugin ABI、remote execution、native Windows。
+- call expressionによるdynamic import discovery/resolution（`__import__`、`importlib.import_module`、import aliasまたはwrapper経由）。
 - legacy CLI compatibility、`pyclassuml` / `tree-git-diff` runtime/package/CLI dependency。
 - release publication。ISSUE-01はinternal foundationを兼ねる最初のusable sliceであり、Python domain preview milestoneはISSUE-02完了後である。
 
@@ -429,11 +432,11 @@ priority invariants:
 
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
-| I01-AC-001 | whole repository fixtureのclass/member/relationをexact semantic JSONとPlantUMLへ出す。member/relation sort tuple、field merge range、relation dedupe winner、tuple/union/subscript type text、annotation TypeReference extraction/resolution/exclusion、method parameter grammar、escape、duplicate visual line policyとmanifest descriptor/hashがgoldenに一致する。 | I01-AT-001 |
+| I01-AC-001 | `whole`、`zero_class`、`whole_mixed_modules` fixtureをwhole modeで解析し、全safe moduleと全safe classをseed兼selectionへ含める。classless moduleを`selected_modules`から落とさず、そのpackage/noteとselected module間のinternal import relationをexact semantic JSONとPlantUMLへ出す。member/relation sort tuple、field merge range、relation dedupe winner、tuple/union/subscript type text、annotation TypeReference extraction/resolution/exclusion、method parameter grammar、escape、duplicate visual line policyとmanifest descriptor/hashがgoldenに一致する。 | I01-AT-001 |
 | I01-AC-002 | path/module/class target、multiple target union、depth 0/1/2、upstream/downstream、frontierをcontractどおり処理する。whole no-Pythonだけをnot_applicableとし、no-Python/zero-class repositoryで明示targetが未解決なら必ずpayload_unavailableにする。classless module targetではselected module package aliasを全て宣言し、selected module間import relationをexact PlantUML一行で描く。depth-limit frontierだけではstderrを出さない。 | I01-AT-002 |
-| I01-AC-003 | no-Python whole、zero-class whole、explicit target absence、partial_safe、payload_unavailable、unsafe symlink、normalization/module/class collision、source driftをstatus/publication/exit matrixどおり処理する。valid commit/unborn/invalid HEADをread-onlyで判別し、non-UTF-8 Git pathはpathを捏造せずrun fatal・Artifact 0件にする。 | I01-AT-003 |
-| I01-AC-004 | import/bytecode-compile/exec/subprocess side effect trapが発火せず、AST-only parse以外のcode generationが0件であり、全channelのnegative scanでsource body、secret literal、malicious unknown config key、absolute/temp path、raw non-UTF-8 bytes、surrogate/hash path、tracebackが0件。Git/target bytes/stateをtoolが変更しない。 | I01-AT-004 |
-| I01-AC-005 | 同一fixtureを別の空output pathで二回実行し、payload/manifest/stdout/stderr bytesとSHA-256が一致する。file/collector orderを反転してもmember/relation winner、TypeReference resolution、diagnostic cardinality、classless module alias/layout、PlantUML visual dedupeが同一で、macOS/Linux、Python 3.12/latest laneでcontract差分がない。 | I01-AT-005 |
+| I01-AC-003 | no-Python whole、zero-class whole、classful/classless mixed whole、explicit target absence、partial_safe、payload_unavailable、unsafe symlink、normalization/module/class collision、source driftをstatus/publication/exit matrixどおり処理する。valid commit/unborn/invalid HEADをread-onlyで判別し、non-UTF-8 Git pathはpathを捏造せずrun fatal・Artifact 0件にする。 | I01-AT-003 |
+| I01-AC-004 | import/bytecode-compile/exec/subprocess side effect trapが発火せず、AST-only parse以外のcode generationが0件である。`dynamic_import_ignored` fixtureの`__import__` / `importlib.import_module` / alias / wrapper callは実行されず、各call由来のImportBinding、relation、frontier、diagnosticを0件とする。全channelのnegative scanでsource body、secret literal、malicious unknown config key、absolute/temp path、raw non-UTF-8 bytes、surrogate/hash path、tracebackが0件。Git/target bytes/stateをtoolが変更しない。 | I01-AT-004 |
+| I01-AC-005 | 同一fixtureを別の空output pathで二回実行し、payload/manifest/stdout/stderr bytesとSHA-256が一致する。file/collector orderを反転してもwhole modeの全safe module/class selection、member/relation winner、TypeReference resolution、diagnostic cardinality、classless module alias/layout、PlantUML visual dedupe、dynamic import callのevidence 0件が同一で、macOS/Linux、Python 3.12/latest laneでcontract差分がない。 | I01-AT-005 |
 | I01-AC-006 | 500成功、501 payload_unavailable、600 override成功、invalid override exit 2。snapshotはimplicit base不在と1,001 non-Python changesに影響されず、diff-only optionだけをexit 2で拒否する。 | I01-AT-006 |
 | I01-AC-007 | stdout selectorのgrammar、duplicate、unselected/unrequested、exact-byte、not_applicable、partial_safe、payload_unavailable、fatal、interrupt、selectorなしsummary、stderr分離をtable-drivenに満たす。全diagnostic codeのcardinality/context golden、malicious quoted unknown keyに対するconstant `CSV-CONFIG-003`、depth-only frontierのempty stderrを検証する。 | I01-AT-007 |
 | I01-AC-008 | wheel/sdistをbuildし、wheelをnetworkなし・runtime dependencyなしでfresh venvへinstallし、`jsonschema`とruntime schema resource/loaderなしでfixture CLIが成功する。lock/license inventory、Python 3.12/3.14、Git 2.39+、Ubuntu/macOS CIが通る。 | I01-AT-008 |

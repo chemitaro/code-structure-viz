@@ -27,7 +27,7 @@ package_sequence_key: "ISSUE-01"
 | I01-DES-001 | I01-REQ-001 | `SnapshotApplication`がone-run lifecycleを所有し、CLI、source、adapter、artifactを明示portで接続する。 |
 | I01-DES-002 | I01-REQ-002 | duplicate-aware parserとclosed `ConfigV1` resolverをsource acquisition前に完了する。 |
 | I01-DES-003 | I01-REQ-003 | read-only `HeadState`判定、non-UTF-8 fatal boundary、repository外stagingへfreezeした`SourceView`、typed `TargetSpec`/`TargetSelection`をimmutable valueにする。 |
-| I01-DES-004 | I01-REQ-004 | Python adapterがmodule index、AST extraction、closed type grammar、annotation TypeReference extraction/resolution/exclusion、class/member/relation identity、exact sort、dedupe winnerを所有する。 |
+| I01-DES-004 | I01-REQ-004 | Python adapterがmodule index、AST extraction、whole modeの全safe module/class selection、closed type grammar、annotation TypeReference extraction/resolution/exclusion、static `Import`/`ImportFrom`だけのimport semantics、dynamic import callの明示的除外、class/member/relation identity、exact sort、dedupe winnerを所有する。 |
 | I01-DES-005 | I01-REQ-005 | schema-defined canonical JSON、code別cardinality/contextを持つdiagnostic、parameter/escape/visual-dedupeとclassless module package layoutを閉じたPython PlantUML、manifest、stream emitterをexact-byte contractとして分離する。 |
 | I01-DES-006 | I01-REQ-006 | discriminated outcome、domain-local budget、redaction/invariant gate、atomic directory publicationでfail-closedにする。 |
 | I01-DES-007 | I01-REQ-006 | Git allowlist、static execution trap、source drift check、deterministic sort/hashをsecurity boundaryにする。 |
@@ -430,7 +430,7 @@ fingerprint preimageは次の形から`fingerprint`を除いたcanonical JSON by
 - `type_comments=False`を固定し、`# type:` commentをentity/member/signature/relationへ反映しない。annotation sourceは`AnnAssign`、`arg.annotation`、`returns`等のsyntax nodeだけである。
 - `SyntaxError`からline/columnだけをsafe diagnosticへ移し、`text` fieldを破棄する。
 - fileごとにparse/read/encoding/module failureを`FailedSourceFile`へ隔離する。
-- importsはmodule全ASTから収集するが、target codeを実行しない。ClassDef extractionは`Module.body`とdirect `ClassDef.body`のstatement listだけを走査し、module/class level control-flow blockやFunctionDef等のbody内ClassDefをentity化しない。method field collectorだけはcontrol-flow statement bodyへ再帰するが、nested function/lambda/class/comprehension scopeへは降りない。
+- static import statementはmodule全ASTの`ast.Import` / `ast.ImportFrom` nodeだけから収集し、target codeを実行しない。`ast.Call`はimport collectorの入力にしない。ClassDef extractionは`Module.body`とdirect `ClassDef.body`のstatement listだけを走査し、module/class level control-flow blockやFunctionDef等のbody内ClassDefをentity化しない。method field collectorだけはcontrol-flow statement bodyへ再帰するが、nested function/lambda/class/comprehension scopeへは降りない。
 
 ### alias resolution
 
@@ -446,7 +446,7 @@ fingerprint preimageは次の形から`fingerprint`を除いたcanonical JSON by
 `ImportBinding(local_name, canonical_name, kind)`はmoduleごとのimmutable mapで、同一local nameへ異なるcanonical bindingがある場合はambiguousとしてそのnameをmapから除外する。source orderでwinnerを選ばない。TypeReference resolverはこのexact mapだけをimport evidenceとして使う。
 
 - importがconditional/function-localでもmodule dependencyとして`conditional: true`をinternal evidenceに持てるが、v1 relation JSONへ新fieldを出さない。
-- dynamic import callは推測しない。
+- call expressionによるdynamic importはv1対象外である。`__import__(...)`、`importlib.import_module(...)`、import aliasまたはwrapper経由を含む`ast.Call`をimport semanticsとして識別・追跡しない。collectorはimport semantics由来の`ImportBinding` 0件、`import_dependency` 0件、TypeReference 0件、coverage frontier 0件、diagnostic 0件を返し、`dynamic_import`を表すenum、frontier reason、diagnostic codeを追加しない。call argumentのliteralまたはsource textを読んで補完しない。annotation site内のCallはdynamic importとして扱わず、既存のunsupported annotation site contractへだけ従う。
 
 ## Python domain model
 
@@ -755,13 +755,13 @@ else:
 ### algorithm
 
 1. all parsed modules/classes/deduped relationsからimmutable graphを作る。
-2. target 0件ならall classをselectedにし、depth traversalを行わない。candidate source 0件のnot_applicableはこのstep前に確定済み。
+2. target 0件なら、safe module indexに存在する全module nodeとsafe class indexに存在する全class nodeをseed兼selectedへ入れ、depth traversalを行わない。candidate source 0件のnot_applicableはこのstep前に確定済み。classless moduleをentityから逆算して除外しない。
 3. explicit targetをexact seed node setへ解決する。unresolved/ambiguous/failed seedが一つでもあればpayload unavailable。
 4. target failure frontierは`direction=failure`, `reason=unresolved_reference`。path targetは`kind=file/reference=<path>`、module targetは`kind=module/reference=python:module:<module>`、class targetは`kind=symbol/reference=class:<normalized raw dotted value>`とする。
 5. downstreamはseedからforward BFS、upstreamはseedからreverse BFSを独立実行する。
 6. membership closureを各BFS level内で行いdepthを消費しない。
-7. selected node unionを取り、selected moduleのclassを含める。
-8. internal relationはsourceとtargetの両方がselectedの場合だけpayloadへ含める。sourceがselectedなexternal/unknown relationはpayloadへ含める。selected sourceからdepth外のinternal targetへ向かうrelationはpayloadから除外しfrontierへ記録する。
+7. selected node unionを取り、selected moduleのclassを含める。whole modeではstep 2のall-module/all-class setをそのまま保ち、classless moduleもselected module nodeとして残す。
+8. internal relationはsourceとtargetの両方がselectedの場合だけpayloadへ含める。whole modeでは全safe module/classがselectedなので、classless module間またはclassful/classless module間のinternal `import_dependency`も含む。sourceがselectedなexternal/unknown relationはpayloadへ含める。selected sourceからdepth外のinternal targetへ向かうrelationはpayloadから除外しfrontierへ記録する。
 9. depth境界のnext hop、failed file、unresolved ref、unsupported local class/star import、identity collisionをcoverage frontierへcanonical sortで記録する。
 
 frontier identityは`(direction, kind, reference, reason)`で、一つへdedupeしてsortする。同じnodeがupstream/downstream両方で到達した場合は方向別entryを保持できる。`reason=depth_limit`はrequested traversalの正常境界なのでdiagnosticを生成しない。`CSV-PY-008`は実際のstatic unresolved reference occurrenceだけに限定する。
@@ -962,7 +962,7 @@ entities, members, relations, diagnostics
 - failed file `stage` enumは`read|path_safety|encoding|parse|module_identity|module_collision`。`diagnostic_code`はそのfile/groupに対応するclosed codeで、non-UTF-8 fatal `CSV-SOURCE-003`はpathを持てないためfailed_filesへ入らない。
 - frontier `direction` enumは`upstream|downstream|failure`、`kind` enumは`module|class|symbol|file`、`reason` enumは`depth_limit|unresolved_reference|failed_source|unsupported_scope|star_import|identity_collision`。
 - `SourceRange.end_line`はASTのpositive `end_lineno`、存在しない場合は`start_line`。columnはpublic contractへ出さない。
-- `candidate_files`はconfig scopeに入った全`.py` logical path数、`parsed_files`はencoding decodeとAST parseが成功したfile数、`selected_entities`はpublished entity array長と一致する。`selected_modules`はclass 0件でもtarget/membership/traversalでselectedになったmoduleを保持する。module/class identity failureはparsed_filesへ数えてもfailed_files/frontierへ必ず残す。
+- `candidate_files`はconfig scopeに入った全`.py` logical path数、`parsed_files`はencoding decodeとAST parseが成功したfile数、`selected_entities`はpublished entity array長と一致する。whole modeの`selected_modules`はsafe module indexの全module identityとexact一致し、whole modeの`selected_entities`はsafe class indexの全classとexact一致する。targeted modeの`selected_modules`はclass 0件でもtarget/membership/traversalでselectedになったmoduleを保持する。どちらのmodeでも`selected_modules`をentity arrayから逆算しない。module/class identity failureはparsed_filesへ数えてもfailed_files/frontierへ必ず残す。
 - frontier `reference`はkind `module|class`ならcanonical node ID、kind `file`ならrepository-relative path、kind `symbol`ならsafe normalized symbolic name。target failureではpath=`file/path`、module=`python:module:<module>`、class=`symbol/class:<raw-dotted-value>`のclosed mappingを使う。raw expression/source textを入れない。
 
 ### arrays/sort
@@ -1316,13 +1316,15 @@ existing `.github/workflows/ci.yml` の`validate` jobを保持し、同fileへ�
 | case | required contents / purpose |
 | --- | --- |
 | `whole` | `src/domain/base.py`, `order.py`, `service.py`; nested class、class/instance field、sync/async method、property、decorator、inheritance/composition/typed/import relation、explicit external ref。unresolved warningは含めずstderr empty |
+| `whole_mixed_modules` | classful `app.model`、classless `app.helpers` / `app.entry`を持ち、`app.entry`が両moduleをstatic importする。whole modeで全safe module三件と全classをseed/selectionへ含め、classless package/noteとselected module間import relationをsemantic/PlantUML/manifestへ保持する |
 | `canonical_model` | duplicate field/property/method collector occurrence、conflicting annotation、same identity relation on different lines、same visual arrow via multiple members、tuple singleton/multi、nested union、Literal/Annotated/unsupported type、all parameter kinds/defaults、NFC Unicode identifier。quote/backslash/control/format/surrogate escapeはpure renderer unit vectorで別途固定 |
 | `annotation_references` | same-module top-level/nested class、explicit external alias、unknown `Missing`、`list[Foo]`、typing `Generic[T]`、PEP 695/legacy TypeVar。TypeReference extraction/adoption/resolution/exclusionとtarget.name/diagnosticをgolden化 |
 | `module_only` | class 0件の`app.a`がclass 0件の`app.b`をimport。module target + downstream depth 1でselected_modules二件、entity/member 0、internal import relation一件、declared package aliases/note/relation layoutをgolden化 |
 | `targeted` | upstream/downstream chain、module-only node、unrelated class、depth frontier、multiple target union。depth limit以外のwarningを含めずstderr empty |
 | `not_applicable` | tracked READMEだけ、`.py` 0件。target 0件whole mode専用 |
 | `target_absence` | subcase `no_python`と`zero_class`; path/module/class explicit targetが未解決でpayload_unavailableになる |
-| `zero_class` | valid `.py` with function/constants only。whole modeはcomplete、missing class targetは`target_absence`で検証 |
+| `zero_class` | class 0件の`app.a`と`app.b`を持ち、`app.a`が`app.b`をstatic importする。whole modeは全safe module二件をselectedにしたcomplete、entity/member 0、internal import relation一件。missing class targetは`target_absence`で検証 |
+| `dynamic_import_ignored` | safe class一件に加え、top-level/function内の`__import__`、`importlib.import_module`、aliased call、wrapper callを持つ。callは実行せず、dynamic call由来のImportBinding/import relation/frontier/diagnosticを0件とし、static importだけをgoldenへ残す |
 | `partial_safe` | valid class file + syntax broken file + safe seed outside broken file |
 | `failed_seed` | requested path/module/classがparse failureまたはmissing。file diagnostic + target diagnostic cardinalityを検証 |
 | `module_collision` | `src/pkg/item.py` と `pkg/item.py` が同じ`pkg.item`。collision group diagnostic一件、requested targetなら追加target diagnostic |
@@ -1348,6 +1350,30 @@ runtime-generated repository cases:
 ```text
 tests/golden/python_snapshot/
   whole/
+    python.snapshot.semantic.json
+    python.snapshot.puml
+    run-manifest.json
+    stdout.run-summary.jsonl
+    stderr.jsonl
+    published-files.txt
+    exit-code.txt
+  whole_mixed_modules/
+    python.snapshot.semantic.json
+    python.snapshot.puml
+    run-manifest.json
+    stdout.run-summary.jsonl
+    stderr.jsonl
+    published-files.txt
+    exit-code.txt
+  zero_class/
+    python.snapshot.semantic.json
+    python.snapshot.puml
+    run-manifest.json
+    stdout.run-summary.jsonl
+    stderr.jsonl
+    published-files.txt
+    exit-code.txt
+  dynamic_import_ignored/
     python.snapshot.semantic.json
     python.snapshot.puml
     run-manifest.json
@@ -1433,11 +1459,11 @@ tests/golden/python_snapshot/
 
 | Test ID | file | principal assertion |
 | --- | --- | --- |
-| I01-AT-001 | `tests/acceptance/python/test_snapshot_cli.py` + `tests/unit/python/test_{model,type_expr,semantic_json,plantuml}.py` | whole/zero-class/canonical-model/annotation-reference exact files、member/relation sort+dedupe winner、TypeReference table、type grammar、PlantUML parameter/escape/visual dedupe、test-time schema/hash、exit0 |
+| I01-AT-001 | `tests/acceptance/python/test_snapshot_cli.py` + `tests/unit/python/test_{model,type_expr,semantic_json,plantuml}.py` | `whole` / `zero_class` / `whole_mixed_modules` / canonical-model / annotation-reference exact files、whole all-module/all-class selection、classless module relation retention、member/relation sort+dedupe winner、TypeReference table、type grammar、PlantUML parameter/escape/visual dedupe、test-time schema/hash、exit0 |
 | I01-AT-002 | `tests/integration/python/test_targeted_snapshot.py` | target grammar/resolution/union/depth/direction/frontier、whole-only not_applicable、explicit target absence payload_unavailable、classless module target/import relation package aliases、depth-only stderr empty |
-| I01-AT-003 | `tests/acceptance/python/test_snapshot_failures.py` + `tests/integration/source/test_git_repository.py` | not_applicable/partial_safe/payload_unavailable/symlink/collision/drift、valid/unborn/invalid HEAD、non-UTF-8 fatal matrix |
-| I01-AT-004 | `tests/security/test_python_static_boundary.py` | execution/Git mutation/redaction/path/traceback/raw-byte/synthetic-path/malicious unknown config key/PlantUML injection negative scan |
-| I01-AT-005 | `tests/acceptance/python/test_snapshot_determinism.py` | two-run exact bytes、collector/filesystem order permutation、winner/cardinality/visual dedupe、cross-lane fixtures |
+| I01-AT-003 | `tests/acceptance/python/test_snapshot_failures.py` + `tests/integration/source/test_git_repository.py` | not_applicable、zero-class whole、classful/classless mixed whole、partial_safe/payload_unavailable/symlink/collision/drift、valid/unborn/invalid HEAD、non-UTF-8 fatal matrix |
+| I01-AT-004 | `tests/security/test_python_static_boundary.py` | execution/Git mutation/redaction/path/traceback/raw-byte/synthetic-path/malicious unknown config key/PlantUML injection negative scan。`dynamic_import_ignored`のCallを実行せず、import evidence/relation/frontier/diagnostic 0件 |
+| I01-AT-005 | `tests/acceptance/python/test_snapshot_determinism.py` | two-run exact bytes、collector/filesystem order permutation、whole all-module/all-class selection、winner/cardinality/visual dedupe、dynamic-import evidence 0件、cross-lane fixtures |
 | I01-AT-006 | `tests/acceptance/python/test_snapshot_budget.py` | 500/501/override/invalid and no diff gate |
 | I01-AT-007 | `tests/acceptance/python/test_stdout_selector.py` + `tests/unit/core/test_diagnostics.py` | closed selector/exact bytes/result/summary、diagnostic code/cardinality/context/sort、depth frontier no diagnostic |
 | I01-AT-008 | `tests/packaging/test_distribution.py` + CI jobs | build/offline install/runtime deps/toolchains、wheel import graphにschema validator/loader 0件 |
@@ -1479,6 +1505,8 @@ unit testはpure rule、integrationはtemporary repository/ports、acceptanceは
 | targeted upstreamがparse failureで欠落 | 全candidate parse index、failed coverage、partial_safe/payload_unavailable distinction。 |
 | module root ambiguity | longest root + collision fail-closed。silent precedenceなし。 |
 | explicit targetがabsenceへ隠れる | NotApplicable constructorをwhole-only predicateへ限定し、target_absence goldensで固定。 |
+| whole selectionをclass entityから逆算してclassless moduleを落とす | whole seed/selectionをsafe module index全件 + safe class index全件とし、`zero_class` / `whole_mixed_modules` semantic・PlantUML・manifest goldenで固定。 |
+| dynamic import callの扱いが実装ごとに分岐する | import collectorを`ast.Import` / `ast.ImportFrom`だけへ閉じ、Callはbinding/relation/frontier/diagnostic 0件とする`dynamic_import_ignored` fixtureで固定。 |
 | unbornとinvalid/corrupt HEADを混同 | rev-parse/symbolic-ref/check-ref-format/show-refのread-only return matrix。invalid refnameとmissing valid refを分離し、stderr文字列判定なし。 |
 | non-UTF-8 pathの架空identity | SourceView前run fatal、context path null、raw/hash/surrogateを公開しない。 |
 | semantic/visual canonicalization drift | enum rank、occurrence winner、type grammar、diagnostic cardinality、PlantUML visual keyをunit/goldenで固定。 |
