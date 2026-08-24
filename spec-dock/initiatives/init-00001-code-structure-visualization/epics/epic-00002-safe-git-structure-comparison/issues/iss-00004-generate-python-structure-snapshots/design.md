@@ -26,9 +26,9 @@ package_sequence_key: "ISSUE-01"
 | --- | --- | --- |
 | I01-DES-001 | I01-REQ-001 | `SnapshotApplication`がone-run lifecycleを所有し、CLI、source、adapter、artifactを明示portで接続する。 |
 | I01-DES-002 | I01-REQ-002 | duplicate-aware parserとclosed `ConfigV1` resolverをsource acquisition前に完了する。 |
-| I01-DES-003 | I01-REQ-003 | repository外stagingへfreezeした`SourceView`とtyped `TargetSpec`/`TargetSelection`をimmutable valueにする。 |
-| I01-DES-004 | I01-REQ-004 | Python adapterがmodule index、AST extraction、safe type expression、class/member/relation identityを所有する。 |
-| I01-DES-005 | I01-REQ-005 | schema-defined canonical JSON、Python PlantUML vocabulary、manifest、stream emitterをexact-byte contractとして分離する。 |
+| I01-DES-003 | I01-REQ-003 | read-only `HeadState`判定、non-UTF-8 fatal boundary、repository外stagingへfreezeした`SourceView`、typed `TargetSpec`/`TargetSelection`をimmutable valueにする。 |
+| I01-DES-004 | I01-REQ-004 | Python adapterがmodule index、AST extraction、closed type grammar、class/member/relation identity、exact sort、dedupe winnerを所有する。 |
+| I01-DES-005 | I01-REQ-005 | schema-defined canonical JSON、code別cardinality/contextを持つdiagnostic、parameter/escape/visual-dedupeを閉じたPython PlantUML、manifest、stream emitterをexact-byte contractとして分離する。 |
 | I01-DES-006 | I01-REQ-006 | discriminated outcome、domain-local budget、redaction/invariant gate、atomic directory publicationでfail-closedにする。 |
 | I01-DES-007 | I01-REQ-006 | Git allowlist、static execution trap、source drift check、deterministic sort/hashをsecurity boundaryにする。 |
 | I01-DES-008 | I01-REQ-007 | stdlib-only runtime package、exact lock、schema/golden、offline wheel、minimum/latest CIをrepository-ownedにする。 |
@@ -168,9 +168,12 @@ tests/
   unit/
     cli/test_parser.py
     core/test_config.py
+    core/test_diagnostics.py
     core/test_outcomes.py
+    source/test_git_repository.py
     source/test_source_view.py
     source/test_targets.py
+    python/test_model.py
     python/test_module_index.py
     python/test_type_expr.py
     python/test_analyzer.py
@@ -180,6 +183,7 @@ tests/
     artifacts/test_manifest.py
     artifacts/test_writer.py
     artifacts/test_streams.py
+  integration/source/test_git_repository.py
   integration/python/test_targeted_snapshot.py
   acceptance/python/test_snapshot_cli.py
   acceptance/python/test_snapshot_failures.py
@@ -202,10 +206,10 @@ tests/
 | `cli/parser.py` | `parse_cli(argv) -> SnapshotCliRequest` | duplicate pre-scan、closed grammar、meta operation、diff-only option rejection。 |
 | `application/snapshot.py` | `SnapshotApplication.run(request) -> RunOutcome` | lifecycle順序、cleanup、publication前drift check、stream result。 |
 | `core/config.py` | `resolve_config(request, repo) -> ResolvedConfig` | TOML v1 validation、precedence、value source、config digest。 |
-| `core/diagnostics.py` | `Diagnostic`, `DiagnosticCode`, `encode_diagnostic_jsonl` | closed code catalog、safe nullable fields、deterministic order。 |
+| `core/diagnostics.py` | `Diagnostic`, `DiagnosticCode`, `DiagnosticContext`, `encode_diagnostic_jsonl` | closed code catalog、code別cardinality/context、safe nullable fields、deterministic dedupe/order。 |
 | `core/outcomes.py` | `DomainOutcome`, `RunOutcome`, status unions | impossible stateをconstructorで拒否する。 |
 | `core/budget.py` | `EntityBudgetGate.admit(snapshot, resolved_limit)` | class entity countだけをrender前に検査する。 |
-| `source/git_repository.py` | `GitRepositoryReader` | Git version/root/HEAD/path enumerationのread-only allowlist。 |
+| `source/git_repository.py` | `GitRepositoryReader`, `HeadState`, `resolve_head_state` | Git version/root/path enumerationのread-only allowlist、commit/unborn/invalid HEADの一意判定、raw path decode fatal。 |
 | `source/source_view.py` | `SourceViewBuilder.build(...)`, `SourceView`, `SourceFile` | staging freeze、content hash、fingerprint、drift probe。 |
 | `source/targets.py` | `TargetSpec`, `parse_target` | path/module/class syntaxだけを扱い、semantic resolutionはadapterへ渡す。 |
 | `semantic/canonical_json.py` | `encode_canonical_json(value, field_order) -> bytes` | UTF-8/no-space/final-LFとschema orderを一箇所で保証する。 |
@@ -216,7 +220,7 @@ tests/
 | `adapters/python/analyzer.py` | `PythonSnapshotAnalyzer.analyze(...) -> PythonAnalysisResult` | Python 3.12 AST、entity/member/relation extraction、file-local failure isolation。 |
 | `adapters/python/type_expr.py` | `SafeTypeExpressionRenderer` | literal-free canonical type stringとreference extraction。 |
 | `adapters/python/selection.py` | `PythonTargetSelector.select(...) -> PythonSnapshot` | target resolution、union traversal、frontier、status preconditions。 |
-| `adapters/python/model.py` | immutable Python domain records | identity、sort key、invariant。 |
+| `adapters/python/model.py` | immutable Python domain records | identity、enum rank、exact sort tuple、occurrence key、dedupe winner、invariant。 |
 | `adapters/python/semantic_json.py` | `PythonSemanticJsonRenderer.render(snapshot) -> bytes` | semantic schema v1だけを生成する。 |
 | `adapters/python/plantuml.py` | `PythonPlantUmlRenderer.render(snapshot) -> bytes` | Python visual vocabulary v1だけを生成する。 |
 
@@ -256,10 +260,13 @@ SnapshotCliRequest
 ```text
 parse/usage
 -> Python/Git/repo/output/config preflight
+-> resolve HeadState (commit | proven unborn; otherwise fatal)
+-> enumerate Git path bytes (non-UTF-8ならfatal、SourceViewなし)
 -> create private staging root
 -> build SourceView
 -> build module/AST index
--> resolve whole/targets and domain outcome
+-> if target 0 and candidate source 0: not_applicable
+-> otherwise resolve whole/explicit targets (explicit failureはpayload_unavailable)
 -> entity budget
 -> render requested payloads
 -> validate schema/redaction/digests
@@ -270,7 +277,9 @@ parse/usage
 -> return exit
 ```
 
-- usage/configではstaging rootを作らない。
+- usage/configではGit/source/output stagingへ触れない。
+- HEAD classification failureとnon-UTF-8 Git pathはdomain outcomeを作らないrun fatalで、staging/output/final manifestは0件。
+- `not_applicable`判定は`request.targets == () and candidate_files == 0`のexact predicateだけで行う。明示targetがあればsource 0件でもtarget resolverを通し`payload_unavailable`にする。
 - valid core runでdomain outcomeが`not_applicable`または`payload_unavailable`でもmanifest transactionを行う。
 - run-level fatalではmanifestを作成・公開しない。
 
@@ -310,19 +319,40 @@ ResolvedConfig
 
 ### Git subprocess allowlist
 
-product codeから起動できるGit commandは次に閉じる。
+product codeから起動できるGit commandは次に閉じる。`<head-ref>`は`symbolic-ref`のraw stdout bytesから末尾LFを一つだけ除き、strict UTF-8 decodeと`os.fsencode(decoded) == raw`のround-tripを確認し、Unicode normalizationを一切行わない。exact `refs/heads/` prefixを持つ場合だけ`check-ref-format`と`show-ref`へ同じdecoded valueを渡す。
 
 ```text
 git --version
 git -C <repo> -c core.fsmonitor=false rev-parse --show-toplevel
 git -C <repo> -c core.fsmonitor=false rev-parse --verify HEAD^{commit}
+git -C <repo> -c core.fsmonitor=false symbolic-ref -q HEAD
+git -C <repo> -c core.fsmonitor=false check-ref-format <head-ref>
+git -C <repo> -c core.fsmonitor=false show-ref --verify --quiet <head-ref>
 git -C <repo> -c core.fsmonitor=false ls-files -z --cached --others --exclude-standard
 ```
 
-- `rev-parse --verify HEAD^{commit}`のunborn return codeだけを`head_commit = null`へ変換する。他のstderr/return codeはfatal。
 - subprocess envは`LC_ALL=C`、`LANG=C`、`GIT_OPTIONAL_LOCKS=0`、`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_GLOBAL=/dev/null`、`GIT_TERMINAL_PROMPT=0`、`GIT_PAGER=cat`、`PAGER=cat`、`NO_COLOR=1`を固定する。
-- target Git stderrをそのまま利用者へ転送せず、stable diagnosticへ変換する。
+- target Git stderrをそのまま利用者へ転送せず、stable diagnosticへ変換する。stderr文字列はHEAD classificationの入力に使わない。
 - shell、alias、pager、hook、external diff、textconvを呼ばない。`shell=False`とargument vectorを必須とする。
+
+### `HeadState` の一意判定
+
+```text
+HeadState = Commit(object_id: str) | Unborn(branch_ref: str)
+```
+
+`resolve_head_state()`は次の順序以外を取らない。
+
+1. `rev-parse --verify HEAD^{commit}`を実行する。
+2. return code 0なら、stdoutがASCII hex **40桁または64桁**のfull object ID一件とLFだけであることを検証し、`Commit(object_id.lower())`を返す。empty、別length、複数line、non-hexは`CSV-REPO-002` fatal。
+3. return code非0なら`symbolic-ref -q HEAD`を実行する。
+4. `symbolic-ref` return code 0なら、stdoutがexactly one non-empty ref + LFでNUL/追加LFを含まないこと、ref bytesがstrict UTF-8 decodeとfilesystem encodingでexact round-tripすること、decoded valueがexact `refs/heads/` prefixを持つことを検証する。decode/round-trip/prefix failureはfatalで、NFC/NFKC/case normalizationをしない。
+5. 同じdecoded refを`check-ref-format`へ渡す。return code 0だけをvalid refnameとし、nonzeroまたはprotocol failureはfatalにする。これにより`show-ref`の「invalid ref」と「missing valid ref」を混同しない。
+6. valid refを`show-ref --verify --quiet`へ渡す。return code 1はref自体が存在しないため**唯一のunborn判定**とし、`Unborn(branch_ref)`を返す。
+7. `show-ref` return code 0はrefが存在するのにstep 1でcommitへpeelできなかった状態なのでmissing/corrupt/non-commit objectとしてfatalにする。
+8. `symbolic-ref` return code 1（detached）またはそれ以外、`show-ref` return code 0/1以外、subprocess起動/protocol failureはすべて`CSV-REPO-002` fatalにする。
+
+`head_commit = null`は`HeadState.Unborn`からだけ作る。return codeまたはstderrだけを見てunbornへ丸めない。このprocedureはref/fileを変更せず、追加Git commandも上記`symbolic-ref`、`check-ref-format`、`show-ref`に限る。
 
 ### SourceFile
 
@@ -345,7 +375,7 @@ SourceFile
 SourceView
   schema = "code-structure-viz.source-view/v1"
   kind = "working-tree"
-  head_commit: 40/64-hex object id | None
+  head_commit: full Git object id | None
   files: tuple[SourceFile, ...]
   failures: tuple[SourceAcquisitionFailure, ...]
   fingerprint: lowercase 64 hex
@@ -353,10 +383,10 @@ SourceView
 SourceAcquisitionFailure
   path: normalized repository-relative PurePosixPath
   stage: read | path_safety
-  diagnostic_code: CSV-PY-001 | CSV-SOURCE-002 | CSV-SOURCE-003
+  diagnostic_code: CSV-PY-001 | CSV-SOURCE-002 | CSV-SOURCE-004
 ```
 
-Git SHA-1/SHA-256 repository差を許すため`head_commit`はhex lengthを固定しない。artifactへalgorithm推測fieldを追加せず、Gitが返すfull object IDを保持する。
+Git SHA-1/SHA-256 repository差を許すため`head_commit`はhex lengthを固定しない。artifactへalgorithm推測fieldを追加せず、Gitが返すfull object IDをlowercaseで保持する。
 
 fingerprint preimageは次の形から`fingerprint`を除いたcanonical JSON bytesである。
 
@@ -364,18 +394,21 @@ fingerprint preimageは次の形から`fingerprint`を除いたcanonical JSON by
 {"schema":"code-structure-viz.source-view/v1","kind":"working-tree","head_commit":"1111111111111111111111111111111111111111","files":[{"path":"src/domain/order.py","kind":"regular","resolved_target":null,"size_bytes":123,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"failures":[]}
 ```
 
-- filesはnormalized path UTF-8 byte order。failuresはpath、stage、diagnostic_code順。read/path-safety failureをfingerprintから落とさない。
+- filesはnormalized path UTF-8 byte order。failuresはpath、stage、diagnostic_code順。representable read/path-safety failureをfingerprintから落とさない。
+- non-UTF-8 Git pathは`SourceAcquisitionFailure`へ変換しない。path fieldを満たせないためSourceView constructor前に`UnrepresentableGitPathFatal`へし、`CSV-SOURCE-003`一件・Artifact 0件で停止する。
+- NFC collision groupは同じcanonical pathへ収束するため、groupごとにそのcanonical pathを持つ`CSV-SOURCE-004` failure descriptor一件を置く。case/inode collisionでcanonical pathが複数なら各actual canonical pathをdescriptorへ置く。一方をsuccessful fileへ選ばない。
 - symlinkの場合、logical pathとresolved repository-relative targetをpreimageへ含める。
 - file copyは`lstat -> open no-follow/verified target -> read -> fstat -> hash -> private write -> fsync`を行い、途中mutationを検出する。
 - private staging rootはoutput parent内にmode `0700`で作り、`source/`と`artifacts/`を分ける。source treeはfinal outputへrenameしない。
-- initial fingerprint probeとpre-publication probeは同じenumeration/config algorithmを再利用する。probeはcontentを再freezeせずdigestだけを計算する。
+- initial fingerprint probeとpre-publication probeは同じenumeration/config/HeadState algorithmを再利用する。probeはcontentを再freezeせずdigestだけを計算する。
 
 ### path safety
 
-- GitのNUL-delimited bytesをstrict UTF-8 decodeする。decode failureはdomain source acquisitionを安全に継続できないため`payload_unavailable`。
-- NFC normalization後のpath collision、case-insensitive filesystemで同一inodeへ異なるlogical pathが対応するcollisionは`payload_unavailable`。
-- path component `.`、`..`、empty、NULを拒否する。
+- `ls-files -z`のstdoutをNULでsplitし、terminal empty elementだけを捨てる。各non-empty raw entryをstrict UTF-8 decodeする。一件でもdecode failureなら、entry count/ordinal/raw bytes/hash/replacement textをpublic modelへ渡さずrun fatalにする。
+- decode成功後、separatorは`/`だけ、component `.`、`..`、empty、NULを拒否しNFCへ正規化する。
+- NFC normalization collision、case-insensitive filesystemで同一inodeへ異なるcanonical logical pathが対応するcollisionは`CSV-SOURCE-004`のpayload_unavailable。collision groupはcanonical path tupleでsortする。
 - symlink resolved targetは`realpath`がrepo root配下かつordinary fileであること。outside/cycle/special fileは`CSV-SOURCE-002`。
+- raw filesystem path、surrogateescape string、`U+FFFD`置換、`bytes.hex()`、SHA、synthetic ordinalをrepository-relative pathの代替にしてはならない。
 
 ## Python module index / AST design
 
@@ -415,7 +448,21 @@ fingerprint preimageは次の形から`fingerprint`を除いたcanonical JSON by
 
 ## Python domain model
 
-全recordは`@dataclass(frozen=True, slots=True)`相当のimmutable valueとし、constructorでNFC、positive line、sorted tuple、ID invariantを検証する。
+全recordは`@dataclass(frozen=True, slots=True)`相当のimmutable valueとし、constructorでNFC、positive line、enum、sorted tuple、ID invariantを検証する。文字列比較はNFC UTF-8 bytesのunsigned lexicographic order、integer比較はnumeric orderである。
+
+### enum rank
+
+| enum | ascending rank |
+| --- | --- |
+| member kind | `field=0`, `property=1`, `method=2` |
+| scope | `null=0`, `class=1`, `instance=2` |
+| property role | `null=0`, `getter=1`, `setter=2`, `deleter=3` |
+| method kind | `null=0`, `instance=1`, `class=2`, `static=3` |
+| relation kind | `inheritance=0`, `composition=1`, `typed_dependency=2`, `import_dependency=3` |
+| target resolution | `internal=0`, `external=1`, `unknown=2` |
+| target kind | `class=0`, `module=1`, `symbol=2` |
+
+nullable textual componentはidentity preimageではempty bytes、sort tupleでは上表のnull rankとempty UTF-8 bytesを使う。digest preimageは各textをNFC UTF-8、integerをunsigned base-10 ASCIIにし、component間をsingle NUL byteで連結する。
 
 ### Entity
 
@@ -432,11 +479,11 @@ PythonClassEntity
 ```
 
 - lexical ClassDef chainだけをqualified nameに使う。
-- 同じ`module + qualified_name`へ複数ClassDefが対応する場合は`CSV-PY-012`を出し、collision entityをsafe indexから除外する。source orderで一方を選ばない。
-- decorator orderはnormalized name、called、source line。raw argumentは保持しない。
-- entity sortは`module UTF-8 bytes, qualified_name UTF-8 bytes, path UTF-8 bytes, start_line`。
+- 同じ`module + qualified_name`へ複数ClassDefが対応する場合は`CSV-PY-012`をcollision group一件として出し、collision entityをsafe indexから除外する。source orderで一方を選ばない。
+- decorator occurrence identity/orderは`(normalized name UTF-8, called false-before-true, path UTF-8, start_line, start_col, end_line, end_col)`。同一tupleのcollector duplicateは一件へ畳み、異なるsource locationの同一decoratorはarrayへ重複して残る。public decoratorは`name, called`だけを持つ。
+- entity sort tupleは`(module UTF-8, qualified_name UTF-8, path UTF-8, start_line, end_line, id UTF-8)`。
 
-### Member
+### Member occurrence / identity / merge
 
 ```text
 PythonMember
@@ -451,13 +498,25 @@ PythonMember
   signature: MethodSignature | null
   decorators: tuple[DecoratorRef, ...]
   range: SourceRange
+  declaration_ordinal: int  # internal canonical component; semantic JSONには出さない
 ```
 
-identity tupleは`owner_id, kind, name, scope-or-empty, property_role-or-empty, method_kind-or-empty, declaration ordinal among same tuple`。UTF-8 NUL-separated bytesのSHA-256を使う。class-body `Assign`/`AnnAssign`はsimple nameおよびtuple/list destructuring内simple nameだけ、method fieldは`Assign`/`AnnAssign`/`AugAssign`のliteral `self.<name>`/`cls.<name>` targetだけを抽出する。`Delete`とnested lexical scope内assignmentはfield declarationにしない。
+base identity tupleは`owner_id, kind, name, scope-or-empty, property_role-or-empty, method_kind-or-empty`。declaration occurrenceのcanonical location keyは次である。
 
-- class body fieldと`self.x`/`cls.x` assignmentはowner/name/scopeでmergeする。merged fieldのdeclaration ordinalは0、最初のrangeをpublic rangeとし、internal occurrence countは出力しない。method/propertyだけが同一identity tuple内の0起点declaration ordinalで複数recordを保持する。
-- distinct non-null annotationが複数あればannotationを`?`にし`CSV-PY-013` warningを出す。default/value inferenceをしない。
-- method ordinalは同名overload/再定義を消さないため必要。source line順で0起点。
+```text
+(path UTF-8, start_line, start_col, end_line, end_col,
+ syntactic_origin_rank)
+```
+
+`syntactic_origin_rank`は`class_field=0`, `instance_field=1`, `class_receiver_field=2`, `property=3`, `method=4`。columnとorigin rankはwinner/ordinal決定専用でpublic JSONへ出さない。異なるcollectorが同じoccurrence identityに異なるannotation/signature/decorator payloadを付与した場合はwinnerを選ばず`CSV-INTERNAL-001`へする。
+
+- class-body `Assign`/`AnnAssign`はsimple nameおよびtuple/list destructuring内simple nameだけ、method fieldは`Assign`/`AnnAssign`/`AugAssign`のliteral `self.<name>`/`cls.<name>` targetだけを抽出する。`Delete`とnested lexical scope内assignmentはfield declarationにしない。
+- 全member candidateはまず`(base identity tuple, canonical location key)`をexact occurrence identityとしてgroup化し、同一AST occurrenceを複数collectorが返した場合は一件へ畳む。group内winnerはcanonical location key最小（exact duplicateでは同値）であり、collector orderを使わない。
+- fieldはdedupe後のoccurrenceを`owner_id, name, scope`でmergeする。全occurrenceをcanonical location keyでsortし、最小occurrenceのline rangeをpublic rangeにする。fieldの`declaration_ordinal`は常に0、field identity tupleは`base identity tuple + 0`とする。
+- merged fieldのnon-null annotation string集合が0件ならnull、distinct一件ならその値、二件以上なら`?`にし、merged field一件につき`CSV-PY-013`一件を出す。source/collector orderでannotation winnerを選ばない。
+- property/methodはexact occurrence dedupe後も異なるsource declarationをmergeしない。同じbase identity tuple内でcanonical location key順に0起点`declaration_ordinal`を割り当て、identity tupleを`base identity tuple + declaration_ordinal`とする。
+- member IDはfield/property/methodとも上記identity tupleのNUL-separated preimageのSHA-256。
+- member sort tupleは`(owner_id UTF-8, member_kind_rank, name UTF-8, scope_rank, property_role_rank, method_kind_rank, declaration_ordinal, range.start_line, range.end_line, id UTF-8)`。
 - `@property`、`.setter`、`.deleter`はproperty memberとして別accessor recordにする。
 - `@staticmethod`/`@classmethod`をmethod_kindへ反映し、decorator metadataにも残す。
 - field memberは`annotation`をsafe annotationまたはnull、`signature=null`、`property_role=null`、`method_kind=null`とする。
@@ -479,35 +538,42 @@ Parameter
   has_default: bool
 ```
 
-`self`/`cls`もsemantic JSONには保持する。PlantUML表示時だけmethod kindに応じてimplicit receiver一件を省略する。
+parameter arrayはPython signature lexical orderを保つ。`self`/`cls`もsemantic JSONには保持する。PlantUML表示時だけclosed receiver ruleで高々一件を省略する。
 
 ### SafeTypeExpressionRenderer
 
+public type text grammarは次だけである。`Identifier`はalias resolution後のPython identifier segmentで、NFCかつ`.`を含まない。
+
+```text
+TypeText      ::= UnionText
+UnionText     ::= PrimaryText (" | " PrimaryText)*
+PrimaryText   ::= Symbol | "None" | "..." | "?" | TupleText | SubscriptText
+Symbol        ::= Identifier ("." Identifier)*
+SubscriptText ::= Symbol "[" TypeText (", " TypeText)* "]"
+TupleText     ::= "()" | "(" TypeText ",)" | "(" TypeText (", " TypeText)+ ")"
+```
+
 closed renderer rule:
 
-| AST | canonical result |
+| AST / semantic special case | canonical result |
 | --- | --- |
-| `Name`, `Attribute` | alias-resolved dotted symbolic name |
-| `Subscript` | `Base[arg1, arg2]` |
-| `Tuple` | comma separated tuple content |
-| `A | B` | precedence-aware `A | B` |
-| `None` | `None` |
-| `...` | `...` |
-| string forward annotation | expressionとして再parseできれば同rule、不可なら`?` |
-| literal constant | `?`（None/Ellipsis除く） |
-| `Literal[...]` | argumentごとに`?` |
-| `Annotated[T, ...]` | `Annotated[T, ?]` |
-| Call/Lambda/comprehension/arithmetic/unknown node | `?` + warning |
+| `Name`, dotted `Attribute` | alias-resolved `Symbol` |
+| `Subscript` with symbolic base | base + bracketed arguments。slice `Tuple`はargument list containerでありtuple parenthesesを出さない。single argumentは`Base[T]` |
+| standalone `Tuple` 0/1/2+ elements | `()` / `(T,)` / `(T1, T2)` |
+| nested `A | B` |全`BitOr`をleft-to-right leaf列へflattenし、operandをdedupeせず`A | B | C`。outer parenthesesなし |
+| `None` / Ellipsis | `None` / `...` |
+| string forward annotation | `mode="eval"`, Python 3.12 grammarでexactly one expressionへparseできれば同rule。失敗は`?` |
+| literal constant | `?`（None/Ellipsis除く）。literal bytes/textを保持しない |
+| alias-resolved `Literal[...]` | arityを保ち全argumentを`?`にする。例`typing.Literal[?, ?]`。redaction自体はwarningなし |
+| alias-resolved `Annotated[T, metadata...]` | metadata数にかかわらず`typing.Annotated[T, ?]`へcanonicalize。Tをrenderし、metadataはreferenceにしない。argument不足はunsupported |
+| Call/Lambda/list/set/dict/comprehension/arithmetic/Starred/unknown node、non-symbolic Subscript base | 該当annotation site全体を`?`、`CSV-PY-011`一件 |
 
-rendererはsafe stringと`TypeReference`集合を同時に返す。typed relationは次だけを生成する。
+- redundant source parenthesesは保持しない。unionがsubscript argumentまたはtuple elementでも追加parenthesesを付けず、周囲の`[]`/`()`で境界を表す。
+- rendererはsafe stringと`TypeReference`集合を同時に返す。union/tuple/subscriptのsupported childはleft-to-rightでreferenceを集め、identityでdedupeしてUTF-8 sortする。unsupported site全体を`?`へした場合はそのunsupported subtreeからreferenceを推測しない。
+- `Literal`/`Annotated` metadata redactionはexpected behaviorで`CSV-PY-011`を生成しない。invalid forward annotationまたはunsupported ASTだけがannotation-site diagnosticを一件生成する。
+- typed relationはSourceView内classへ一意解決できるreference、explicit importで外部symbolへ解決できるreference、inheritance baseのsymbolic referenceだけを生成する。unqualified builtin/typing helperだけをexternal dependencyとして量産しない。
 
-- SourceView内classへ一意解決できるreference。
-- explicit importで外部symbolへ解決できるreference。
-- inheritance baseのsymbolic reference。
-
-unqualified builtin/typing helperだけをexternal dependencyとして量産しない。
-
-### Relation
+### Relation occurrence / identity / dedupe
 
 ```text
 PythonRelation
@@ -526,11 +592,12 @@ RelationTarget
   name: safe normalized symbolic name
 ```
 
-- relation identity tupleは`kind, source_id, target.resolution, target.kind, target.id-or-empty, target.name, via_member_id-or-empty, annotation-or-empty`。同一memberから同一targetへ異なるsafe annotationで到達したrelationを黙って一つへ潰さない。
-- relation kind orderは`inheritance, composition, typed_dependency, import_dependency`。
-- source -> targetはdependent -> dependency。
-- inheritanceはbase expression、compositionはfield annotation、typed dependencyはmethod/property parameter/return、import dependencyはmodule importから作る。
-- exact duplicateはidentityで一つへ畳む。異なるmember経由は別relation。
+- relation identity tupleは`kind, source_id, target.resolution, target.kind, target.id-or-empty, target.name, via_member_id-or-empty, annotation-or-empty`。IDはこのtupleのNUL-separated preimageのSHA-256。range/path/columnはidentityへ含めない。
+- relation occurrence keyは`(source_path UTF-8, start_line, start_col, end_line, end_col, origin_rank)`。origin rankは`inheritance_base=0`, `field_annotation=1`, `parameter_annotation=2`, `return_annotation=3`, `import_statement=4`。同じidentityとoccurrence keyに複数collector candidateがありtarget/annotation等がidentity上同値でなければinternal invariant failureとする。
+- identity tupleが同じoccurrenceをgroup化し、occurrence key最小をwinnerにする。public rangeはwinnerのline range。異なるlineの同一import/relationでもearliest canonical occurrenceが必ず残る。discardしたexact semantic duplicateにdiagnosticを出さない。
+- 同一memberから同一targetへ異なるsafe annotationで到達したrelation、または異なるmember経由のrelationはidentityが異なるため保持する。
+- relation sort tupleは`(relation_kind_rank, source_id UTF-8, target_resolution_rank, target_kind_rank, target.id-or-empty UTF-8, target.name UTF-8, via_member_id-or-empty UTF-8, annotation-or-empty UTF-8, range.start_line, range.end_line, id UTF-8)`。
+- source -> targetはdependent -> dependency。inheritanceはbase expression、compositionはfield annotation、typed dependencyはmethod/property parameter/return、import dependencyはmodule importから作る。
 
 ## target selection / traversal design
 
@@ -544,6 +611,27 @@ ClassTarget(raw: str)
 
 ClassTargetはparse時に任意分割しない。module index構築後、raw dotted valueのprefixを長い順に試し、exact module一件を得た最長prefixをmoduleとする。remainderをqualified class nameとする。
 
+### mode/outcome precedence
+
+```text
+if request.targets is empty:
+    if source_view.files and source_failures are both empty:
+        NotApplicable
+    else:
+        whole-mode analysis/selection
+else:
+    explicit-target resolution
+    if any target unresolved, ambiguous, or bound only to failed/colliding source:
+        IncompletePayloadUnavailable
+    else:
+        targeted traversal
+```
+
+- `NotApplicable` constructorは`targets == ()`, `candidate_files == 0`, `failed_files == ()`を同時に要求する。targeted requestから呼べない型/APIにする。
+- explicit target source 0件では全targetをunresolvedとして`CSV-PY-006`一target一件とfailure frontier一target一件へ変換する。representable path identity collisionに対応するpath targetは`CSV-SOURCE-004` group diagnosticに加え`CSV-PY-007`一件、module/class identity collisionに対応するtargetも各group diagnosticに加え`CSV-PY-007`一件とする。
+- zero-class sourceでもmissing class targetはpayload unavailable。whole modeだけがzero-class completeを作れる。
+- multiple targetの一件でも失敗したらsafe seedだけのpartial resultを公開しない。
+
 ### graph
 
 - module node ID: `python:module:<module>`。
@@ -554,16 +642,17 @@ ClassTargetはparse時に任意分割しない。module index構築後、raw dot
 
 ### algorithm
 
-1. all parsed modules/classes/relationsからimmutable graphを作る。
-2. target 0件ならall classをselectedにし、depth traversalを行わない。
-3. targetをexact seed node setへ解決する。unresolved/ambiguous/failed seedが一つでもあればpayload unavailable。
-4. downstreamはseedからforward BFS、upstreamはseedからreverse BFSを独立実行する。
-5. membership closureを各BFS level内で行いdepthを消費しない。
-6. selected node unionを取り、selected moduleのclassを含める。
-7. internal relationはsourceとtargetの両方がselectedの場合だけpayloadへ含める。sourceがselectedなexternal/unknown relationはpayloadへ含める。selected sourceからdepth外のinternal targetへ向かうrelationはpayloadから除外しfrontierへ記録する。
-8. depth境界の次hop、failed file、unresolved ref、unsupported local class/star importをcoverage frontierへcanonical sortで記録する。
+1. all parsed modules/classes/deduped relationsからimmutable graphを作る。
+2. target 0件ならall classをselectedにし、depth traversalを行わない。candidate source 0件のnot_applicableはこのstep前に確定済み。
+3. explicit targetをexact seed node setへ解決する。unresolved/ambiguous/failed seedが一つでもあればpayload unavailable。
+4. target failure frontierは`direction=failure`, `reason=unresolved_reference`。path targetは`kind=file/reference=<path>`、module targetは`kind=module/reference=python:module:<module>`、class targetは`kind=symbol/reference=class:<normalized raw dotted value>`とする。
+5. downstreamはseedからforward BFS、upstreamはseedからreverse BFSを独立実行する。
+6. membership closureを各BFS level内で行いdepthを消費しない。
+7. selected node unionを取り、selected moduleのclassを含める。
+8. internal relationはsourceとtargetの両方がselectedの場合だけpayloadへ含める。sourceがselectedなexternal/unknown relationはpayloadへ含める。selected sourceからdepth外のinternal targetへ向かうrelationはpayloadから除外しfrontierへ記録する。
+9. depth境界のnext hop、failed file、unresolved ref、unsupported local class/star import、identity collisionをcoverage frontierへcanonical sortで記録する。
 
-同じnodeがupstream/downstream両方で到達してもentityは一つ。coverageは方向別最小distanceを内部で保持するが、v1 payloadにはfrontierだけを公開する。
+frontier identityは`(direction, kind, reference, reason)`で、一つへdedupeしてsortする。同じnodeがupstream/downstream両方で到達した場合は方向別entryを保持できる。`reason=depth_limit`はrequested traversalの正常境界なのでdiagnosticを生成しない。`CSV-PY-008`は実際のstatic unresolved reference occurrenceだけに限定する。
 
 ## outcome model
 
@@ -594,15 +683,21 @@ constructor invariants:
 
 ### failure classification
 
-| failure | classification |
+| condition | classification |
 | --- | --- |
+| whole mode、candidate Python source 0件、failure 0件 | not_applicable |
+| targeted mode、candidate Python source 0件 | payload_unavailable + `CSV-PY-006` per target |
+| whole mode、sourceあり、全parse成功、class 0件 | complete zero-class payload |
+| targeted mode、missing path/module/class、failed seed、ambiguous target | payload_unavailable |
 | one or more non-seed file read/encoding/parse/module identity failure + safe requested subset | partial_safe |
 | non-seed class identity collision + safe requested subset | partial_safe |
 | requested class identity collision、またはcollisionしかなくsafe entity 0件 | payload_unavailable |
 | whole modeで一部safe classあり、failed fileあり | partial_safe |
 | all candidate files failed | payload_unavailable |
-| requested target seed file/class/module failed、missing、ambiguous | payload_unavailable |
-| outside-repo symlink、path normalization collision | payload_unavailable |
+| outside-repo symlink、representable NFC/case path identity collision | payload_unavailable |
+| non-UTF-8 Git path bytes | run fatal exit1、SourceView/manifestなし |
+| proven unborn branch | valid source state、`head_commit=null` |
+| detached/malformed/missing/corrupt/non-commit HEADまたはHEAD Git protocol failure | run fatal exit1 |
 | unresolved external/static type | completeまたはpartial_safeを悪化させないwarning/coverage |
 | class entity > resolved limit | payload_unavailable |
 | config/usage invalid | usage exit2 |
@@ -640,12 +735,43 @@ example:
 
 - nullable fieldも省略せず`null`。
 - stderrは一diagnostic一line。manifest/payload内では同じobjectをarray elementとして使い、各elementにLFはない。
-- ordering keyは`domain null-first, path null-first UTF-8, line null-first, code, symbol null-first, message`。
-- diagnosticは全field tupleでdeduplicateしてからordering keyでsortする。stderr、manifest domain/root、partial semantic payloadへ渡す同一diagnostic集合のbytes/valueが一致しなければならない。
+- ordering keyは`domain null-first, path null-first UTF-8, line null-first, code UTF-8, symbol null-first UTF-8, message UTF-8`。
+- diagnosticは全field tupleでdeduplicateしてからordering keyでsortする。stderr、manifest domain/root、partial semantic payloadへ渡す同一diagnostic集合のvalueが一致しなければならない。
+
+### generation cardinality / context
+
+usage/config/preflightはphase fail-fastで、一runに最初のapplicable diagnostic一件だけを出す。usageの選択優先順位は`generic grammar -> duplicate single-value -> diff-only option -> stdout syntax -> stdout compatibility`、同phase内はraw argvで最も左のoffending token。configは`read -> TOML parse -> unknown key -> invalid value`、複数unknown/invalid keyはNFC dotted key UTF-8最小を選ぶ。environment/repository/outputはlifecycle順の最初のfailureで停止する。
+
+| code group | exact emission unit / maximum | domain | path | symbol | line |
+| --- | --- | --- | --- | --- | --- |
+| `CSV-USAGE-*`, `CSV-CONFIG-*`, `CSV-ENV-*`, `CSV-REPO-*`, `CSV-OUTPUT-*`, `CSV-SOURCE-001`, `CSV-SOURCE-003`, `CSV-INTERNAL-001`, `CSV-INTERRUPT-001` | fail-fast run diagnostic exactly 1 | `null` | `null` | `null` | `null` |
+| `CSV-SOURCE-002` | unsafe symlink logical pathごとに1 | `python` | canonical logical path | `null` | `null` |
+| `CSV-SOURCE-004` | NFC collision groupごとに1、case/inode collision groupごとに1 | `python` | groupのcanonical path UTF-8最小 | `null` | `null` |
+| `CSV-PY-001`, `CSV-PY-002`, `CSV-PY-004` | code/fileごとに1 | `python` | failed file | `null` | `null` |
+| `CSV-PY-003` | fileごとに1 | `python` | failed file | `null` | positive `SyntaxError.lineno`、なければ`null` |
+| `CSV-PY-005` | collided module identity groupごとに1 | `python` | `null` | `python:module:<module>` | `null` |
+| `CSV-PY-006`, `CSV-PY-007` | unresolved/ambiguous requested targetごとに1 | `python` | path targetならnormalized path、それ以外`null` | module targetなら`module:<value>`、class targetなら`class:<value>`、path targetなら`null` | `null` |
+| `CSV-PY-008` | unresolved reference occurrence key `(path,line,safe-reference)`ごとに1 | `python` | source path | safe normalized reference | occurrence start line |
+| `CSV-PY-009` | skipped ClassDef occurrence keyごとに1 | `python` | source path | `class:<lexical-qualified-name>` | declaration start line |
+| `CSV-PY-010` | domain budget failure exactly 1 | `python` | `null` | `null` | `null` |
+| `CSV-PY-011` | unsupported annotation siteごとに1 | `python` | declaration path | site token | annotation/declaration start line |
+| `CSV-PY-012` | collided class identity groupごとに1 | `python` | `null` | canonical class entity ID | `null` |
+| `CSV-PY-013` | merged conflicting fieldごとに1 | `python` | owner class path | merged field member ID | winner range start line |
+
+annotation site tokenは次だけである。
+
+- field/property annotation: `<member-id>#annotation`
+- method/property parameter: `<member-id>#parameter:<parameter-name>`
+- method/property return: `<member-id>#return`
+- inheritance base: `<entity-id>#base:<zero-based-base-ordinal>`
+
+file/source diagnosticとtarget diagnosticは独立である。たとえばrequested fileがparse failureなら`CSV-PY-003`一件と、そのrequested targetの`CSV-PY-006`一件を両方出す。requested pathがrepresentable path identity collisionに対応する場合は`CSV-SOURCE-004`に加えてtarget `CSV-PY-007`、requested module/class collisionならgroup diagnostic `CSV-PY-005`/`CSV-PY-012`に加えてtarget `CSV-PY-007`を出す。
+
+`depth_limit` frontierはdiagnostic emission unitではない。depthだけで除外されたtargeted completeのstderrはempty bytesである。
 
 ### closed diagnostic catalog
 
-| code | default severity | recoverable | message template / outcome |
+| code | default severity | recoverable | exact message / outcome |
 | --- | --- | --- | --- |
 | `CSV-USAGE-001` | error | false | `Command line does not match the snapshot v1 grammar.` / exit2 |
 | `CSV-USAGE-002` | error | false | `Single-value option '<option>' was specified more than once.` / exit2 |
@@ -659,14 +785,16 @@ example:
 | `CSV-ENV-001` | error | false | `Python 3.12 or newer is required.` / exit1 |
 | `CSV-ENV-002` | error | false | `Git 2.39 or newer is required.` / exit1 |
 | `CSV-REPO-001` | error | false | `Repository path must be an exact Git working-tree root.` / exit1 |
+| `CSV-REPO-002` | error | false | `Repository HEAD is neither a resolvable commit nor a valid unborn branch.` / exit1 |
 | `CSV-OUTPUT-001` | error | false | `Output destination already exists or cannot be published atomically.` / exit1 |
 | `CSV-OUTPUT-002` | error | false | `Output destination must be outside the target repository.` / exit1 |
 | `CSV-SOURCE-001` | error | false | `Source view changed before publication.` / exit1 |
 | `CSV-SOURCE-002` | error | false | `Python source symlink is unsafe.` / payload unavailable |
-| `CSV-SOURCE-003` | error | false | `Repository path cannot be represented uniquely as safe UTF-8 NFC.` / payload unavailable |
+| `CSV-SOURCE-003` | error | false | `Repository contains a path that is not valid UTF-8.` / run fatal exit1, no SourceView/manifest |
+| `CSV-SOURCE-004` | error | false | `Repository paths are not unique after safe path normalization.` / payload unavailable |
 | `CSV-PY-001` | error | true | `Python source could not be read.` / file-local failure |
 | `CSV-PY-002` | error | true | `Python source encoding could not be decoded safely.` / file-local failure |
-| `CSV-PY-003` | error | true | parse message above / file-local failure |
+| `CSV-PY-003` | error | true | `Python source could not be parsed with the v1 Python 3.12 grammar.` / file-local failure |
 | `CSV-PY-004` | error | true | `Python source path does not map to a valid module identity.` / file-local failure |
 | `CSV-PY-005` | error | true | `More than one source file maps to the same Python module identity.` / collision group |
 | `CSV-PY-006` | error | false | `Requested Python target was not found in the safe source view.` / payload unavailable |
@@ -680,7 +808,7 @@ example:
 | `CSV-INTERNAL-001` | error | false | `Internal snapshot contract invariant failed before publication.` / exit1 |
 | `CSV-INTERRUPT-001` | warning | false | `Snapshot was interrupted before publication.` / exit130 |
 
-新code/meaningはimplementation convenienceで追加せず、Design/schema/goldenを先に更新する。
+`<option>`はclosed CLI option token、`<key>`はvalidated NFC dotted config keyだけを代入する。新code/meaning/context/cardinalityはimplementation convenienceで追加せず、Design/schema/goldenを先に更新する。
 
 ## semantic JSON v1
 
@@ -719,20 +847,22 @@ entities, members, relations, diagnostics
 | relation target | `resolution, kind, id, name` |
 
 - targetは`{"kind":"path|module|class","value":"<normalized value>"}`。prefixをvalueへ重複させない。
-- failed file `stage` enumは`read|path_safety|encoding|parse|module_identity|module_collision`。
+- failed file `stage` enumは`read|path_safety|encoding|parse|module_identity|module_collision`。`diagnostic_code`はそのfile/groupに対応するclosed codeで、non-UTF-8 fatal `CSV-SOURCE-003`はpathを持てないためfailed_filesへ入らない。
 - frontier `direction` enumは`upstream|downstream|failure`、`kind` enumは`module|class|symbol|file`、`reason` enumは`depth_limit|unresolved_reference|failed_source|unsupported_scope|star_import|identity_collision`。
 - `SourceRange.end_line`はASTのpositive `end_lineno`、存在しない場合は`start_line`。columnはpublic contractへ出さない。
 - `candidate_files`はconfig scopeに入った全`.py` logical path数、`parsed_files`はencoding decodeとAST parseが成功したfile数、`selected_entities`はpublished entity array長と一致する。module/class identity failureはparsed_filesへ数えてもfailed_files/frontierへ必ず残す。
-- frontier `reference`はkind `module|class`ならcanonical node ID、kind `file`ならrepository-relative path、kind `symbol`ならsafe normalized symbolic name。raw expression/source textを入れない。
+- frontier `reference`はkind `module|class`ならcanonical node ID、kind `file`ならrepository-relative path、kind `symbol`ならsafe normalized symbolic name。target failureではpath=`file/path`、module=`python:module:<module>`、class=`symbol/class:<raw-dotted-value>`のclosed mappingを使う。raw expression/source textを入れない。
 
 ### arrays/sort
 
-- targets: kind order path/module/class、value UTF-8。
-- failed_files: path、stage、code。
+- targets: `(target_kind_rank path=0,module=1,class=2, value UTF-8)`。
+- failed_files: `(path UTF-8, stage UTF-8, diagnostic_code UTF-8)`。
 - selected_modules: module UTF-8。
-- frontier: direction order upstream/downstream/failure、kind、reference、reason。
-- entities/members/relations: model sort key。
-- diagnostics: diagnostic sort key。
+- frontier: `(direction_rank upstream=0,downstream=1,failure=2, kind UTF-8, reference UTF-8, reason UTF-8)`。identityも同tupleでdedupeする。
+- entities: `(module UTF-8, qualified_name UTF-8, path UTF-8, start_line, end_line, id UTF-8)`。
+- members: `(owner_id UTF-8, member_kind_rank, name UTF-8, scope_rank, property_role_rank, method_kind_rank, declaration_ordinal, start_line, end_line, id UTF-8)`。
+- relations: `(relation_kind_rank, source_id UTF-8, target_resolution_rank, target_kind_rank, target.id-or-empty UTF-8, target.name UTF-8, via_member_id-or-empty UTF-8, annotation-or-empty UTF-8, start_line, end_line, id UTF-8)`。
+- diagnostics: diagnostic ordering key。
 
 ### complete example
 
@@ -780,7 +910,7 @@ source, config, run, domains, artifacts, diagnostics
 - run statusは`complete|not_applicable|incomplete`。fatal/interrupt/usageではmanifestなし。
 - `adapters`と`domains`は本Issueではexactly one elementで、domain `python`だけを持つ。domain省略/all-domain envelopeを先行実装しない。
 - domain `coverage`はsemantic JSONのcoverage objectとexactly同じfield/order/enumを再利用する。
-- not_applicable entity_countは0、budget.actualは0、artifact_pathsはempty。
+- not_applicableはwhole mode `targets=[]`かつcandidate/file failure 0件だけで、entity_count 0、budget.actual 0、artifact_paths empty。targeted modeでは使用しない。
 - payload_unavailable entity_countは解析後countを安全に得られる場合そのcount、得られない場合`null`。budget.actualも同様にnullable。
 - `request.targets`はsemantic JSONと同じ`kind, value` target object。
 - `artifact_paths`とroot `artifacts`はformat order `semantic-json`, `plantuml`、同format内path UTF-8でsortする。
@@ -866,20 +996,63 @@ exact line order:
 5. `hide empty members`
 6. incomplete note（partial_safeだけ）
 7. module package blocks
-8. internal relation lines
+8. deduped internal visual relation lines
 9. Japanese legend
 10. `@enduml`
 
-- module aliasは`M_` + `sha256("python:module:" + module)`の64hex。
-- class aliasは`C_` + `sha256(entity.id)`の64hex。
+- module aliasは`M_` + `sha256("python:module:" + module)`の64 lowercase hex。
+- class aliasは`C_` + `sha256(entity.id)`の64 lowercase hex。
 - alias full digestを使いcollision fallbackを不要にする。
-- package orderはmodule UTF-8。class/member/relation orderはsemantic model order。
+- package orderはmodule UTF-8。class/member orderはsemantic model order。visual relation line orderはrepresentative relation sort key。
 - class labelはqualified name。package labelはmodule。
-- member lineは`field <name> : <type-or-?>`、`property <name>(<role>) : <type-or-?>`、`method <name>(<params>) : <return-or-?>`。default literalを出さない。
-- method displayはimplicit receiver `self|cls`一件を省略する。
-- labelの`"`, `\`, newline、PlantUML control characterはbackslash escapeし、raw PlantUML directiveを注入できないようにする。
 
-### arrows
+### member / parameter line grammar
+
+```text
+field-line    ::= "    field " Name " : " TypeOrUnknown
+property-line ::= "    property " Name "(" Role ") : " TypeOrUnknown
+method-line   ::= "    method " Name "(" ParameterList ") : " TypeOrUnknown
+ParameterList ::= "" | DisplayToken (", " DisplayToken)*
+DisplayToken  ::= "/" | "*" | Parameter
+Parameter     ::= Name ": " TypeOrUnknown [" = …"]
+               | "*" Name ": " TypeOrUnknown
+               | "**" Name ": " TypeOrUnknown
+```
+
+- `TypeOrUnknown`はsemantic type string、nullなら`?`。default expression/literalは出さず、`has_default=true`のnon-variadic parameterにexact suffix ` = …`を付ける。var positional/keywordの`has_default`はmodel invariantでfalse。
+- implicit receiver除外は高々一件。instance methodはfirst positional-only/positional-or-keyword parameterがexact name `self`、class methodはexact `cls`なら除く。static methodは除かない。propertyはfirst positional parameterが`self`または`cls`なら除く。期待名がなければ何も除かずdiagnosticも出さない。
+- receiver除外後のvisible parameter順を保持する。positional-only parameterを通常Parameterとして出し、visible positional-onlyが一件以上なら最後の直後にstandalone `/`を入れる。
+- positional-or-keywordは通常Parameter。var-positionalは`*name: T`。keyword-onlyがあり、その前にvisible var-positionalがなければ最初のkeyword-only直前にstandalone `*`を入れる。keyword-only自体は通常Parameter。var-keywordは`**name: T`。
+- token separatorはexact `, `。空parameterは括弧内empty bytes。
+
+examples:
+
+```text
+    method f(a: A, /, b: B = …, *args: C, d: D, **kwargs: E) : R
+    method g(*, flag: bool = …) : None
+```
+
+### user-derived text escape
+
+`escape_plantuml_text`はNFC stringのoriginal code pointを左から一回だけ走査し、次のexact ASCII sequenceへ変換する。生成したbackslashを再escapeしない。
+
+| input code point/category | output bytes |
+| --- | --- |
+| `U+005C` backslash | `\\` |
+| `U+0022` double quote | `\"` |
+| `U+000A` LF | `\n` |
+| `U+000D` CR | `\r` |
+| `U+0009` TAB | `\t` |
+| other Unicode category `Cc`/`Cf`/`Cs`, `Zl`, `Zp` at `<= U+FFFF` | literal `\u` + uppercase 4-hex |
+| same categories at `> U+FFFF` | literal `\U` + uppercase 8-hex |
+| other code point | unchanged UTF-8 |
+
+- quoted package/class labelsへこのfunctionを適用する。
+- member/parameter/type lineはraw sourceを連結せず、Python identifier、closed type grammar、上記fixed punctuationだけから構築する。各Identifier segmentにも同escapeを適用する。
+- fixed note/legend/titleはconstant bytesで、escape inputにしない。
+- structural validatorはembedded LF、unescaped quote/backslash、`@`/`!` directive line、unknown line shapeを拒否する。
+
+### arrows / visual dedupe
 
 | relation | line |
 | --- | --- |
@@ -889,6 +1062,8 @@ exact line order:
 | import dependency | `<source module> ..> <target module> : import依存` |
 
 internal targetだけを描く。external/unknownはdiagram nodeを捏造しない。
+
+visual keyは`(relation_kind_rank, rendered_source_alias, rendered_target_alias, fixed_label UTF-8)`。同じvisual keyへ複数semantic relationが対応する場合、relation sort key最小をrepresentativeとしてexact line一件だけをemitする。異なるkind/labelは同じendpointでも別line。semantic JSON relation arrayとmanifest countをvisual dedupeで変更しない。
 
 ### example
 
@@ -901,6 +1076,7 @@ hide empty members
 package "domain.order" as M_1111111111111111111111111111111111111111111111111111111111111111 {
   class "Order" as C_2222222222222222222222222222222222222222222222222222222222222222 {
     field id : int
+    method find(key: str, /, *, required: bool = …) : domain.order.Order | None
   }
 }
 legend right
@@ -997,19 +1173,28 @@ existing `.github/workflows/ci.yml` の`validate` jobを保持し、同fileへ�
 
 | case | required contents / purpose |
 | --- | --- |
-| `whole` | `src/domain/base.py`, `order.py`, `service.py`; nested class、class/instance field、sync/async method、property、decorator、inheritance/composition/typed/import relation、external ref |
-| `targeted` | upstream/downstream chain、module-only node、unrelated class、depth frontier、multiple target union |
-| `not_applicable` | tracked READMEだけ、`.py` 0件 |
-| `zero_class` | valid `.py` with function/constants only |
+| `whole` | `src/domain/base.py`, `order.py`, `service.py`; nested class、class/instance field、sync/async method、property、decorator、inheritance/composition/typed/import relation、explicit external ref。unresolved warningは含めずstderr empty |
+| `canonical_model` | duplicate field/property/method collector occurrence、conflicting annotation、same identity relation on different lines、same visual arrow via multiple members、tuple singleton/multi、nested union、Literal/Annotated/unsupported type、all parameter kinds/defaults、NFC Unicode identifier。quote/backslash/control/format/surrogate escapeはpure renderer unit vectorで別途固定 |
+| `targeted` | upstream/downstream chain、module-only node、unrelated class、depth frontier、multiple target union。depth limit以外のwarningを含めずstderr empty |
+| `not_applicable` | tracked READMEだけ、`.py` 0件。target 0件whole mode専用 |
+| `target_absence` | subcase `no_python`と`zero_class`; path/module/class explicit targetが未解決でpayload_unavailableになる |
+| `zero_class` | valid `.py` with function/constants only。whole modeはcomplete、missing class targetは`target_absence`で検証 |
 | `partial_safe` | valid class file + syntax broken file + safe seed outside broken file |
-| `failed_seed` | requested path/module/classがparse failureまたはmissing |
-| `module_collision` | `src/pkg/item.py` と `pkg/item.py` が同じ`pkg.item`になる |
+| `failed_seed` | requested path/module/classがparse failureまたはmissing。file diagnostic + target diagnostic cardinalityを検証 |
+| `module_collision` | `src/pkg/item.py` と `pkg/item.py` が同じ`pkg.item`。collision group diagnostic一件、requested targetなら追加target diagnostic |
 | `class_collision` | 同じmodule/qualified nameのClassDef二件 + unrelated safe class。wholeはpartial_safe、colliding class targetはpayload_unavailable |
+| `diagnostics` | unresolved reference occurrence、unsupported class scope、unsupported annotation site、conflicting fieldを固定し、code/cardinality/context/sortをgolden化 |
 | `security` | top-level marker write、raise、secret literal、build/plugin-like filename。importされればtestがfailする |
-| `unicode_paths` | NFC valid path、test-generated normalization collision |
-| `unborn_many_changes` | unborn HEAD、1,001 non-Python untracked files。snapshotはchanged-path logicへ触れない |
+| `unicode_paths` | NFC valid path、test-generated normalization collision（`CSV-SOURCE-004`） |
+| `unborn_many_changes` | true unborn branch、valid classを持つ一つのPython file、1,001 non-Python untracked files。snapshotはchanged-path logicへ触れずcomplete/exit0、`head_commit=null` |
 
-- outside symlinkはfixtureに固定せずtest runtimeでtemporary outside fileへ作る。
+runtime-generated repository cases:
+
+- `invalid_head_existing_ref`: symbolic branch refは存在するがobjectがmissing/non-commitで`HEAD^{commit}`が失敗。`CSV-REPO-002` run fatal。
+- `invalid_head_refname`: `symbolic-ref`が`refs/heads/*`形でも`check-ref-format`に失敗するrefを返すtest double。`show-ref`へ進まず`CSV-REPO-002` run fatal。
+- `invalid_head_detached`: detached HEADがcommitへ解決不能。`CSV-REPO-002` run fatal。
+- `non_utf8_path`: POSIX bytes path `b"bad-\\xff.py"`をLinuxでactual Git enumerationし`CSV-SOURCE-003` fatalを確認する。filesystemが作成を拒否するlaneでも`GitRepositoryReader` integration fakeが同じNUL-delimited bytesを返し、skipなしでclassificationを検証する。
+- outside symlinkはtemporary outside fileへ作る。
 - 500/501/600 classは`tests/helpers/fixture_repo.py::write_generated_classes(count)`でdeterministically生成し、巨大source fixtureをcommitしない。
 - unreadable fileはplatform capabilityをprobeし、root権限等で再現不能なら`SourceFileReader` fault-injection integration caseで同じclassificationを必ず検証する。acceptanceはparse/unsafe pathでpublication matrixを担保する。
 
@@ -1025,7 +1210,26 @@ tests/golden/python_snapshot/
     stderr.jsonl
     published-files.txt
     exit-code.txt
+  canonical_model/
+    python.snapshot.semantic.json
+    python.snapshot.puml
+    run-manifest.json
+    stderr.jsonl
+    ...
   targeted/
+    python.snapshot.semantic.json
+    python.snapshot.puml
+    run-manifest.json
+    stdout.run-summary.jsonl
+    stderr.jsonl            # exact empty file: depth frontierだけ
+    ...
+  target_absence-no-python/
+    run-manifest.json
+    stdout.domain-result.jsonl
+    stderr.jsonl
+    published-files.txt
+    exit-code.txt
+  target_absence-zero-class/
     ...
   partial_safe/
     ...
@@ -1041,9 +1245,24 @@ tests/golden/python_snapshot/
     stderr.jsonl
     published-files.txt
     exit-code.txt
+  invalid_head/
+    stdout.run-summary.jsonl
+    stderr.jsonl
+    published-files.txt     # empty
+    exit-code.txt
+  non_utf8_path/
+    stdout.run-summary.jsonl
+    stderr.jsonl            # path/domain/symbol/line are null
+    published-files.txt     # empty
+    exit-code.txt
+  diagnostics/
+    stderr.jsonl
+    diagnostics.manifest-array.json
+    diagnostics.semantic-array.json
 ```
 
-- goldenはtool version、fake HEAD/fingerprint/hashをfixture helperでdeterministicに固定する。
+- goldenはtool version、fake valid HEAD/fingerprint/hashをfixture helperでdeterministicに固定する。unbornは`head_commit=null`を固定する。
+- fatal goldenはoutput directoryが存在しないこともassertし、`published-files.txt`をzero-byte fileとして保持する。
 - production serializerからgoldenを生成するupdate modeをtest pass中に自動実行しない。
 - `tests/helpers/golden.py`のexplicit `--update-golden <case>`はdeveloper commandとして許すが、変更後にnormal test、schema validation、human diff reviewを必須とする。
 
@@ -1051,13 +1270,13 @@ tests/golden/python_snapshot/
 
 | Test ID | file | principal assertion |
 | --- | --- | --- |
-| I01-AT-001 | `tests/acceptance/python/test_snapshot_cli.py` | whole/zero-class exact files, schema, hashes, exit0 |
-| I01-AT-002 | `tests/integration/python/test_targeted_snapshot.py` | target grammar/resolution/union/depth/direction/frontier |
-| I01-AT-003 | `tests/acceptance/python/test_snapshot_failures.py` | not_applicable/partial_safe/payload_unavailable/symlink/collision/drift matrix |
-| I01-AT-004 | `tests/security/test_python_static_boundary.py` | execution/Git mutation/redaction/path/traceback negative scan |
-| I01-AT-005 | `tests/acceptance/python/test_snapshot_determinism.py` | two-run exact bytes and cross-lane contract fixtures |
+| I01-AT-001 | `tests/acceptance/python/test_snapshot_cli.py` + `tests/unit/python/test_{model,type_expr,semantic_json,plantuml}.py` | whole/zero-class/canonical-model exact files、member/relation sort+dedupe winner、type grammar、PlantUML parameter/escape/visual dedupe、schema/hash、exit0 |
+| I01-AT-002 | `tests/integration/python/test_targeted_snapshot.py` | target grammar/resolution/union/depth/direction/frontier、whole-only not_applicable、explicit target absence payload_unavailable、depth-only stderr empty |
+| I01-AT-003 | `tests/acceptance/python/test_snapshot_failures.py` + `tests/integration/source/test_git_repository.py` | not_applicable/partial_safe/payload_unavailable/symlink/collision/drift、valid/unborn/invalid HEAD、non-UTF-8 fatal matrix |
+| I01-AT-004 | `tests/security/test_python_static_boundary.py` | execution/Git mutation/redaction/path/traceback/raw-byte/synthetic-path/PlantUML injection negative scan |
+| I01-AT-005 | `tests/acceptance/python/test_snapshot_determinism.py` | two-run exact bytes、collector/filesystem order permutation、winner/cardinality/visual dedupe、cross-lane fixtures |
 | I01-AT-006 | `tests/acceptance/python/test_snapshot_budget.py` | 500/501/override/invalid and no diff gate |
-| I01-AT-007 | `tests/acceptance/python/test_stdout_selector.py` | closed selector/exact bytes/result/summary/stderr/publication |
+| I01-AT-007 | `tests/acceptance/python/test_stdout_selector.py` + `tests/unit/core/test_diagnostics.py` | closed selector/exact bytes/result/summary、diagnostic code/cardinality/context/sort、depth frontier no diagnostic |
 | I01-AT-008 | `tests/packaging/test_distribution.py` + CI jobs | build/offline install/runtime deps/toolchains |
 | I01-AT-009 | `tests/contracts/test_json_schemas.py`, `test_scope_exclusions.py` | schema/golden/docs/runtime and scope/dependency exclusions |
 
@@ -1096,6 +1315,10 @@ unit testはpure rule、integrationはtemporary repository/ports、acceptanceは
 | Python type表現がliteralを漏らす | structural SafeTypeExpressionRenderer、Literal/Annotated redaction、secret fixture。`ast.unparse`を直接public outputへ使わない。 |
 | targeted upstreamがparse failureで欠落 | 全candidate parse index、failed coverage、partial_safe/payload_unavailable distinction。 |
 | module root ambiguity | longest root + collision fail-closed。silent precedenceなし。 |
+| explicit targetがabsenceへ隠れる | NotApplicable constructorをwhole-only predicateへ限定し、target_absence goldensで固定。 |
+| unbornとinvalid/corrupt HEADを混同 | rev-parse/symbolic-ref/check-ref-format/show-refのread-only return matrix。invalid refnameとmissing valid refを分離し、stderr文字列判定なし。 |
+| non-UTF-8 pathの架空identity | SourceView前run fatal、context path null、raw/hash/surrogateを公開しない。 |
+| semantic/visual canonicalization drift | enum rank、occurrence winner、type grammar、diagnostic cardinality、PlantUML visual keyをunit/goldenで固定。 |
 | JSON self-hash recursion | manifestは自身をartifact descriptorへ含めない。 |
 | atomic publicationがfile単位でpartial | destination absent + same-parent directory rename。 |
 | minimum/latest AST差 | v1 grammarを3.12 feature_versionへ固定し、3.14 runtime laneでsame goldenを通す。 |
