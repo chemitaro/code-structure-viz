@@ -64,9 +64,11 @@ Epic-level integration does not create separate contract-only/source-only/render
 - Run all Issue acceptance commands in topological order and full suite after each phase.
 - P1 で Python diff の endpoint matrixに `--to working-tree` without `--from` を含め、start HEAD anchor、frozen digest、candidate、merge-base、resolution methodを検証する。
 - P1/P2/P3 で Python、SQLAlchemy、Next の both-present/both-absent/before-only/after-only/analysis-failure truth tableを同一 expected status/publication/exitで検証する。
-- implicit changed-path 1,001 overrun は exit 1・diagnostic only・final manifestなし、entity 501 overrun は affected domain incomplete・exit 3・affected payloadなし・safe manifest/sibling保持とする。valid overrides は requested/resolved/countをmanifestへ残す。
+- implicit changed-path 1,001 overrun は exit 1・diagnostic only・final manifestなし、entity 501 overrun は affected domain `incomplete_kind: payload_unavailable`・exit 3・affected payloadなし・safe manifest/sibling保持とする。valid overrides は requested/resolved/countをmanifestへ残す。
 - FileChangeSet hunkがold/new ranges、status、content-independent IDだけを持ち、raw patch/context/source/comment/literal/secret/absolute pathを全 channelへ出さないことをnegative fixtureで確認する。
 - domain 無指定 run は各 domain semantic JSON/PlantUML と `code-structure-viz.run-manifest/v1` だけを公開し、`code-structure-viz.semantic/v1` の `domain: all` payloadを公開しない。
+- 全phaseで `--stdout SELECTOR` を高々1回の `manifest | DOMAIN:FORMAT` に限定し、invalid/duplicate/unselected/unrequestedはsource acquisition前exit 2・stdout空・Artifactなし、availableはexact bytes、unavailableは`stdout-result/v1` 1行、selectorなしは`run-summary/v1` 1行、diagnosticはstderrだけであることをtable-drivenに検証する。
+- `partial_safe` はsafe incomplete JSON+PlantUML+manifestを保持し、`payload_unavailable`だけaffected payloadを除外してsafe manifestと健全siblingを保持することを、snapshot local failure、diff side failure、global/unsafe failure、entity overrunで横断検証する。
 - Confirm output determinism, no overwrite, Git state preservation, source execution traps, partial success retention, minimum/latest CI, core-only/Next-enabled offline install and license inventory.
 - Confirm exactly one Epic, seven vertical Issues, unchanged acyclic DAG, full Requirement→Design→Plan→acceptance→test trace, and no product HTML command/schema/UI/publication.
 

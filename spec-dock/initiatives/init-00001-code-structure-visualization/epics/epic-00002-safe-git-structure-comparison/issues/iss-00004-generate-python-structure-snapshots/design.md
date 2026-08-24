@@ -28,12 +28,13 @@ package_sequence_key: "ISSUE-01"
 | I01-DES-004 | I01-REQ-004 | ArtifactPublisherがper-domain JSON/PlantUML/run manifestのstaging、collision、SHA-256、atomic publicationを所有する。 |
 | I01-DES-005 | I01-REQ-005 | core preflightとdomain-local entity budgetを別gateにし、incomplete publicationを型で表す。 |
 | I01-DES-006 | I01-REQ-006 | static execution trap、redaction、canonical ordering、same-input digest invariantをadapter entry/serializerで検証する。 |
+| I01-DES-007 | I01-REQ-007 | closed stdout selectorをsource acquisition前に検証し、publication後exact bytesまたはtyped unavailable resultをstderr diagnosticsと分離して出す。 |
 
 ## Current / Target
 
-### Current（verified baseline）
+### Current（canonical specification state）
 
-- exact verified current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` は本Issueのcanonical Requirement/Design/Plan、accepted ADR、interviewを含む。
+- 本 Issue の canonical state は stable scope ID と repository-relative Requirement/Design/Plan path、accepted ADR、interviewで識別する。採用・実装開始時に HEAD と configured upstream を再検証し、current commit SHA を本文へ固定しない。
 - production package、CLI、domain adapter、schema implementation、acceptance fixturesは未実装であり、以下のpath/symbolはすべてplannedである。
 - 本Designは親の横断contractをslice固有の構造へ具体化し、依存Issueのpublic contractを変更せずに後続sliceへ渡す。
 
@@ -62,13 +63,29 @@ package_sequence_key: "ISSUE-01"
 ### common command interface
 
 ```text
-code-structure-viz snapshot --repo PATH --output-dir PATH [--domain DOMAIN] [--target SELECTOR] [--format FORMAT] [--config PATH]
-code-structure-viz diff --repo PATH --output-dir PATH [--domain DOMAIN] [--from ENDPOINT] [--to ENDPOINT] [--format FORMAT] [--config PATH]
+code-structure-viz snapshot --repo PATH --output-dir PATH [--domain DOMAIN] [--target SELECTOR] [--format FORMAT] [--config PATH] [--stdout SELECTOR]
+code-structure-viz diff --repo PATH --output-dir PATH [--domain DOMAIN] [--from ENDPOINT] [--to ENDPOINT] [--format FORMAT] [--config PATH] [--stdout SELECTOR]
 ```
 
 - `--output-dir` は必須。writer は existing file を置換せず、全 payload を staging 後に公開する。
 - `--format` 未指定は semantic JSON と PlantUML。`--stdout` は output directory requirement を解除しない。
 - analysis behavior を environment variable で変更しない。環境は executable discovery と locale-independent process setup にだけ使う。
+
+### stdout selector and stream routing
+
+CLI parser は `--stdout` を optional single-value option として一度だけ受理し、closed grammar `manifest | DOMAIN:FORMAT` を `StdoutSelector` valueへ正規化する。domain/format の resolved selection が確定した直後、source acquisition より前に selector compatibility を検証する。boolean、path、alias、略記、大小文字違い、値省略、重複、未選択 domain、未要求 format は `UsageError` とし、source acquisition と publication の前に exit 2、stdout 空、Artifact 0件で終了する。`OutputTransaction` は開始しない。
+
+通常 publication 後、既存 CLI/application boundary 内の stdout emitter は次のいずれか一つだけを行う。新しい command または独立 architecture layer は追加しない。
+
+1. selector なしなら `run-summary/v1` を canonical JSON 1行として出す。
+2. selected Artifact が利用可能なら、公開 file を binary read して exact bytes を複製する。
+3. selected Artifact が利用不能なら、`RunOutcome`/`DomainOutcome` から `stdout-result/v1` 1行を構築する。
+
+stdout emitter は diagnostic renderer と分離し、diagnostic は stderr だけへ出す。exact-byte copy に summary、BOM、改行補正を加えない。`stdout-result/v1` は status と stable reason だけを参照し、source content、absolute path、secret を受け取る field を持たない。handled SIGINT は cleanup 完了後に `run_status: interrupted` を返せる場合だけ exit 130 の result line を出す。process を強制終了された場合の出力は契約外である。
+
+### snapshot path excludes comparison facilities
+
+command dispatch は `SnapshotSourceRequest` と `DiffSourceRequest` を型で分ける。snapshot branch は単一のrun-start `SourceView`だけを作り、`ComparisonEndpointResolver`、start-HEAD anchor、`FileChangeSet`、`ChangedPathAdmissionGate` を呼び出せない依存方向にする。CLI validation はdiff-only optionをsnapshot requestへ変換する前に拒否する。acceptance fixtureはimplicit base不在と1,001 non-domain changed pathsを同時に持つrepositoryでsnapshotが通常処理されること、diff-only option併用だけがexit 2になることを検証する。
 
 ### source interface
 
@@ -94,6 +111,16 @@ render_plantuml(DomainResult, VisualVocabulary) -> bytes
 ```
 
 この Issue が未使用の method は実装を強制しない。後続 slice が stable contract を additive に拡張する。
+
+### incomplete classes and publication
+
+`DomainOutcome` は `status` に加え、status が `incomplete` の場合だけ `incomplete_kind: partial_safe | payload_unavailable` と `payload_available` を持つ。
+
+- `partial_safe` は isolated failure set、safe subset、explicit coverage frontier、safe diagnostics、redaction pass、entity-budget pass、requested renderer passをすべて満たす場合だけ生成する。requested domain payload と manifest descriptor を同一 transaction で公開する。
+- `payload_unavailable` は safe subset不在、global acquisition/protocol/schema/security/unsafe-path failure、entity overrun、または diff side failureで生成する。affected payload descriptorは空とし、safe core manifestだけを許す。
+- all-domain `RunOutcome` はどちらもoverall `incomplete`/exit 3へ集約するが、`partial_safe` payloadと健全 siblingを捨てない。run-level fatalだけがfinal manifestを含む全stagingを破棄する。
+
+serializer と manifest builder は `incomplete_kind` と `payload_available` の整合を検証する。`partial_safe` なのにrequested descriptorが欠ける状態、`payload_unavailable` なのにaffected descriptorがある状態はinternal contract failureとしてpublication前に拒否する。
 
 ## data / failure
 
@@ -157,10 +184,11 @@ SourceViewはrepository-relative pathとcontent digestだけをdomain serializer
 | --- | --- | --- | --- |
 | I01-AT-001 | normal | tests/acceptance/python/test_snapshot_cli.py | uv run pytest tests/acceptance/python/test_snapshot_cli.py -q |
 | I01-AT-002 | boundary | tests/integration/python/test_targeted_snapshot.py | uv run pytest tests/integration/python/test_targeted_snapshot.py -q |
-| I01-AT-003 | negative | tests/acceptance/python/test_snapshot_failures.py | uv run pytest tests/acceptance/python/test_snapshot_failures.py -q |
+| I01-AT-003 | incomplete class matrix | tests/acceptance/python/test_snapshot_failures.py | partial_safe JSON+PlantUML+manifest、payload_unavailable manifest-only、coverage/diagnostic、exit 3 |
 | I01-AT-004 | security | tests/security/test_python_static_boundary.py | uv run pytest tests/security/test_python_static_boundary.py -q |
 | I01-AT-005 | determinism | tests/acceptance/python/test_snapshot_determinism.py | uv run pytest tests/acceptance/python/test_snapshot_determinism.py -q |
 | I01-AT-006 | entity budget / diff-only option rejection | tests/acceptance/python/test_snapshot_budget.py | uv run pytest tests/acceptance/python/test_snapshot_budget.py -q |
+| I01-AT-007 | stdout selector matrix | tests/acceptance/python/test_stdout_selector.py | selector grammar、exact bytes、unavailable result、summary、stderr、exit/publication |
 
 - unit testはdomain parser/matcher/serializerとcanonicalizationのpure functionを対象にする。
 - integration testはtemporary Git repositoryまたはimmutable source fixtureを使い、Git stateとsource bytesのbefore/afterを比較する。

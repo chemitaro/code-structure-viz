@@ -28,10 +28,11 @@ ID: "epic-00002"
 | EPIC-DES-004 | EPIC-REQ-004, EPIC-REQ-005 | run-level changed-path gate、domain-local entity gate、OutputTransaction、`run-manifest/v1`、status/exit aggregation を cross-Issue contract にする。 |
 | EPIC-DES-005 | EPIC-REQ-006 | Python package と optional Next workspace、two lockfiles、CI matrix を採用する。 |
 | EPIC-DES-006 | EPIC-REQ-008 | HTML/runtime/legacy/public plugin boundary を product architecture 外に置く。 |
+| EPIC-DES-007 | EPIC-REQ-005, EPIC-REQ-009 | incomplete classとstdout selector/stream routingをOutcome/CLI/OutputTransactionのshared contractとして実装可能にする。 |
 
 ## Current / Target
 
-Current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` は exactly one Epic と seven active vertical Issue nodes、および各 canonical R/D/P を含むが、production implementation は未着手である。Target は同じ one-Epic/seven-Issue DAG を維持しつつ、domain presence、budget outcomes、all-domain output、working-tree anchor、hunk safety、traceability を一意にした product plan とする。
+canonical specification tree は exactly one Epic と seven active vertical Issue nodes、および各 canonical R/D/P を含むが、production implementation は未着手である。current revision は採用・実装開始時に HEAD と configured upstream から再検証し、本文へ固定しない。Target は同じ one-Epic/seven-Issue DAG を維持しつつ、domain presence、budget outcomes、all-domain output、working-tree anchor、hunk safety、traceability を一意にした product plan とする。
 
 ```plantuml
 @startuml
@@ -102,7 +103,19 @@ tests/                 unit/integration/acceptance/security/packaging
 
 - `DomainResult` は `complete`/`not_applicable`/`incomplete` の discriminated union で、`None`/empty ambiguity を許さない。
 - `RunOutcome` は domain aggregation より前に usage、interrupt、run-level fatal changed-path admission を処理する。valid core run 後の domain incomplete/entity overrun は exit 3。
-- `OutputTransaction` は selected domain payload と aggregate manifest を staging するが、run-level fatal では final manifest も公開しない。domain-local incomplete では affected payload を除外し、safe manifest と successful siblings を公開する。
+- `OutputTransaction` は selected domain payload と aggregate manifest を staging するが、run-level fatal では final manifest も公開しない。domain-local `partial_safe` はsafe incomplete payloadとmanifestを公開し、`payload_unavailable`だけaffected payloadを除外してsafe manifestとsuccessful siblingsを公開する。
+
+### stdout selector and stream routing
+
+CLI parser は `--stdout` を optional single-value option として一度だけ受理し、closed grammar `manifest | DOMAIN:FORMAT` を `StdoutSelector` valueへ正規化する。domain/format の resolved selection が確定した直後、source acquisition より前に selector compatibility を検証する。boolean、path、alias、略記、大小文字違い、値省略、重複、未選択 domain、未要求 format は `UsageError` とし、source acquisition と publication の前に exit 2、stdout 空、Artifact 0件で終了する。`OutputTransaction` は開始しない。
+
+通常 publication 後、既存 CLI/application boundary 内の stdout emitter は次のいずれか一つだけを行う。新しい command または独立 architecture layer は追加しない。
+
+1. selector なしなら `run-summary/v1` を canonical JSON 1行として出す。
+2. selected Artifact が利用可能なら、公開 file を binary read して exact bytes を複製する。
+3. selected Artifact が利用不能なら、`RunOutcome`/`DomainOutcome` から `stdout-result/v1` 1行を構築する。
+
+stdout emitter は diagnostic renderer と分離し、diagnostic は stderr だけへ出す。exact-byte copy に summary、BOM、改行補正を加えない。`stdout-result/v1` は status と stable reason だけを参照し、source content、absolute path、secret を受け取る field を持たない。handled SIGINT は cleanup 完了後に `run_status: interrupted` を返せる場合だけ exit 130 の result line を出す。process を強制終了された場合の出力は契約外である。
 
 ### diff domain presence truth table
 
@@ -114,7 +127,7 @@ tests/                 unit/integration/acceptance/security/packaging
 | present、解析成功 | present、解析成功 | `complete` | 二つの実 snapshot を比較する。 | domain semantic diff JSON、domain-specific PlantUML、run manifest descriptor を公開する。 | exit 0。 |
 | present、解析成功 | absent | `complete` | 実 before snapshot と internal canonical empty-side snapshot を比較し、before の全 entity/member/relation を `removed` とする。 | domain semantic diff JSON、domain-specific PlantUML、run manifest descriptor を公開する。empty-side 自体は公開しない。 | exit 0。 |
 | absent | present、解析成功 | `complete` | internal canonical empty-side snapshot と実 after snapshot を比較し、after の全 entity/member/relation を `added` とする。 | domain semantic diff JSON、domain-specific PlantUML、run manifest descriptor を公開する。empty-side 自体は公開しない。 | exit 0。 |
-| target evidence あり | いずれかの side で source acquisition または static analysis 失敗 | `incomplete` | added/removed を推測しない。 | affected domain の semantic JSON と PlantUMLを公開しない。safe diagnostic、coverage、side provenance を run manifest に記録し、成功 sibling Artifact は保持する。 | single-domain exit 3。all-domain overall `incomplete`、exit 3。 |
+| target evidence あり | いずれかの side で source acquisition または static analysis 失敗 | `incomplete` / `payload_unavailable` | added/removed を推測しない。 | affected domain の semantic JSON と PlantUMLを公開しない。run manifest に `incomplete_kind: "payload_unavailable"`、`payload_available: false`、safe diagnostic、coverage、side provenance を記録し、成功 sibling Artifact は保持する。 | single-domain exit 3。all-domain overall `incomplete`、exit 3。 |
 
 internal canonical empty-side snapshot の canonical bytes は、key sort・UTF-8・余分な空白なしで直列化した `code-structure-viz.empty-side/v1` document とする。document は `domain`、`document_kind: "internal-diff-side"`、空の `entities`/`members`/`relations` だけを持ち、endpoint や side 名を含めない。同じ domain と contract version では常に同じ SHA-256 になる。manifest の該当 side descriptor は `kind: "canonical-empty-side"`、schema、domain、SHA-256 を記録する。この internal document を成功した standalone snapshot、empty semantic Artifact、empty diagram として公開してはならない。
 
@@ -129,7 +142,7 @@ provenance は requested `from`/`to`、frozen working-tree SHA-256 digest、star
 | budget | gate / default | override なしの超過 | publication | valid override |
 | --- | --- | --- | --- | --- |
 | implicit changed paths | domain comparison 前の run-level admission gate。default 1,000。implicit comparison の actual changed-path count に適用する。 | fatal analysis/environment、exit 1。domain analysis を開始しない。safe machine-readable diagnostic を stderr に出す。 | semantic JSON、PlantUML、final run manifest を一切公開せず、staging を破棄する。 | positive integer の `--max-changed-paths N` で通常処理を許可する。公開 manifest に requested value、resolved value、actual changed-path count、config source を記録する。 |
-| entities per diagram | domain semantic result 生成後かつ renderer/publication 前の domain-local gate。default 500。 | affected domain を `incomplete` とし、単一 domain run も all-domain run も exit 3。切り捨てない。 | affected domain の semantic JSON と PlantUML は公開しない。successful sibling Artifact と aggregate run manifest は保持し、diagnostic、requested/resolved limit、actual entity count を記録する。 | positive integer の `--max-entities N` で通常公開を許可し、manifest に requested value、resolved value、actual entity count、config source を記録する。 |
+| entities per diagram | domain semantic result 生成後かつ renderer/publication 前の domain-local gate。default 500。 | affected domain を `incomplete_kind: payload_unavailable` とし、単一 domain run も all-domain run も exit 3。切り捨てない。 | affected domain の semantic JSON と PlantUML は公開しない。successful sibling Artifact と aggregate run manifest は保持し、diagnostic、requested/resolved limit、actual entity count を記録する。 | positive integer の `--max-entities N` で通常公開を許可し、manifest に requested value、resolved value、actual entity count、config source を記録する。 |
 
 override の zero、negative、non-integer、型不正、unknown config key は usage/config error、exit 2 であり、Artifact を公開しない。depth の default は upstream/downstream 各 1 で、depth は graph context を制限するだけで budget 超過の truncation 手段にはしない。
 
@@ -138,6 +151,16 @@ override の zero、negative、non-integer、型不正、unknown config key は 
 `FileChangeSet` の hunk evidence は metadata だけである。各 hunk は repository-relative old/new path、file status、old/new start line、old/new line count、同一 file 内の ordinal、および content-independent な `hunk_id` を持てる。`hunk_id` はこれら metadata の canonical tuple から SHA-256 で生成し、source bytes を入力にしない。
 
 raw patch line、context line、added/deleted line、source body、comment、literal、secret、absolute path を memory-owned model、semantic JSON、PlantUML、manifest、diagnostic、logへ保持または公開してはならない。Git diff streamを range extraction に読む実装は、metadata を抽出した時点で本文を破棄し、serializer へ本文型を渡さない。negative acceptance test は secret-like patch、comment、literal、absolute temporary path が全 output channel に存在しないことを確認する。
+
+### incomplete classes and publication
+
+`DomainOutcome` は `status` に加え、status が `incomplete` の場合だけ `incomplete_kind: partial_safe | payload_unavailable` と `payload_available` を持つ。
+
+- `partial_safe` は isolated failure set、safe subset、explicit coverage frontier、safe diagnostics、redaction pass、entity-budget pass、requested renderer passをすべて満たす場合だけ生成する。requested domain payload と manifest descriptor を同一 transaction で公開する。
+- `payload_unavailable` は safe subset不在、global acquisition/protocol/schema/security/unsafe-path failure、entity overrun、または diff side failureで生成する。affected payload descriptorは空とし、safe core manifestだけを許す。
+- all-domain `RunOutcome` はどちらもoverall `incomplete`/exit 3へ集約するが、`partial_safe` payloadと健全 siblingを捨てない。run-level fatalだけがfinal manifestを含む全stagingを破棄する。
+
+serializer と manifest builder は `incomplete_kind` と `payload_available` の整合を検証する。`partial_safe` なのにrequested descriptorが欠ける状態、`payload_unavailable` なのにaffected descriptorがある状態はinternal contract failureとしてpublication前に拒否する。
 
 ### all-domain output boundary
 

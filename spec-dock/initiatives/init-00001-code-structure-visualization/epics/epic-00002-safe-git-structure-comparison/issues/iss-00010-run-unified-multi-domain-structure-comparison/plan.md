@@ -37,37 +37,38 @@ CLI request -> safe source acquisition -> domain semantic analysis
 ## 順序・依存
 
 - declared dependency: ISSUE-04, ISSUE-06。
-- execution order: I07-PLAN-001 → 002 → 003 → 005 → 004 → 007 → 006。per-domain result ownershipとrun/domain failure boundaryを先に固定する。
+- execution order: I07-PLAN-001 → 002 → 003 → 005 → 004 → 007 → 008 → 006。per-domain result ownershipとrun/domain failure boundaryを先に固定する。
 - multi-domain fixtures、manifest schema examples、package/CI lanesはdependency contract verification後に並行できる。
 - stop condition: per-domain-only semantic output、aggregate run-manifest/v1、cross-domain presence/budget matrix、partial success、endpoint/hunk safety、atomicity、platform/package traceが成立するまでInitiativeをcompleteにしない。
 
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
-| I07-PLAN-001 | I07-AT-001〜011のrun/domain status、file set、manifest、exit fixturesを先に固定する。 | I07-DES-001 |
-| I07-PLAN-002 | one run endpoint/freeze/metadata-only FileChangeSet/changed-path admissionとdomain registry fan-outを実装する。 | I07-DES-002 |
+| I07-PLAN-001 | I07-AT-001〜014のrun/domain status、file set、manifest、stdout、snapshot/diff source separation、exit fixturesを先に固定する。 | I07-DES-001 |
+| I07-PLAN-002 | snapshotのsingle SourceView pathとdiffのendpoint/freeze/metadata-only FileChangeSet/changed-path pathを分離し、domain registryへfan-outする。 | I07-DES-002 |
 | I07-PLAN-003 | domain semanticsを統合せずDomainResult/summary/empty-side provenanceをaggregateする。 | I07-DES-003 |
 | I07-PLAN-004 | per-domain semantic JSON/PlantUMLとrun-manifest/v1だけを構築する。 | I07-DES-004 |
 | I07-PLAN-005 | presence truth table、run/domain budgets、partial success、0/1/2/3/130をRunOutcomeへ接続する。 | I07-DES-005 |
 | I07-PLAN-006 | static/read-only/redaction/determinism/platform/package/offline/full trace regressionを完了する。 | I07-DES-006 |
 | I07-PLAN-007 | OutputTransactionのrun-fatal全破棄とdomain-incomplete safe subset publicationを実装する。 | I07-DES-007 |
+| I07-PLAN-008 | stdout selector grammar、stream routing、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを実装・検証する。 | I07-DES-008 |
 
 ## 実装step
 
 ### I07-PLAN-001 acceptance-first contract
 
-- per-domain output/no-domain-all、partial failure、applicability、run atomicity、exit codes、platform/package、cross-domain presence/budget、working-tree anchor、hunk redaction fixturesを先に固定する。
+- per-domain output/no-domain-all、partial failure、applicability、run atomicity、exit codes、stdout selector、snapshot/diff source separation、platform/package、cross-domain presence/budget、working-tree anchor、hunk redaction fixturesを先に固定する。
 - each caseはstdout/stderr、published paths、manifest presence/schema/domain entries、digests、countsまでassertする。
 
 ### I07-PLAN-002 shared run source and domain fan-out
 
-planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` には未実装）:
+planned modules（canonical specification 時点では未実装。実装開始時に HEAD と configured upstream を再検証し、実在 path/symbol と差異があれば Design/Plan を先に更新する）:
 
 - `src/code_structure_viz/application/run.py::RunCoordinator`
 - `application/domain_registry.py::FirstPartyDomainRegistry`
 - `core/outcome.py::RunOutcome`
 - ISSUE-02 endpoint/freezer/metadata-only FileChangeSet/changed-path public contracts
 
-one start-HEAD anchor/frozen digest/selected candidate/merge-base/resolution methodを全domain provenanceへ共有し、domain順をpython→sqlalchemy→nextでdeterministicにする。
+snapshotはsingle frozen SourceView digestだけを共有し、comparison resolver、FileChangeSet、ChangedPathAdmissionGateを呼ばない。diffはone start HEAD anchor/frozen digest/selected candidate/merge-base/resolution methodを全domain provenanceへ共有する。domain順はpython→sqlalchemy→nextでdeterministicにする。
 
 ### I07-PLAN-003 domain-owned result aggregation
 
@@ -78,18 +79,24 @@ one start-HEAD anchor/frozen digest/selected candidate/merge-base/resolution met
 ### I07-PLAN-005 outcome and budget aggregation
 
 - both-absent/before-only/after-only/side-failure combinationsからdomain/overall statusを算出する。
-- changed-path overrunはfan-out前exit 1/final manifestなし。entity overrunはaffected domain incomplete/exit 3/affected payloadなし/sibling+manifest保持。valid overridesはrequested/resolved/count、invalid valuesはexit 2。
+- diffのimplicit 1,001 changed paths overrunはChangedPathAdmissionGateでfan-out前exit 1/final manifestなし。snapshotはChangedPathAdmissionGateを実行せず、同じworking treeの1,001 changed pathsに影響されない。entity overrunは`payload_unavailable`/exit 3/affected payloadなし/sibling+manifest保持。isolated snapshot failureでsafe subsetを証明できる場合は`partial_safe` payload+manifestを保持する。valid overridesはrequested/resolved/count、invalid valuesはexit 2。
 
 ### I07-PLAN-004 per-domain output and run manifest
 
-- complete domainごとにown semantic JSON/PlantUMLを参照し、`code-structure-viz.run-manifest/v1`を構築する。
+- complete domainと`partial_safe` domainごとにown semantic JSON/PlantUMLを参照し、`payload_unavailable`/not_applicable domainはpayload descriptorなしで`code-structure-viz.run-manifest/v1`を構築する。
 - manifest root/domain summaryにentities/members/relations/matchingを置かず、safe graph countsだけを置く。`code-structure-viz.semantic/v1`の`domain: all`を生成しない。
 
 ### I07-PLAN-007 output transaction
 
 - `artifacts/manifest.py::AggregateManifestBuilder`、`transaction.py::OutputTransaction`、`cli/exit_codes.py`をplanned targetとする。
-- run fatalは全stagingを破棄しfinal manifestなし。domain incompleteはaffected payloadを除外しsuccessful siblings+safe manifestをfingerprint/collision/integrity後にpublishする。
+- run fatalは全stagingを破棄しfinal manifestなし。`partial_safe` domainはsafe incomplete payloadをsuccessful siblings+safe manifestとpublishし、`payload_unavailable` domainだけaffected payloadを除外する。fingerprint/collision/integrity check後にatomic publishする。
 - SIGINTはstaging cleanup、exit 130、existing output/target repositoryを変更しない。
+
+### I07-PLAN-008 stdout selector and stream contract
+
+- CLI parserは`--stdout`を高々1回だけ受理し、`manifest | DOMAIN:FORMAT`のclosed grammar、selected domain、requested formatをsource acquisition前に検証する。invalid/duplicate/unselected/unrequestedはexit 2、stdout空、Artifactなしとする。
+- publication後はavailable selectorの公開fileをexact bytesで複製する。unavailable selectorは`stdout-result/v1` 1行、selectorなしは`run-summary/v1` 1行をcanonical key orderで出す。diagnosticはstderrだけへ出し、`--output-dir` publicationを維持する。
+- complete、not_applicable、partial_safe、payload_unavailable、run fatal、handled interrupt、manifest unavailableをtable-driven fixtureで固定し、source/secret/absolute pathがstdoutへ漏れないことをnegative scanする。
 
 ### I07-PLAN-006 hardening and completion handoff
 
@@ -111,6 +118,9 @@ one start-HEAD anchor/frozen digest/selected candidate/merge-base/resolution met
 | I07-AT-009 | two-level budget matrix | tests/acceptance/test_multi_domain_budget_matrix.py | uv run pytest tests/acceptance/test_multi_domain_budget_matrix.py -q |
 | I07-AT-010 | shared working-tree anchor | tests/acceptance/test_multi_domain_working_tree_anchor.py | uv run pytest tests/acceptance/test_multi_domain_working_tree_anchor.py -q |
 | I07-AT-011 | hunk/output redaction | tests/security/test_multi_domain_hunk_redaction.py | uv run pytest tests/security/test_multi_domain_hunk_redaction.py -q |
+| I07-AT-012 | stdout selector matrix | tests/acceptance/multi_domain/test_stdout_selector.py | uv run pytest tests/acceptance/multi_domain/test_stdout_selector.py -q |
+| I07-AT-013 | snapshot excludes base/FileChangeSet/ChangedPathAdmissionGate, ignores base-unavailable and 1,001 changed paths, and rejects diff-only options | tests/acceptance/test_multi_domain_snapshot_source_separation.py | uv run pytest tests/acceptance/test_multi_domain_snapshot_source_separation.py -q |
+| I07-AT-014 | partial_safe payload retention and payload_unavailable exclusion | tests/acceptance/test_multi_domain_incomplete_kinds.py | uv run pytest tests/acceptance/test_multi_domain_incomplete_kinds.py -q |
 
 ### issue gate commands
 
@@ -126,6 +136,9 @@ uv run pytest tests/acceptance/test_multi_domain_presence_matrix.py -q
 uv run pytest tests/acceptance/test_multi_domain_budget_matrix.py -q
 uv run pytest tests/acceptance/test_multi_domain_working_tree_anchor.py -q
 uv run pytest tests/security/test_multi_domain_hunk_redaction.py -q
+uv run pytest tests/acceptance/multi_domain/test_stdout_selector.py -q
+uv run pytest tests/acceptance/test_multi_domain_snapshot_source_separation.py -q
+uv run pytest tests/acceptance/test_multi_domain_incomplete_kinds.py -q
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
@@ -136,12 +149,13 @@ uv run pytest
 | Requirement | Design | Plan | acceptance | test |
 | --- | --- | --- | --- | --- |
 | I07-REQ-001 | I07-DES-001 | I07-PLAN-001 | I07-AC-001, I07-AC-002, I07-AC-003 | I07-AT-001, I07-AT-002, I07-AT-003 |
-| I07-REQ-002 | I07-DES-002 | I07-PLAN-002 | I07-AC-004, I07-AC-010, I07-AC-011 | I07-AT-004, I07-AT-010, I07-AT-011 |
+| I07-REQ-002 | I07-DES-002 | I07-PLAN-002 | I07-AC-004, I07-AC-010, I07-AC-011, I07-AC-013 | I07-AT-004, I07-AT-010, I07-AT-011, I07-AT-013 |
 | I07-REQ-003 | I07-DES-003 | I07-PLAN-003 | I07-AC-001, I07-AC-008 | I07-AT-001, I07-AT-008 |
 | I07-REQ-004 | I07-DES-004 | I07-PLAN-004 | I07-AC-001, I07-AC-002, I07-AC-003 | I07-AT-001, I07-AT-002, I07-AT-003 |
-| I07-REQ-005 | I07-DES-005 | I07-PLAN-005 | I07-AC-002, I07-AC-004, I07-AC-005, I07-AC-008, I07-AC-009 | I07-AT-002, I07-AT-004, I07-AT-005, I07-AT-008, I07-AT-009 |
+| I07-REQ-005 | I07-DES-005 | I07-PLAN-005 | I07-AC-002, I07-AC-004, I07-AC-005, I07-AC-008, I07-AC-009, I07-AC-014 | I07-AT-002, I07-AT-004, I07-AT-005, I07-AT-008, I07-AT-009, I07-AT-014 |
 | I07-REQ-006 | I07-DES-006 | I07-PLAN-006 | I07-AC-006, I07-AC-007, I07-AC-011 | I07-AT-006, I07-AT-007, I07-AT-011 |
 | I07-REQ-007 | I07-DES-007 | I07-PLAN-007 | I07-AC-002, I07-AC-004, I07-AC-005, I07-AC-009 | I07-AT-002, I07-AT-004, I07-AT-005, I07-AT-009 |
+| I07-REQ-008 | I07-DES-008 | I07-PLAN-008 | I07-AC-012 | I07-AT-012 |
 
 ### regression boundary
 
@@ -161,7 +175,7 @@ uv run pytest
 
 ## exit / handoff
 
-- I07-AC-001〜I07-AC-011 の acceptance evidence が揃う。
+- I07-AC-001〜I07-AC-014 の acceptance evidence が揃う。
 - Requirement→Design→Plan→test trace に gap がない。
 - planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。

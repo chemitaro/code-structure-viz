@@ -37,7 +37,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 ## 順序・依存
 
 - declared dependency: ISSUE-02, ISSUE-03。
-- execution order: I04-PLAN-001 → 002 → 003 → 005 → 004 → 006。shared endpoint/hunk/budget contractを再実装せずconsumer contract testで固定する。
+- execution order: I04-PLAN-001 → 002 → 003 → 005 → 004 → 007 → 006。shared endpoint/hunk/budget contractを再実装せずconsumer contract testで固定する。
 - truth-table fixture、row golden、matching、security scanはdependency contract verification後に並行できる。
 - stop condition: row deltas/ghosts、domain presence、start-HEAD anchor、metadata-only hunk、two-level budget、union impactが成立するまでintermediate releaseを宣言しない。
 
@@ -49,6 +49,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 | I04-PLAN-004 | side/table/row/matching/hunkを分離したJSON、ghost PlantUML、manifest publicationを接続する。 | I04-DES-004 |
 | I04-PLAN-005 | side failure、changed-path/entity budgets、ambiguityをstatus/exit/publicationへ写像する。 | I04-DES-005 |
 | I04-PLAN-006 | DB/import/Git/redaction/determinism/atomicity regressionとintermediate release gateを完了する。 | I04-DES-006 |
+| I04-PLAN-007 | stdout selector grammar、stream routing、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを実装・検証する。 | I04-DES-007 |
 
 ## 実装step
 
@@ -58,7 +59,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 ### I04-PLAN-002 shared comparison source
 
-planned domain modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` には未実装）:
+planned domain modules（canonical specification 時点では未実装。実装開始時に HEAD と configured upstream を再検証し、実在 path/symbol と差異があれば Design/Plan を先に更新する）:
 
 - `src/code_structure_viz/adapters/sqlalchemy/differ.py::SqlAlchemySemanticDiffer`
 - `matcher.py::SqlAlchemyMoveMatcher`
@@ -66,7 +67,7 @@ planned domain modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e
 - `diff_renderer.py`
 - `semantic/impact.py` domain graph extension
 
-ISSUE-02のendpoint/freezer/FileChangeSet/changed-path gateをcontract fixturesでconsumeし、`--to working-tree` onlyのstart HEAD anchorを変更しない。
+ISSUE-02のendpoint/freezer/FileChangeSet/changed-path gateをcontract fixturesでconsumeし、`--to working-tree` onlyのrequested endpoint、frozen digest、start HEAD anchor、selected candidate、merge-base、resolution methodをそのままprovenanceへ記録する。
 
 ### I04-PLAN-003 ER presence and semantic diff
 
@@ -83,6 +84,12 @@ ISSUE-02のendpoint/freezer/FileChangeSet/changed-path gateをcontract fixtures�
 
 - side descriptors/digests、metadata-only FileChangeSet、table/row deltas、redacted before/after、matching、impactをseparate fieldsへserializeする。
 - ghost visual vocabulary、no overwrite、fingerprint/integrity gate、final SHA-256を実装する。
+
+### I04-PLAN-007 stdout selector and stream contract
+
+- CLI parserは`--stdout`を高々1回だけ受理し、`manifest | DOMAIN:FORMAT`のclosed grammar、selected domain、requested formatをsource acquisition前に検証する。invalid/duplicate/unselected/unrequestedはexit 2、stdout空、Artifactなしとする。
+- publication後はavailable selectorの公開fileをexact bytesで複製する。unavailable selectorは`stdout-result/v1` 1行、selectorなしは`run-summary/v1` 1行をcanonical key orderで出す。diagnosticはstderrだけへ出し、`--output-dir` publicationを維持する。
+- complete、not_applicable、payload_unavailable、run fatal、handled interrupt、manifest unavailableをtable-driven fixtureで固定し、side failureが`partial_safe`にならないこととsource/secret/absolute pathがstdoutへ漏れないことをnegative scanする。
 
 ### I04-PLAN-006 hardening and intermediate handoff
 
@@ -102,6 +109,8 @@ ISSUE-02のendpoint/freezer/FileChangeSet/changed-path gateをcontract fixtures�
 | I04-AT-008 | working-tree anchor | tests/acceptance/sqlalchemy/test_working_tree_anchor.py | uv run pytest tests/acceptance/sqlalchemy/test_working_tree_anchor.py -q |
 | I04-AT-009 | hunk safety | tests/security/test_sqlalchemy_diff_hunk_redaction.py | uv run pytest tests/security/test_sqlalchemy_diff_hunk_redaction.py -q |
 | I04-AT-010 | entity budget publication | tests/acceptance/sqlalchemy/test_diff_entity_budget.py | uv run pytest tests/acceptance/sqlalchemy/test_diff_entity_budget.py -q |
+| I04-AT-011 | sqlalchemy diff 1,001-path fatal and valid override provenance | tests/acceptance/sqlalchemy/test_diff_changed_path_admission.py | uv run pytest tests/acceptance/sqlalchemy/test_diff_changed_path_admission.py -q |
+| I04-AT-012 | stdout selector matrix | tests/acceptance/sqlalchemy/test_stdout_selector.py | uv run pytest tests/acceptance/sqlalchemy/test_stdout_selector.py -q |
 
 ### issue gate commands
 
@@ -116,6 +125,8 @@ uv run pytest tests/acceptance/sqlalchemy/test_diff_domain_presence.py -q
 uv run pytest tests/acceptance/sqlalchemy/test_working_tree_anchor.py -q
 uv run pytest tests/security/test_sqlalchemy_diff_hunk_redaction.py -q
 uv run pytest tests/acceptance/sqlalchemy/test_diff_entity_budget.py -q
+uv run pytest tests/acceptance/sqlalchemy/test_diff_changed_path_admission.py -q
+uv run pytest tests/acceptance/sqlalchemy/test_stdout_selector.py -q
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
@@ -126,11 +137,12 @@ uv run pytest
 | Requirement | Design | Plan | acceptance | test |
 | --- | --- | --- | --- | --- |
 | I04-REQ-001 | I04-DES-001 | I04-PLAN-001 | I04-AC-001, I04-AC-002 | I04-AT-001, I04-AT-002 |
-| I04-REQ-002 | I04-DES-002 | I04-PLAN-002 | I04-AC-008, I04-AC-009 | I04-AT-008, I04-AT-009 |
+| I04-REQ-002 | I04-DES-002 | I04-PLAN-002 | I04-AC-008, I04-AC-009, I04-AC-011 | I04-AT-008, I04-AT-009, I04-AT-011 |
 | I04-REQ-003 | I04-DES-003 | I04-PLAN-003 | I04-AC-001, I04-AC-002, I04-AC-003, I04-AC-006, I04-AC-007 | I04-AT-001, I04-AT-002, I04-AT-003, I04-AT-006, I04-AT-007 |
 | I04-REQ-004 | I04-DES-004 | I04-PLAN-004 | I04-AC-001, I04-AC-002, I04-AC-005, I04-AC-009 | I04-AT-001, I04-AT-002, I04-AT-005, I04-AT-009 |
 | I04-REQ-005 | I04-DES-005 | I04-PLAN-005 | I04-AC-003, I04-AC-004, I04-AC-007, I04-AC-010 | I04-AT-003, I04-AT-004, I04-AT-007, I04-AT-010 |
 | I04-REQ-006 | I04-DES-006 | I04-PLAN-006 | I04-AC-005, I04-AC-009, I04-AC-010 | I04-AT-005, I04-AT-009, I04-AT-010 |
+| I04-REQ-007 | I04-DES-007 | I04-PLAN-007 | I04-AC-012 | I04-AT-012 |
 
 ### regression boundary
 
@@ -150,7 +162,7 @@ uv run pytest
 
 ## exit / handoff
 
-- I04-AC-001〜I04-AC-010 の acceptance evidence が揃う。
+- I04-AC-001〜I04-AC-012 の acceptance evidence が揃う。
 - Requirement→Design→Plan→test trace に gap がない。
 - planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。

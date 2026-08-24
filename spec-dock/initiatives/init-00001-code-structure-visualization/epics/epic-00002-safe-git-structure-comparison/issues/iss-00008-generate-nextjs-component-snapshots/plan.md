@@ -37,7 +37,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 ## 順序・依存
 
 - declared dependency: ISSUE-01。
-- execution order: I05-PLAN-001 → 002 → 003 → 005 → 004 → 006。Node optionality/applicabilityをprocess起動前に固定する。
+- execution order: I05-PLAN-001 → 002 → 003 → 005 → 004 → 007 → 006。Node optionality/applicabilityをprocess起動前に固定する。
 - TypeScript fixtures、protocol golden、renderer golden、security trapsはcontract固定後に並行できる。
 - stop condition: adapter protocol、static semantics、not_applicable/incomplete、entity budget、optional Node、determinismが成立するまでNext diffへ進まない。
 
@@ -49,6 +49,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 | I05-PLAN-004 | adapter response validation、semantic JSON、PlantUML、manifest publicationを接続する。 | I05-DES-004 |
 | I05-PLAN-005 | dynamic unknown、protocol/static failure、entity gateをstatus/exit/publicationへ接続する。 | I05-DES-005 |
 | I05-PLAN-006 | build非実行、redaction、determinism、Node optionality、lock/license/offline/CIを完了する。 | I05-DES-006 |
+| I05-PLAN-007 | stdout selector grammar、stream routing、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを実装・検証する。 | I05-DES-007 |
 
 ## 実装step
 
@@ -58,7 +59,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 ### I05-PLAN-002 bridge and adapter boundary
 
-planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` には未実装）:
+planned modules（canonical specification 時点では未実装。実装開始時に HEAD と configured upstream を再検証し、実在 path/symbol と差異があれば Design/Plan を先に更新する）:
 
 - `src/code_structure_viz/adapters/next/bridge.py::NextAdapterBridge`
 - `src/code_structure_viz/adapters/next/protocol.py`
@@ -82,6 +83,12 @@ static target evidence不在ではNode processを起動しない。stdin/stdout 
 - validated adapter responseをdomain `next` semantic/v1へmapし、Next PlantUML、coverage/diagnostic、manifest descriptorをOutputTransactionへ接続する。
 - literal/source/absolute path/protocol noiseをpublish前にrejectする。
 
+### I05-PLAN-007 stdout selector and stream contract
+
+- CLI parserは`--stdout`を高々1回だけ受理し、`manifest | DOMAIN:FORMAT`のclosed grammar、selected domain、requested formatをsource acquisition前に検証する。invalid/duplicate/unselected/unrequestedはexit 2、stdout空、Artifactなしとする。
+- publication後はavailable selectorの公開fileをexact bytesで複製する。unavailable selectorは`stdout-result/v1` 1行、selectorなしは`run-summary/v1` 1行をcanonical key orderで出す。diagnosticはstderrだけへ出し、`--output-dir` publicationを維持する。
+- complete、not_applicable、partial_safe、payload_unavailable、run fatal、handled interrupt、manifest unavailableをtable-driven fixtureで固定し、source/secret/absolute pathがstdoutへ漏れないことをnegative scanする。
+
 ### I05-PLAN-006 hardening and handoff
 
 - build/config/plugin/application execution traps、same-input adapter/output equality、core-only install without Node、Next-enabled offline npm/lock/license、Node 22/latest CIを通してISSUE-06へhand offする。
@@ -93,10 +100,11 @@ static target evidence不在ではNode processを起動しない。stdin/stdout 
 | I05-AT-001 | Next snapshot | tests/acceptance/next/test_snapshot_cli.py | uv run pytest tests/acceptance/next/test_snapshot_cli.py -q |
 | I05-AT-002 | adapter protocol | tests/contracts/next/test_adapter_protocol.py | uv run pytest tests/contracts/next/test_adapter_protocol.py -q |
 | I05-AT-003 | safe subset | adapters/next/test/safe-subset.test.ts | npm --prefix adapters/next test -- safe-subset |
-| I05-AT-004 | adapter failures | tests/acceptance/next/test_adapter_failures.py | uv run pytest tests/acceptance/next/test_adapter_failures.py -q |
+| I05-AT-004 | partial_safe/payload_unavailable adapter matrix | tests/acceptance/next/test_adapter_failures.py | uv run pytest tests/acceptance/next/test_adapter_failures.py -q |
 | I05-AT-005 | static/redaction | tests/security/test_next_static_boundary.py | uv run pytest tests/security/test_next_static_boundary.py -q |
 | I05-AT-006 | Node optionality | tests/acceptance/next/test_optionality.py | uv run pytest tests/acceptance/next/test_optionality.py -q |
 | I05-AT-007 | entity budget publication and diff-only option rejection | tests/acceptance/next/test_snapshot_budget.py | uv run pytest tests/acceptance/next/test_snapshot_budget.py -q |
+| I05-AT-008 | stdout selector matrix | tests/acceptance/next/test_stdout_selector.py | uv run pytest tests/acceptance/next/test_stdout_selector.py -q |
 
 ### issue gate commands
 
@@ -108,6 +116,7 @@ uv run pytest tests/acceptance/next/test_adapter_failures.py -q
 uv run pytest tests/security/test_next_static_boundary.py -q
 uv run pytest tests/acceptance/next/test_optionality.py -q
 uv run pytest tests/acceptance/next/test_snapshot_budget.py -q
+uv run pytest tests/acceptance/next/test_stdout_selector.py -q
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
@@ -123,6 +132,7 @@ uv run pytest
 | I05-REQ-004 | I05-DES-004 | I05-PLAN-004 | I05-AC-001, I05-AC-002 | I05-AT-001, I05-AT-002 |
 | I05-REQ-005 | I05-DES-005 | I05-PLAN-005 | I05-AC-003, I05-AC-004, I05-AC-007 | I05-AT-003, I05-AT-004, I05-AT-007 |
 | I05-REQ-006 | I05-DES-006 | I05-PLAN-006 | I05-AC-005, I05-AC-006 | I05-AT-005, I05-AT-006 |
+| I05-REQ-007 | I05-DES-007 | I05-PLAN-007 | I05-AC-008 | I05-AT-008 |
 
 ### regression boundary
 
@@ -142,7 +152,7 @@ uv run pytest
 
 ## exit / handoff
 
-- I05-AC-001〜I05-AC-007 の acceptance evidence が揃う。
+- I05-AC-001〜I05-AC-008 の acceptance evidence が揃う。
 - Requirement→Design→Plan→test trace に gap がない。
 - planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。

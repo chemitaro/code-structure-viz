@@ -37,7 +37,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 ## 順序・依存
 
 - declared dependency: なし。
-- execution order: I01-PLAN-001 → 002 → 003 → 005 → 004 → 006。acceptance fixtureとfailure/publication contractを先に固定し、entity gateをrenderer/publicationより前に置く。
+- execution order: I01-PLAN-001 → 002 → 003 → 005 → 004 → 007 → 006。acceptance fixtureとfailure/publication contractを先に固定し、entity gateをrenderer/publicationより前に置く。
 - fixture authoring、schema example、PlantUML golden、security trapはI01-PLAN-001後に並行できる。
 - stop condition: whole/targeted snapshot、not_applicable/incomplete、entity overrun publication、static safety、determinismがacceptanceで成立するまでdiff foundationへ進まない。
 
@@ -49,6 +49,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 | I01-PLAN-004 | per-domain semantic JSON、PlantUML、safe run manifest、atomic no-overwrite publicationを接続する。 | I01-DES-004 |
 | I01-PLAN-005 | not_applicable/incompleteとdefault 500 entity gate、valid/invalid override、publication/exitを実装する。 | I01-DES-005 |
 | I01-PLAN-006 | static execution trap、redaction、determinism、lock/license/offline/minimum/latest regressionを完了する。 | I01-DES-006 |
+| I01-PLAN-007 | stdout selector grammar、stream routing、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを実装・検証する。 | I01-DES-007 |
 
 ## 実装step
 
@@ -59,7 +60,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 ### I01-PLAN-002 application and source boundary
 
-planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` には未実装）:
+planned modules（canonical specification 時点では未実装。実装開始時に HEAD と configured upstream を再検証し、実在 path/symbol と差異があれば Design/Plan を先に更新する）:
 
 - `pyproject.toml`、`uv.lock`
 - `src/code_structure_viz/cli/main.py::main`
@@ -87,6 +88,12 @@ planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` に�
 - `src/code_structure_viz/adapters/python/renderer.py`、semantic serializer、manifest builderを一つのOutputTransactionへ接続する。
 - staging → collision/integrity check → publishの順で、existing fileを上書きしない。pathはoutput-dir relative、digestはfinal bytes基準。
 
+### I01-PLAN-007 stdout selector and stream contract
+
+- CLI parserは`--stdout`を高々1回だけ受理し、`manifest | DOMAIN:FORMAT`のclosed grammar、selected domain、requested formatをsource acquisition前に検証する。invalid/duplicate/unselected/unrequestedはexit 2、stdout空、Artifactなしとする。
+- publication後はavailable selectorの公開fileをexact bytesで複製する。unavailable selectorは`stdout-result/v1` 1行、selectorなしは`run-summary/v1` 1行をcanonical key orderで出す。diagnosticはstderrだけへ出し、`--output-dir` publicationを維持する。
+- complete、not_applicable、partial_safe、payload_unavailable、run fatal、handled interrupt、manifest unavailableをtable-driven fixtureで固定し、source/secret/absolute pathがstdoutへ漏れないことをnegative scanする。
+
 ### I01-PLAN-006 hardening and handoff
 
 - import/build/plugin trap、secret/literal/absolute-path scan、same-input byte equality、core-only offline install、license inventory、Python/Git minimum/latest CIを実行する。
@@ -98,10 +105,11 @@ planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` に�
 | --- | --- | --- | --- |
 | I01-AT-001 | whole repository Python snapshot | tests/acceptance/python/test_snapshot_cli.py | uv run pytest tests/acceptance/python/test_snapshot_cli.py -q |
 | I01-AT-002 | target and traversal | tests/integration/python/test_targeted_snapshot.py | uv run pytest tests/integration/python/test_targeted_snapshot.py -q |
-| I01-AT-003 | parse/read failure | tests/acceptance/python/test_snapshot_failures.py | uv run pytest tests/acceptance/python/test_snapshot_failures.py -q |
+| I01-AT-003 | partial_safe/payload_unavailable snapshot matrix | tests/acceptance/python/test_snapshot_failures.py | uv run pytest tests/acceptance/python/test_snapshot_failures.py -q |
 | I01-AT-004 | static/redaction safety | tests/security/test_python_static_boundary.py | uv run pytest tests/security/test_python_static_boundary.py -q |
 | I01-AT-005 | determinism | tests/acceptance/python/test_snapshot_determinism.py | uv run pytest tests/acceptance/python/test_snapshot_determinism.py -q |
 | I01-AT-006 | entity budget publication and diff-only option rejection | tests/acceptance/python/test_snapshot_budget.py | uv run pytest tests/acceptance/python/test_snapshot_budget.py -q |
+| I01-AT-007 | stdout selector matrix | tests/acceptance/python/test_stdout_selector.py | uv run pytest tests/acceptance/python/test_stdout_selector.py -q |
 
 ### issue gate commands
 
@@ -112,6 +120,7 @@ uv run pytest tests/acceptance/python/test_snapshot_failures.py -q
 uv run pytest tests/security/test_python_static_boundary.py -q
 uv run pytest tests/acceptance/python/test_snapshot_determinism.py -q
 uv run pytest tests/acceptance/python/test_snapshot_budget.py -q
+uv run pytest tests/acceptance/python/test_stdout_selector.py -q
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
@@ -127,6 +136,7 @@ uv run pytest
 | I01-REQ-004 | I01-DES-004 | I01-PLAN-004 | I01-AC-001, I01-AC-005 | I01-AT-001, I01-AT-005 |
 | I01-REQ-005 | I01-DES-005 | I01-PLAN-005 | I01-AC-003, I01-AC-006 | I01-AT-003, I01-AT-006 |
 | I01-REQ-006 | I01-DES-006 | I01-PLAN-006 | I01-AC-004, I01-AC-005 | I01-AT-004, I01-AT-005 |
+| I01-REQ-007 | I01-DES-007 | I01-PLAN-007 | I01-AC-007 | I01-AT-007 |
 
 ### regression boundary
 
@@ -146,7 +156,7 @@ uv run pytest
 
 ## exit / handoff
 
-- I01-AC-001〜I01-AC-006 の acceptance evidence が揃う。
+- I01-AC-001〜I01-AC-007 の acceptance evidence が揃う。
 - Requirement→Design→Plan→test trace に gap がない。
 - planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。

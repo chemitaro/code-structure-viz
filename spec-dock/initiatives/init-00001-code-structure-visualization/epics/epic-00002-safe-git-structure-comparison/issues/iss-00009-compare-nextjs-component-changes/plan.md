@@ -37,7 +37,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 ## 順序・依存
 
 - declared dependency: ISSUE-02, ISSUE-05。
-- execution order: I06-PLAN-001 → 002 → 003 → 005 → 004 → 006。shared endpoint/hunk/budget contractとadapter protocolをconsumer fixturesで先に固定する。
+- execution order: I06-PLAN-001 → 002 → 003 → 005 → 004 → 007 → 006。shared endpoint/hunk/budget contractとadapter protocolをconsumer fixturesで先に固定する。
 - presence/matching/impact/renderer/security fixturesはdependency contract verification後に並行できる。
 - stop condition: Next presence truth table、start-HEAD anchor、metadata-only hunk、two-level budget、static semantic diff/unknownが成立するまでall-domainへhand offしない。
 
@@ -49,6 +49,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 | I06-PLAN-004 | side/adapter/semantic/hunkを分離したJSON、PlantUML、manifest publicationを接続する。 | I06-DES-004 |
 | I06-PLAN-005 | side failure、changed-path/entity budgets、ambiguity/unknownをstatus/exit/publicationへ写像する。 | I06-DES-005 |
 | I06-PLAN-006 | build非実行、Git/hunk/source redaction、determinism、Node/package/CI regressionを完了する。 | I06-DES-006 |
+| I06-PLAN-007 | stdout selector grammar、stream routing、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを実装・検証する。 | I06-DES-007 |
 
 ## 実装step
 
@@ -58,7 +59,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 ### I06-PLAN-002 shared source and adapter
 
-planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` には未実装）:
+planned modules（canonical specification 時点では未実装。実装開始時に HEAD と configured upstream を再検証し、実在 path/symbol と差異があれば Design/Plan を先に更新する）:
 
 - `adapters/next/src/diff.ts::diffNextSnapshots`
 - `adapters/next/src/matcher.ts::matchMovedComponents`
@@ -66,7 +67,7 @@ planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` に�
 - `src/code_structure_viz/adapters/next/diff_bridge.py`
 - `src/code_structure_viz/semantic/impact.py` Next relation extension
 
-ISSUE-02 endpoint/freezer/FileChangeSet/changed-path gateとISSUE-05 protocolをconsumeし、`--to working-tree` onlyのstart HEAD anchorを変更しない。
+ISSUE-02 endpoint/freezer/FileChangeSet/changed-path gateとISSUE-05 protocolをconsumeし、`--to working-tree` onlyのrequested endpoint、frozen digest、start HEAD anchor、selected candidate、merge-base、resolution methodをそのままprovenanceへ記録する。
 
 ### I06-PLAN-003 Next presence and semantic diff
 
@@ -83,6 +84,12 @@ ISSUE-02 endpoint/freezer/FileChangeSet/changed-path gateとISSUE-05 protocolを
 
 - side/adapter descriptors、metadata-only FileChangeSet、semantic changes、impact、matching、coverageをseparate fieldsへserializeする。
 - source/raw patch lines/comment/literal/secret/absolute pathをbridge/adapter/Artifact/logへ渡さない。
+
+### I06-PLAN-007 stdout selector and stream contract
+
+- CLI parserは`--stdout`を高々1回だけ受理し、`manifest | DOMAIN:FORMAT`のclosed grammar、selected domain、requested formatをsource acquisition前に検証する。invalid/duplicate/unselected/unrequestedはexit 2、stdout空、Artifactなしとする。
+- publication後はavailable selectorの公開fileをexact bytesで複製する。unavailable selectorは`stdout-result/v1` 1行、selectorなしは`run-summary/v1` 1行をcanonical key orderで出す。diagnosticはstderrだけへ出し、`--output-dir` publicationを維持する。
+- complete、not_applicable、payload_unavailable、run fatal、handled interrupt、manifest unavailableをtable-driven fixtureで固定し、side failureが`partial_safe`にならないこととsource/secret/absolute pathがstdoutへ漏れないことをnegative scanする。
 
 ### I06-PLAN-006 hardening and handoff
 
@@ -102,6 +109,8 @@ ISSUE-02 endpoint/freezer/FileChangeSet/changed-path gateとISSUE-05 protocolを
 | I06-AT-008 | working-tree anchor | tests/acceptance/next/test_working_tree_anchor.py | uv run pytest tests/acceptance/next/test_working_tree_anchor.py -q |
 | I06-AT-009 | hunk safety | tests/security/test_next_diff_hunk_redaction.py | uv run pytest tests/security/test_next_diff_hunk_redaction.py -q |
 | I06-AT-010 | entity budget publication | tests/acceptance/next/test_diff_entity_budget.py | uv run pytest tests/acceptance/next/test_diff_entity_budget.py -q |
+| I06-AT-011 | next diff 1,001-path fatal and valid override provenance | tests/acceptance/next/test_diff_changed_path_admission.py | uv run pytest tests/acceptance/next/test_diff_changed_path_admission.py -q |
+| I06-AT-012 | stdout selector matrix | tests/acceptance/next/test_stdout_selector.py | uv run pytest tests/acceptance/next/test_stdout_selector.py -q |
 
 ### issue gate commands
 
@@ -116,6 +125,8 @@ uv run pytest tests/acceptance/next/test_diff_domain_presence.py -q
 uv run pytest tests/acceptance/next/test_working_tree_anchor.py -q
 uv run pytest tests/security/test_next_diff_hunk_redaction.py -q
 uv run pytest tests/acceptance/next/test_diff_entity_budget.py -q
+uv run pytest tests/acceptance/next/test_diff_changed_path_admission.py -q
+uv run pytest tests/acceptance/next/test_stdout_selector.py -q
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
@@ -126,11 +137,12 @@ uv run pytest
 | Requirement | Design | Plan | acceptance | test |
 | --- | --- | --- | --- | --- |
 | I06-REQ-001 | I06-DES-001 | I06-PLAN-001 | I06-AC-001, I06-AC-002 | I06-AT-001, I06-AT-002 |
-| I06-REQ-002 | I06-DES-002 | I06-PLAN-002 | I06-AC-008, I06-AC-009 | I06-AT-008, I06-AT-009 |
+| I06-REQ-002 | I06-DES-002 | I06-PLAN-002 | I06-AC-008, I06-AC-009, I06-AC-011 | I06-AT-008, I06-AT-009, I06-AT-011 |
 | I06-REQ-003 | I06-DES-003 | I06-PLAN-003 | I06-AC-001, I06-AC-002, I06-AC-003, I06-AC-005, I06-AC-006, I06-AC-007 | I06-AT-001, I06-AT-002, I06-AT-003, I06-AT-005, I06-AT-006, I06-AT-007 |
 | I06-REQ-004 | I06-DES-004 | I06-PLAN-004 | I06-AC-001, I06-AC-005, I06-AC-009 | I06-AT-001, I06-AT-005, I06-AT-009 |
 | I06-REQ-005 | I06-DES-005 | I06-PLAN-005 | I06-AC-003, I06-AC-004, I06-AC-007, I06-AC-010 | I06-AT-003, I06-AT-004, I06-AT-007, I06-AT-010 |
 | I06-REQ-006 | I06-DES-006 | I06-PLAN-006 | I06-AC-006, I06-AC-009, I06-AC-010 | I06-AT-006, I06-AT-009, I06-AT-010 |
+| I06-REQ-007 | I06-DES-007 | I06-PLAN-007 | I06-AC-012 | I06-AT-012 |
 
 ### regression boundary
 
@@ -150,7 +162,7 @@ uv run pytest
 
 ## exit / handoff
 
-- I06-AC-001〜I06-AC-010 の acceptance evidence が揃う。
+- I06-AC-001〜I06-AC-012 の acceptance evidence が揃う。
 - Requirement→Design→Plan→test trace に gap がない。
 - planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。

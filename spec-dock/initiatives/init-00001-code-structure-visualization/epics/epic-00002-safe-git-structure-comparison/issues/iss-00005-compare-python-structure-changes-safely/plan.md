@@ -37,7 +37,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 ## 順序・依存
 
 - declared dependency: ISSUE-01。
-- execution order: I02-PLAN-001 → 002 → 007 → 003 → 005 → 004 → 006。endpoint/freezeとmetadata-only hunkをsemantic comparison前に固定する。
+- execution order: I02-PLAN-001 → 002 → 007 → 003 → 005 → 004 → 008 → 006。endpoint/freezeとmetadata-only hunkをsemantic comparison前に固定する。
 - fixture authoring、endpoint matrix、empty-side golden、hunk redaction、renderer goldenはI02-PLAN-001後に並行できる。
 - stop condition: all endpoint combinations、five-row domain presence、two-level budget、metadata-only hunk、union impact、matching、read-only Gitがacceptanceで成立するまでconsumer diff sliceへhand offしない。
 
@@ -50,6 +50,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 | I02-PLAN-005 | run-level changed-path gateとdomain-local entity gateをexit/publication matrixへ接続する。 | I02-DES-005 |
 | I02-PLAN-006 | read-only/static/redaction/determinism/atomicity/CI/package regressionを完了する。 | I02-DES-006 |
 | I02-PLAN-007 | HunkMetadata parser/value/serializerをrange/status/content-independent IDだけに限定しnegative testを通す。 | I02-DES-007 |
+| I02-PLAN-008 | stdout selector grammar、stream routing、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを実装・検証する。 | I02-DES-008 |
 
 ## 実装step
 
@@ -60,14 +61,14 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 ### I02-PLAN-002 endpoint and immutable source
 
-planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` には未実装）:
+planned modules（canonical specification 時点では未実装。実装開始時に HEAD と configured upstream を再検証し、実在 path/symbol と差異があれば Design/Plan を先に更新する）:
 
 - `src/code_structure_viz/source/endpoints.py::ComparisonEndpointResolver`
 - `src/code_structure_viz/source/freezer.py::WorkingTreeFreezer`
 - `src/code_structure_viz/source/git_repository.py::ReadOnlyGitRepository`
 - `src/code_structure_viz/source/source_view.py::SourceView`
 
-`--to working-tree` onlyではfreezeとstart HEAD解決を同じrun-start boundaryで行い、candidate priority、merge-base、resolution methodをprovenanceへ記録する。auto fetch/checkout/fallbackは禁止する。
+`--to working-tree` onlyではfreezeとstart HEAD anchor解決を同じrun-start boundaryで行い、requested endpoint、frozen working-tree digest、start HEAD anchor、selected candidate、merge-base、resolution methodをprovenanceへ記録する。auto fetch/checkout/fallbackは禁止する。
 
 ### I02-PLAN-007 metadata-only FileChangeSet
 
@@ -91,6 +92,12 @@ planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` に�
 - side descriptors/digests、metadata-only FileChangeSet、SemanticChangeSet、seed、union impact、matching evidenceを別fieldでserializeする。
 - staging/collision/fingerprint/integrity gate後にpublishし、run fatalでは全stagingを破棄、domain incompleteではsafe manifestのみpublishする。
 
+### I02-PLAN-008 stdout selector and stream contract
+
+- CLI parserは`--stdout`を高々1回だけ受理し、`manifest | DOMAIN:FORMAT`のclosed grammar、selected domain、requested formatをsource acquisition前に検証する。invalid/duplicate/unselected/unrequestedはexit 2、stdout空、Artifactなしとする。
+- publication後はavailable selectorの公開fileをexact bytesで複製する。unavailable selectorは`stdout-result/v1` 1行、selectorなしは`run-summary/v1` 1行をcanonical key orderで出す。diagnosticはstderrだけへ出し、`--output-dir` publicationを維持する。
+- complete、not_applicable、payload_unavailable、run fatal、handled interrupt、manifest unavailableをtable-driven fixtureで固定し、side failureが`partial_safe`にならないこととsource/secret/absolute pathがstdoutへ漏れないことをnegative scanする。
+
 ### I02-PLAN-006 hardening and handoff
 
 - read-only Git allowlist、refs/index/worktree byte equality、static execution trap、same-input output equality、minimum/latest/offline/license regressionを通す。
@@ -110,6 +117,7 @@ planned modules（current commit `867ee6929283dfc84711bce245b784d2b8e3e9e6` に�
 | I02-AT-008 | domain presence/empty-side | tests/acceptance/python/test_domain_presence_diff.py | uv run pytest tests/acceptance/python/test_domain_presence_diff.py -q |
 | I02-AT-009 | hunk redaction | tests/security/test_file_change_hunk_redaction.py | uv run pytest tests/security/test_file_change_hunk_redaction.py -q |
 | I02-AT-010 | entity budget publication | tests/acceptance/python/test_diff_entity_budget.py | uv run pytest tests/acceptance/python/test_diff_entity_budget.py -q |
+| I02-AT-011 | stdout selector matrix | tests/acceptance/python/test_stdout_selector.py | uv run pytest tests/acceptance/python/test_stdout_selector.py -q |
 
 ### issue gate commands
 
@@ -124,6 +132,7 @@ uv run pytest tests/acceptance/git/test_changed_path_budget.py -q
 uv run pytest tests/acceptance/python/test_domain_presence_diff.py -q
 uv run pytest tests/security/test_file_change_hunk_redaction.py -q
 uv run pytest tests/acceptance/python/test_diff_entity_budget.py -q
+uv run pytest tests/acceptance/python/test_stdout_selector.py -q
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
@@ -140,6 +149,7 @@ uv run pytest
 | I02-REQ-005 | I02-DES-005 | I02-PLAN-005 | I02-AC-003, I02-AC-007, I02-AC-008, I02-AC-010 | I02-AT-003, I02-AT-007, I02-AT-008, I02-AT-010 |
 | I02-REQ-006 | I02-DES-006 | I02-PLAN-006 | I02-AC-004, I02-AC-005, I02-AC-006, I02-AC-009 | I02-AT-004, I02-AT-005, I02-AT-006, I02-AT-009 |
 | I02-REQ-007 | I02-DES-007 | I02-PLAN-007 | I02-AC-007, I02-AC-009 | I02-AT-007, I02-AT-009 |
+| I02-REQ-008 | I02-DES-008 | I02-PLAN-008 | I02-AC-011 | I02-AT-011 |
 
 ### regression boundary
 
@@ -159,7 +169,7 @@ uv run pytest
 
 ## exit / handoff
 
-- I02-AC-001〜I02-AC-010 の acceptance evidence が揃う。
+- I02-AC-001〜I02-AC-011 の acceptance evidence が揃う。
 - Requirement→Design→Plan→test trace に gap がない。
 - planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。

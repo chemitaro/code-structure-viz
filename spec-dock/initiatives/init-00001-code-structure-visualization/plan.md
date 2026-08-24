@@ -22,7 +22,7 @@ exactly one Epic `epic-00002` を通じて CodeStructureViz の product spine �
 2. Python snapshot/diff を先行し、安全な core/source/Artifact spine を利用可能にする。
 3. SQLAlchemy snapshot/diff を追加し、Python+SQLAlchemy intermediate release gate を通す。
 4. Next snapshot/diff を optional first-party Node adapter として追加する。
-5. all-domain orchestration、domain presence truth table、two-level budget、per-domain-only semantic output、partial success、aggregate `run-manifest/v1`、platform/package gate を完成し Initiative を close する。
+5. all-domain orchestration、domain presence truth table、two-level budget、per-domain-only semantic output、partial_safe/payload_unavailable aggregation、aggregate `run-manifest/v1`、closed stdout selector、platform/package gate を完成し Initiative を close する。
 
 Initiative 配下の Epic は本 scope では `epic-00002` 一つだけ。product HTML report は将来の別 Epic 候補であり、本 Initiative に追加しない。
 
@@ -39,12 +39,12 @@ M2 と ISSUE-05 work は ISSUE-01 完了後に一部並行できるが、M2 rele
 
 ## 検証
 
-- Epic acceptance が `INIT-REQ-001`〜`INIT-REQ-008` と `INIT-AC-001`〜`INIT-AC-008` を trace する。
+- Epic acceptance が `INIT-REQ-001`〜`INIT-REQ-009` と `INIT-AC-001`〜`INIT-AC-009` を trace する。
 - exact one Epic invariant、seven Issue DAG acyclicity、verticality、intermediate/final release boundary を machine-checkable evidence で検査する。
 - M1 で Python diff の five-row domain presence truth table、canonical empty-side digest、`--to working-tree` start-HEAD anchor、metadata-only hunk negative test、changed-path/entity budget matrixを固定する。
-- M2 と M3 で SQLAlchemy/Next が shared endpoint/FileChangeSet contract を再利用し、片側不在を全 removed/added、解析 failure を incomplete とする同一 table-driven acceptance を通す。
-- M4 で三 domain の both-absent/before-only/after-only/failure を組み合わせ、per-domain semantic JSON/PlantUMLだけが生成され、aggregate は `code-structure-viz.run-manifest/v1` だけであることを検証する。
-- release ごとに static safety、Git immutability、source/secret/absolute-path/raw-hunk redaction、determinism、run-level changed-path gate、domain-local entity gate、partial failure、platform/package matrix を再実行する。
+- M2 と M3 で SQLAlchemy/Next が shared endpoint/FileChangeSet contract を再利用し、片側不在を全 removed/added、解析 failure を `incomplete_kind: payload_unavailable` とする同一 table-driven acceptance を通す。
+- M4 で三 domain の both-absent/before-only/after-only/failure を組み合わせ、per-domain semantic JSON/PlantUMLだけが生成され、aggregate は `code-structure-viz.run-manifest/v1` だけであることを検証する。`partial_safe` payloadは保持し、`payload_unavailable` payloadだけを除外する。
+- release ごとに static safety、Git immutability、source/secret/absolute-path/raw-hunk redaction、determinism、run-level changed-path gate、domain-local entity gate、partial failure、platform/package matrix を再実行する。全sliceで `--stdout SELECTOR` を高々1回の `manifest | DOMAIN:FORMAT` に限定し、invalid/duplicate/unselected/unrequestedのsource acquisition前exit 2・stdout空・Artifactなし、available exact bytes、unavailable `stdout-result/v1` 1行、selectorなし`run-summary/v1` 1行、diagnosticのstderr分離をtable-drivenに再実行する。
 - product R/D/P と CLI help/schema から HTML runtime output が除外されていることを scope scan する。
 
 ## rollback
