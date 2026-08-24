@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "type": "issue",
+  "id": "iss-00005",
+  "title": "Compare Python Structure Changes Safely",
+  "slug": "compare-python-structure-changes-safely",
+  "created_at": "2026-08-24T14:35:17+09:00",
+  "updated_at": "2026-08-24T14:40:50+09:00",
+  "parent_id": "epic-00002",
+  "initiative_id": "init-00001",
+  "epic_id": "epic-00002",
+  "_spec_dock": {
+    "managed": true,
+    "do_not_edit": true,
+    "edit_via": "spec-dock"
+  },
+  "github": {
+    "issue_number": 5,
+    "repo_owner": "chemitaro",
+    "repo_name": "code-structure-viz"
+  },
+  "depends_on": [
+    "iss-00004"
+  ]
+}

@@ -13,20 +13,46 @@ ID: "init-00001"
 詳細: [Scope Layering Guide](../../docs/authoring/scope-layering.md)
 
 ## 目標
-Initiative として達成する成果を記述する。
+
+exactly one Epic `epic-00002` を通じて CodeStructureViz の product spine と三 domain を段階的に成立させる。Initiative Plan は individual implementation task を再掲せず、投資順、milestone、全体 verification、見直し条件を管理する。
 
 ## 順序・依存
-Epic を進める順序、投資上の依存、並行可能な作業を記述する。
+
+1. `epic-00002` が cross-Issue contract、seven vertical slice、dependency DAG を確定する。
+2. Python snapshot/diff を先行し、安全な core/source/Artifact spine を利用可能にする。
+3. SQLAlchemy snapshot/diff を追加し、Python+SQLAlchemy intermediate release gate を通す。
+4. Next snapshot/diff を optional first-party Node adapter として追加する。
+5. all-domain orchestration、partial success、aggregate manifest、platform/package gate を完成し Initiative を close する。
+
+Initiative 配下の Epic は本 scope では `epic-00002` 一つだけ。product HTML report は将来の別 Epic 候補であり、本 Initiative に追加しない。
 
 ## 実装step
-成果を届ける Epic と主要なマイルストーンを記述する。
+
+| Initiative milestone | Owning Epic/Issue boundary | Exit evidence |
+| --- | --- | --- |
+| M1 Product spine + Python preview | epic-00002: ISSUE-01→ISSUE-02 | Python snapshot/diff、Git safety、semantic Artifact acceptance |
+| M2 Intermediate release | epic-00002: ISSUE-03→ISSUE-04 | Python+SQLAlchemy full acceptance、ER row diff、offline package gate |
+| M3 Next preview | epic-00002: ISSUE-05→ISSUE-06 | first-party adapter、Next snapshot/diff、optional Node gate |
+| M4 Initiative completion | epic-00002: ISSUE-07 | all-domain run、partial success、exit/manifest、minimum/latest CI |
+
+M2 と ISSUE-05 work は ISSUE-01 完了後に一部並行できるが、M2 release と M3 Next diff はそれぞれ declared dependency gate を越えるまで統合しない。
 
 ## 検証
-全体として成果を確認する方法を記述する。
+
+- Epic acceptance が `INIT-REQ-001`〜`INIT-REQ-008` と `INIT-AC-001`〜`INIT-AC-008` を trace する。
+- exact one Epic invariant、seven Issue DAG acyclicity、verticality、intermediate/final release boundary を package Artifact で検査する。
+- release ごとに static safety、Git immutability、redaction、determinism、budget、partial failure、platform/package matrix を再実行する。
+- product R/D/P と CLI help/schema から HTML runtime output が除外されていることを scope scan する。
 
 ## rollback
-問題時に戻す範囲と判断を記述する。
+
+- M1/M2/M3/M4 は release tag/Issue group 単位で rollback 可能にする。later adapter を戻しても earlier domain の schema/CLI を壊さない。
+- false success、安全性違反、secret leak は release stop 条件。affected adapter/default orchestration を無効化し、incomplete へ狭めて forward recovery する。
+- target repository/data migration は N/A。CodeStructureViz は read-only analyzer である。
 
 ## exit / handoff
-Epic への引き渡しと Initiative 完了条件を記述する。
 
+- Epic へは Initiative requirement、accepted ADR、milestone、scope exclusion を渡す。
+- M2 で intermediate release を記録するが Initiative を close しない。
+- M4 で Next/all-domain acceptance、one Epic completion、trace matrix、open question なし、package/CI gate を確認して Initiative completion とする。
+- implementation result と residual risk は canonical Initiative Report に記録し、本 Plan は execution log にしない。

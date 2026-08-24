@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="ja" data-plantuml-status="pending" data-plantuml-contract="2">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>epic-00002 Establish Safe Git Structure Comparison</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: #f3f6fb;
+      --surface: #ffffff;
+      --text: #182230;
+      --muted: #536273;
+      --border: #d8e0ea;
+      --accent: #175cd3;
+      --success: #067647;
+      --success-bg: #ecfdf3;
+      --error: #b42318;
+      --error-bg: #fef3f2;
+      --code-bg: #101828;
+      --code-text: #f2f4f7;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+      line-height: 1.75;
+    }
+
+    main {
+      width: min(100% - 24px, 960px);
+      margin: 0 auto;
+      padding: max(24px, env(safe-area-inset-top)) 0 max(48px, env(safe-area-inset-bottom));
+    }
+
+    header, section {
+      margin-top: 20px;
+      padding: 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 6px 24px rgb(16 24 40 / 8%);
+    }
+
+    header { margin-top: 0; }
+    h1, h2 { line-height: 1.4; }
+    h1 { margin: 0 0 12px; font-size: clamp(1.6rem, 5vw, 2.25rem); }
+    h2 { margin: 0 0 8px; font-size: clamp(1.2rem, 4vw, 1.5rem); }
+    p { margin: 8px 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .plantuml-status {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: var(--success-bg);
+      color: var(--success);
+      font-weight: 700;
+    }
+
+    .plantuml-status.error { background: var(--error-bg); color: var(--error); }
+    .plantuml-diagram {
+      position: relative;
+      min-height: 160px;
+      margin-top: 14px;
+      padding: 14px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #ffffff;
+      color: #182230;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .plantuml-diagram[data-zoom-ready="true"] { cursor: zoom-in; }
+    .plantuml-diagram[data-zoom-ready="true"]:focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    .diagram-zoom-hint {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--accent);
+      box-shadow: 0 2px 8px rgb(16 24 40 / 14%);
+      font-size: 0.78rem;
+      font-weight: 700;
+      pointer-events: none;
+    }
+
+    .plantuml-diagram svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 0 auto;
+    }
+
+    details { margin-top: 12px; }
+    summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+    pre {
+      margin: 10px 0 0;
+      padding: 14px;
+      overflow-x: auto;
+      border-radius: 10px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-size: 0.8rem;
+      line-height: 1.55;
+      white-space: pre;
+    }
+
+    .muted { color: var(--muted); }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    body.diagram-zoom-open { overflow: hidden; }
+
+    .diagram-zoom-dialog[hidden] { display: none !important; }
+    .diagram-zoom-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+      background: rgb(3 10 21 / 78%);
+    }
+
+    .diagram-zoom-panel {
+      display: flex;
+      flex-direction: column;
+      width: min(1800px, 100%);
+      height: min(1200px, 100%);
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+    }
+
+    .diagram-zoom-header {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      margin: 0;
+      padding: 6px 8px;
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      border-radius: 0;
+      background: var(--surface);
+      box-shadow: none;
+    }
+
+    .diagram-zoom-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .diagram-zoom-controls button {
+      display: inline-grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .diagram-zoom-controls button svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentcolor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .diagram-zoom-controls button:hover,
+    .diagram-zoom-controls button:focus-visible {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .diagram-zoom-controls button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .diagram-zoom-level {
+      min-width: 3.5rem;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+
+    #diagram-zoom-reset {
+      width: auto;
+      min-width: 58px;
+      padding-inline: 8px;
+    }
+
+    .diagram-zoom-viewport {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      background: #ffffff;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .diagram-zoom-canvas {
+      width: max-content;
+      min-width: 100%;
+      min-height: 100%;
+      padding: 24px;
+    }
+
+    .diagram-zoom-canvas svg {
+      display: block;
+      max-width: none;
+      height: auto;
+      margin: 0;
+    }
+
+    @media (max-width: 640px) {
+      .diagram-zoom-dialog { padding: 0; }
+      .diagram-zoom-panel { border-radius: 0; }
+      .diagram-zoom-canvas { padding: 16px; }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #0c111d;
+        --surface: #161b26;
+        --text: #f5f7fa;
+        --muted: #b9c2cf;
+        --border: #333b48;
+        --success-bg: #053321;
+        --error-bg: #55160c;
+      }
+    }
+
+
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 800; letter-spacing: .04em; }
+    .callout { margin-top: 14px; padding: 14px 16px; border-left: 4px solid var(--accent); border-radius: 10px; background: color-mix(in srgb, var(--surface) 90%, var(--accent) 10%); }
+    .table-wrap { margin-top: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; border-collapse: collapse; font-size: .94rem; }
+    th, td { padding: 10px 12px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%); }
+    ul, ol { padding-left: 1.4rem; }
+    li + li { margin-top: 6px; }
+    .contract-note { font-weight: 700; }
+    figure { margin: 0; }
+    figcaption { margin-top: 10px; color: var(--muted); }
+    kbd { padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); }
+  </style>
+</head>
+<body>
+
+  <main>
+    <header>
+      <p class="eyebrow">Epic specification Artifact</p>
+      <h1>epic-00002 Establish Safe Git Structure Comparison</h1>
+      <p>safe Git comparison spine と三 domain support を seven vertical Issues で完成させる cross-Issue contract を説明します。</p>
+      <div class="callout contract-note">Epic は Initiative 全体を担う exactly one Epic です。Issue boundary はこの package の seven vertical proposal を adoption gate で確定します。</div>
+      <div id="plantuml-status" class="plantuml-status" role="status" aria-live="polite">
+        図を読み込んでいます。
+      </div>
+    </header>
+
+    <section>
+      <h2>この資料で理解できること</h2>
+      <p>この HTML だけで、対象 scope の目的、責務、正常時と失敗時の動作、データと出力、実装順、検証、対象外を把握できます。Requirement、Design、Plan の要約ではなく、新規参加者向けに契約を一続きで説明する specification Artifact です。</p>
+      <p>製品が HTML report を生成する機能ではありません。ブラウザ内 PlantUML は、この仕様説明の理解を助けるためだけに使用します。</p>
+    </section>
+
+    <section>
+      <h2>背景と解決したい問題</h2>
+      <ul>
+<li>Epic title は既存のまま保持しますが、scope は CodeStructureViz 全体の唯一の Epic として再構成します。</li>
+<li>existing iss-00003 は provisional horizontal scaffold であり、Issue count/boundary の authority ではありません。</li>
+<li>snapshot と diff は独立 acceptance/rollback boundary を持つため、各 domain で分けます。</li>
+<li>final all-domain command は partial success と aggregate manifest という独立 observable outcome を持ちます。</li>
+</ul>
+    </section>
+
+    <section>
+      <h2>最初に知る用語</h2>
+      <div class="table-wrap"><table><thead><tr><th scope="col">用語</th><th scope="col">この scope での意味</th></tr></thead><tbody><tr><td>vertical Issue</td><td>CLI input から source、analysis、JSON/PlantUML、diagnostic、test まで一つの価値を届ける Issue。</td></tr><tr><td>stable sequence key</td><td>package 内の ISSUE-01 等。実 SpecDock ID を予測しない。</td></tr><tr><td>cross-Issue contract</td><td>versioned schema/port/exit behavior。private implementation は含まない。</td></tr><tr><td>intermediate release</td><td>ISSUE-04 完了時の Python+SQLAlchemy release。Epic completion ではない。</td></tr><tr><td>supersede</td><td>iss-00003 の concern を ISSUE-02 へ移し、node history を明示的に閉じること。</td></tr></tbody></table></div>
+    </section>
+
+    <section>
+      <h2>全体構成と責務</h2>
+      <p>図は責務と処理境界を示します。PlantUML source block が HTML 内の唯一の editable source of truth です。外部 server へ図 source を送信しません。</p>
+      <script type="text/plain"
+              class="plantuml-source"
+              id="source-scope-overview"
+              data-target="diagram-scope-overview">
+@startuml
+title Epic の seven vertical Issue DAG
+left to right direction
+rectangle "ISSUE-01\nPython snapshot" as I01
+rectangle "ISSUE-02\nPython diff" as I02
+rectangle "ISSUE-03\nSQLAlchemy snapshot" as I03
+rectangle "ISSUE-04\nSQLAlchemy diff" as I04
+rectangle "ISSUE-05\nNext snapshot" as I05
+rectangle "ISSUE-06\nNext diff" as I06
+rectangle "ISSUE-07\nall-domain run" as I07
+I01 --> I02
+I01 --> I03
+I02 --> I04
+I03 --> I04
+I01 --> I05
+I02 --> I06
+I05 --> I06
+I04 --> I07
+I06 --> I07
+@enduml
+      </script>
+      <figure>
+        <div id="diagram-scope-overview" class="plantuml-diagram">
+          構成図を描画しています。
+        </div>
+        <figcaption>依存方向は一方向で、ISSUE-04 と ISSUE-06 が ISSUE-07 に合流します。</figcaption>
+      </figure>
+      <details>
+        <summary>PlantUMLソースを確認する</summary>
+        <pre data-source-copy="source-scope-overview"></pre>
+      </details>
+      <div class="table-wrap"><table><thead><tr><th scope="col">要素</th><th scope="col">所有する責務</th><th scope="col">所有しない責務</th></tr></thead><tbody><tr><td>ISSUE-01</td><td>Python snapshot + minimal core</td><td>Git temporal diff</td></tr><tr><td>ISSUE-02</td><td>Python diff + source/Git spine</td><td>SQLA/Next semantics</td></tr><tr><td>ISSUE-03/04</td><td>SQLAlchemy snapshot/row diff</td><td>DB/Alembic execution</td></tr><tr><td>ISSUE-05/06</td><td>Next adapter snapshot/diff</td><td>runtime tree</td></tr><tr><td>ISSUE-07</td><td>all-domain outcome/manifest/exit/package</td><td>domain matching semantics</td></tr></tbody></table></div>
+    </section>
+
+    <section>
+      <h2>正常時の処理</h2>
+      <ol>
+        <li>ISSUE-01 が common envelope、CLI、Artifact publication を Python snapshot で実証します。</li><li>ISSUE-02 が named endpoint、freeze、dual snapshot、semantic impact を Python diff で実証します。</li><li>ISSUE-03/04 が SQLAlchemy row semantics と intermediate release を完成します。</li><li>ISSUE-05/06 が optional Node adapter と Next semantics を完成します。</li><li>ISSUE-07 が domain status を集約し final acceptance を通します。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>失敗時と境界条件</h2>
+      <div class="table-wrap"><table><thead><tr><th scope="col">条件</th><th scope="col">観測される動作</th><th scope="col">利用者が確認する点</th></tr></thead><tbody><tr><td>Issue が horizontal fragment になる</td><td>verticality gate で adoption/acceptance を停止</td><td>単独 CLI output/test があるか</td></tr><tr><td>sibling private API へ依存</td><td>parent Design contract へ戻して stable interface を決める</td><td>declared dependency と schema</td></tr><tr><td>common core が domain field を吸収</td><td>ADR review trigger</td><td>adapter ownership</td></tr><tr><td>ISSUE-04 未完で release</td><td>intermediate release をブロック</td><td>I03/I04 acceptance</td></tr><tr><td>ISSUE-07 未完で Initiative close</td><td>final completion をブロック</td><td>all-domain/partial/package tests</td></tr></tbody></table></div>
+    </section>
+
+    <section>
+      <h2>データと出力</h2>
+      <div class="table-wrap"><table><thead><tr><th scope="col">Artifact / field</th><th scope="col">内容</th><th scope="col">安全上の境界</th></tr></thead><tbody><tr><td>Issue R/D/P</td><td>slice-specific behavior/design/implementation plan</td><td>全 heading、planned honesty、trace ID</td></tr><tr><td>semantic-contract.md</td><td>common/domain ownership contract</td><td>cross-Issue stable boundary</td></tr><tr><td>CLI matrix</td><td>endpoint/domain/format/failure/exit examples</td><td>ambiguous positional semantics なし</td></tr><tr><td>acceptance matrix</td><td>normal/boundary/negative/security/determinism/partial/budget</td><td>release gates</td></tr><tr><td>adoption plan</td><td>node create/copy/import/preserve/supersede</td><td>metadata direct edit なし</td></tr></tbody></table></div>
+      <p class="muted">source body、comment、literal、secret、absolute path は出力しません。path は repository-relative、Artifact path は output directory-relative です。</p>
+    </section>
+
+    <section>
+      <h2>実装を読む順番</h2>
+      <ol>
+        <li>Epic Requirement で eight cross-Issue requirements を確認します。</li><li>Epic Design で planned package architecture と stable contracts を確認します。</li><li>issue-slicing-assessment で候補案と verticality/DAG を確認します。</li><li>各 Issue R/D/P を dependency order で読み、test command と stop condition を確認します。</li><li>ISSUE-04 と ISSUE-07 の release gate を acceptance matrix で確認します。</li>
+      </ol>
+      <p>記載する path と symbol は baseline には未実装の planned candidate です。実装済みと誤認してはいけません。</p>
+    </section>
+
+    <section>
+      <h2>テストと動作確認</h2>
+      <div class="table-wrap"><table><thead><tr><th scope="col">観点</th><th scope="col">確認内容</th><th scope="col">planned evidence</th></tr></thead><tbody><tr><td>DAG</td><td>all dependencies topological and acyclic</td><td>MANIFEST dependency_dag</td></tr><tr><td>verticality</td><td>各 Issue に CLI/source/analysis/output/test</td><td>issue-slicing-assessment</td></tr><tr><td>trace</td><td>parent→Issue→Design→Plan→AT</td><td>traceability-matrix</td></tr><tr><td>rollback</td><td>snapshot/diff/domain/release boundaries</td><td>各 Issue Plan</td></tr><tr><td>scope</td><td>product HTML/legacy/runtime exclusions</td><td>R/D/P scope scan</td></tr></tbody></table></div>
+      <p>正常系だけでなく、fail-closed、安全性、determinism、budget、partial failure、rollback/forward recovery を acceptance boundary に含めます。</p>
+    </section>
+
+    <section>
+      <h2>対象外と運用上の注意</h2>
+      <ul>
+<li>技術 layer ごとの contract/freezer/parser/renderer Issue。</li>
+<li>Epic 内での product HTML report feature。</li>
+<li>Issue Plan の micro-step を Epic Plan へ複製すること。</li>
+<li>accepted ADR/interview の改変 copy。</li>
+</ul>
+      <p>図は code と test の確認を置き換えません。manifest の coverage と diagnostic を確認してから、人間向け説明へ利用します。</p>
+      <p class="muted">図の初回描画には pinned <code>@plantuml/core@1.2026.6</code> を取得するインターネット接続が必要です。PlantUML source は閲覧中のブラウザ内で SVG へ変換され、PlantUML Server や Kroki へ送信されません。</p>
+    </section>
+  </main>
+
+  <div id="diagram-zoom-dialog" class="diagram-zoom-dialog" hidden>
+    <section class="diagram-zoom-panel"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="diagram-zoom-title">
+      <h2 id="diagram-zoom-title" class="visually-hidden">図を拡大表示</h2>
+      <header class="diagram-zoom-header">
+        <div class="diagram-zoom-controls" aria-label="図の拡大率を操作する">
+          <button type="button" id="diagram-zoom-out" aria-label="図を縮小する" title="縮小">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>
+          </button>
+          <button type="button" id="diagram-zoom-reset" aria-label="100%に戻す" title="100%に戻す">
+            <span id="diagram-zoom-level" class="diagram-zoom-level" aria-live="polite">100%</span>
+          </button>
+          <button type="button" id="diagram-zoom-in" aria-label="図を拡大する" title="拡大">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+          </button>
+          <button type="button" id="diagram-zoom-close" aria-label="拡大表示を閉じる" title="閉じる">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+          </button>
+        </div>
+      </header>
+      <div id="diagram-zoom-viewport" class="diagram-zoom-viewport" tabindex="0">
+        <div id="diagram-zoom-canvas" class="diagram-zoom-canvas"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const sources = [...document.querySelectorAll(".plantuml-source")];
+      const status = document.getElementById("plantuml-status");
+
+      window.__plantumlDocumentState = {
+        expected: sources.length,
+        rendered: 0,
+        errors: [],
+        completed: false
+      };
+
+      window.__plantumlFail = message => {
+        const state = window.__plantumlDocumentState;
+        state.errors.push(String(message));
+        state.completed = true;
+        document.documentElement.dataset.plantumlStatus = "error";
+        status.className = "plantuml-status error";
+        status.textContent = `図の描画に失敗しました: ${message}`;
+      };
+
+      for (const output of document.querySelectorAll("[data-source-copy]")) {
+        const source = document.getElementById(output.dataset.sourceCopy);
+        if (source) output.textContent = source.textContent.trim();
+      }
+
+      document.documentElement.dataset.plantumlStatus = "running";
+    })();
+  </script>
+
+  <script
+    src="https://unpkg.com/@plantuml/core@1.2026.6/viz-global.js"
+    onerror="window.__plantumlFail('viz-global.jsを読み込めませんでした。')"></script>
+
+  <script type="module">
+    const state = window.__plantumlDocumentState;
+    const status = document.getElementById("plantuml-status");
+    const zoomDialog = document.getElementById("diagram-zoom-dialog");
+    const zoomTitle = document.getElementById("diagram-zoom-title");
+    const zoomViewport = document.getElementById("diagram-zoom-viewport");
+    const zoomCanvas = document.getElementById("diagram-zoom-canvas");
+    const zoomLevelOutput = document.getElementById("diagram-zoom-level");
+    const zoomOutButton = document.getElementById("diagram-zoom-out");
+    const zoomInButton = document.getElementById("diagram-zoom-in");
+    const zoomResetButton = document.getElementById("diagram-zoom-reset");
+    const zoomCloseButton = document.getElementById("diagram-zoom-close");
+    let zoomLevel = 1;
+    let zoomBaseWidth = 0;
+    let zoomedSvg = null;
+    let zoomReturnFocus = null;
+
+    const diagramTitle = sourceElement => {
+      const titleLine = sourceElement.textContent.match(/^\s*title\s+(.+)$/m);
+      return titleLine?.[1]?.trim() || "図を拡大表示";
+    };
+
+    const applyDiagramZoom = () => {
+      if (!zoomedSvg || zoomBaseWidth <= 0) return;
+      zoomedSvg.style.width = `${Math.round(zoomBaseWidth * zoomLevel)}px`;
+      zoomedSvg.style.height = "auto";
+      zoomLevelOutput.value = `${Math.round(zoomLevel * 100)}%`;
+      zoomLevelOutput.textContent = zoomLevelOutput.value;
+      zoomResetButton.setAttribute("aria-label", `100%に戻す（現在${zoomLevelOutput.value}）`);
+      zoomOutButton.disabled = zoomLevel <= 0.5;
+      zoomInButton.disabled = zoomLevel >= 3;
+    };
+
+    const setDiagramZoom = nextLevel => {
+      zoomLevel = Math.min(3, Math.max(0.5, nextLevel));
+      applyDiagramZoom();
+    };
+
+    const closeDiagramZoom = () => {
+      if (zoomDialog.hidden) return;
+      zoomDialog.hidden = true;
+      document.body.classList.remove("diagram-zoom-open");
+      zoomCanvas.replaceChildren();
+      zoomedSvg = null;
+      zoomBaseWidth = 0;
+      zoomReturnFocus?.focus();
+      zoomReturnFocus = null;
+    };
+
+    const openDiagramZoom = (target, sourceElement) => {
+      const sourceSvg = target.querySelector("svg");
+      if (!sourceSvg) return;
+
+      zoomReturnFocus = target;
+      zoomedSvg = sourceSvg.cloneNode(true);
+      zoomedSvg.removeAttribute("height");
+      zoomedSvg.style.maxWidth = "none";
+      const viewBoxWidth = zoomedSvg.viewBox?.baseVal?.width || 0;
+      const declaredWidth = Number.parseFloat(zoomedSvg.getAttribute("width")) || 0;
+      zoomBaseWidth = Math.max(viewBoxWidth, declaredWidth, sourceSvg.getBoundingClientRect().width);
+      zoomLevel = 1;
+      zoomTitle.textContent = diagramTitle(sourceElement);
+      zoomCanvas.replaceChildren(zoomedSvg);
+      zoomDialog.hidden = false;
+      document.body.classList.add("diagram-zoom-open");
+      zoomViewport.scrollTo({ top: 0, left: 0 });
+      applyDiagramZoom();
+      zoomCloseButton.focus();
+    };
+
+    const prepareDiagramZoom = (target, sourceElement) => {
+      target.dataset.zoomReady = "true";
+      target.tabIndex = 0;
+      target.setAttribute("role", "button");
+      target.setAttribute("aria-label", `${diagramTitle(sourceElement)}を拡大表示する`);
+      const hint = document.createElement("span");
+      hint.className = "diagram-zoom-hint";
+      hint.textContent = "クリックして拡大";
+      hint.setAttribute("aria-hidden", "true");
+      target.append(hint);
+      target.addEventListener("click", () => openDiagramZoom(target, sourceElement));
+      target.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openDiagramZoom(target, sourceElement);
+        }
+      });
+    };
+
+    const focusableZoomElements = () => [...zoomDialog.querySelectorAll(
+      'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    )].filter(element => !element.hidden && element.getClientRects().length > 0);
+
+    zoomOutButton.addEventListener("click", () => setDiagramZoom(zoomLevel - 0.25));
+    zoomInButton.addEventListener("click", () => setDiagramZoom(zoomLevel + 0.25));
+    zoomResetButton.addEventListener("click", () => setDiagramZoom(1));
+    zoomCloseButton.addEventListener("click", closeDiagramZoom);
+    zoomDialog.addEventListener("click", event => {
+      if (event.target === zoomDialog) closeDiagramZoom();
+    });
+    document.addEventListener("keydown", event => {
+      if (zoomDialog.hidden) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDiagramZoom();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = focusableZoomElements();
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && (document.activeElement === first || !zoomDialog.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !zoomDialog.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+
+    try {
+      const { renderToString } = await import(
+        "https://unpkg.com/@plantuml/core@1.2026.6/plantuml.js"
+      );
+
+      const renderDiagram = lines => new Promise((resolve, reject) => {
+        renderToString(
+          lines,
+          svg => resolve(svg),
+          message => reject(new Error(message))
+        );
+      });
+
+      const normalizeDiagnosticText = value => String(value ?? "").replace(/\s+/g, " ").trim();
+
+      const inspectRenderedSvg = svgMarkup => {
+        const parsed = new DOMParser().parseFromString(svgMarkup, "image/svg+xml");
+        const root = parsed.documentElement;
+        if (!root || root.localName.toLowerCase() === "parsererror" || parsed.querySelector("parsererror")) {
+          throw new Error("PlantUMLが不正なSVGを返しました。");
+        }
+        if (root.localName.toLowerCase() !== "svg") {
+          throw new Error("PlantUMLの描画結果がSVGではありません。");
+        }
+
+        const fullText = normalizeDiagnosticText(root.textContent);
+        const diagramType = root.getAttribute("data-diagram-type")?.toLowerCase() ?? "";
+        const hasKnownErrorText = /Syntax Error\?|An error has occurred/i.test(fullText);
+        const hasDiagnosticStructure = /PlantUML version\b/i.test(fullText)
+          && /\[From [^\]]*\(line \d+\)\s*\]/i.test(fullText)
+          && /@startuml/i.test(fullText);
+
+        if (diagramType === "error" || hasKnownErrorText || hasDiagnosticStructure) {
+          const diagnosticLines = [...root.querySelectorAll("text")]
+            .filter(element => {
+              const presentation = [
+                element.getAttribute("fill"),
+                element.getAttribute("style"),
+                element.getAttribute("text-decoration")
+              ].filter(Boolean).join(" ").toLowerCase().replace(/\s+/g, "");
+              return /(?:fill:)?(?:#ff0000|#f00|red|rgb\(255,0,0\))/.test(presentation)
+                || presentation.includes("wavy");
+            })
+            .map(element => normalizeDiagnosticText(element.textContent))
+            .filter(Boolean);
+          const reason = [...new Set(diagnosticLines)].join(" / ").slice(0, 500)
+            || (hasKnownErrorText
+              ? fullText.match(/Syntax Error\?|An error has occurred/i)?.[0]
+              : "PlantUMLの診断画面が返されました。");
+          throw new Error(`PlantUMLの診断SVGが検出されました: ${reason}`);
+        }
+
+        return root;
+      };
+
+      for (const sourceElement of document.querySelectorAll(".plantuml-source")) {
+        const target = document.getElementById(sourceElement.dataset.target);
+        if (!target) {
+          state.errors.push(`${sourceElement.id}: 描画先がありません。`);
+          continue;
+        }
+
+        try {
+          const lines = sourceElement.textContent.trim().split(/\r?\n/);
+          const svgMarkup = await renderDiagram(lines);
+          const svg = inspectRenderedSvg(svgMarkup);
+          target.replaceChildren(document.importNode(svg, true));
+          prepareDiagramZoom(target, sourceElement);
+          target.dataset.plantumlStatus = "success";
+          state.rendered += 1;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          state.errors.push(`${sourceElement.id}: ${message}`);
+          target.dataset.plantumlStatus = "error";
+          target.textContent = `この図の描画に失敗しました: ${message}`;
+        }
+      }
+
+      state.completed = true;
+      if (state.rendered === state.expected && state.errors.length === 0) {
+        document.documentElement.dataset.plantumlStatus = "success";
+        status.textContent = `図を${state.rendered}件すべて描画できました。`;
+      } else {
+        document.documentElement.dataset.plantumlStatus = "error";
+        status.className = "plantuml-status error";
+        status.textContent = `図を${state.rendered}件描画し、${state.errors.length}件のエラーが発生しました。`;
+      }
+    } catch (error) {
+      window.__plantumlFail(error instanceof Error ? error.message : String(error));
+    }
+  </script>
+</body>
+</html>

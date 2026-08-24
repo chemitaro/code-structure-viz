@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "type": "issue",
+  "id": "iss-00009",
+  "title": "Compare Nextjs Component Changes",
+  "slug": "compare-nextjs-component-changes",
+  "created_at": "2026-08-24T14:36:42+09:00",
+  "updated_at": "2026-08-24T14:40:55+09:00",
+  "parent_id": "epic-00002",
+  "initiative_id": "init-00001",
+  "epic_id": "epic-00002",
+  "_spec_dock": {
+    "managed": true,
+    "do_not_edit": true,
+    "edit_via": "spec-dock"
+  },
+  "github": {
+    "issue_number": 9,
+    "repo_owner": "chemitaro",
+    "repo_name": "code-structure-viz"
+  },
+  "depends_on": [
+    "iss-00005",
+    "iss-00008"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "type": "issue",
+  "id": "iss-00010",
+  "title": "Run Unified Multi Domain Structure Comparison",
+  "slug": "run-unified-multi-domain-structure-comparison",
+  "created_at": "2026-08-24T14:36:43+09:00",
+  "updated_at": "2026-08-24T14:40:57+09:00",
+  "parent_id": "epic-00002",
+  "initiative_id": "init-00001",
+  "epic_id": "epic-00002",
+  "_spec_dock": {
+    "managed": true,
+    "do_not_edit": true,
+    "edit_via": "spec-dock"
+  },
+  "github": {
+    "issue_number": 10,
+    "repo_owner": "chemitaro",
+    "repo_name": "code-structure-viz"
+  },
+  "depends_on": [
+    "iss-00007",
+    "iss-00009"
+  ]
+}
