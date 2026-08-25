@@ -47,6 +47,23 @@ def test_output_transaction_rejects_existing_or_inside_repository_destination(
     assert inside_error.value.diagnostic.code is DiagnosticCode.OUTPUT_INSIDE_REPO
 
 
+def test_output_transaction_rejects_alternate_case_physical_repository_alias(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "Repository"
+    repository.mkdir()
+    alternate_spelling = tmp_path / "repository"
+    if not alternate_spelling.exists() or not os.path.samefile(repository, alternate_spelling):
+        pytest.skip("filesystem is case-sensitive")
+    output = alternate_spelling / "artifacts"
+
+    with pytest.raises(OutputTransactionError) as caught:
+        OutputTransaction(repository, output)
+
+    assert caught.value.diagnostic.code is DiagnosticCode.OUTPUT_INSIDE_REPO
+    assert not output.exists()
+
+
 def test_output_transaction_abort_removes_frozen_source_and_payload_bytes(
     tmp_path: Path,
 ) -> None:

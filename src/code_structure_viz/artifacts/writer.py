@@ -54,6 +54,17 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def _is_physically_within(path: Path, root: Path) -> bool:
+    current = path
+    while True:
+        if os.path.samefile(current, root):
+            return True
+        parent = current.parent
+        if parent == current:
+            return False
+        current = parent
+
+
 def _fsync_directory(path: Path) -> None:
     flags = os.O_RDONLY
     if hasattr(os, "O_DIRECTORY"):
@@ -156,9 +167,10 @@ class OutputTransaction:
                 raise OSError
             parent = self.output_dir.parent
             parent_stat = parent.stat(follow_symlinks=False)
+            physically_inside_repository = _is_physically_within(parent, self.repository)
         except OSError as error:
             raise _error(DiagnosticCode.OUTPUT_DESTINATION) from error
-        if _is_within(self.output_dir, self.repository):
+        if _is_within(self.output_dir, self.repository) or physically_inside_repository:
             raise _error(DiagnosticCode.OUTPUT_INSIDE_REPO)
         if os.path.lexists(self.output_dir) or not stat.S_ISDIR(parent_stat.st_mode):
             raise _error(DiagnosticCode.OUTPUT_DESTINATION)
