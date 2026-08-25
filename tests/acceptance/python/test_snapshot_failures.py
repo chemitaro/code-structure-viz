@@ -191,6 +191,54 @@ def test_malicious_unknown_config_key_is_constant_usage_error_with_no_artifacts(
 
 
 @pytest.mark.parametrize(
+    ("config_text", "expected_code", "expected_message"),
+    [
+        pytest.param(
+            _COMPLETE_CONFIG.replace("max_entities = 500", "max_entities = " + "9" * 5_000),
+            "CSV-CONFIG-002",
+            "Configuration is not valid TOML.",
+            id="oversized_integer",
+        ),
+        pytest.param(
+            _COMPLETE_CONFIG.replace('source_roots = ["."]', 'source_roots = ["\\u0000"]'),
+            "CSV-CONFIG-004",
+            "Configuration value 'python.source_roots' is invalid for config v1.",
+            id="nul_source_root",
+        ),
+    ],
+)
+def test_unrepresentable_config_values_are_closed_usage_errors_without_artifacts(
+    tmp_path: Path,
+    config_text: str,
+    expected_code: str,
+    expected_message: str,
+) -> None:
+    repository = tmp_path / "repo"
+    initialize_repository(repository)
+    config = tmp_path / "config.toml"
+    config.write_text(config_text, encoding="utf-8")
+    output = tmp_path / "output"
+
+    result = run_cli(repository, output, "--config", str(config))
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert not output.exists()
+    assert json.loads(result.stderr) == {
+        "type": "diagnostic",
+        "schema": "code-structure-viz.diagnostic/v1",
+        "code": expected_code,
+        "severity": "error",
+        "domain": None,
+        "path": None,
+        "symbol": None,
+        "line": None,
+        "recoverable": False,
+        "message": expected_message,
+    }
+
+
+@pytest.mark.parametrize(
     ("removed", "expected_key"),
     [
         ('schema = "code-structure-viz.config/v1"\n', "schema"),

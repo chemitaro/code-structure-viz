@@ -69,7 +69,11 @@ class SnapshotApplication:
             self._checkpoint()
 
             transaction.begin()
-            source_builder = SourceViewBuilder(repository, transaction.staging_root)
+            source_builder = SourceViewBuilder(
+                repository,
+                transaction.staging_root,
+                staging_root_descriptor=transaction.staging_root_descriptor,
+            )
             source_view = source_builder.build(head_state, entries, config.python)
             analysis = PythonSnapshotAnalyzer().analyze(
                 PythonModuleIndex.build(source_view, config.python)

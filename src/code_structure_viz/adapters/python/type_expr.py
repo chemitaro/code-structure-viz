@@ -109,6 +109,8 @@ class _TypeReferenceCandidate:
 
 _LITERAL_NAMES = frozenset({"typing.Literal", "typing_extensions.Literal"})
 _ANNOTATED_NAMES = frozenset({"typing.Annotated", "typing_extensions.Annotated"})
+_MAX_TYPE_EXPRESSION_NODES = 4_096
+_MAX_TYPE_EXPRESSION_DEPTH = 256
 
 
 class SafeTypeExpressionRenderer:
@@ -137,6 +139,8 @@ class SafeTypeExpressionRenderer:
         self._modules = modules
 
     def render(self, node: ast.expr, site: TypeReferenceSite) -> RenderedType:
+        if not _within_complexity_budget(node):
+            return RenderedType("?", (), False, None)
         rendered = self._render_node(
             node,
             TypeReferenceRole.HEAD,
@@ -299,7 +303,9 @@ class SafeTypeExpressionRenderer:
                         mode="eval",
                         feature_version=(3, 12),
                     ).body
-                except (SyntaxError, ValueError):
+                except (SyntaxError, ValueError, RecursionError):
+                    return _unsupported()
+                if not _within_complexity_budget(parsed):
                     return _unsupported()
                 return self._render_node(
                     parsed,
@@ -394,21 +400,45 @@ def _unsupported() -> _RenderedNode:
     return _RenderedNode("?", (), False)
 
 
+def _within_complexity_budget(node: ast.expr) -> bool:
+    pending: list[tuple[ast.AST, int]] = [(node, 1)]
+    node_count = 0
+    while pending:
+        current, depth = pending.pop()
+        node_count += 1
+        if node_count > _MAX_TYPE_EXPRESSION_NODES or depth > _MAX_TYPE_EXPRESSION_DEPTH:
+            return False
+        for child in ast.iter_child_nodes(current):
+            pending.append((child, depth + 1))
+            if node_count + len(pending) > _MAX_TYPE_EXPRESSION_NODES:
+                return False
+    return True
+
+
 def _symbol(node: ast.expr) -> tuple[str, ...] | None:
-    if isinstance(node, ast.Name):
-        return (unicodedata.normalize("NFC", node.id),)
-    if not isinstance(node, ast.Attribute):
+    attributes: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        attributes.append(unicodedata.normalize("NFC", current.attr))
+        current = current.value
+    if not isinstance(current, ast.Name):
         return None
-    prefix = _symbol(node.value)
-    if prefix is None:
-        return None
-    return (*prefix, unicodedata.normalize("NFC", node.attr))
+    return (
+        unicodedata.normalize("NFC", current.id),
+        *reversed(attributes),
+    )
 
 
 def _union_leaves(node: ast.expr) -> tuple[ast.expr, ...]:
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return (*_union_leaves(node.left), *_union_leaves(node.right))
-    return (node,)
+    leaves: list[ast.expr] = []
+    pending = [node]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, ast.BinOp) and isinstance(current.op, ast.BitOr):
+            pending.extend((current.right, current.left))
+        else:
+            leaves.append(current)
+    return tuple(leaves)
 
 
 def _range(node: ast.expr) -> SourceRangeWithColumns:

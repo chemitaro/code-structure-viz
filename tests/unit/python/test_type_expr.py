@@ -18,6 +18,12 @@ def _render(
     expression: str, bindings: tuple[ImportBinding, ...] = ()
 ) -> tuple[str, tuple[tuple[str, str], ...], bool]:
     node = ast.parse(expression, mode="eval", feature_version=(3, 12)).body
+    return _render_node(node, bindings)
+
+
+def _render_node(
+    node: ast.expr, bindings: tuple[ImportBinding, ...] = ()
+) -> tuple[str, tuple[tuple[str, str], ...], bool]:
     site = TypeReferenceSite(
         TypeReferenceSiteKind.FIELD_ANNOTATION,
         "python:class:pkg.mod:Owner",
@@ -106,6 +112,27 @@ def test_unsupported_site_becomes_one_unknown_without_inferred_references(
     expression: str,
 ) -> None:
     assert _render(expression) == ("?", (), False)
+
+
+@pytest.mark.parametrize("shape", ["attribute", "union", "forward"])
+def test_deep_valid_type_expression_has_a_bounded_unsupported_outcome(shape: str) -> None:
+    depth = 1_500
+    if shape == "attribute":
+        node: ast.expr = ast.Name(id="Root", ctx=ast.Load())
+        for _ in range(depth):
+            node = ast.Attribute(value=node, attr="part", ctx=ast.Load())
+    elif shape == "union":
+        node = ast.Name(id="Left", ctx=ast.Load())
+        for _ in range(depth):
+            node = ast.BinOp(
+                left=node,
+                op=ast.BitOr(),
+                right=ast.Name(id="Right", ctx=ast.Load()),
+            )
+    else:
+        node = ast.Constant(value=" | ".join("Type" for _ in range(depth)))
+
+    assert _render_node(node) == ("?", (), False)
 
 
 def test_occurrence_keeps_internal_columns_but_not_source_text() -> None:

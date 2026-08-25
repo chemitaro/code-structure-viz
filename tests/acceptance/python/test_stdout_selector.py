@@ -23,11 +23,24 @@ class _RenameFunction:
         self.restype: object = None
 
     def __call__(self, *arguments: object) -> int:
-        paths = [argument for argument in arguments if isinstance(argument, bytes)]
-        assert len(paths) == 2
         operation = self._operation
         assert callable(operation)
-        operation(Path(os.fsdecode(paths[0])), Path(os.fsdecode(paths[1])))
+        if len(arguments) == 5:
+            source_directory, source, destination_directory, destination, _flags = arguments
+            assert isinstance(source_directory, int)
+            assert isinstance(source, bytes)
+            assert isinstance(destination_directory, int)
+            assert isinstance(destination, bytes)
+            operation(
+                Path(os.fsdecode(source)),
+                Path(os.fsdecode(destination)),
+                source_directory=source_directory,
+                destination_directory=destination_directory,
+            )
+        else:
+            paths = [argument for argument in arguments if isinstance(argument, bytes)]
+            assert len(paths) == 2
+            operation(Path(os.fsdecode(paths[0])), Path(os.fsdecode(paths[1])))
         return 0
 
 
@@ -35,6 +48,7 @@ class _RenameLibrary:
     def __init__(self, operation: object) -> None:
         function = _RenameFunction(operation)
         self.renamex_np = function
+        self.renameatx_np = function
         self.renameat2 = function
 
 
@@ -216,10 +230,24 @@ def test_post_rename_signal_and_output_deletion_keep_bound_stdout_and_exit(
     real_rename = os.rename
     published = False
 
-    def rename_then_delete_and_interrupt(source: Path, destination: Path) -> None:
+    def rename_then_delete_and_interrupt(
+        source: Path,
+        destination: Path,
+        *,
+        source_directory: int | None = None,
+        destination_directory: int | None = None,
+    ) -> None:
         nonlocal published
-        real_rename(source, destination)
-        if Path(destination) == output and not published:
+        if source_directory is None or destination_directory is None:
+            real_rename(source, destination)
+        else:
+            real_rename(
+                source,
+                destination,
+                src_dir_fd=source_directory,
+                dst_dir_fd=destination_directory,
+            )
+        if output.exists() and not published:
             published = True
             shutil.rmtree(output)
             os.kill(os.getpid(), signal.SIGINT)

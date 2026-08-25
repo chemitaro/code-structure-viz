@@ -5,6 +5,7 @@ import hashlib
 import os
 import stat
 import unicodedata
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
@@ -296,9 +297,16 @@ def _resolve_repository_file(
 
 
 class SourceViewBuilder:
-    def __init__(self, repository: Path, staging_root: Path) -> None:
+    def __init__(
+        self,
+        repository: Path,
+        staging_root: Path,
+        *,
+        staging_root_descriptor: int | None = None,
+    ) -> None:
         self.repository = repository.resolve()
         self.staging_root = staging_root
+        self._staging_root_descriptor = staging_root_descriptor
 
     def build(
         self,
@@ -325,6 +333,30 @@ class SourceViewBuilder:
 
     def _prepare_staging(self) -> None:
         try:
+            if self._staging_root_descriptor is not None:
+                if set(os.listdir(self._staging_root_descriptor)) != {"source", "artifacts"}:
+                    raise OSError
+                source_descriptor: int | None = None
+                artifacts_descriptor: int | None = None
+                try:
+                    source_descriptor = os.open(
+                        "source",
+                        _directory_flags(),
+                        dir_fd=self._staging_root_descriptor,
+                    )
+                    artifacts_descriptor = os.open(
+                        "artifacts",
+                        _directory_flags(),
+                        dir_fd=self._staging_root_descriptor,
+                    )
+                    if os.listdir(source_descriptor) or os.listdir(artifacts_descriptor):
+                        raise OSError
+                finally:
+                    if source_descriptor is not None:
+                        os.close(source_descriptor)
+                    if artifacts_descriptor is not None:
+                        os.close(artifacts_descriptor)
+                return
             if self.staging_root.exists():
                 source = self.staging_root / "source"
                 artifacts = self.staging_root / "artifacts"
@@ -547,6 +579,9 @@ class SourceViewBuilder:
         )
 
     def _write_frozen(self, logical_path: PurePosixPath, content: bytes) -> None:
+        if self._staging_root_descriptor is not None:
+            self._write_frozen_at(self._staging_root_descriptor, logical_path, content)
+            return
         destination = (self.staging_root / "source").joinpath(*logical_path.parts)
         try:
             destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -566,3 +601,60 @@ class SourceViewBuilder:
                 os.close(fd)
         except OSError as error:
             raise SourceViewBuildError(diagnostic(DiagnosticCode.OUTPUT_DESTINATION)) from error
+
+    @staticmethod
+    def _write_frozen_at(
+        staging_root_descriptor: int,
+        logical_path: PurePosixPath,
+        content: bytes,
+    ) -> None:
+        directory_descriptor: int | None = None
+        try:
+            directory_descriptor = os.open(
+                "source",
+                _directory_flags(),
+                dir_fd=staging_root_descriptor,
+            )
+            for component in logical_path.parts[:-1]:
+                try:
+                    child = os.open(
+                        component,
+                        _directory_flags(),
+                        dir_fd=directory_descriptor,
+                    )
+                except FileNotFoundError:
+                    with suppress(FileExistsError):
+                        os.mkdir(component, mode=0o700, dir_fd=directory_descriptor)
+                    child = os.open(
+                        component,
+                        _directory_flags(),
+                        dir_fd=directory_descriptor,
+                    )
+                os.close(directory_descriptor)
+                directory_descriptor = child
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_CLOEXEC"):
+                flags |= os.O_CLOEXEC
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            file_descriptor = os.open(
+                logical_path.name,
+                flags,
+                0o600,
+                dir_fd=directory_descriptor,
+            )
+            try:
+                remaining = memoryview(content)
+                while remaining:
+                    written = os.write(file_descriptor, remaining)
+                    if written <= 0:
+                        raise OSError
+                    remaining = remaining[written:]
+                os.fsync(file_descriptor)
+            finally:
+                os.close(file_descriptor)
+        except OSError as error:
+            raise SourceViewBuildError(diagnostic(DiagnosticCode.OUTPUT_DESTINATION)) from error
+        finally:
+            if directory_descriptor is not None:
+                os.close(directory_descriptor)

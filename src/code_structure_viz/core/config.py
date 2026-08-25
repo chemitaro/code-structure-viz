@@ -129,6 +129,8 @@ def _integer(value: object, *, key: str, positive: bool) -> int:
 
 
 def _validate_source_root(value: str, *, repo: Path, require_exists: bool) -> None:
+    if "\0" in value:
+        raise _error(DiagnosticCode.CONFIG_VALUE, key="python.source_roots")
     path = PurePosixPath(value)
     if (
         not value
@@ -292,6 +294,8 @@ def _load(path: Path, *, source: ConfigSource, repo: Path) -> ResolvedConfig:
     except UnicodeDecodeError as exc:
         raise _error(DiagnosticCode.CONFIG_TOML) from exc
     except tomllib.TOMLDecodeError as exc:
+        raise _error(DiagnosticCode.CONFIG_TOML) from exc
+    except ValueError as exc:
         raise _error(DiagnosticCode.CONFIG_TOML) from exc
     return _decode_config(parsed, source=source, repo=repo)
 

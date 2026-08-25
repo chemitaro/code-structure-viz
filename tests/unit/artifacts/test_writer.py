@@ -64,6 +64,84 @@ def test_output_transaction_rejects_alternate_case_physical_repository_alias(
     assert not output.exists()
 
 
+def test_output_transaction_parent_swap_cannot_redirect_staging_into_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    parent = tmp_path / "safe-parent"
+    parent.mkdir()
+    displaced_parent = tmp_path / "displaced-parent"
+    transaction = OutputTransaction(repository, parent / "result")
+    real_mkdir = os.mkdir
+    swapped = False
+
+    def swap_parent_before_staging(
+        path: os.PathLike[str] | str,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        nonlocal swapped
+        if not swapped and Path(path).name.startswith(".code-structure-viz-staging-"):
+            parent.rename(displaced_parent)
+            parent.symlink_to(repository, target_is_directory=True)
+            swapped = True
+        if dir_fd is None:
+            real_mkdir(path, mode)
+        else:
+            real_mkdir(path, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "mkdir", swap_parent_before_staging)
+
+    try:
+        with pytest.raises(OutputTransactionError) as caught:
+            transaction.begin()
+    finally:
+        transaction.abort()
+
+    assert caught.value.diagnostic.code is DiagnosticCode.OUTPUT_DESTINATION
+    assert swapped is True
+    assert list(repository.iterdir()) == []
+    assert list(displaced_parent.iterdir()) == []
+
+
+def test_output_transaction_parent_swap_cannot_redirect_artifacts_or_publication(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    parent = tmp_path / "safe-parent"
+    parent.mkdir()
+    displaced_parent = tmp_path / "displaced-parent"
+    transaction = OutputTransaction(repository, parent / "result")
+    transaction.begin()
+    staging_name = transaction.staging_root.name
+
+    parent.rename(displaced_parent)
+    parent.symlink_to(repository, target_is_directory=True)
+    shadow_staging = repository / staging_name
+    (shadow_staging / "source").mkdir(parents=True)
+    (shadow_staging / "artifacts").mkdir()
+    marker = shadow_staging / "marker"
+    marker.write_bytes(b"unchanged")
+    transaction.stage_payload("semantic-json", b"{}\n")
+    transaction.stage_manifest(b'{"type":"run_manifest"}\n')
+
+    try:
+        with pytest.raises(OutputTransactionError) as caught:
+            transaction.commit()
+    finally:
+        transaction.abort()
+
+    assert caught.value.diagnostic.code is DiagnosticCode.OUTPUT_DESTINATION
+    assert marker.read_bytes() == b"unchanged"
+    assert list((shadow_staging / "artifacts").iterdir()) == []
+    assert not (repository / "result").exists()
+    assert list(displaced_parent.iterdir()) == []
+
+
 def test_output_transaction_abort_removes_frozen_source_and_payload_bytes(
     tmp_path: Path,
 ) -> None:
@@ -93,20 +171,25 @@ def test_output_transaction_never_replaces_destination_created_at_commit(
     transaction.stage_payload("semantic-json", b"{}\n")
     transaction.stage_manifest(b'{"type":"run_manifest"}\n')
 
-    real_lexists = os.path.lexists
+    real_stat = os.stat
     raced = False
     existing_inode: int | None = None
 
-    def create_destination_during_final_absence_check(path: os.PathLike[str] | str) -> bool:
+    def create_destination_during_final_absence_check(
+        path: os.PathLike[str] | str,
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
         nonlocal existing_inode, raced
-        if Path(path) == output and not raced:
+        if path == output.name and dir_fd is not None and not raced:
             raced = True
             output.mkdir()
-            existing_inode = output.stat().st_ino
-            return False
-        return real_lexists(path)
+            existing_inode = real_stat(output).st_ino
+            raise FileNotFoundError
+        return real_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
 
-    monkeypatch.setattr(os.path, "lexists", create_destination_during_final_absence_check)
+    monkeypatch.setattr(os, "stat", create_destination_during_final_absence_check)
 
     with pytest.raises(OutputTransactionError) as caught:
         transaction.commit()
