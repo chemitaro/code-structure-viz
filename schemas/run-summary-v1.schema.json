@@ -14,32 +14,101 @@
     "domains": {
       "type": "array",
       "maxItems": 1,
-      "items": {
-        "oneOf": [
-          {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["domain", "status"],
-            "properties": {
-              "domain": {"const": "python"},
-              "status": {"enum": ["complete", "not_applicable"]}
-            }
-          },
-          {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["domain", "status", "incomplete_kind"],
-            "properties": {
-              "domain": {"const": "python"},
-              "status": {"const": "incomplete"},
-              "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]}
-            }
-          }
-        ]
-      }
+      "items": {"$ref": "#/$defs/domain"}
     },
     "manifest": {
       "oneOf": [{"const": "run-manifest.json"}, {"type": "null"}]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "run_status": {"const": "complete"},
+        "exit_code": {"const": 0},
+        "domains": {
+          "minItems": 1,
+          "maxItems": 1,
+          "prefixItems": [{"$ref": "#/$defs/complete_domain"}]
+        },
+        "manifest": {"const": "run-manifest.json"}
+      }
+    },
+    {
+      "properties": {
+        "run_status": {"const": "not_applicable"},
+        "exit_code": {"const": 0},
+        "domains": {
+          "minItems": 1,
+          "maxItems": 1,
+          "prefixItems": [{"$ref": "#/$defs/not_applicable_domain"}]
+        },
+        "manifest": {"const": "run-manifest.json"}
+      }
+    },
+    {
+      "properties": {
+        "run_status": {"const": "incomplete"},
+        "exit_code": {"const": 3},
+        "domains": {
+          "minItems": 1,
+          "maxItems": 1,
+          "prefixItems": [{"$ref": "#/$defs/incomplete_domain"}]
+        },
+        "manifest": {"const": "run-manifest.json"}
+      }
+    },
+    {
+      "properties": {
+        "run_status": {"const": "fatal"},
+        "exit_code": {"const": 1},
+        "domains": {"maxItems": 0},
+        "manifest": {"type": "null"}
+      }
+    },
+    {
+      "properties": {
+        "run_status": {"const": "interrupted"},
+        "exit_code": {"const": 130},
+        "domains": {"maxItems": 0},
+        "manifest": {"type": "null"}
+      }
+    }
+  ],
+  "$defs": {
+    "complete_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "status"],
+      "properties": {
+        "domain": {"const": "python"},
+        "status": {"const": "complete"}
+      }
+    },
+    "not_applicable_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "status"],
+      "properties": {
+        "domain": {"const": "python"},
+        "status": {"const": "not_applicable"}
+      }
+    },
+    "incomplete_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "status", "incomplete_kind"],
+      "properties": {
+        "domain": {"const": "python"},
+        "status": {"const": "incomplete"},
+        "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]}
+      }
+    },
+    "domain": {
+      "oneOf": [
+        {"$ref": "#/$defs/complete_domain"},
+        {"$ref": "#/$defs/not_applicable_domain"},
+        {"$ref": "#/$defs/incomplete_domain"}
+      ]
     }
   }
 }

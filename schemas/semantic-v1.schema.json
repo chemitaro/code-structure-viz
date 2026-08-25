@@ -258,7 +258,51 @@
         },
         "decorators": {"type": "array", "items": {"$ref": "#/$defs/decorator"}},
         "range": {"$ref": "#/$defs/range"}
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {"const": "field"},
+            "scope": {"enum": ["class", "instance"]},
+            "property_role": {"type": "null"},
+            "method_kind": {"type": "null"},
+            "signature": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "kind": {"const": "property"},
+            "scope": {"type": "null"},
+            "property_role": {"enum": ["getter", "setter", "deleter"]},
+            "method_kind": {"type": "null"},
+            "signature": {"$ref": "#/$defs/signature"}
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "property_role": {"enum": ["getter", "setter"]},
+                "annotation": {"type": ["string", "null"]}
+              }
+            },
+            {
+              "properties": {
+                "property_role": {"const": "deleter"},
+                "annotation": {"type": "null"}
+              }
+            }
+          ]
+        },
+        {
+          "properties": {
+            "kind": {"const": "method"},
+            "scope": {"type": "null"},
+            "property_role": {"type": "null"},
+            "method_kind": {"enum": ["instance", "class", "static"]},
+            "annotation": {"type": "null"},
+            "signature": {"$ref": "#/$defs/signature"}
+          }
+        }
+      ]
     },
     "relation_target": {
       "type": "object",
@@ -269,7 +313,37 @@
         "kind": {"enum": ["class", "module", "symbol"]},
         "id": {"type": ["string", "null"]},
         "name": {"type": "string", "minLength": 1}
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "resolution": {"const": "internal"},
+            "kind": {"const": "class"},
+            "id": {"type": "string", "pattern": "^python:class:"}
+          }
+        },
+        {
+          "properties": {
+            "resolution": {"const": "internal"},
+            "kind": {"const": "module"},
+            "id": {"type": "string", "pattern": "^python:module:"}
+          }
+        },
+        {
+          "properties": {
+            "resolution": {"const": "external"},
+            "kind": {"enum": ["module", "symbol"]},
+            "id": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "resolution": {"const": "unknown"},
+            "kind": {"const": "symbol"},
+            "id": {"type": "null"}
+          }
+        }
+      ]
     },
     "relation": {
       "type": "object",
@@ -293,7 +367,42 @@
         "via_member_id": {"type": ["string", "null"]},
         "annotation": {"type": ["string", "null"]},
         "range": {"$ref": "#/$defs/range"}
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {"const": "inheritance"},
+            "source_id": {"type": "string", "pattern": "^python:class:"},
+            "via_member_id": {"type": "null"},
+            "annotation": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "properties": {
+            "kind": {"enum": ["composition", "typed_dependency"]},
+            "source_id": {"type": "string", "pattern": "^python:class:"},
+            "via_member_id": {
+              "type": "string",
+              "pattern": "^python:member:[0-9a-f]{64}$"
+            },
+            "annotation": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "properties": {
+            "kind": {"const": "import_dependency"},
+            "source_id": {"type": "string", "pattern": "^python:module:"},
+            "target": {
+              "allOf": [
+                {"$ref": "#/$defs/relation_target"},
+                {"properties": {"kind": {"const": "module"}}}
+              ]
+            },
+            "via_member_id": {"type": "null"},
+            "annotation": {"type": "null"}
+          }
+        }
+      ]
     },
     "diagnostic": {
       "type": "object",
@@ -313,7 +422,44 @@
       "properties": {
         "type": {"const": "diagnostic"},
         "schema": {"const": "code-structure-viz.diagnostic/v1"},
-        "code": {"type": "string", "pattern": "^CSV-"},
+        "code": {
+          "enum": [
+            "CSV-USAGE-001",
+            "CSV-USAGE-002",
+            "CSV-USAGE-003",
+            "CSV-USAGE-004",
+            "CSV-USAGE-005",
+            "CSV-CONFIG-001",
+            "CSV-CONFIG-002",
+            "CSV-CONFIG-003",
+            "CSV-CONFIG-004",
+            "CSV-ENV-001",
+            "CSV-ENV-002",
+            "CSV-REPO-001",
+            "CSV-REPO-002",
+            "CSV-OUTPUT-001",
+            "CSV-OUTPUT-002",
+            "CSV-SOURCE-001",
+            "CSV-SOURCE-002",
+            "CSV-SOURCE-003",
+            "CSV-SOURCE-004",
+            "CSV-PY-001",
+            "CSV-PY-002",
+            "CSV-PY-003",
+            "CSV-PY-004",
+            "CSV-PY-005",
+            "CSV-PY-006",
+            "CSV-PY-007",
+            "CSV-PY-008",
+            "CSV-PY-009",
+            "CSV-PY-010",
+            "CSV-PY-011",
+            "CSV-PY-012",
+            "CSV-PY-013",
+            "CSV-INTERNAL-001",
+            "CSV-INTERRUPT-001"
+          ]
+        },
         "severity": {"enum": ["error", "warning", "info"]},
         "domain": {"enum": ["python", null]},
         "path": {"type": ["string", "null"]},
@@ -321,7 +467,8 @@
         "line": {"type": ["integer", "null"], "minimum": 1},
         "recoverable": {"type": "boolean"},
         "message": {"type": "string", "minLength": 1}
-      }
+      },
+      "allOf": [{"$ref": "urn:code-structure-viz:schema:diagnostic-v1"}]
     }
   }
 }

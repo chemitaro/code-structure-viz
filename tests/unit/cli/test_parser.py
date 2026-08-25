@@ -62,6 +62,34 @@ def test_snapshot_canonicalizes_repeatable_formats_and_targets() -> None:
     assert request.stdout_selector == DomainFormatSelector(domain="python", format="semantic-json")
 
 
+def test_cli_paths_keep_lexical_symlink_identity_for_boundary_validation(
+    tmp_path: Path,
+) -> None:
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+    config = linked_parent / "config.toml"
+
+    request = parse_cli(
+        [
+            "snapshot",
+            "--repo",
+            str(linked_parent / "repo"),
+            "--output-dir",
+            str(linked_parent / "output"),
+            "--domain",
+            "python",
+            "--config",
+            str(config),
+        ]
+    )
+
+    assert request.repo == linked_parent / "repo"
+    assert request.output_dir == linked_parent / "output"
+    assert request.config_path == config
+
+
 @pytest.mark.parametrize(
     ("extra", "code", "message"),
     [
@@ -121,6 +149,78 @@ def test_max_entities_accepts_only_positive_ascii_decimal(value: str) -> None:
         )
 
     assert caught.value.diagnostic.code.value == "CSV-USAGE-001"
+
+
+def test_arbitrarily_long_decimal_is_a_closed_usage_error_not_a_conversion_exception() -> None:
+    with pytest.raises(CliUsageError) as caught:
+        parse_cli(
+            [
+                "snapshot",
+                "--repo",
+                ".",
+                "--output-dir",
+                "../output",
+                "--domain",
+                "python",
+                "--max-entities",
+                "9" * 10_000,
+            ]
+        )
+
+    assert caught.value.diagnostic.code.value == "CSV-USAGE-001"
+
+
+@pytest.mark.parametrize(
+    ("extra", "code", "message"),
+    [
+        (
+            ["--repo", ".", "--unknown", "value"],
+            "CSV-USAGE-001",
+            "Command line does not match the snapshot v1 grammar.",
+        ),
+        (
+            ["--from", "HEAD", "--repo", "."],
+            "CSV-USAGE-002",
+            "Single-value option '--repo' was specified more than once.",
+        ),
+        (
+            ["--stdout", "invalid", "--to", "HEAD"],
+            "CSV-USAGE-003",
+            "Snapshot does not accept diff-only option '--to'.",
+        ),
+        (
+            [
+                "--format",
+                "plantuml",
+                "--stdout",
+                "python:semantic-json",
+                "--stdout",
+                "invalid",
+            ],
+            "CSV-USAGE-002",
+            "Single-value option '--stdout' was specified more than once.",
+        ),
+    ],
+)
+def test_usage_diagnostics_follow_closed_phase_priority_across_mixed_argv(
+    extra: list[str], code: str, message: str
+) -> None:
+    with pytest.raises(CliUsageError) as caught:
+        parse_cli(
+            [
+                "snapshot",
+                "--repo",
+                ".",
+                "--output-dir",
+                "../output",
+                "--domain",
+                "python",
+                *extra,
+            ]
+        )
+
+    assert caught.value.diagnostic.code.value == code
+    assert caught.value.diagnostic.message == message
 
 
 def test_stdout_selector_must_name_a_requested_format() -> None:

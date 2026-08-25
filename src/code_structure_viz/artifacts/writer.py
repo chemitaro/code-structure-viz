@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import re
 import shutil
 import stat
+import sys
 import tempfile
 from collections.abc import Callable
 from contextlib import suppress
@@ -15,6 +17,7 @@ from code_structure_viz.artifacts.manifest import (
     ArtifactFormat,
 )
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
+from code_structure_viz.core.path_safety import has_symlink_component, lexical_absolute
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
 
 _FINAL_PATHS = frozenset(
@@ -60,6 +63,33 @@ def _fsync_directory(path: Path) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def _rename_noreplace(source: Path, destination: Path) -> None:
+    library = ctypes.CDLL(None, use_errno=True)
+    source_bytes = os.fsencode(source)
+    destination_bytes = os.fsencode(destination)
+    if sys.platform == "darwin":
+        operation = library.renamex_np
+        operation.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        operation.restype = ctypes.c_int
+        result = operation(source_bytes, destination_bytes, 0x00000004)
+    elif sys.platform.startswith("linux"):
+        operation = library.renameat2
+        operation.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        operation.restype = ctypes.c_int
+        result = operation(-100, source_bytes, -100, destination_bytes, 1)
+    else:
+        raise OSError("atomic no-replace publication is unsupported")
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), destination)
 
 
 def _canonical_json_bytes(content: bytes) -> bool:
@@ -121,7 +151,9 @@ class OutputTransaction:
     def __init__(self, repository: Path, output_dir: Path) -> None:
         try:
             self.repository = repository.resolve(strict=True)
-            self.output_dir = output_dir.resolve(strict=False)
+            self.output_dir = lexical_absolute(output_dir)
+            if has_symlink_component(self.output_dir):
+                raise OSError
             parent = self.output_dir.parent
             parent_stat = parent.stat(follow_symlinks=False)
         except OSError as error:
@@ -188,6 +220,23 @@ class OutputTransaction:
             )
         )
 
+    def read_staged_artifacts(self) -> dict[str, bytes]:
+        if not self._manifest_staged:
+            raise _error(DiagnosticCode.INTERNAL_INVARIANT)
+        paths = [descriptor.path for descriptor in self.descriptors]
+        paths.append("run-manifest.json")
+        contents: dict[str, bytes] = {}
+        try:
+            for relative_path in paths:
+                content = (self.staging_root / "artifacts" / relative_path).read_bytes()
+                self._validate_content(relative_path, content)
+                contents[relative_path] = content
+        except OutputTransactionError:
+            raise
+        except OSError as error:
+            raise _error(DiagnosticCode.OUTPUT_DESTINATION) from error
+        return contents
+
     def commit(self, cancelled: Callable[[], bool] | None = None) -> None:
         if self._committed or not self._manifest_staged:
             raise _error(DiagnosticCode.INTERNAL_INVARIANT)
@@ -199,7 +248,7 @@ class OutputTransaction:
                 raise PublicationInterrupted(diagnostic(DiagnosticCode.INTERRUPTED))
             if os.path.lexists(self.output_dir):
                 raise _error(DiagnosticCode.OUTPUT_DESTINATION)
-            os.rename(self.staging_root / "artifacts", self.output_dir)
+            _rename_noreplace(self.staging_root / "artifacts", self.output_dir)
             self._committed = True
         except PublicationInterrupted:
             self.abort()

@@ -11,6 +11,7 @@ from typing import Final, cast
 
 from code_structure_viz.cli.parser import SnapshotCliRequest
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
+from code_structure_viz.core.path_safety import has_symlink_component
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
 
 
@@ -86,6 +87,15 @@ _TOP_LEVEL_KEYS: Final = frozenset({"schema", "python", "traversal", "limits"})
 _PYTHON_KEYS: Final = frozenset({"source_roots", "include", "exclude"})
 _TRAVERSAL_KEYS: Final = frozenset({"upstream_depth", "downstream_depth"})
 _LIMIT_KEYS: Final = frozenset({"max_entities"})
+_TOP_LEVEL_MISSING_KEYS: Final[dict[str, str]] = {
+    "schema": "schema",
+    "python": "python.source_roots",
+    "traversal": "traversal.upstream_depth",
+    "limits": "limits.max_entities",
+}
+_MAX_GLOB_PATTERNS: Final = 256
+_MAX_GLOB_LENGTH: Final = 4096
+_MAX_GLOB_SEGMENTS: Final = 256
 
 
 def _error(code: DiagnosticCode, *, key: str | None = None) -> ConfigResolutionError:
@@ -145,6 +155,8 @@ def _validate_glob(value: str, *, key: str) -> None:
     path = PurePosixPath(value)
     if (
         not value
+        or len(value) > _MAX_GLOB_LENGTH
+        or len(path.parts) > _MAX_GLOB_SEGMENTS
         or "\\" in value
         or path.is_absolute()
         or any(token in value for token in ("!", "[", "]", "{", "}"))
@@ -171,15 +183,10 @@ def _closed_table(value: object, *, expected: frozenset[str]) -> dict[str, objec
 def _decode_config(data: object, *, source: ConfigSource, repo: Path) -> ResolvedConfig:
     root = _closed_table(data, expected=_TOP_LEVEL_KEYS)
     if set(root) != _TOP_LEVEL_KEYS:
-        missing = min(_TOP_LEVEL_KEYS - set(root))
-        safe_key = "schema" if missing == "schema" else f"{missing}.source_roots"
-        if safe_key not in {
-            "schema",
-            "python.source_roots",
-            "traversal.source_roots",
-            "limits.source_roots",
-        }:
-            safe_key = "schema"
+        safe_key = min(
+            (_TOP_LEVEL_MISSING_KEYS[item] for item in _TOP_LEVEL_KEYS - set(root)),
+            key=lambda item: item.encode("utf-8"),
+        )
         raise _error(DiagnosticCode.CONFIG_VALUE, key=safe_key)
     if root["schema"] != _SCHEMA:
         raise _error(DiagnosticCode.CONFIG_VALUE, key="schema")
@@ -187,9 +194,17 @@ def _decode_config(data: object, *, source: ConfigSource, repo: Path) -> Resolve
     traversal = _closed_table(root["traversal"], expected=_TRAVERSAL_KEYS)
     limits = _closed_table(root["limits"], expected=_LIMIT_KEYS)
     if set(python) != _PYTHON_KEYS:
-        raise _error(DiagnosticCode.CONFIG_VALUE, key="python.source_roots")
+        key = min(
+            (f"python.{item}" for item in _PYTHON_KEYS - set(python)),
+            key=lambda item: item.encode("utf-8"),
+        )
+        raise _error(DiagnosticCode.CONFIG_VALUE, key=key)
     if set(traversal) != _TRAVERSAL_KEYS:
-        raise _error(DiagnosticCode.CONFIG_VALUE, key="traversal.upstream_depth")
+        key = min(
+            (f"traversal.{item}" for item in _TRAVERSAL_KEYS - set(traversal)),
+            key=lambda item: item.encode("utf-8"),
+        )
+        raise _error(DiagnosticCode.CONFIG_VALUE, key=key)
     if set(limits) != _LIMIT_KEYS:
         raise _error(DiagnosticCode.CONFIG_VALUE, key="limits.max_entities")
 
@@ -198,6 +213,10 @@ def _decode_config(data: object, *, source: ConfigSource, repo: Path) -> Resolve
     )
     include = _string_array(python["include"], key="python.include", allow_empty=False)
     exclude = _string_array(python["exclude"], key="python.exclude", allow_empty=True)
+    if len(include) > _MAX_GLOB_PATTERNS:
+        raise _error(DiagnosticCode.CONFIG_VALUE, key="python.include")
+    if len(exclude) > _MAX_GLOB_PATTERNS:
+        raise _error(DiagnosticCode.CONFIG_VALUE, key="python.exclude")
     for value in source_roots:
         _validate_source_root(value, repo=repo, require_exists=True)
     for value in include:
@@ -263,7 +282,7 @@ def _builtin(repo: Path) -> ResolvedConfig:
 
 def _load(path: Path, *, source: ConfigSource, repo: Path) -> ResolvedConfig:
     try:
-        if path.is_symlink() or not path.is_file():
+        if has_symlink_component(path) or not path.is_file():
             raise OSError
         raw = path.read_bytes()
     except OSError as exc:

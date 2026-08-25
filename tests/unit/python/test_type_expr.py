@@ -79,6 +79,10 @@ def test_forward_annotation_uses_same_closed_grammar() -> None:
     assert _render('"not valid ["') == ("?", (), False)
 
 
+def test_forward_annotation_expands_only_once_and_then_treats_strings_as_literals() -> None:
+    assert _render("\"'private.Secret'\"") == ("?", (), True)
+
+
 def test_literal_and_annotated_redact_values_without_making_references() -> None:
     bindings = (
         ImportBinding("L", "typing.Literal", BindingKind.SYMBOL),

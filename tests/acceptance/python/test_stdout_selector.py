@@ -1,13 +1,41 @@
+import ctypes
 import json
+import os
+import shutil
+import signal
 from pathlib import Path
 
 import pytest
 
+from code_structure_viz.cli.main import main
 from tests.helpers.acceptance import (
+    ROOT,
     initialize_fixture_repository,
     initialize_repository,
     run_cli,
 )
+
+
+class _RenameFunction:
+    def __init__(self, operation: object) -> None:
+        self._operation = operation
+        self.argtypes: object = None
+        self.restype: object = None
+
+    def __call__(self, *arguments: object) -> int:
+        paths = [argument for argument in arguments if isinstance(argument, bytes)]
+        assert len(paths) == 2
+        operation = self._operation
+        assert callable(operation)
+        operation(Path(os.fsdecode(paths[0])), Path(os.fsdecode(paths[1])))
+        return 0
+
+
+class _RenameLibrary:
+    def __init__(self, operation: object) -> None:
+        function = _RenameFunction(operation)
+        self.renamex_np = function
+        self.renameat2 = function
 
 
 @pytest.mark.parametrize(
@@ -173,3 +201,54 @@ def test_manifest_selector_on_run_fatal_reports_final_manifest_unavailable(
         b'"stable_reason":"final_manifest_unavailable","artifact":null}\n'
     )
     assert json.loads(result.stderr)["code"] == "CSV-OUTPUT-001"
+
+
+def test_post_rename_signal_and_output_deletion_keep_bound_stdout_and_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsysbinary: pytest.CaptureFixture[bytes],
+) -> None:
+    repository = initialize_fixture_repository(tmp_path, "whole")
+    output = tmp_path / "output"
+    expected = (
+        ROOT / "tests" / "golden" / "python_snapshot" / "whole" / "python.snapshot.puml"
+    ).read_bytes()
+    real_rename = os.rename
+    published = False
+
+    def rename_then_delete_and_interrupt(source: Path, destination: Path) -> None:
+        nonlocal published
+        real_rename(source, destination)
+        if Path(destination) == output and not published:
+            published = True
+            shutil.rmtree(output)
+            os.kill(os.getpid(), signal.SIGINT)
+
+    monkeypatch.setattr(os, "rename", rename_then_delete_and_interrupt)
+    monkeypatch.setattr(
+        ctypes,
+        "CDLL",
+        lambda *_arguments, **_keywords: _RenameLibrary(rename_then_delete_and_interrupt),
+    )
+
+    exit_code = main(
+        [
+            "snapshot",
+            "--repo",
+            str(repository),
+            "--output-dir",
+            str(output),
+            "--domain",
+            "python",
+            "--format",
+            "plantuml",
+            "--stdout",
+            "python:plantuml",
+        ]
+    )
+
+    captured = capsysbinary.readouterr()
+    assert published
+    assert exit_code == 0
+    assert captured.out == expected
+    assert captured.err == b""

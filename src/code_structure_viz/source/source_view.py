@@ -120,22 +120,21 @@ def _head_commit(state: HeadState) -> str | None:
 def _segment_matches(pattern: str, path: str) -> bool:
     pattern_parts = pattern.split("/")
     path_parts = path.split("/")
-
-    def match(pattern_index: int, path_index: int) -> bool:
-        if pattern_index == len(pattern_parts):
-            return path_index == len(path_parts)
-        token = pattern_parts[pattern_index]
+    suffix = [False] * (len(path_parts) + 1)
+    suffix[-1] = True
+    for token in reversed(pattern_parts):
+        current = [False] * (len(path_parts) + 1)
         if token == "**":
-            return match(pattern_index + 1, path_index) or (
-                path_index < len(path_parts) and match(pattern_index, path_index + 1)
-            )
-        return (
-            path_index < len(path_parts)
-            and fnmatch.fnmatchcase(path_parts[path_index], token)
-            and match(pattern_index + 1, path_index + 1)
-        )
-
-    return match(0, 0)
+            current[-1] = suffix[-1]
+            for path_index in range(len(path_parts) - 1, -1, -1):
+                current[path_index] = suffix[path_index] or current[path_index + 1]
+        else:
+            for path_index in range(len(path_parts) - 1, -1, -1):
+                current[path_index] = suffix[path_index + 1] and fnmatch.fnmatchcase(
+                    path_parts[path_index], token
+                )
+        suffix = current
+    return suffix[0]
 
 
 def _under_source_root(path: PurePosixPath, roots: tuple[str, ...]) -> bool:
@@ -171,13 +170,129 @@ def _read_fd(fd: int) -> bytes:
         chunks.append(chunk)
 
 
-def _open_read_only(path: Path) -> int:
+def _directory_flags() -> int:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
+
+
+def _read_flags() -> int:
     flags = os.O_RDONLY
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
-    return os.open(path, flags)
+    return flags
+
+
+def _open_parent_without_symlinks(repository: Path, relative: PurePosixPath) -> int:
+    descriptor = os.open(repository, _directory_flags())
+    try:
+        for component in relative.parts[:-1]:
+            before = os.stat(component, dir_fd=descriptor, follow_symlinks=False)
+            if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+                raise _UnsafeSymlinkError
+            child = os.open(component, _directory_flags(), dir_fd=descriptor)
+            after = os.fstat(child)
+            if _stat_signature(before) != _stat_signature(after):
+                os.close(child)
+                raise _ConcurrentMutationError
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _collapse_relative_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
+    collapsed: list[str] = []
+    for component in parts:
+        if component in {"", "."}:
+            continue
+        if component == "..":
+            if not collapsed:
+                raise _UnsafeSymlinkError
+            collapsed.pop()
+            continue
+        collapsed.append(component)
+    return tuple(collapsed)
+
+
+def _symlink_target_parts(
+    repository: Path,
+    parent_parts: tuple[str, ...],
+    target: str,
+    remaining: tuple[str, ...],
+) -> tuple[str, ...]:
+    target_path = Path(target)
+    if target_path.is_absolute():
+        normalized = Path(os.path.normpath(target))
+        try:
+            relative = normalized.relative_to(repository)
+        except ValueError as error:
+            raise _UnsafeSymlinkError from error
+        prefix = relative.parts
+    else:
+        prefix = (*parent_parts, *PurePosixPath(target).parts)
+    return _collapse_relative_parts((*prefix, *remaining))
+
+
+def _resolve_repository_file(
+    repository: Path,
+    relative: PurePosixPath,
+) -> tuple[PurePosixPath, int, str, os.stat_result]:
+    pending = list(_collapse_relative_parts(relative.parts))
+    if not pending:
+        raise _UnsafeSymlinkError
+    resolved: list[str] = []
+    descriptor = os.open(repository, _directory_flags())
+    symlink_count = 0
+    try:
+        while pending:
+            component = pending.pop(0)
+            before = os.stat(component, dir_fd=descriptor, follow_symlinks=False)
+            if stat.S_ISLNK(before.st_mode):
+                symlink_count += 1
+                if symlink_count > 40:
+                    raise _UnsafeSymlinkError
+                target = os.readlink(component, dir_fd=descriptor)
+                pending = list(
+                    _symlink_target_parts(
+                        repository,
+                        tuple(resolved),
+                        target,
+                        tuple(pending),
+                    )
+                )
+                resolved.clear()
+                os.close(descriptor)
+                descriptor = os.open(repository, _directory_flags())
+                continue
+            if pending:
+                if not stat.S_ISDIR(before.st_mode):
+                    raise _UnsafeSymlinkError
+                child = os.open(component, _directory_flags(), dir_fd=descriptor)
+                after = os.fstat(child)
+                if _stat_signature(before) != _stat_signature(after):
+                    os.close(child)
+                    raise _ConcurrentMutationError
+                os.close(descriptor)
+                descriptor = child
+                resolved.append(component)
+                continue
+            if not stat.S_ISREG(before.st_mode):
+                raise _UnsafeSymlinkError
+            return PurePosixPath(*resolved, component), descriptor, component, before
+        raise _UnsafeSymlinkError
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 class SourceViewBuilder:
@@ -254,7 +369,7 @@ class SourceViewBuilder:
         for entry in candidates:
             if entry.normalized in collision_paths:
                 continue
-            frozen = self._freeze(entry.normalized, write_frozen=write_frozen)
+            frozen = self._freeze(entry, write_frozen=write_frozen)
             if isinstance(frozen, SourceFile):
                 files.append(frozen)
             elif frozen is not None:
@@ -283,60 +398,97 @@ class SourceViewBuilder:
             normalized_groups.setdefault(entry.normalized, []).append(entry)
         collision_paths = {path for path, group in normalized_groups.items() if len(group) > 1}
 
-        case_groups: dict[str, list[PurePosixPath]] = {}
-        for path in normalized_groups:
-            case_groups.setdefault(path.as_posix().casefold(), []).append(path)
+        case_groups: dict[str, list[EnumeratedPath]] = {}
+        for path, group in normalized_groups.items():
+            if len(group) == 1:
+                case_groups.setdefault(path.as_posix().casefold(), []).append(group[0])
         for group in case_groups.values():
             if len(group) < 2:
                 continue
             for index, left in enumerate(group):
                 for right in group[index + 1 :]:
                     try:
-                        if os.path.samefile(self.repository / left, self.repository / right):
-                            collision_paths.update((left, right))
+                        if os.path.samefile(
+                            self.repository.joinpath(*PurePosixPath(left.raw_text).parts),
+                            self.repository.joinpath(*PurePosixPath(right.raw_text).parts),
+                        ):
+                            collision_paths.update((left.normalized, right.normalized))
                     except OSError:
                         continue
         return frozenset(collision_paths)
 
     def _freeze(
-        self, logical_path: PurePosixPath, *, write_frozen: bool
+        self, entry: EnumeratedPath, *, write_frozen: bool
     ) -> SourceFile | SourceAcquisitionFailure | None:
-        source_path = self.repository.joinpath(*logical_path.parts)
+        logical_path = entry.normalized
+        physical_path = PurePosixPath(entry.raw_text)
+        source_parent_descriptor: int | None = None
+        target_parent_descriptor: int | None = None
         try:
-            logical_before = source_path.lstat()
+            source_parent_descriptor = _open_parent_without_symlinks(self.repository, physical_path)
+            source_name = physical_path.name
+            logical_before = os.stat(
+                source_name,
+                dir_fd=source_parent_descriptor,
+                follow_symlinks=False,
+            )
+        except _ConcurrentMutationError as error:
+            raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
+        except _UnsafeSymlinkError:
+            return SourceAcquisitionFailure(
+                logical_path,
+                AcquisitionStage.PATH_SAFETY,
+                DiagnosticCode.SOURCE_SYMLINK,
+            )
         except FileNotFoundError:
             return None
         except OSError:
             return SourceAcquisitionFailure(
                 logical_path, AcquisitionStage.READ, DiagnosticCode.PY_READ
             )
-        if stat.S_ISLNK(logical_before.st_mode):
-            kind = SourceFileKind.SYMLINK
-            try:
-                opened_path = source_path.resolve(strict=True)
-                relative_target = opened_path.relative_to(self.repository)
-                target_before = opened_path.stat(follow_symlinks=False)
-                if not stat.S_ISREG(target_before.st_mode):
-                    raise _UnsafeSymlinkError
-            except (OSError, RuntimeError, ValueError, _UnsafeSymlinkError):
-                return SourceAcquisitionFailure(
-                    logical_path,
-                    AcquisitionStage.PATH_SAFETY,
-                    DiagnosticCode.SOURCE_SYMLINK,
-                )
-            resolved_target = PurePosixPath(
-                unicodedata.normalize("NFC", relative_target.as_posix())
-            )
-        elif stat.S_ISREG(logical_before.st_mode):
-            kind = SourceFileKind.REGULAR
-            opened_path = source_path
-            target_before = logical_before
-            resolved_target = None
-        else:
-            return None
 
         try:
-            fd = _open_read_only(opened_path)
+            if stat.S_ISLNK(logical_before.st_mode):
+                kind = SourceFileKind.SYMLINK
+                try:
+                    target_text = os.readlink(source_name, dir_fd=source_parent_descriptor)
+                    target_path = Path(target_text)
+                    if target_path.is_absolute():
+                        try:
+                            absolute_target = Path(os.path.normpath(target_text))
+                            relative_target = absolute_target.relative_to(self.repository)
+                        except ValueError as error:
+                            raise _UnsafeSymlinkError from error
+                        initial_target = PurePosixPath(*relative_target.parts)
+                    else:
+                        initial_target = physical_path.parent / PurePosixPath(target_text)
+                    (
+                        physical_target,
+                        target_parent_descriptor,
+                        target_name,
+                        target_before,
+                    ) = _resolve_repository_file(self.repository, initial_target)
+                except _ConcurrentMutationError:
+                    raise
+                except (OSError, RuntimeError, ValueError, _UnsafeSymlinkError) as error:
+                    raise _UnsafeSymlinkError from error
+                resolved_target = PurePosixPath(
+                    unicodedata.normalize("NFC", physical_target.as_posix())
+                )
+            elif stat.S_ISREG(logical_before.st_mode):
+                kind = SourceFileKind.REGULAR
+                target_parent_descriptor = source_parent_descriptor
+                target_name = source_name
+                target_before = logical_before
+                resolved_target = None
+            else:
+                return None
+
+            fd = os.open(
+                target_name,
+                _read_flags(),
+                dir_fd=target_parent_descriptor,
+            )
             try:
                 opened_before = os.fstat(fd)
                 if _stat_signature(opened_before) != _stat_signature(target_before):
@@ -345,8 +497,16 @@ class SourceViewBuilder:
                 opened_after = os.fstat(fd)
             finally:
                 os.close(fd)
-            logical_after = source_path.lstat()
-            target_after = opened_path.stat(follow_symlinks=False)
+            logical_after = os.stat(
+                source_name,
+                dir_fd=source_parent_descriptor,
+                follow_symlinks=False,
+            )
+            target_after = os.stat(
+                target_name,
+                dir_fd=target_parent_descriptor,
+                follow_symlinks=False,
+            )
             if (
                 _stat_signature(opened_before) != _stat_signature(opened_after)
                 or _stat_signature(logical_before) != _stat_signature(logical_after)
@@ -356,10 +516,24 @@ class SourceViewBuilder:
                 raise _ConcurrentMutationError
         except _ConcurrentMutationError as error:
             raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
+        except _UnsafeSymlinkError:
+            return SourceAcquisitionFailure(
+                logical_path,
+                AcquisitionStage.PATH_SAFETY,
+                DiagnosticCode.SOURCE_SYMLINK,
+            )
         except OSError:
             return SourceAcquisitionFailure(
                 logical_path, AcquisitionStage.READ, DiagnosticCode.PY_READ
             )
+        finally:
+            if (
+                target_parent_descriptor is not None
+                and target_parent_descriptor != source_parent_descriptor
+            ):
+                os.close(target_parent_descriptor)
+            if source_parent_descriptor is not None:
+                os.close(source_parent_descriptor)
 
         if write_frozen:
             self._write_frozen(logical_path, content)

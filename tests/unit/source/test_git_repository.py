@@ -1,3 +1,4 @@
+import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
@@ -8,6 +9,7 @@ from code_structure_viz.source.git_repository import (
     Commit,
     GitReadError,
     GitRepositoryReader,
+    SubprocessRunner,
     Unborn,
     UnrepresentableGitPathFatal,
 )
@@ -75,6 +77,108 @@ def test_resolve_head_state_accepts_full_sha1_and_uses_fixed_read_only_command(
         "PAGER": "cat",
         "NO_COLOR": "1",
     }
+
+
+def test_git_child_environment_drops_repository_config_object_and_trace_injection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    hostile = {
+        "GIT_DIR": "/tmp/attacker-git-dir",
+        "GIT_WORK_TREE": "/tmp/attacker-work-tree",
+        "GIT_INDEX_FILE": "/tmp/attacker-index",
+        "GIT_OBJECT_DIRECTORY": "/tmp/attacker-objects",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": "/tmp/attacker-alternates",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "alias.rev-parse",
+        "GIT_CONFIG_VALUE_0": "!malicious",
+        "GIT_TRACE": "1",
+        "GIT_TRACE2": "/tmp/attacker-trace",
+    }
+    for key, value in hostile.items():
+        monkeypatch.setenv(key, value)
+    runner = ScriptedRunner([_result(0, b"1" * 40 + b"\n")])
+
+    GitRepositoryReader(repo, runner=runner).resolve_head_state()
+
+    child_environment = runner.calls[0][1]
+    assert not set(hostile).intersection(child_environment)
+    assert set(child_environment).issubset(
+        {
+            "PATH",
+            "LC_ALL",
+            "LANG",
+            "GIT_OPTIONAL_LOCKS",
+            "GIT_CONFIG_NOSYSTEM",
+            "GIT_CONFIG_GLOBAL",
+            "GIT_TERMINAL_PROMPT",
+            "GIT_PAGER",
+            "PAGER",
+            "NO_COLOR",
+        }
+    )
+
+
+def test_subprocess_runner_starts_git_in_an_independent_signal_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(argv: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, b"git version 2.39.5\n", b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = SubprocessRunner().run(("git", "--version"), {"LC_ALL": "C"})
+
+    assert result.returncode == 0
+    assert captured["start_new_session"] is True
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        b"git version 2.39\n",
+        b"git version 2.39.3\n",
+        b"git version 2.39.3 (Apple Git-145)\n",
+        b"git version 2.43.0.windows.1\n",
+        b"git version 10.1.vendor-build\n",
+    ],
+)
+def test_git_version_accepts_numeric_minimum_with_single_line_vendor_suffix(
+    tmp_path: Path, version: bytes
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    GitRepositoryReader(repo, runner=ScriptedRunner([_result(0, version)])).validate_git_version()
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        b"git version 2.38.99 (Apple Git-999)\n",
+        b"git version 2.x\n",
+        b"git version 2.39beta\n",
+        b"git version 2.39\r\n",
+        b"git version 2.39.3\nextra\n",
+        b"git version 2.39.3\x00vendor\n",
+    ],
+)
+def test_git_version_rejects_old_malformed_or_multiline_protocol(
+    tmp_path: Path, version: bytes
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    with pytest.raises(GitReadError) as caught:
+        GitRepositoryReader(
+            repo, runner=ScriptedRunner([_result(0, version)])
+        ).validate_git_version()
+
+    assert caught.value.diagnostic.code.value == "CSV-ENV-002"
 
 
 def test_only_missing_valid_symbolic_branch_is_unborn(tmp_path: Path) -> None:

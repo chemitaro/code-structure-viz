@@ -15,6 +15,7 @@ GOLDEN_CASES = (
     "dynamic_import_ignored",
     "canonical_model",
     "annotation_references",
+    "internal_module_reference",
     "module_only",
     "targeted",
     "partial_safe",
@@ -35,6 +36,7 @@ _REQUESTS = {
     "dynamic_import_ignored": GoldenRequest((), 1, 1),
     "canonical_model": GoldenRequest((), 1, 1),
     "annotation_references": GoldenRequest((), 1, 1),
+    "internal_module_reference": GoldenRequest((), 1, 1),
     "module_only": GoldenRequest(("module:app.a",), 0, 1),
     "targeted": GoldenRequest(("class:app.a.A",), 0, 1),
     "partial_safe": GoldenRequest(("module:app.good",), 1, 1),
@@ -45,7 +47,10 @@ def render_case(case: str) -> dict[str, bytes]:
     if case not in GOLDEN_CASES:
         raise ValueError("golden case is not in the closed allowlist")
     request = _REQUESTS[case]
-    with tempfile.TemporaryDirectory(prefix="code-structure-viz-golden-") as directory:
+    with tempfile.TemporaryDirectory(
+        prefix="code-structure-viz-golden-",
+        dir=Path(tempfile.gettempdir()).resolve(),
+    ) as directory:
         temporary = Path(directory)
         repository = initialize_fixture_repository(temporary, case)
         output = temporary / "output"

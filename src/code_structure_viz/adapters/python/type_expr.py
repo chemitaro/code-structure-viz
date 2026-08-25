@@ -111,7 +111,12 @@ class SafeTypeExpressionRenderer:
         }
 
     def render(self, node: ast.expr, site: TypeReferenceSite) -> RenderedType:
-        rendered = self._render_node(node, TypeReferenceRole.HEAD, range_override=None)
+        rendered = self._render_node(
+            node,
+            TypeReferenceRole.HEAD,
+            range_override=None,
+            allow_forward=True,
+        )
         if not rendered.supported:
             return RenderedType("?", (), False)
         occurrences = tuple(
@@ -136,6 +141,7 @@ class SafeTypeExpressionRenderer:
         role: TypeReferenceRole,
         *,
         range_override: SourceRangeWithColumns | None,
+        allow_forward: bool,
     ) -> _RenderedNode:
         symbol = _symbol(node)
         if symbol is not None:
@@ -160,7 +166,12 @@ class SafeTypeExpressionRenderer:
             if canonical_base in _ANNOTATED_NAMES:
                 if len(arguments) < 2:
                     return _unsupported()
-                first = self._render_node(arguments[0], role, range_override=range_override)
+                first = self._render_node(
+                    arguments[0],
+                    role,
+                    range_override=range_override,
+                    allow_forward=allow_forward,
+                )
                 if not first.supported:
                     return _unsupported()
                 return _RenderedNode(f"{canonical_base}[{first.text}, ?]", first.occurrences, True)
@@ -175,6 +186,7 @@ class SafeTypeExpressionRenderer:
                     argument,
                     TypeReferenceRole.ARGUMENT,
                     range_override=range_override,
+                    allow_forward=allow_forward,
                 )
                 for argument in arguments
             )
@@ -191,7 +203,13 @@ class SafeTypeExpressionRenderer:
 
         if isinstance(node, ast.Tuple):
             items = tuple(
-                self._render_node(item, role, range_override=range_override) for item in node.elts
+                self._render_node(
+                    item,
+                    role,
+                    range_override=range_override,
+                    allow_forward=allow_forward,
+                )
+                for item in node.elts
             )
             if any(not item.supported for item in items):
                 return _unsupported()
@@ -210,7 +228,13 @@ class SafeTypeExpressionRenderer:
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
             leaves = _union_leaves(node)
             rendered_leaves = tuple(
-                self._render_node(leaf, role, range_override=range_override) for leaf in leaves
+                self._render_node(
+                    leaf,
+                    role,
+                    range_override=range_override,
+                    allow_forward=allow_forward,
+                )
+                for leaf in leaves
             )
             if any(not item.supported for item in rendered_leaves):
                 return _unsupported()
@@ -226,6 +250,8 @@ class SafeTypeExpressionRenderer:
             if node.value is Ellipsis:
                 return _RenderedNode("...", (), True)
             if isinstance(node.value, str):
+                if not allow_forward:
+                    return _RenderedNode("?", (), True)
                 try:
                     parsed = ast.parse(
                         node.value,
@@ -239,6 +265,7 @@ class SafeTypeExpressionRenderer:
                     parsed,
                     role,
                     range_override=range_override or _range(node),
+                    allow_forward=False,
                 )
             return _RenderedNode("?", (), True)
 

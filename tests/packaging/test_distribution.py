@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def _build(tmp_path: Path) -> tuple[Path, Path]:
     distribution = tmp_path / "dist"
     result = subprocess.run(
-        ("uv", "build", "--out-dir", str(distribution)),
+        ("uv", "build", "--offline", "--out-dir", str(distribution)),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         check=False,
@@ -158,3 +158,35 @@ def test_lock_and_third_party_license_inventory_match_exactly() -> None:
         assert len(columns) == 4
         assert columns[2] not in {"", "UNKNOWN"}
         assert columns[3].startswith("https://")
+
+
+def test_pep517_backend_and_transitive_build_requirements_are_exactly_pinned() -> None:
+    expected = {
+        "hatchling": "1.27.0",
+        "packaging": "26.3",
+        "pathspec": "1.1.1",
+        "pluggy": "1.6.0",
+        "trove-classifiers": "2026.6.1.19",
+    }
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    exact_requirements = {f"{name}=={version}" for name, version in expected.items()}
+
+    assert set(project["build-system"]["requires"]) == exact_requirements
+    assert set(project["dependency-groups"]["build"]) == exact_requirements
+
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    locked = {package["name"]: package["version"] for package in lock["package"]}
+    assert {name: locked.get(name) for name in expected} == expected
+    project_package = next(
+        package for package in lock["package"] if package["name"] == "code-structure-viz"
+    )
+    build_group = project_package["dev-dependencies"]["build"]
+    assert {dependency["name"] for dependency in build_group} == set(expected)
+
+    hatchling = next(package for package in lock["package"] if package["name"] == "hatchling")
+    assert {dependency["name"] for dependency in hatchling["dependencies"]} == {
+        "packaging",
+        "pathspec",
+        "pluggy",
+        "trove-classifiers",
+    }

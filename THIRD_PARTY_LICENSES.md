@@ -10,6 +10,7 @@ platform-conditional dependencies, are locked by `uv.lock`.
 | attrs | 26.1.0 | MIT | https://github.com/python-attrs/attrs |
 | colorama | 0.4.6 | BSD-3-Clause | https://github.com/tartley/colorama |
 | coverage | 7.15.4 | Apache-2.0 | https://github.com/coveragepy/coveragepy |
+| hatchling | 1.27.0 | MIT | https://github.com/pypa/hatch/tree/master/backend |
 | iniconfig | 2.3.0 | MIT | https://github.com/pytest-dev/iniconfig |
 | jsonschema | 4.26.0 | MIT | https://github.com/python-jsonschema/jsonschema |
 | jsonschema-specifications | 2025.9.1 | MIT | https://github.com/python-jsonschema/jsonschema-specifications |
@@ -25,4 +26,5 @@ platform-conditional dependencies, are locked by `uv.lock`.
 | referencing | 0.37.0 | MIT | https://github.com/python-jsonschema/referencing |
 | rpds-py | 2026.6.3 | MIT | https://github.com/crate-py/rpds |
 | ruff | 0.16.4 | MIT | https://github.com/astral-sh/ruff |
+| trove-classifiers | 2026.6.1.19 | Apache-2.0 | https://github.com/pypa/trove-classifiers |
 | typing-extensions | 4.16.0 | PSF-2.0 | https://github.com/python/typing_extensions |

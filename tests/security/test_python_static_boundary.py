@@ -187,24 +187,22 @@ def test_cli_never_executes_security_fixture_and_preserves_repository_and_git_al
     before = _repository_state(repository, real_git)
     shim = tmp_path / "bin" / "git"
     shim.parent.mkdir()
+    command_log = tmp_path / "git-commands.jsonl"
     shim.write_text(
         "#!/usr/bin/env python3\n"
         "import json, os, sys\n"
-        "with open(os.environ['CSV_GIT_LOG'], 'a', encoding='utf-8') as stream:\n"
+        f"with open({str(command_log)!r}, 'a', encoding='utf-8') as stream:\n"
         "    stream.write(json.dumps(sys.argv[1:], separators=(',', ':')) + '\\n')\n"
-        "os.execv(os.environ['CSV_REAL_GIT'], [os.environ['CSV_REAL_GIT'], *sys.argv[1:]])\n",
+        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n",
         encoding="utf-8",
     )
     shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
-    command_log = tmp_path / "git-commands.jsonl"
 
     result = run_cli(
         repository,
         output,
         environment={
             "PATH": f"{shim.parent}{os.pathsep}{os.environ['PATH']}",
-            "CSV_GIT_LOG": str(command_log),
-            "CSV_REAL_GIT": real_git,
         },
     )
 

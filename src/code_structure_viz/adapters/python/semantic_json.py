@@ -78,6 +78,32 @@ def render_semantic_snapshot(
     return encode_canonical_json(value)
 
 
+class PythonSemanticJsonRenderer:
+    """Render Python semantic v1 bytes for one resolved snapshot request."""
+
+    def __init__(
+        self,
+        *,
+        source_view: SourceView,
+        targets: tuple[TargetSpec, ...],
+        upstream_depth: int,
+        downstream_depth: int,
+    ) -> None:
+        self._source_view = source_view
+        self._targets = targets
+        self._upstream_depth = upstream_depth
+        self._downstream_depth = downstream_depth
+
+    def render(self, snapshot: PythonSnapshot) -> bytes:
+        return render_semantic_snapshot(
+            snapshot,
+            self._source_view,
+            self._targets,
+            self._upstream_depth,
+            self._downstream_depth,
+        )
+
+
 def target_value(value: TargetSpec) -> dict[str, str]:
     if isinstance(value, PathTarget):
         return {"kind": "path", "value": value.value.as_posix()}

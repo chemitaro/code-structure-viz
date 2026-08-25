@@ -10,11 +10,10 @@ from pathlib import Path, PurePosixPath
 from typing import Final, Protocol
 
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
+from code_structure_viz.core.path_safety import has_symlink_component
 
 _OBJECT_ID: Final[re.Pattern[bytes]] = re.compile(rb"(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})\n")
-_GIT_VERSION: Final[re.Pattern[bytes]] = re.compile(
-    rb"git version ([0-9]+)\.([0-9]+)(?:\.[^\r\n ]+)?\n"
-)
+_GIT_VERSION_PREFIX: Final[re.Pattern[bytes]] = re.compile(rb"git version ([0-9]+)\.([0-9]+)")
 _FIXED_ENV: Final[dict[str, str]] = {
     "LC_ALL": "C",
     "LANG": "C",
@@ -49,6 +48,7 @@ class SubprocessRunner:
                 check=False,
                 env=env,
                 shell=False,
+                start_new_session=True,
             )
         except OSError:
             return CommandResult(127, b"", b"")
@@ -85,8 +85,10 @@ class UnrepresentableGitPathFatal(GitReadError):
 
 
 def _safe_environment() -> dict[str, str]:
-    environment = dict(os.environ)
-    environment.update(_FIXED_ENV)
+    environment = dict(_FIXED_ENV)
+    executable_path = os.environ.get("PATH")
+    if executable_path is not None:
+        environment["PATH"] = executable_path
     return environment
 
 
@@ -117,13 +119,28 @@ class GitRepositoryReader:
 
     def validate_git_version(self) -> None:
         result = self._runner.run(("git", "--version"), self._environment)
-        match = _GIT_VERSION.fullmatch(result.stdout) if result.returncode == 0 else None
+        if (
+            result.returncode != 0
+            or not result.stdout.endswith(b"\n")
+            or result.stdout.count(b"\n") != 1
+        ):
+            raise _fatal(DiagnosticCode.ENV_GIT)
+        line = result.stdout[:-1]
+        match = _GIT_VERSION_PREFIX.match(line)
+        suffix = line[match.end() :] if match is not None else b""
+        valid_suffix = not suffix or (
+            len(suffix) > 1
+            and suffix[:1] in {b".", b" "}
+            and all(0x20 <= byte <= 0x7E for byte in suffix)
+        )
         if match is None or (int(match[1]), int(match[2])) < (2, 39):
+            raise _fatal(DiagnosticCode.ENV_GIT)
+        if not valid_suffix:
             raise _fatal(DiagnosticCode.ENV_GIT)
 
     def validate_repository_root(self) -> Path:
         try:
-            if self.repository.is_symlink() or not self.repository.is_dir():
+            if has_symlink_component(self.repository) or not self.repository.is_dir():
                 raise _fatal(DiagnosticCode.REPO_ROOT)
             expected = self.repository.resolve(strict=True)
         except OSError as error:

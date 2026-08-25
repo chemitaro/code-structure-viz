@@ -227,16 +227,26 @@ _RUN_CONTEXT_CODES: Final[frozenset[DiagnosticCode]] = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class DiagnosticContext:
+    domain: str | None
+    path: str | None
+    symbol: str | None
+    line: int | None
+
+    def __post_init__(self) -> None:
+        if self.line is not None and (type(self.line) is not int or self.line <= 0):
+            raise ValueError("diagnostic line must be a positive integer or null")
+
+
 def _validate_context(
     code: DiagnosticCode,
-    *,
-    domain: str | None,
-    path: str | None,
-    symbol: str | None,
-    line: int | None,
+    context: DiagnosticContext,
 ) -> None:
-    if line is not None and (type(line) is not int or line <= 0):
-        raise ValueError("diagnostic line must be a positive integer or null")
+    domain = context.domain
+    path = context.path
+    symbol = context.symbol
+    line = context.line
     if code in _RUN_CONTEXT_CODES:
         if any(value is not None for value in (domain, path, symbol, line)):
             raise ValueError("run diagnostic context must be null")
@@ -298,6 +308,15 @@ class Diagnostic:
     recoverable: bool
     message: str
 
+    @property
+    def context(self) -> DiagnosticContext:
+        return DiagnosticContext(
+            domain=self.domain,
+            path=self.path,
+            symbol=self.symbol,
+            line=self.line,
+        )
+
     def to_json_value(self) -> dict[str, object]:
         return {
             "type": "diagnostic",
@@ -337,7 +356,8 @@ def diagnostic(
         if key is None:
             raise ValueError("diagnostic config key is required")
         message = message.format(key=key)
-    _validate_context(code, domain=domain, path=path, symbol=symbol, line=line)
+    context = DiagnosticContext(domain=domain, path=path, symbol=symbol, line=line)
+    _validate_context(code, context)
     return Diagnostic(
         code=code,
         severity=spec.severity,

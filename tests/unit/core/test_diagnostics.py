@@ -2,6 +2,7 @@ import pytest
 
 from code_structure_viz.core.diagnostics import (
     DiagnosticCode,
+    DiagnosticContext,
     canonical_diagnostics,
     diagnostic,
     encode_diagnostic_jsonl,
@@ -21,6 +22,23 @@ def test_python_parse_diagnostic_has_exact_json_field_order_and_context() -> Non
         b'"code":"CSV-PY-003","severity":"error","domain":"python",'
         b'"path":"src/broken.py","symbol":null,"line":7,"recoverable":true,'
         b'"message":"Python source could not be parsed with the v1 Python 3.12 grammar."}\n'
+    )
+
+
+def test_diagnostic_exposes_its_context_as_an_immutable_typed_value() -> None:
+    value = diagnostic(
+        DiagnosticCode.PY_REFERENCE_UNKNOWN,
+        domain="python",
+        path="src/app/model.py",
+        symbol="Missing",
+        line=4,
+    )
+
+    assert value.context == DiagnosticContext(
+        domain="python",
+        path="src/app/model.py",
+        symbol="Missing",
+        line=4,
     )
 
 

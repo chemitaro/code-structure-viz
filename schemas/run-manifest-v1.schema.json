@@ -50,6 +50,98 @@
       "items": {"$ref": "#/$defs/diagnostic"}
     }
   },
+  "oneOf": [
+    {
+      "properties": {
+        "run": {
+          "properties": {
+            "status": {"const": "complete"},
+            "exit_code": {"const": 0}
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {"const": "complete"},
+                "payload_available": {"const": true},
+                "artifact_paths": {"minItems": 1}
+              }
+            }
+          ]
+        },
+        "artifacts": {"minItems": 1}
+      }
+    },
+    {
+      "properties": {
+        "run": {
+          "properties": {
+            "status": {"const": "not_applicable"},
+            "exit_code": {"const": 0}
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {"const": "not_applicable"},
+                "payload_available": {"const": false},
+                "artifact_paths": {"maxItems": 0}
+              }
+            }
+          ]
+        },
+        "artifacts": {"maxItems": 0}
+      }
+    },
+    {
+      "properties": {
+        "run": {
+          "properties": {
+            "status": {"const": "incomplete"},
+            "exit_code": {"const": 3}
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {"const": "incomplete"},
+                "incomplete_kind": {"const": "partial_safe"},
+                "payload_available": {"const": true},
+                "artifact_paths": {"minItems": 1}
+              }
+            }
+          ]
+        },
+        "artifacts": {"minItems": 1}
+      }
+    },
+    {
+      "properties": {
+        "run": {
+          "properties": {
+            "status": {"const": "incomplete"},
+            "exit_code": {"const": 3}
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {"const": "incomplete"},
+                "incomplete_kind": {"const": "payload_unavailable"},
+                "payload_available": {"const": false},
+                "artifact_paths": {"maxItems": 0}
+              }
+            }
+          ]
+        },
+        "artifacts": {"maxItems": 0}
+      }
+    }
+  ],
   "$defs": {
     "tool": {
       "type": "object",
@@ -238,7 +330,21 @@
         "status": {"enum": ["complete", "not_applicable", "incomplete"]},
         "exit_code": {"enum": [0, 3]},
         "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": {"enum": ["complete", "not_applicable"]},
+            "exit_code": {"const": 0}
+          }
+        },
+        {
+          "properties": {
+            "status": {"const": "incomplete"},
+            "exit_code": {"const": 3}
+          }
+        }
+      ]
     },
     "failed_file": {
       "type": "object",
@@ -355,7 +461,44 @@
       "properties": {
         "type": {"const": "diagnostic"},
         "schema": {"const": "code-structure-viz.diagnostic/v1"},
-        "code": {"type": "string", "pattern": "^CSV-[A-Z]+-[0-9]{3}$"},
+        "code": {
+          "enum": [
+            "CSV-USAGE-001",
+            "CSV-USAGE-002",
+            "CSV-USAGE-003",
+            "CSV-USAGE-004",
+            "CSV-USAGE-005",
+            "CSV-CONFIG-001",
+            "CSV-CONFIG-002",
+            "CSV-CONFIG-003",
+            "CSV-CONFIG-004",
+            "CSV-ENV-001",
+            "CSV-ENV-002",
+            "CSV-REPO-001",
+            "CSV-REPO-002",
+            "CSV-OUTPUT-001",
+            "CSV-OUTPUT-002",
+            "CSV-SOURCE-001",
+            "CSV-SOURCE-002",
+            "CSV-SOURCE-003",
+            "CSV-SOURCE-004",
+            "CSV-PY-001",
+            "CSV-PY-002",
+            "CSV-PY-003",
+            "CSV-PY-004",
+            "CSV-PY-005",
+            "CSV-PY-006",
+            "CSV-PY-007",
+            "CSV-PY-008",
+            "CSV-PY-009",
+            "CSV-PY-010",
+            "CSV-PY-011",
+            "CSV-PY-012",
+            "CSV-PY-013",
+            "CSV-INTERNAL-001",
+            "CSV-INTERRUPT-001"
+          ]
+        },
         "severity": {"enum": ["error", "warning", "info"]},
         "domain": {"enum": ["python", null]},
         "path": {"type": ["string", "null"]},
@@ -363,7 +506,8 @@
         "line": {"type": ["integer", "null"], "minimum": 1},
         "recoverable": {"type": "boolean"},
         "message": {"type": "string", "minLength": 1}
-      }
+      },
+      "allOf": [{"$ref": "urn:code-structure-viz:schema:diagnostic-v1"}]
     },
     "domain_base": {
       "type": "object",
@@ -409,7 +553,8 @@
               "properties": {
                 "status": {"const": "complete"},
                 "payload_available": {"const": true},
-                "entity_count": {"type": "integer", "minimum": 0}
+                "entity_count": {"type": "integer", "minimum": 0},
+                "artifact_paths": {"minItems": 1}
               },
               "not": {"required": ["incomplete_kind"]}
             },
@@ -428,7 +573,8 @@
                 "status": {"const": "incomplete"},
                 "incomplete_kind": {"const": "partial_safe"},
                 "payload_available": {"const": true},
-                "entity_count": {"type": "integer", "minimum": 0}
+                "entity_count": {"type": "integer", "minimum": 0},
+                "artifact_paths": {"minItems": 1}
               },
               "required": ["incomplete_kind"]
             },
@@ -465,7 +611,23 @@
         },
         "size_bytes": {"type": "integer", "minimum": 0},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "path": {"const": "python.snapshot.semantic.json"},
+            "format": {"const": "semantic-json"},
+            "media_type": {"const": "application/json"}
+          }
+        },
+        {
+          "properties": {
+            "path": {"const": "python.snapshot.puml"},
+            "format": {"const": "plantuml"},
+            "media_type": {"const": "text/vnd.plantuml; charset=utf-8"}
+          }
+        }
+      ]
     }
   }
 }

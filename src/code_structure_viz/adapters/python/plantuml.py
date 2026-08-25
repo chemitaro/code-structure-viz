@@ -14,6 +14,7 @@ from code_structure_viz.adapters.python.model import (
     PythonRelation,
     PythonSnapshot,
     RelationKind,
+    TargetKind,
     TargetResolution,
     entity_sort_key,
     member_sort_key,
@@ -94,6 +95,13 @@ def render_plantuml(snapshot: PythonSnapshot) -> bytes:
     lines.extend(_LEGEND)
     lines.append("@enduml")
     return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+class PythonPlantUmlRenderer:
+    """Render Python PlantUML v1 bytes."""
+
+    def render(self, snapshot: PythonSnapshot) -> bytes:
+        return render_plantuml(snapshot)
 
 
 def _sha256(value: str) -> str:
@@ -227,7 +235,16 @@ def _relation_line_parts(
             "import依存",
         )
     source_alias = _class_alias(relation.source_id)
-    target_alias = _class_alias(target_id)
+    if relation.target.kind is TargetKind.MODULE:
+        if not target_id.startswith("python:module:"):
+            raise ValueError("internal module relation target has an invalid id")
+        target_alias = _module_alias(target_id.removeprefix("python:module:"))
+    else:
+        if relation.target.kind is not TargetKind.CLASS or not target_id.startswith(
+            "python:class:"
+        ):
+            raise ValueError("internal class relation target has an invalid id")
+        target_alias = _class_alias(target_id)
     if relation.kind is RelationKind.INHERITANCE:
         return target_alias, "<|--", source_alias, "継承"
     if relation.kind is RelationKind.COMPOSITION:

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -61,3 +62,39 @@ def test_output_transaction_abort_removes_frozen_source_and_payload_bytes(
 
     assert not staging_root.exists()
     assert not (tmp_path / "result").exists()
+
+
+def test_output_transaction_never_replaces_destination_created_at_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    output = tmp_path / "result"
+    transaction = OutputTransaction(repository, output)
+    transaction.begin()
+    transaction.stage_payload("semantic-json", b"{}\n")
+    transaction.stage_manifest(b'{"type":"run_manifest"}\n')
+
+    real_lexists = os.path.lexists
+    raced = False
+    existing_inode: int | None = None
+
+    def create_destination_during_final_absence_check(path: os.PathLike[str] | str) -> bool:
+        nonlocal existing_inode, raced
+        if Path(path) == output and not raced:
+            raced = True
+            output.mkdir()
+            existing_inode = output.stat().st_ino
+            return False
+        return real_lexists(path)
+
+    monkeypatch.setattr(os.path, "lexists", create_destination_during_final_absence_check)
+
+    with pytest.raises(OutputTransactionError) as caught:
+        transaction.commit()
+
+    assert caught.value.diagnostic.code is DiagnosticCode.OUTPUT_DESTINATION
+    assert output.is_dir()
+    assert output.stat().st_ino == existing_inode
+    assert list(output.iterdir()) == []

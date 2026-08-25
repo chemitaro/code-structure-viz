@@ -167,3 +167,31 @@ def test_class_collision_target_is_ambiguous_and_has_no_safe_winner() -> None:
 
     assert result.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE
     assert [item.code.value for item in result.diagnostics] == ["CSV-PY-007", "CSV-PY-012"]
+
+
+def test_path_or_module_seed_containing_a_class_collision_is_payload_unavailable() -> None:
+    analysis = _analysis(
+        {
+            "src/app/duplicate.py": (b"class Same: pass\nclass Same: pass\nclass Safe: pass\n"),
+            "src/app/other.py": b"class Other: pass\n",
+        }
+    )
+    whole = PythonTargetSelector().select(analysis, (), 1, 1)
+
+    assert whole.incomplete_kind is IncompleteKind.PARTIAL_SAFE
+    assert whole.snapshot is not None
+    assert {item.name for item in whole.snapshot.entities} == {"Other", "Safe"}
+
+    for target in (
+        PathTarget(PurePosixPath("src/app/duplicate.py")),
+        ModuleTarget("app.duplicate"),
+    ):
+        targeted = PythonTargetSelector().select(analysis, (target,), 1, 1)
+        assert targeted.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE
+        assert targeted.snapshot is None
+        expected_codes = (
+            ["CSV-PY-012", "CSV-PY-007"]
+            if isinstance(target, PathTarget)
+            else ["CSV-PY-007", "CSV-PY-012"]
+        )
+        assert [item.code.value for item in targeted.diagnostics] == expected_codes

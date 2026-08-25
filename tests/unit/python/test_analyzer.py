@@ -101,6 +101,185 @@ def factory():
     assert [item.code.value for item in result.diagnostics].count("CSV-PY-009") == 2
 
 
+def test_control_flow_walker_covers_try_handlers_try_star_and_match_cases() -> None:
+    result = _analyze(
+        {
+            "src/pkg/control.py": b"""
+class TryBody: pass
+class ExceptBody: pass
+class TryElse: pass
+class TryFinally: pass
+class ExceptStarBody: pass
+class MatchBody: pass
+
+class Owner:
+    def assign(self, value):
+        try:
+            self.in_try: TryBody = value
+        except Exception:
+            self.in_except: ExceptBody = value
+        else:
+            self.in_else: TryElse = value
+        finally:
+            self.in_finally: TryFinally = value
+
+        try:
+            pass
+        except* Exception:
+            self.in_except_star: ExceptStarBody = value
+
+        match value:
+            case _:
+                self.in_match: MatchBody = value
+"""
+        }
+    )
+
+    instance_fields = {
+        member.name
+        for member in result.members
+        if member.kind is MemberKind.FIELD and member.scope is MemberScope.INSTANCE
+    }
+    assert instance_fields == {
+        "in_try",
+        "in_except",
+        "in_else",
+        "in_finally",
+        "in_except_star",
+        "in_match",
+    }
+
+
+def test_skipped_class_walker_reports_classes_in_try_handlers_and_match_cases() -> None:
+    result = _analyze(
+        {
+            "src/pkg/skipped.py": b"""
+class Safe:
+    pass
+
+try:
+    pass
+except Exception:
+    class InExcept:
+        pass
+
+try:
+    pass
+except* Exception:
+    class InExceptStar:
+        pass
+
+match value:
+    case _:
+        class InMatch:
+            pass
+"""
+        }
+    )
+
+    skipped = [item for item in result.diagnostics if item.code.value == "CSV-PY-009"]
+    assert [(item.symbol, item.line) for item in skipped] == [
+        ("class:InExcept", 8),
+        ("class:InExceptStar", 14),
+        ("class:InMatch", 19),
+    ]
+    assert {
+        item.reference for item in result.frontier if item.reason.value == "unsupported_scope"
+    } == {
+        "python:class:pkg.skipped:InExcept",
+        "python:class:pkg.skipped:InExceptStar",
+        "python:class:pkg.skipped:InMatch",
+    }
+
+
+def test_property_accessor_matching_and_type_reference_adoption_are_exact() -> None:
+    result = _analyze(
+        {
+            "src/pkg/properties.py": """
+import builtins
+
+class Receiver: pass
+class GetterExtra: pass
+class GetterReturn: pass
+class SetterValue: pass
+class SetterExtra: pass
+class SetterReturn: pass
+class DeleterExtra: pass
+class DeleterReturn: pass
+
+class Owner:
+    @property
+    def accepted(self: Receiver, extra: GetterExtra) -> GetterReturn:
+        raise NotImplementedError
+
+    @accepted.setter
+    def accepted(
+        self: Receiver, value: SetterValue, ignored: SetterExtra
+    ) -> SetterReturn:
+        raise NotImplementedError
+
+    @accepted.deleter
+    def accepted(self: Receiver, ignored: DeleterExtra) -> DeleterReturn:
+        raise NotImplementedError
+
+    @other.setter
+    def mismatched(self, value: SetterValue) -> SetterReturn:
+        raise NotImplementedError
+
+    @builtins.property
+    def explicit(self) -> GetterReturn:
+        raise NotImplementedError
+
+    @property
+    def caf\u00e9(self) -> GetterReturn:
+        raise NotImplementedError
+
+    @cafe\u0301.setter
+    def caf\u00e9(self, value: SetterValue) -> None:
+        raise NotImplementedError
+""".encode("utf-8")
+        }
+    )
+
+    accepted = [member for member in result.members if member.name == "accepted"]
+    assert [member.property_role for member in accepted] == [
+        PropertyRole.GETTER,
+        PropertyRole.SETTER,
+        PropertyRole.DELETER,
+    ]
+    assert [member.annotation for member in accepted] == [
+        "GetterReturn",
+        "SetterValue",
+        None,
+    ]
+    mismatched = next(member for member in result.members if member.name == "mismatched")
+    explicit = next(member for member in result.members if member.name == "explicit")
+    assert (mismatched.kind, mismatched.method_kind) == (MemberKind.METHOD, MethodKind.INSTANCE)
+    assert (explicit.kind, explicit.method_kind) == (MemberKind.METHOD, MethodKind.INSTANCE)
+    cafe = [member for member in result.members if member.name == "caf\u00e9"]
+    assert [member.property_role for member in cafe] == [
+        PropertyRole.GETTER,
+        PropertyRole.SETTER,
+    ]
+
+    accepted_ids = {member.id for member in accepted}
+    adopted_targets = {
+        relation.target.name
+        for relation in result.relations
+        if relation.kind is RelationKind.TYPED_DEPENDENCY and relation.via_member_id in accepted_ids
+    }
+    assert adopted_targets == {"pkg.properties.GetterReturn", "pkg.properties.SetterValue"}
+
+
+def test_nested_quoted_forward_annotation_is_a_literal_without_reference_leak() -> None:
+    result = _analyze({"src/pkg/forward.py": b"class Owner:\n    value: \"'private.Secret'\"\n"})
+
+    assert result.members[0].annotation == "?"
+    assert result.relations == ()
+    assert not any(item.code.value in {"CSV-PY-008", "CSV-PY-011"} for item in result.diagnostics)
+    assert "private.Secret" not in repr(result)
+
+
 def test_encoding_and_parse_failures_are_isolated_per_file() -> None:
     result = _analyze(
         {

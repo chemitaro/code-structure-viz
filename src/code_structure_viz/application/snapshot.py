@@ -5,12 +5,12 @@ from collections.abc import Callable
 
 from code_structure_viz.adapters.python.analyzer import PythonSnapshotAnalyzer
 from code_structure_viz.adapters.python.module_index import PythonModuleIndex
-from code_structure_viz.adapters.python.plantuml import render_plantuml
+from code_structure_viz.adapters.python.plantuml import PythonPlantUmlRenderer
 from code_structure_viz.adapters.python.selection import (
     PythonSelectionResult,
     PythonTargetSelector,
 )
-from code_structure_viz.adapters.python.semantic_json import render_semantic_snapshot
+from code_structure_viz.adapters.python.semantic_json import PythonSemanticJsonRenderer
 from code_structure_viz.artifacts.manifest import RunManifestBuilder, artifact_format
 from code_structure_viz.artifacts.writer import (
     OutputTransaction,
@@ -43,8 +43,14 @@ _ARTIFACT_PATHS = {
 class SnapshotApplication:
     """Own one static working-tree snapshot lifecycle through publication."""
 
-    def __init__(self, *, cancelled: Callable[[], bool] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+        artifacts_bound: Callable[[dict[str, bytes]], None] | None = None,
+    ) -> None:
         self._cancelled = cancelled or (lambda: False)
+        self._artifacts_bound = artifacts_bound or (lambda _artifacts: None)
 
     def run(self, request: SnapshotCliRequest) -> RunOutcome:
         transaction: OutputTransaction | None = None
@@ -81,17 +87,18 @@ class SnapshotApplication:
                 snapshot = selection.snapshot
                 if snapshot is None:
                     raise ValueError("available Python outcome lost its snapshot")
+                semantic_renderer = PythonSemanticJsonRenderer(
+                    source_view=source_view,
+                    targets=request.targets,
+                    upstream_depth=config.traversal.upstream_depth,
+                    downstream_depth=config.traversal.downstream_depth,
+                )
+                plantuml_renderer = PythonPlantUmlRenderer()
                 for format_value in request.formats:
                     if format_value == "semantic-json":
-                        content = render_semantic_snapshot(
-                            snapshot,
-                            source_view,
-                            request.targets,
-                            config.traversal.upstream_depth,
-                            config.traversal.downstream_depth,
-                        )
+                        content = semantic_renderer.render(snapshot)
                     else:
-                        content = render_plantuml(snapshot)
+                        content = plantuml_renderer.render(snapshot)
                     transaction.stage_payload(artifact_format(format_value), content)
 
             outcome = (
@@ -116,6 +123,7 @@ class SnapshotApplication:
                 current_entries,
                 config.python,
             )
+            self._artifacts_bound(transaction.read_staged_artifacts())
             transaction.commit(self._cancelled)
             return outcome
         except ConfigResolutionError as error:

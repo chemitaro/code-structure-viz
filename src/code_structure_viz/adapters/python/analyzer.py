@@ -604,14 +604,8 @@ def _collect_skipped_classes(
                     (*lexical, unicodedata.normalize("NFC", statement.name)),
                 )
                 continue
-            child_statements: list[ast.stmt] = []
-            for _, value in ast.iter_fields(statement):
-                if isinstance(value, list):
-                    child_statements.extend(item for item in value if isinstance(item, ast.stmt))
-                elif isinstance(value, ast.stmt):
-                    child_statements.append(value)
-            if child_statements:
-                scan(child_statements, lexical)
+            for block in _control_flow_blocks(statement):
+                scan(block, lexical)
 
     scan(parsed.tree.body, ())
 
@@ -679,6 +673,25 @@ def _receiver_fields(target: ast.expr) -> tuple[tuple[str, MemberScope], ...]:
     return ()
 
 
+def _control_flow_blocks(statement: ast.stmt) -> tuple[list[ast.stmt], ...]:
+    if isinstance(statement, ast.If):
+        return statement.body, statement.orelse
+    if isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
+        return statement.body, statement.orelse
+    if isinstance(statement, (ast.With, ast.AsyncWith)):
+        return (statement.body,)
+    if isinstance(statement, (ast.Try, ast.TryStar)):
+        return (
+            statement.body,
+            *(handler.body for handler in statement.handlers),
+            statement.orelse,
+            statement.finalbody,
+        )
+    if isinstance(statement, ast.Match):
+        return tuple(case.body for case in statement.cases)
+    return ()
+
+
 def _method_field_declarations(
     function: ast.FunctionDef | ast.AsyncFunctionDef,
     type_parameters: frozenset[str],
@@ -711,14 +724,8 @@ def _method_field_declarations(
                         )
             if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
-            children: list[ast.stmt] = []
-            for _, value in ast.iter_fields(statement):
-                if isinstance(value, list):
-                    children.extend(item for item in value if isinstance(item, ast.stmt))
-                elif isinstance(value, ast.stmt):
-                    children.append(value)
-            if children:
-                scan(children)
+            for block in _control_flow_blocks(statement):
+                scan(block)
 
     scan(function.body)
     return tuple(result)
@@ -728,18 +735,29 @@ def _callable_kind(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     bindings: tuple[ImportBinding, ...],
 ) -> tuple[MemberKind, PropertyRole | None, MethodKind | None]:
-    names = [
-        _canonical_symbol(symbol, bindings)
+    normalized_name = unicodedata.normalize("NFC", node.name)
+    symbolic_decorators = tuple(
+        (decorator, symbol, _canonical_symbol(symbol, bindings))
         for decorator in node.decorator_list
         if (symbol := _symbol(decorator.func if isinstance(decorator, ast.Call) else decorator))
         is not None
-    ]
-    if "property" in names:
+    )
+    if any(
+        not isinstance(decorator, ast.Call) and symbol == ("property",) and canonical == "property"
+        for decorator, symbol, canonical in symbolic_decorators
+    ):
         return MemberKind.PROPERTY, PropertyRole.GETTER, None
-    if any(name.endswith(".setter") for name in names):
+    if any(
+        not isinstance(decorator, ast.Call) and symbol == (normalized_name, "setter")
+        for decorator, symbol, _canonical in symbolic_decorators
+    ):
         return MemberKind.PROPERTY, PropertyRole.SETTER, None
-    if any(name.endswith(".deleter") for name in names):
+    if any(
+        not isinstance(decorator, ast.Call) and symbol == (normalized_name, "deleter")
+        for decorator, symbol, _canonical in symbolic_decorators
+    ):
         return MemberKind.PROPERTY, PropertyRole.DELETER, None
+    names = [canonical for _decorator, _symbol_value, canonical in symbolic_decorators]
     if "staticmethod" in names or "builtins.staticmethod" in names:
         return MemberKind.METHOD, None, MethodKind.STATIC
     if "classmethod" in names or "builtins.classmethod" in names:
@@ -996,7 +1014,28 @@ def _analyze_class_members(
                     declaration_ordinal=ordinal,
                 )
             members.append(member)
-            for rendered_type in (*rendered_parameters, rendered_return):
+            adopted_types: tuple[RenderedType | None, ...]
+            if kind is MemberKind.PROPERTY:
+                assert property_role is not None
+                if property_role is PropertyRole.GETTER:
+                    adopted_types = (rendered_return,)
+                elif property_role is PropertyRole.SETTER:
+                    value_index = next(
+                        (
+                            index
+                            for index, parameter in enumerate(signature.parameters)
+                            if parameter.name not in {"self", "cls"}
+                        ),
+                        None,
+                    )
+                    adopted_types = (
+                        rendered_parameters[value_index] if value_index is not None else None,
+                    )
+                else:
+                    adopted_types = ()
+            else:
+                adopted_types = (*rendered_parameters, rendered_return)
+            for rendered_type in adopted_types:
                 if rendered_type is not None:
                     type_evidence.extend(
                         _type_evidence(
@@ -1035,9 +1074,9 @@ def _signature(
     member_id: str,
     renderer: SafeTypeExpressionRenderer,
     diagnostics: list[Diagnostic],
-) -> tuple[MethodSignature, tuple[RenderedType, ...], RenderedType | None]:
+) -> tuple[MethodSignature, tuple[RenderedType | None, ...], RenderedType | None]:
     parameters: list[Parameter] = []
-    rendered_parameters: list[RenderedType] = []
+    rendered_parameters: list[RenderedType | None] = []
     path = candidate.parsed.indexed.path
     for index, (argument, kind, has_default) in enumerate(
         _parameter_records(declaration.node.args)
@@ -1058,7 +1097,7 @@ def _signature(
                 diagnostics,
                 f"{member_id}#parameter:{argument.arg}",
             )
-            rendered_parameters.append(rendered)
+        rendered_parameters.append(rendered)
         parameters.append(
             Parameter(
                 unicodedata.normalize("NFC", argument.arg),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import signal
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from types import FrameType
 
 from code_structure_viz import __version__
@@ -54,19 +54,36 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     previous_handler = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, handle_interrupt)
+    published_artifacts: Mapping[str, bytes] | None = None
+
+    def bind_artifacts(artifacts: dict[str, bytes]) -> None:
+        nonlocal published_artifacts
+        published_artifacts = artifacts
+
     try:
-        outcome = SnapshotApplication(cancelled=lambda: interrupted).run(request)
-    except KeyboardInterrupt:
-        from code_structure_viz.core.outcomes import RunOutcome
+        try:
+            outcome = SnapshotApplication(
+                cancelled=lambda: interrupted,
+                artifacts_bound=bind_artifacts,
+            ).run(request)
+        except KeyboardInterrupt:
+            from code_structure_viz.core.outcomes import RunOutcome
 
-        outcome = RunOutcome.interrupted((diagnostic(DiagnosticCode.INTERRUPTED),))
-    except Exception:
-        from code_structure_viz.core.outcomes import RunOutcome
+            outcome = RunOutcome.interrupted((diagnostic(DiagnosticCode.INTERRUPTED),))
+        except Exception:
+            from code_structure_viz.core.outcomes import RunOutcome
 
-        outcome = RunOutcome.fatal((diagnostic(DiagnosticCode.INTERNAL_INVARIANT),))
+            outcome = RunOutcome.fatal((diagnostic(DiagnosticCode.INTERNAL_INVARIANT),))
+
+        _write_stdout(
+            StdoutEmitter().render(
+                outcome,
+                request.stdout_selector,
+                request.output_dir,
+                published_artifacts=published_artifacts,
+            )
+        )
+        _write_stderr(StderrEmitter().render(outcome))
+        return outcome.exit_code
     finally:
         signal.signal(signal.SIGINT, previous_handler)
-
-    _write_stdout(StdoutEmitter().render(outcome, request.stdout_selector, request.output_dir))
-    _write_stderr(StderrEmitter().render(outcome))
-    return outcome.exit_code

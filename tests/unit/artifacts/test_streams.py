@@ -38,6 +38,27 @@ def test_available_selector_copies_final_artifact_exactly(tmp_path: Path) -> Non
     )
 
 
+def test_available_selector_uses_bytes_bound_before_publication_mutation(
+    tmp_path: Path,
+) -> None:
+    committed = b"@startuml\n@enduml\n"
+    (tmp_path / "python.snapshot.puml").write_bytes(b"mutated after rename\n")
+    outcome = RunOutcome.completed(
+        (DomainOutcome.complete(object(), artifact_paths=("python.snapshot.puml",)),),
+        manifest_relative_path="run-manifest.json",
+    )
+
+    assert (
+        StdoutEmitter().render(
+            outcome,
+            DomainFormatSelector("python", "plantuml"),
+            tmp_path,
+            published_artifacts={"python.snapshot.puml": committed},
+        )
+        == committed
+    )
+
+
 def test_unavailable_domain_and_manifest_fatal_use_closed_result_variants(
     tmp_path: Path,
 ) -> None:

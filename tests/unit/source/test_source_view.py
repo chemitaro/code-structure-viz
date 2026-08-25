@@ -1,3 +1,5 @@
+import os
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -94,6 +96,112 @@ def test_nfc_collision_becomes_one_failure_and_neither_path_wins(tmp_path: Path)
     assert failure.path == composed
     assert failure.stage.value == "path_safety"
     assert failure.diagnostic_code.value == "CSV-SOURCE-004"
+
+
+def test_single_physical_spelling_is_read_without_replacing_it_with_logical_identity(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "physical.py").write_bytes(b"class Physical:\n    pass\n")
+
+    view = SourceViewBuilder(repo, tmp_path / "stage").build(
+        Commit("3" * 40),
+        (EnumeratedPath("physical.py", PurePosixPath("logical.py")),),
+        PythonConfig((".",), ("**/*.py",), ()),
+    )
+
+    assert tuple(item.path for item in view.files) == (PurePosixPath("logical.py"),)
+    assert view.files[0].content == b"class Physical:\n    pass\n"
+    assert (tmp_path / "stage/source/logical.py").read_bytes() == view.files[0].content
+
+
+def test_parent_symlink_component_is_rejected_without_reading_outside_repository(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.py").write_bytes(b"SECRET_OUTSIDE_REPOSITORY")
+    (repo / "linked").symlink_to(outside, target_is_directory=True)
+
+    view = SourceViewBuilder(repo, tmp_path / "stage").build(
+        Commit("3" * 40),
+        (_entry("linked/secret.py"),),
+        PythonConfig((".",), ("**/*.py",), ()),
+    )
+
+    assert view.files == ()
+    assert len(view.failures) == 1
+    assert view.failures[0].path == PurePosixPath("linked/secret.py")
+    assert view.failures[0].diagnostic_code.value == "CSV-SOURCE-002"
+    assert not (tmp_path / "stage/source/linked/secret.py").exists()
+
+
+def test_parent_directory_swap_never_reads_repository_external_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    source_parent = repo / "src"
+    source_parent.mkdir(parents=True)
+    (source_parent / "model.py").write_bytes(b"class Safe:\n    pass\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = b"SECRET_OUTSIDE_REPOSITORY"
+    (outside / "model.py").write_bytes(secret)
+    moved_parent = repo / "original-src"
+    real_open = os.open
+    swapped = False
+    unanchored_leaf_open = False
+
+    def swap_before_leaf_open(
+        path: os.PathLike[str] | str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal swapped, unanchored_leaf_open
+        if not swapped and (Path(path) == source_parent / "model.py" or path == "model.py"):
+            source_parent.rename(moved_parent)
+            source_parent.symlink_to(outside, target_is_directory=True)
+            swapped = True
+            unanchored_leaf_open = dir_fd is None
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", swap_before_leaf_open)
+
+    with suppress(SourceDriftError):
+        SourceViewBuilder(repo, tmp_path / "stage").build(
+            Commit("3" * 40),
+            (_entry("src/model.py"),),
+            PythonConfig(("src",), ("**/*.py",), ()),
+        )
+
+    assert swapped
+    assert not unanchored_leaf_open
+
+
+def test_repeated_double_star_pattern_on_a_deep_path_is_bounded_and_non_recursive(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    staging = tmp_path / "staging"
+    depth = 600
+    path = "/".join(["d"] * depth + ["target.py"])
+    pattern = "/".join(["**"] * depth + ["never.py"])
+
+    view = SourceViewBuilder(repository, staging).build(
+        Unborn("refs/heads/main"),
+        (EnumeratedPath(path, PurePosixPath(path)),),
+        PythonConfig((".",), (pattern,), ()),
+    )
+
+    assert view.files == ()
+    assert view.failures == ()
 
 
 def test_internal_symlink_is_frozen_but_outside_symlink_is_a_failure(tmp_path: Path) -> None:

@@ -22,6 +22,18 @@ from tests.helpers.fixture_repo import (
     initialize_repository as initialize_unborn_repository,
 )
 
+_COMPLETE_CONFIG = """schema = "code-structure-viz.config/v1"
+[python]
+source_roots = ["."]
+include = ["**/*.py"]
+exclude = []
+[traversal]
+upstream_depth = 1
+downstream_depth = 1
+[limits]
+max_entities = 500
+"""
+
 
 def _git_proxy(tmp_path: Path, behavior: str) -> tuple[Path, str]:
     real_git = shutil.which("git")
@@ -32,7 +44,7 @@ def _git_proxy(tmp_path: Path, behavior: str) -> tuple[Path, str]:
         "#!/usr/bin/env python3\n"
         "import os, pathlib, sys, time\n"
         f"{behavior}\n"
-        "os.execv(os.environ['CSV_REAL_GIT'], [os.environ['CSV_REAL_GIT'], *sys.argv[1:]])\n",
+        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n",
         encoding="utf-8",
     )
     shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
@@ -178,6 +190,55 @@ def test_malicious_unknown_config_key_is_constant_usage_error_with_no_artifacts(
     assert sentinel.encode() not in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    ("removed", "expected_key"),
+    [
+        ('schema = "code-structure-viz.config/v1"\n', "schema"),
+        (
+            '[python]\nsource_roots = ["."]\ninclude = ["**/*.py"]\nexclude = []\n',
+            "python.source_roots",
+        ),
+        (
+            "[traversal]\nupstream_depth = 1\ndownstream_depth = 1\n",
+            "traversal.upstream_depth",
+        ),
+        ("[limits]\nmax_entities = 500\n", "limits.max_entities"),
+        ('source_roots = ["."]\n', "python.source_roots"),
+        ('include = ["**/*.py"]\n', "python.include"),
+        ("exclude = []\n", "python.exclude"),
+        ("upstream_depth = 1\n", "traversal.upstream_depth"),
+        ("downstream_depth = 1\n", "traversal.downstream_depth"),
+        ("max_entities = 500\n", "limits.max_entities"),
+    ],
+)
+def test_missing_config_table_or_field_is_fatal_without_stdout_or_artifacts(
+    tmp_path: Path, removed: str, expected_key: str
+) -> None:
+    repository = tmp_path / "repo"
+    initialize_repository(repository)
+    config = tmp_path / "config.toml"
+    config.write_text(_COMPLETE_CONFIG.replace(removed, ""), encoding="utf-8")
+    output = tmp_path / "output"
+
+    result = run_cli(repository, output, "--config", str(config))
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert not output.exists()
+    assert json.loads(result.stderr) == {
+        "type": "diagnostic",
+        "schema": "code-structure-viz.diagnostic/v1",
+        "code": "CSV-CONFIG-004",
+        "severity": "error",
+        "domain": None,
+        "path": None,
+        "symbol": None,
+        "line": None,
+        "recoverable": False,
+        "message": f"Configuration value '{expected_key}' is invalid for config v1.",
+    }
+
+
 def test_existing_and_inside_repository_outputs_are_run_fatal_without_publication(
     tmp_path: Path,
 ) -> None:
@@ -194,6 +255,123 @@ def test_existing_and_inside_repository_outputs_are_run_fatal_without_publicatio
     assert inside_result.returncode == 1
     assert json.loads(inside_result.stderr)["code"] == "CSV-OUTPUT-002"
     assert not (repository / "generated").exists()
+
+
+@pytest.mark.parametrize("spelling", ["leaf", "parent", "dangling"])
+def test_repository_symlink_identity_is_rejected_before_git_reads(
+    tmp_path: Path, spelling: str
+) -> None:
+    execution_root = tmp_path / "execution"
+    initialize_repository(execution_root)
+    if spelling == "leaf":
+        real_repository = tmp_path / "real-repo"
+        initialize_repository(real_repository)
+        repository = tmp_path / "repo-link"
+        repository.symlink_to(real_repository, target_is_directory=True)
+    elif spelling == "parent":
+        real_parent = tmp_path / "real-parent"
+        real_parent.mkdir()
+        real_repository = real_parent / "repo"
+        initialize_repository(real_repository)
+        linked_parent = tmp_path / "linked-parent"
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+        repository = linked_parent / "repo"
+    else:
+        repository = tmp_path / "dangling-repo"
+        repository.symlink_to(tmp_path / "missing-repo", target_is_directory=True)
+    output = tmp_path / "output"
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            "-m",
+            "code_structure_viz",
+            "snapshot",
+            "--repo",
+            str(repository),
+            "--output-dir",
+            str(output),
+            "--domain",
+            "python",
+        ),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        cwd=execution_root,
+    )
+
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["run_status"] == "fatal"
+    assert not output.exists()
+    assert json.loads(result.stderr)["code"] == "CSV-REPO-001"
+
+
+@pytest.mark.parametrize("spelling", ["leaf", "parent", "dangling"])
+def test_explicit_config_symlink_identity_is_a_closed_usage_failure(
+    tmp_path: Path, spelling: str
+) -> None:
+    repository = tmp_path / "repo"
+    initialize_repository(repository)
+    real_parent = tmp_path / "real-config-parent"
+    real_parent.mkdir()
+    real_config = real_parent / "config.toml"
+    real_config.write_text(_COMPLETE_CONFIG, encoding="utf-8")
+    if spelling == "leaf":
+        config = tmp_path / "config-link.toml"
+        config.symlink_to(real_config)
+    elif spelling == "parent":
+        linked_parent = tmp_path / "linked-config-parent"
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+        config = linked_parent / "config.toml"
+    else:
+        config = tmp_path / "dangling-config.toml"
+        config.symlink_to(tmp_path / "missing-config.toml")
+    output = tmp_path / "output"
+
+    result = run_cli(repository, output, "--config", str(config))
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert not output.exists()
+    assert json.loads(result.stderr)["code"] == "CSV-CONFIG-001"
+
+
+@pytest.mark.parametrize("spelling", ["leaf", "parent", "dangling"])
+def test_output_symlink_identity_is_rejected_without_overwriting_target(
+    tmp_path: Path, spelling: str
+) -> None:
+    repository = initialize_fixture_repository(tmp_path, "whole")
+    real_parent = tmp_path / "real-output-parent"
+    real_parent.mkdir()
+    if spelling == "leaf":
+        target = tmp_path / "existing-target"
+        target.mkdir()
+        marker = target / "marker"
+        marker.write_bytes(b"unchanged")
+        output = tmp_path / "output-link"
+        output.symlink_to(target, target_is_directory=True)
+        identity = output
+    elif spelling == "parent":
+        linked_parent = tmp_path / "linked-output-parent"
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+        output = linked_parent / "output"
+        marker = real_parent / "marker"
+        marker.write_bytes(b"unchanged")
+        identity = linked_parent
+    else:
+        output = tmp_path / "dangling-output"
+        output.symlink_to(tmp_path / "missing-output", target_is_directory=True)
+        marker = tmp_path / "marker"
+        marker.write_bytes(b"unchanged")
+        identity = output
+
+    result = run_cli(repository, output)
+
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["run_status"] == "fatal"
+    assert json.loads(result.stderr)["code"] == "CSV-OUTPUT-001"
+    assert marker.read_bytes() == b"unchanged"
+    assert identity.is_symlink()
 
 
 def test_zero_class_repository_missing_class_target_is_payload_unavailable(
@@ -283,6 +461,71 @@ def test_colliding_class_seed_is_payload_unavailable_with_group_and_target_diagn
         ("CSV-PY-007", "class:app.duplicate.Duplicate"),
         ("CSV-PY-012", "python:class:app.duplicate:Duplicate"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("option", "target", "context_key", "context_value", "expected_codes"),
+    [
+        (
+            "--target",
+            "path:src/app/duplicate.py",
+            "path",
+            "src/app/duplicate.py",
+            ["CSV-PY-012", "CSV-PY-007"],
+        ),
+        (
+            "--target",
+            "module:app.duplicate",
+            "symbol",
+            "module:app.duplicate",
+            ["CSV-PY-007", "CSV-PY-012"],
+        ),
+    ],
+)
+def test_path_or_module_seed_containing_class_collision_has_no_payload(
+    tmp_path: Path,
+    option: str,
+    target: str,
+    context_key: str,
+    context_value: str,
+    expected_codes: list[str],
+) -> None:
+    repository = initialize_fixture_repository(tmp_path, "class_collision")
+    output = tmp_path / "output"
+
+    result = run_cli(repository, output, option, target)
+
+    assert result.returncode == 3
+    assert sorted(path.name for path in output.iterdir()) == ["run-manifest.json"]
+    diagnostics = [json.loads(line) for line in result.stderr.splitlines()]
+    assert [item["code"] for item in diagnostics] == expected_codes
+    target_diagnostic = next(item for item in diagnostics if item["code"] == "CSV-PY-007")
+    assert target_diagnostic[context_key] == context_value
+
+
+def test_nested_forward_annotation_cannot_leak_symbol_text_to_public_artifacts(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    source = repository / "src" / "app" / "model.py"
+    source.parent.mkdir(parents=True)
+    sentinel = b"private.SecretSentinel"
+    source.write_bytes(b"class Owner:\n    value: \"'private.SecretSentinel'\"\n")
+    initialize_repository(repository)
+    output = tmp_path / "output"
+
+    result = run_cli(repository, output)
+
+    assert result.returncode == 0
+    assert result.stderr == b""
+    public_bytes = (
+        result.stdout
+        + result.stderr
+        + b"".join(path.read_bytes() for path in sorted(output.iterdir()))
+    )
+    assert sentinel not in public_bytes
+    semantic = json.loads((output / "python.snapshot.semantic.json").read_bytes())
+    assert semantic["members"][0]["annotation"] == "?"
 
 
 def test_true_unborn_repository_with_1001_non_python_changes_is_a_complete_snapshot(
@@ -396,7 +639,7 @@ def test_nfc_path_collision_is_payload_unavailable_with_one_group_diagnostic(
     source.parent.mkdir(parents=True)
     source.write_text("class Safe:\n    pass\n", encoding="utf-8")
     initialize_repository(repository)
-    proxy, real_git = _git_proxy(
+    proxy, _real_git = _git_proxy(
         tmp_path,
         "if sys.argv[-5:] == ['ls-files', '-z', '--cached', '--others', '--exclude-standard']:\n"
         "    os.write(1, 'src/café.py\\0src/cafe\\u0301.py\\0'.encode('utf-8'))\n"
@@ -411,7 +654,6 @@ def test_nfc_path_collision_is_payload_unavailable_with_one_group_diagnostic(
         "python:semantic-json",
         environment={
             "PATH": f"{proxy}{os.pathsep}{os.environ['PATH']}",
-            "CSV_REAL_GIT": real_git,
         },
     )
 
@@ -430,14 +672,14 @@ def test_source_drift_aborts_staged_payload_and_manifest_before_publication(
     repository = initialize_fixture_repository(tmp_path, "whole")
     counter = tmp_path / "ls-files-count"
     mutated_source = repository / "src" / "domain" / "base.py"
-    proxy, real_git = _git_proxy(
+    proxy, _real_git = _git_proxy(
         tmp_path,
         "if sys.argv[-5:] == ['ls-files', '-z', '--cached', '--others', '--exclude-standard']:\n"
-        "    counter = pathlib.Path(os.environ['CSV_COUNTER'])\n"
+        f"    counter = pathlib.Path({str(counter)!r})\n"
         "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
         "    counter.write_text(str(count))\n"
         "    if count == 2:\n"
-        "        pathlib.Path(os.environ['CSV_MUTATE']).write_text('class Mutated:\\n    pass\\n')",
+        f"        pathlib.Path({str(mutated_source)!r}).write_text('class Mutated:\\n    pass\\n')",
     )
     output = tmp_path / "output"
 
@@ -448,9 +690,6 @@ def test_source_drift_aborts_staged_payload_and_manifest_before_publication(
         "manifest",
         environment={
             "PATH": f"{proxy}{os.pathsep}{os.environ['PATH']}",
-            "CSV_REAL_GIT": real_git,
-            "CSV_COUNTER": str(counter),
-            "CSV_MUTATE": str(mutated_source),
         },
     )
 
@@ -465,14 +704,14 @@ def test_sigint_during_final_probe_interrupts_before_directory_rename(tmp_path: 
     repository = initialize_fixture_repository(tmp_path, "whole")
     counter = tmp_path / "ls-files-count"
     ready = tmp_path / "ready"
-    proxy, real_git = _git_proxy(
+    proxy, _real_git = _git_proxy(
         tmp_path,
         "if sys.argv[-5:] == ['ls-files', '-z', '--cached', '--others', '--exclude-standard']:\n"
-        "    counter = pathlib.Path(os.environ['CSV_COUNTER'])\n"
+        f"    counter = pathlib.Path({str(counter)!r})\n"
         "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
         "    counter.write_text(str(count))\n"
         "    if count == 2:\n"
-        "        pathlib.Path(os.environ['CSV_READY']).write_text('ready')\n"
+        f"        pathlib.Path({str(ready)!r}).write_text('ready')\n"
         "        time.sleep(1)",
     )
     output = tmp_path / "output"
@@ -499,9 +738,6 @@ def test_sigint_during_final_probe_interrupts_before_directory_rename(tmp_path: 
             **os.environ,
             "NO_COLOR": "1",
             "PATH": f"{proxy}{os.pathsep}{os.environ['PATH']}",
-            "CSV_REAL_GIT": real_git,
-            "CSV_COUNTER": str(counter),
-            "CSV_READY": str(ready),
         },
     )
     try:

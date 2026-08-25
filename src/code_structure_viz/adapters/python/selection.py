@@ -149,6 +149,8 @@ def _resolve_target(
     if isinstance(target, PathTarget):
         module_id = parsed_paths.get(target.value)
         if module_id is not None:
+            if any(item.path == target.value for item in analysis.class_collisions):
+                return frozenset(), _TargetFailure(target, DiagnosticCode.PY_TARGET_AMBIGUOUS)
             return frozenset({module_id}), None
         code = (
             DiagnosticCode.PY_TARGET_AMBIGUOUS
@@ -162,6 +164,11 @@ def _resolve_target(
     indexed_modules = {item.module for item in analysis.indexed_modules}
     if isinstance(target, ModuleTarget):
         if target.value in parsed_modules:
+            collision_prefix = f"python:class:{target.value}:"
+            if any(
+                item.entity_id.startswith(collision_prefix) for item in analysis.class_collisions
+            ):
+                return frozenset(), _TargetFailure(target, DiagnosticCode.PY_TARGET_AMBIGUOUS)
             return frozenset({parsed_modules[target.value]}), None
         code = (
             DiagnosticCode.PY_TARGET_AMBIGUOUS

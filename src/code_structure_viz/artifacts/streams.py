@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from code_structure_viz.cli.parser import (
@@ -92,6 +93,8 @@ class StdoutEmitter:
         outcome: RunOutcome,
         selector: StdoutSelector | None,
         output_dir: Path,
+        *,
+        published_artifacts: Mapping[str, bytes] | None = None,
     ) -> bytes:
         if outcome.status is RunStatus.USAGE:
             return b""
@@ -109,6 +112,8 @@ class StdoutEmitter:
         if isinstance(selector, ManifestSelector):
             if outcome.manifest_relative_path is None:
                 raise ValueError("committed outcome is missing a manifest")
+            if published_artifacts is not None:
+                return published_artifacts[outcome.manifest_relative_path]
             return (output_dir / outcome.manifest_relative_path).read_bytes()
 
         assert isinstance(selector, DomainFormatSelector)
@@ -122,6 +127,8 @@ class StdoutEmitter:
         relative_path = _DOMAIN_PATHS[selector.format]
         if relative_path not in domain.artifact_paths:
             raise ValueError("selected domain artifact was not published")
+        if published_artifacts is not None:
+            return published_artifacts[relative_path]
         return (output_dir / relative_path).read_bytes()
 
 

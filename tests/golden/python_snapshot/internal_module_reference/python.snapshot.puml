@@ -1,0 +1,22 @@
+@startuml
+title Python structure snapshot
+left to right direction
+skinparam classAttributeIconSize 0
+hide empty members
+package "app.owner" as M_f1813948579d65a9f2f9a11b67fa6817f3452977c4275cfb45733f05f40db6fe {
+  class "Owner" as C_7b0af7a387b6a651f86e70058dc2fc80a7cb11f7eaafd7ee3067c86810e83f7a {
+    field module : app.types
+  }
+}
+package "app.types" as M_ff741527171180487b75a81d948298f58726c2584e73dc01c92e6dcb8887477d {
+  note "classなし" as N_EMPTY_d78e9bd81a3ffbffe99c2230e6302c1a6d750af1a2b189fff4809e9fafd70a29
+}
+C_7b0af7a387b6a651f86e70058dc2fc80a7cb11f7eaafd7ee3067c86810e83f7a *-- M_ff741527171180487b75a81d948298f58726c2584e73dc01c92e6dcb8887477d : 合成
+M_f1813948579d65a9f2f9a11b67fa6817f3452977c4275cfb45733f05f40db6fe ..> M_ff741527171180487b75a81d948298f58726c2584e73dc01c92e6dcb8887477d : import依存
+legend right
+  <|-- 継承
+  *-- 合成
+  ..> 型依存
+  package ..> package import依存
+endlegend
+@enduml

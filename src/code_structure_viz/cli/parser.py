@@ -5,9 +5,10 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Final, Literal, cast
 
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
+from code_structure_viz.core.path_safety import lexical_absolute
 from code_structure_viz.source.targets import TargetSpec, parse_target, target_sort_key
 
 OutputFormat = Literal["semantic-json", "plantuml"]
@@ -62,6 +63,15 @@ _SINGLE_OPTIONS = frozenset(
 _REPEATABLE_OPTIONS = frozenset({"--target", "--format"})
 _DIFF_OPTIONS = frozenset({"--from", "--to", "--pr-target", "--max-changed-paths"})
 _ASCII_DECIMAL = re.compile(r"[0-9]+\Z", flags=re.ASCII)
+_MAX_DECIMAL_DIGITS: Final = 4_300
+
+
+@dataclass(frozen=True, slots=True)
+class _UsageCandidate:
+    phase: int
+    index: int
+    code: DiagnosticCode
+    option: str | None = None
 
 
 def _usage(code: DiagnosticCode, *, option: str | None = None) -> CliUsageError:
@@ -69,9 +79,12 @@ def _usage(code: DiagnosticCode, *, option: str | None = None) -> CliUsageError:
 
 
 def _parse_non_negative(value: str) -> int:
-    if _ASCII_DECIMAL.fullmatch(value) is None:
+    if _ASCII_DECIMAL.fullmatch(value) is None or len(value) > _MAX_DECIMAL_DIGITS:
         raise _usage(DiagnosticCode.USAGE_GRAMMAR)
-    return int(value, 10)
+    try:
+        return int(value, 10)
+    except ValueError as error:
+        raise _usage(DiagnosticCode.USAGE_GRAMMAR) from error
 
 
 def _parse_positive(value: str) -> int:
@@ -96,14 +109,127 @@ def _parse_stdout(value: str) -> StdoutSelector:
     return DomainFormatSelector(domain=domain, format=format_value)  # type: ignore[arg-type]
 
 
-def parse_cli(argv: Sequence[str]) -> SnapshotCliRequest:
-    """Parse the closed snapshot command grammar."""
+def _candidate_error(candidates: list[_UsageCandidate]) -> None:
+    if not candidates:
+        return
+    selected = min(candidates, key=lambda item: (item.phase, item.index))
+    raise _usage(selected.code, option=selected.option)
+
+
+def _validate_usage_priority(argv: Sequence[str]) -> None:
     if not argv:
         raise _usage(DiagnosticCode.USAGE_GRAMMAR)
     if argv[0] == "diff":
         raise _usage(DiagnosticCode.USAGE_DIFF_OPTION, option="diff")
     if argv[0] != "snapshot":
         raise _usage(DiagnosticCode.USAGE_GRAMMAR)
+
+    candidates: list[_UsageCandidate] = []
+    occurrences: dict[str, list[tuple[int, int, str]]] = {}
+    index = 1
+    while index < len(argv):
+        option = argv[index]
+        if option.startswith("--") and "=" in option:
+            candidates.append(_UsageCandidate(0, index, DiagnosticCode.USAGE_GRAMMAR))
+            index += 1
+            continue
+        if option in _DIFF_OPTIONS:
+            candidates.append(_UsageCandidate(2, index, DiagnosticCode.USAGE_DIFF_OPTION, option))
+            if index + 1 < len(argv) and not argv[index + 1].startswith("--"):
+                index += 2
+            else:
+                index += 1
+            continue
+        if option not in _SINGLE_OPTIONS and option not in _REPEATABLE_OPTIONS:
+            candidates.append(_UsageCandidate(0, index, DiagnosticCode.USAGE_GRAMMAR))
+            index += 1
+            continue
+        if index + 1 >= len(argv) or argv[index + 1].startswith("--"):
+            candidates.append(
+                _UsageCandidate(
+                    3 if option == "--stdout" else 0,
+                    index,
+                    (
+                        DiagnosticCode.USAGE_STDOUT_SYNTAX
+                        if option == "--stdout"
+                        else DiagnosticCode.USAGE_GRAMMAR
+                    ),
+                )
+            )
+            index += 1
+            continue
+        occurrences.setdefault(option, []).append((index, index + 1, argv[index + 1]))
+        index += 2
+
+    for option in _SINGLE_OPTIONS:
+        values = occurrences.get(option, [])
+        for option_index, _value_index, _value in values[1:]:
+            candidates.append(
+                _UsageCandidate(1, option_index, DiagnosticCode.USAGE_DUPLICATE, option)
+            )
+    required = {"--repo", "--output-dir", "--domain"}
+    if any(not occurrences.get(option) for option in required):
+        candidates.append(_UsageCandidate(0, len(argv), DiagnosticCode.USAGE_GRAMMAR))
+
+    domain_values = occurrences.get("--domain", [])
+    if domain_values and domain_values[0][2] != "python":
+        candidates.append(_UsageCandidate(0, domain_values[0][1], DiagnosticCode.USAGE_GRAMMAR))
+
+    format_values = occurrences.get("--format", [])
+    seen_formats: set[str] = set()
+    for option_index, _value_index, value in format_values:
+        if value not in {"semantic-json", "plantuml"} or value in seen_formats:
+            candidates.append(_UsageCandidate(0, option_index, DiagnosticCode.USAGE_GRAMMAR))
+        seen_formats.add(value)
+
+    target_values = occurrences.get("--target", [])
+    for _option_index, value_index, value in target_values:
+        try:
+            parse_target(unicodedata.normalize("NFC", value))
+        except ValueError:
+            candidates.append(_UsageCandidate(0, value_index, DiagnosticCode.USAGE_GRAMMAR))
+
+    for option in ("--upstream-depth", "--downstream-depth"):
+        values = occurrences.get(option, [])
+        if values:
+            option_index, value_index, value = values[0]
+            if _ASCII_DECIMAL.fullmatch(value) is None or len(value) > _MAX_DECIMAL_DIGITS:
+                candidates.append(_UsageCandidate(0, value_index, DiagnosticCode.USAGE_GRAMMAR))
+            if not target_values:
+                candidates.append(_UsageCandidate(0, option_index, DiagnosticCode.USAGE_GRAMMAR))
+
+    max_values = occurrences.get("--max-entities", [])
+    if max_values:
+        _option_index, value_index, value = max_values[0]
+        if (
+            _ASCII_DECIMAL.fullmatch(value) is None
+            or len(value) > _MAX_DECIMAL_DIGITS
+            or not value.strip("0")
+        ):
+            candidates.append(_UsageCandidate(0, value_index, DiagnosticCode.USAGE_GRAMMAR))
+
+    stdout_values = occurrences.get("--stdout", [])
+    if stdout_values:
+        option_index, _value_index, value = stdout_values[0]
+        try:
+            selector = _parse_stdout(value)
+        except CliUsageError:
+            candidates.append(_UsageCandidate(3, option_index, DiagnosticCode.USAGE_STDOUT_SYNTAX))
+        else:
+            resolved_formats = {item[2] for item in format_values} or {"semantic-json", "plantuml"}
+            if isinstance(selector, DomainFormatSelector) and (
+                selector.domain != "python" or selector.format not in resolved_formats
+            ):
+                candidates.append(
+                    _UsageCandidate(4, option_index, DiagnosticCode.USAGE_STDOUT_COMPATIBILITY)
+                )
+
+    _candidate_error(candidates)
+
+
+def parse_cli(argv: Sequence[str]) -> SnapshotCliRequest:
+    """Parse the closed snapshot command grammar."""
+    _validate_usage_priority(argv)
 
     values: dict[str, str] = {}
     targets: list[str] = []
@@ -181,7 +307,7 @@ def parse_cli(argv: Sequence[str]) -> SnapshotCliRequest:
         path = Path(raw)
         if not path.is_absolute():
             path = invocation_cwd / path
-        return path.resolve(strict=False)
+        return lexical_absolute(path)
 
     return SnapshotCliRequest(
         repo=resolve_path(values["--repo"]),

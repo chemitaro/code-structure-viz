@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:diagnostic-v1",
   "title": "CodeStructureViz diagnostic v1",
   "type": "object",
   "additionalProperties": false,
@@ -57,11 +58,458 @@
       ]
     },
     "severity": {"enum": ["error", "warning", "info"]},
-    "domain": {"type": ["string", "null"], "enum": ["python", null]},
+    "domain": {"enum": ["python", null]},
     "path": {"type": ["string", "null"], "minLength": 1},
     "symbol": {"type": ["string", "null"], "minLength": 1},
     "line": {"type": ["integer", "null"], "minimum": 1},
     "recoverable": {"type": "boolean"},
     "message": {"type": "string", "minLength": 1}
-  }
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "code": {"const": "CSV-USAGE-001"},
+            "message": {"const": "Command line does not match the snapshot v1 grammar."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-USAGE-002"},
+            "message": {
+              "enum": [
+                "Single-value option '--repo' was specified more than once.",
+                "Single-value option '--output-dir' was specified more than once.",
+                "Single-value option '--domain' was specified more than once.",
+                "Single-value option '--config' was specified more than once.",
+                "Single-value option '--upstream-depth' was specified more than once.",
+                "Single-value option '--downstream-depth' was specified more than once.",
+                "Single-value option '--max-entities' was specified more than once.",
+                "Single-value option '--stdout' was specified more than once."
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-USAGE-003"},
+            "message": {
+              "enum": [
+                "Snapshot does not accept diff-only option 'diff'.",
+                "Snapshot does not accept diff-only option '--from'.",
+                "Snapshot does not accept diff-only option '--to'.",
+                "Snapshot does not accept diff-only option '--pr-target'.",
+                "Snapshot does not accept diff-only option '--max-changed-paths'."
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-USAGE-004"},
+            "message": {"const": "Stdout selector is not valid for snapshot v1."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-USAGE-005"},
+            "message": {
+              "const": "Stdout selector does not name a selected domain and requested format."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-CONFIG-001"},
+            "message": {"const": "Configuration file could not be read."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-CONFIG-002"},
+            "message": {"const": "Configuration is not valid TOML."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-CONFIG-003"},
+            "message": {"const": "Configuration contains an unknown key."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-CONFIG-004"},
+            "message": {
+              "enum": [
+                "Configuration value 'schema' is invalid for config v1.",
+                "Configuration value 'python.source_roots' is invalid for config v1.",
+                "Configuration value 'python.include' is invalid for config v1.",
+                "Configuration value 'python.exclude' is invalid for config v1.",
+                "Configuration value 'traversal.upstream_depth' is invalid for config v1.",
+                "Configuration value 'traversal.downstream_depth' is invalid for config v1.",
+                "Configuration value 'limits.max_entities' is invalid for config v1."
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-ENV-001"},
+            "message": {"const": "Python 3.12 or newer is required."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-ENV-002"},
+            "message": {"const": "Git 2.39 or newer is required."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-REPO-001"},
+            "message": {"const": "Repository path must be an exact Git working-tree root."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-REPO-002"},
+            "message": {
+              "const": "Repository HEAD is neither a resolvable commit nor a valid unborn branch."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-OUTPUT-001"},
+            "message": {
+              "const": "Output destination already exists or cannot be published atomically."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-OUTPUT-002"},
+            "message": {"const": "Output destination must be outside the target repository."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SOURCE-001"},
+            "message": {"const": "Source view changed before publication."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SOURCE-002"},
+            "message": {"const": "Python source symlink is unsafe."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SOURCE-003"},
+            "message": {"const": "Repository contains a path that is not valid UTF-8."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SOURCE-004"},
+            "message": {
+              "const": "Repository paths are not unique after safe path normalization."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-001"},
+            "message": {"const": "Python source could not be read."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-002"},
+            "message": {"const": "Python source encoding could not be decoded safely."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-003"},
+            "message": {
+              "const": "Python source could not be parsed with the v1 Python 3.12 grammar."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-004"},
+            "message": {"const": "Python source path does not map to a valid module identity."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-005"},
+            "message": {
+              "const": "More than one source file maps to the same Python module identity."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-006"},
+            "message": {
+              "const": "Requested Python target was not found in the safe source view."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-007"},
+            "message": {"const": "Requested Python target is ambiguous."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-008"},
+            "message": {"const": "Python reference could not be resolved statically."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-009"},
+            "message": {
+              "const": "Class declaration outside a direct module or class body is outside Python semantic v1."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-010"},
+            "message": {
+              "const": "Python entity count exceeds the resolved max-entities limit."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-011"},
+            "message": {"const": "Python type expression was reduced to an unknown marker."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-012"},
+            "message": {
+              "const": "More than one class declaration maps to the same Python class identity."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-013"},
+            "message": {
+              "const": "Conflicting field annotations were reduced to an unknown marker."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-INTERNAL-001"},
+            "message": {
+              "const": "Internal snapshot contract invariant failed before publication."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-INTERRUPT-001"},
+            "message": {"const": "Snapshot was interrupted before publication."}
+          }
+        }
+      ]
+    },
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "CSV-USAGE-001",
+                "CSV-USAGE-002",
+                "CSV-USAGE-003",
+                "CSV-USAGE-004",
+                "CSV-USAGE-005",
+                "CSV-CONFIG-001",
+                "CSV-CONFIG-002",
+                "CSV-CONFIG-003",
+                "CSV-CONFIG-004",
+                "CSV-ENV-001",
+                "CSV-ENV-002",
+                "CSV-REPO-001",
+                "CSV-REPO-002",
+                "CSV-OUTPUT-001",
+                "CSV-OUTPUT-002",
+                "CSV-SOURCE-001",
+                "CSV-SOURCE-002",
+                "CSV-SOURCE-003",
+                "CSV-SOURCE-004",
+                "CSV-PY-006",
+                "CSV-PY-007",
+                "CSV-PY-010",
+                "CSV-INTERNAL-001"
+              ]
+            },
+            "severity": {"const": "error"},
+            "recoverable": {"const": false}
+          }
+        },
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "CSV-PY-001",
+                "CSV-PY-002",
+                "CSV-PY-003",
+                "CSV-PY-004",
+                "CSV-PY-005",
+                "CSV-PY-012"
+              ]
+            },
+            "severity": {"const": "error"},
+            "recoverable": {"const": true}
+          }
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-PY-008", "CSV-PY-011", "CSV-PY-013"]},
+            "severity": {"const": "warning"},
+            "recoverable": {"const": true}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-009"},
+            "severity": {"const": "info"},
+            "recoverable": {"const": true}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-INTERRUPT-001"},
+            "severity": {"const": "warning"},
+            "recoverable": {"const": false}
+          }
+        }
+      ]
+    },
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "CSV-USAGE-001",
+                "CSV-USAGE-002",
+                "CSV-USAGE-003",
+                "CSV-USAGE-004",
+                "CSV-USAGE-005",
+                "CSV-CONFIG-001",
+                "CSV-CONFIG-002",
+                "CSV-CONFIG-003",
+                "CSV-CONFIG-004",
+                "CSV-ENV-001",
+                "CSV-ENV-002",
+                "CSV-REPO-001",
+                "CSV-REPO-002",
+                "CSV-OUTPUT-001",
+                "CSV-OUTPUT-002",
+                "CSV-SOURCE-001",
+                "CSV-SOURCE-003",
+                "CSV-INTERNAL-001",
+                "CSV-INTERRUPT-001"
+              ]
+            },
+            "domain": {"type": "null"},
+            "path": {"type": "null"},
+            "symbol": {"type": "null"},
+            "line": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-SOURCE-002", "CSV-SOURCE-004"]},
+            "domain": {"const": "python"},
+            "path": {"type": "string", "minLength": 1},
+            "symbol": {"type": "null"},
+            "line": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-PY-001", "CSV-PY-002", "CSV-PY-004"]},
+            "domain": {"const": "python"},
+            "path": {"type": "string", "minLength": 1},
+            "symbol": {"type": "null"},
+            "line": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-003"},
+            "domain": {"const": "python"},
+            "path": {"type": "string", "minLength": 1},
+            "symbol": {"type": "null"},
+            "line": {"type": ["integer", "null"], "minimum": 1}
+          }
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-PY-005", "CSV-PY-012"]},
+            "domain": {"const": "python"},
+            "path": {"type": "null"},
+            "symbol": {"type": "string", "minLength": 1},
+            "line": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-PY-006", "CSV-PY-007"]},
+            "domain": {"const": "python"},
+            "line": {"type": "null"}
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "symbol": {"type": "null"}
+              }
+            },
+            {
+              "properties": {
+                "path": {"type": "null"},
+                "symbol": {"type": "string", "minLength": 1}
+              }
+            }
+          ]
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-PY-008", "CSV-PY-009", "CSV-PY-011", "CSV-PY-013"]},
+            "domain": {"const": "python"},
+            "path": {"type": "string", "minLength": 1},
+            "symbol": {"type": "string", "minLength": 1},
+            "line": {"type": "integer", "minimum": 1}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-PY-010"},
+            "domain": {"const": "python"},
+            "path": {"type": "null"},
+            "symbol": {"type": "null"},
+            "line": {"type": "null"}
+          }
+        }
+      ]
+    }
+  ]
 }

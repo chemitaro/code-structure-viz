@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import unicodedata
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -86,6 +88,31 @@ def test_real_git_and_source_view_admit_tracked_and_unignored_untracked_python(
     )
     assert PurePosixPath("ignored.py") not in tuple(entry.normalized for entry in entries)
     assert view.failures == ()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux physical Unicode spelling contract")
+def test_linux_source_view_reads_single_nfd_physical_filename_as_nfc_identity(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    initialize_repository(repo)
+    physical = "src/cafe\u0301.py"
+    logical = unicodedata.normalize("NFC", physical)
+    (repo / "src").mkdir()
+    (repo / physical).write_bytes(b"class Cafe:\n    pass\n")
+    commit_all(repo)
+    reader = GitRepositoryReader(repo)
+
+    entries = reader.enumerate_path_entries()
+    view = SourceViewBuilder(repo, tmp_path / "stage").build(
+        reader.resolve_head_state(), entries, PythonConfig(("src",), ("**/*.py",), ())
+    )
+
+    assert tuple(entry.raw_text for entry in entries if entry.normalized.suffix == ".py") == (
+        physical,
+    )
+    assert tuple(item.path.as_posix() for item in view.files) == (logical,)
+    assert view.files[0].content == b"class Cafe:\n    pass\n"
 
 
 def test_real_git_non_utf8_path_stops_before_source_view(tmp_path: Path) -> None:

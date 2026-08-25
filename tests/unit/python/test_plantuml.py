@@ -19,6 +19,7 @@ from code_structure_viz.adapters.python.model import (
     TargetResolution,
 )
 from code_structure_viz.adapters.python.plantuml import (
+    PythonPlantUmlRenderer,
     escape_plantuml_text,
     render_plantuml,
 )
@@ -29,6 +30,34 @@ def test_escape_plantuml_text_is_a_single_pass_closed_escape() -> None:
 
     assert escape_plantuml_text(value) == (
         '\u00e9\\\\\\"\\n\\r\\t\\u0001\\u200B\\u2028\\U000E0001\\uD800'
+    )
+
+
+def test_plantuml_renderer_class_preserves_the_exact_snapshot_bytes() -> None:
+    snapshot = PythonSnapshot(
+        (),
+        (),
+        (),
+        PythonCoverage(0, 0, (), (), 0, ()),
+        (),
+    )
+
+    assert (
+        PythonPlantUmlRenderer().render(snapshot)
+        == (
+            "@startuml\n"
+            "title Python structure snapshot\n"
+            "left to right direction\n"
+            "skinparam classAttributeIconSize 0\n"
+            "hide empty members\n"
+            "legend right\n"
+            "  <|-- 継承\n"
+            "  *-- 合成\n"
+            "  ..> 型依存\n"
+            "  package ..> package import依存\n"
+            "endlegend\n"
+            "@enduml\n"
+        ).encode()
     )
 
 
@@ -185,3 +214,49 @@ def test_members_use_closed_parameter_grammar_and_visual_relations_are_deduped()
         "app.service.Item | None" in rendered
     )
     assert rendered.count(" : 合成") == 1
+
+
+def test_internal_module_type_reference_uses_its_declared_module_endpoint() -> None:
+    owner = PythonClassEntity.create(
+        module="app.owner",
+        qualified_name="Owner",
+        path=PurePosixPath("src/app/owner.py"),
+        source_range=SourceRange(1, 3),
+    )
+    field = PythonMember.create_field(
+        owner_id=owner.id,
+        name="types",
+        scope=MemberScope.INSTANCE,
+        annotation="app.types",
+        source_range=SourceRange(2, 2),
+    )
+    relation = PythonRelation.create(
+        kind=RelationKind.COMPOSITION,
+        source_id=owner.id,
+        target=RelationTarget(
+            TargetResolution.INTERNAL,
+            TargetKind.MODULE,
+            "python:module:app.types",
+            "app.types",
+        ),
+        via_member_id=field.id,
+        annotation="app.types",
+        source_range=field.range,
+    )
+    snapshot = PythonSnapshot(
+        (owner,),
+        (field,),
+        (relation,),
+        PythonCoverage(2, 2, (), ("app.owner", "app.types"), 1, ()),
+        (),
+    )
+
+    rendered = render_plantuml(snapshot).decode("utf-8")
+
+    assert (
+        "C_7b0af7a387b6a651f86e70058dc2fc80a7cb11f7eaafd7ee3067c86810e83f7a"
+        " *-- "
+        "M_ff741527171180487b75a81d948298f58726c2584e73dc01c92e6dcb8887477d"
+        " : 合成\n"
+    ) in rendered
+    assert "C_ff741527171180487b75a81d948298f58726c2584e73dc01c92e6dcb8887477d" not in rendered

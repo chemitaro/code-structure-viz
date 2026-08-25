@@ -22,6 +22,19 @@ def _request(repo: Path, output: Path, *extra: str) -> SnapshotCliRequest:
     )
 
 
+_COMPLETE_CONFIG = """schema = "code-structure-viz.config/v1"
+[python]
+source_roots = ["."]
+include = ["**/*.py"]
+exclude = []
+[traversal]
+upstream_depth = 1
+downstream_depth = 1
+[limits]
+max_entities = 500
+"""
+
+
 def test_builtin_config_has_exact_values_sources_and_digest(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -136,6 +149,44 @@ max_entities = 500
 
 
 @pytest.mark.parametrize(
+    ("removed", "expected_key"),
+    [
+        ('schema = "code-structure-viz.config/v1"\n', "schema"),
+        (
+            '[python]\nsource_roots = ["."]\ninclude = ["**/*.py"]\nexclude = []\n',
+            "python.source_roots",
+        ),
+        (
+            "[traversal]\nupstream_depth = 1\ndownstream_depth = 1\n",
+            "traversal.upstream_depth",
+        ),
+        ("[limits]\nmax_entities = 500\n", "limits.max_entities"),
+        ('source_roots = ["."]\n', "python.source_roots"),
+        ('include = ["**/*.py"]\n', "python.include"),
+        ("exclude = []\n", "python.exclude"),
+        ("upstream_depth = 1\n", "traversal.upstream_depth"),
+        ("downstream_depth = 1\n", "traversal.downstream_depth"),
+        ("max_entities = 500\n", "limits.max_entities"),
+    ],
+)
+def test_every_missing_config_table_or_field_maps_to_a_closed_safe_key(
+    tmp_path: Path, removed: str, expected_key: str
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config_path = tmp_path / "missing.toml"
+    config_path.write_text(_COMPLETE_CONFIG.replace(removed, ""), encoding="utf-8")
+
+    with pytest.raises(ConfigResolutionError) as caught:
+        resolve_config(_request(repo, tmp_path / "output", "--config", str(config_path)), repo)
+
+    value = caught.value.diagnostic
+    assert value.code.value == "CSV-CONFIG-004"
+    assert value.message == f"Configuration value '{expected_key}' is invalid for config v1."
+    assert (value.domain, value.path, value.symbol, value.line) == (None, None, None, None)
+
+
+@pytest.mark.parametrize(
     ("source_root", "include"),
     [("missing", "**/*.py"), (".", "[abc].py"), (".", "../*.py")],
 )
@@ -164,3 +215,40 @@ max_entities = 500
         resolve_config(_request(repo, tmp_path / "output", "--config", str(config_path)), repo)
 
     assert caught.value.diagnostic.code.value == "CSV-CONFIG-004"
+
+
+@pytest.mark.parametrize(
+    ("include", "exclude", "expected_key"),
+    [
+        (["/".join(["**"] * 257 + ["*.py"])], [], "python.include"),
+        ([f"module_{index}/**/*.py" for index in range(257)], [], "python.include"),
+        (["**/*.py"], ["a" * 4097], "python.exclude"),
+    ],
+)
+def test_glob_pattern_count_length_and_depth_have_closed_complexity_bounds(
+    tmp_path: Path,
+    include: list[str],
+    exclude: list[str],
+    expected_key: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config_path = tmp_path / "complex.toml"
+    config_path.write_text(
+        _COMPLETE_CONFIG.replace(
+            'include = ["**/*.py"]',
+            "include = [" + ", ".join(f'"{value}"' for value in include) + "]",
+        ).replace(
+            "exclude = []",
+            "exclude = [" + ", ".join(f'"{value}"' for value in exclude) + "]",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigResolutionError) as caught:
+        resolve_config(_request(repo, tmp_path / "output", "--config", str(config_path)), repo)
+
+    assert caught.value.diagnostic.code.value == "CSV-CONFIG-004"
+    assert caught.value.diagnostic.message == (
+        f"Configuration value '{expected_key}' is invalid for config v1."
+    )

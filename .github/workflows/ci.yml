@@ -35,7 +35,7 @@ jobs:
             uv run ruff check .
             uv run mypy src tests
             uv run pytest -q
-            uv build
+            uv build --offline
           '
 
   product-test-latest:
@@ -87,7 +87,7 @@ jobs:
       - name: Build and verify offline wheel
         run: |
           uv sync --frozen --all-groups
-          uv build
+          uv build --offline
           python -m venv .offline-venv
           .offline-venv/bin/python -m pip install --no-index dist/*.whl
           .offline-venv/bin/code-structure-viz --version
