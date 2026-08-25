@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import PurePosixPath
@@ -77,6 +78,7 @@ class RenderedType:
     text: str
     occurrences: tuple[TypeReferenceOccurrence, ...]
     supported: bool
+    outer_head: TypeReferenceOccurrence | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +93,18 @@ class _RenderedNode:
     text: str
     occurrences: tuple[_OccurrenceDraft, ...]
     supported: bool
+    outer_head_index: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _TypeReferenceCandidate:
+    original_name: str
+    candidate_name: str
+    rendered_name: str
+    explicit_import: bool
+    binding_kind: BindingKind | None
+    binding_exact: bool
+    internal_class: tuple[str, str] | None
 
 
 _LITERAL_NAMES = frozenset({"typing.Literal", "typing_extensions.Literal"})
@@ -98,7 +112,15 @@ _ANNOTATED_NAMES = frozenset({"typing.Annotated", "typing_extensions.Annotated"}
 
 
 class SafeTypeExpressionRenderer:
-    def __init__(self, bindings: tuple[ImportBinding, ...]) -> None:
+    def __init__(
+        self,
+        bindings: tuple[ImportBinding, ...],
+        *,
+        current_module: str | None = None,
+        owner_qualified_name: str | None = None,
+        class_identities: frozenset[tuple[str, str]] = frozenset(),
+        modules: frozenset[str] = frozenset(),
+    ) -> None:
         grouped: dict[str, set[tuple[str, BindingKind]]] = {}
         for binding in bindings:
             grouped.setdefault(binding.local_name, set()).add(
@@ -109,6 +131,10 @@ class SafeTypeExpressionRenderer:
             for local, values in grouped.items()
             if len(values) == 1
         }
+        self._current_module = current_module
+        self._owner_qualified_name = owner_qualified_name
+        self._class_identities = class_identities
+        self._modules = modules
 
     def render(self, node: ast.expr, site: TypeReferenceSite) -> RenderedType:
         rendered = self._render_node(
@@ -118,7 +144,7 @@ class SafeTypeExpressionRenderer:
             allow_forward=True,
         )
         if not rendered.supported:
-            return RenderedType("?", (), False)
+            return RenderedType("?", (), False, None)
         occurrences = tuple(
             TypeReferenceOccurrence(
                 spelling=draft.spelling,
@@ -133,7 +159,12 @@ class SafeTypeExpressionRenderer:
             )
             for ordinal, draft in enumerate(rendered.occurrences)
         )
-        return RenderedType(rendered.text, occurrences, True)
+        outer_head = (
+            occurrences[rendered.outer_head_index]
+            if rendered.outer_head_index is not None
+            else None
+        )
+        return RenderedType(rendered.text, occurrences, True, outer_head)
 
     def _render_node(
         self,
@@ -146,24 +177,32 @@ class SafeTypeExpressionRenderer:
         symbol = _symbol(node)
         if symbol is not None:
             return _RenderedNode(
-                self._canonical_symbol(symbol),
+                self._candidate(symbol).rendered_name,
                 (_OccurrenceDraft(symbol, role, range_override or _range(node)),),
                 True,
+                0 if role is TypeReferenceRole.HEAD else None,
             )
 
         if isinstance(node, ast.Subscript):
             base = _symbol(node.value)
             if base is None:
                 return _unsupported()
-            canonical_base = self._canonical_symbol(base)
+            base_candidate = self._candidate(base)
+            canonical_base = base_candidate.rendered_name
             arguments = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
-            if canonical_base in _LITERAL_NAMES:
+            if (
+                base_candidate.internal_class is None
+                and base_candidate.candidate_name in _LITERAL_NAMES
+            ):
                 if not arguments:
                     return _unsupported()
                 return _RenderedNode(
                     f"{canonical_base}[{', '.join('?' for _ in arguments)}]", (), True
                 )
-            if canonical_base in _ANNOTATED_NAMES:
+            if (
+                base_candidate.internal_class is None
+                and base_candidate.candidate_name in _ANNOTATED_NAMES
+            ):
                 if len(arguments) < 2:
                     return _unsupported()
                 first = self._render_node(
@@ -199,6 +238,7 @@ class SafeTypeExpressionRenderer:
                     *(occurrence for item in rendered_arguments for occurrence in item.occurrences),
                 ),
                 True,
+                0,
             )
 
         if isinstance(node, ast.Tuple):
@@ -271,12 +311,83 @@ class SafeTypeExpressionRenderer:
 
         return _unsupported()
 
-    def _canonical_symbol(self, spelling: tuple[str, ...]) -> str:
-        binding = self._bindings.get(spelling[0])
-        if binding is None:
-            return ".".join(spelling)
+    def _candidate(self, spelling: tuple[str, ...]) -> _TypeReferenceCandidate:
+        return _construct_type_reference_candidate(
+            spelling,
+            self._bindings,
+            current_module=self._current_module,
+            owner_qualified_name=self._owner_qualified_name,
+            class_identities=self._class_identities,
+            modules=self._modules,
+        )
+
+
+def _construct_type_reference_candidate(
+    spelling: tuple[str, ...],
+    bindings: Mapping[str, ImportBinding],
+    *,
+    current_module: str | None,
+    owner_qualified_name: str | None,
+    class_identities: frozenset[tuple[str, str]],
+    modules: frozenset[str],
+) -> _TypeReferenceCandidate:
+    original_name = ".".join(spelling)
+    if current_module is not None and owner_qualified_name is not None:
+        owner_parts = owner_qualified_name.split(".")
+        for length in range(len(owner_parts), -1, -1):
+            qualified_name = ".".join((*owner_parts[:length], *spelling))
+            identity = (current_module, qualified_name)
+            if identity in class_identities:
+                return _TypeReferenceCandidate(
+                    original_name,
+                    f"{current_module}.{qualified_name}",
+                    original_name,
+                    False,
+                    None,
+                    False,
+                    identity,
+                )
+
+    binding = bindings.get(spelling[0])
+    if binding is not None:
         suffix = ".".join(spelling[1:])
-        return binding.canonical_name if not suffix else f"{binding.canonical_name}.{suffix}"
+        candidate_name = (
+            binding.canonical_name if not suffix else f"{binding.canonical_name}.{suffix}"
+        )
+        return _TypeReferenceCandidate(
+            original_name,
+            candidate_name,
+            candidate_name,
+            True,
+            binding.kind,
+            len(spelling) == 1,
+            _find_exact_class(candidate_name, class_identities, modules),
+        )
+
+    return _TypeReferenceCandidate(
+        original_name,
+        original_name,
+        original_name,
+        False,
+        None,
+        False,
+        _find_exact_class(original_name, class_identities, modules),
+    )
+
+
+def _find_exact_class(
+    candidate_name: str,
+    class_identities: frozenset[tuple[str, str]],
+    modules: frozenset[str],
+) -> tuple[str, str] | None:
+    parts = candidate_name.split(".")
+    for split_at in range(len(parts) - 1, 0, -1):
+        module = ".".join(parts[:split_at])
+        qualified_name = ".".join(parts[split_at:])
+        identity = (module, qualified_name)
+        if module in modules and identity in class_identities:
+            return identity
+    return None
 
 
 def _unsupported() -> _RenderedNode:

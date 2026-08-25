@@ -385,6 +385,104 @@ class Box(Generic[T]):
     assert (unknown[0].path, unknown[0].symbol) == ("src/pkg/model.py", "Missing")
 
 
+def test_type_text_and_targets_share_the_closed_candidate_construction_priority() -> None:
+    result = _analyze(
+        {
+            "src/app/types.py": b"class Internal: pass\n",
+            "src/pkg/model.py": b"""
+from ext import Foo
+from app import types as SymbolAlias
+import app as ModuleAlias
+from typing import Annotated, Literal
+
+class Foo: pass
+class Literal: pass
+class Annotated: pass
+class Item: pass
+
+class Owner:
+    local: Foo
+    symbol_binding: SymbolAlias
+    module_suffix: ModuleAlias.types
+    original_dotted: app.types.Internal
+    literal_shadow: Literal[1]
+    annotated_shadow: Annotated[Item, 1]
+""",
+        }
+    )
+
+    fields = {member.id: member for member in result.members if member.kind is MemberKind.FIELD}
+    annotations = {member.name: member.annotation for member in fields.values()}
+    targets = tuple(
+        sorted(
+            (
+                fields[relation.via_member_id].name,
+                relation.target.resolution.value,
+                relation.target.kind.value,
+                relation.target.name,
+            )
+            for relation in result.relations
+            if relation.kind is RelationKind.COMPOSITION and relation.via_member_id in fields
+        )
+    )
+
+    assert annotations == {
+        "local": "Foo",
+        "symbol_binding": "app.types",
+        "module_suffix": "app.types",
+        "original_dotted": "app.types.Internal",
+        "literal_shadow": "Literal[?]",
+        "annotated_shadow": "Annotated[Item, ?]",
+    }
+    assert targets == (
+        ("annotated_shadow", "internal", "class", "pkg.model.Annotated"),
+        ("annotated_shadow", "internal", "class", "pkg.model.Item"),
+        ("literal_shadow", "internal", "class", "pkg.model.Literal"),
+        ("local", "internal", "class", "pkg.model.Foo"),
+        ("module_suffix", "external", "symbol", "app.types"),
+        ("original_dotted", "internal", "class", "app.types.Internal"),
+        ("symbol_binding", "external", "symbol", "app.types"),
+    )
+
+
+def test_inheritance_adopts_only_the_base_expression_outer_symbolic_head() -> None:
+    result = _analyze(
+        {
+            "src/pkg/inheritance.py": b"""
+from typing import Annotated
+
+class A: pass
+class B: pass
+
+class UnionBase(A | B): pass
+class TupleBase((A, B)): pass
+class AnnotatedBase(Annotated[A, 1]): pass
+class SubscriptBase(A[B]): pass
+"""
+        }
+    )
+
+    inheritance = tuple(
+        (
+            relation.source_id,
+            relation.target.resolution.value,
+            relation.target.name,
+            relation.annotation,
+        )
+        for relation in result.relations
+        if relation.kind is RelationKind.INHERITANCE
+    )
+
+    assert inheritance == (
+        (
+            "python:class:pkg.inheritance:SubscriptBase",
+            "internal",
+            "pkg.inheritance.A",
+            "A[B]",
+        ),
+    )
+
+
 def test_conflicting_field_annotations_merge_to_unknown_without_guessing_relations() -> None:
     result = _analyze(
         {

@@ -48,9 +48,9 @@ from code_structure_viz.adapters.python.type_expr import (
     RenderedType,
     SafeTypeExpressionRenderer,
     TypeReferenceOccurrence,
-    TypeReferenceRole,
     TypeReferenceSite,
     TypeReferenceSiteKind,
+    _construct_type_reference_candidate,
 )
 from code_structure_viz.core.diagnostics import (
     Diagnostic,
@@ -250,17 +250,27 @@ class PythonSnapshotAnalyzer:
         entity_by_id = {entity.id: entity for entity in entities}
         parsed_by_module = {item.indexed.module: item for item in parsed_modules}
         module_names = frozenset(parsed_by_module)
-        class_by_full_name = {
-            f"{entity.module}.{entity.qualified_name}": entity for entity in entities
-        }
+        class_identities = frozenset((entity.module, entity.qualified_name) for entity in entities)
 
         members: list[PythonMember] = []
         type_evidence: list[_TypeEvidence] = []
         for candidate in safe_candidates:
-            class_members, class_types = _analyze_class_members(candidate, diagnostics)
+            class_members, class_types = _analyze_class_members(
+                candidate,
+                diagnostics,
+                class_identities,
+                module_names,
+            )
             members.extend(class_members)
             type_evidence.extend(class_types)
-            type_evidence.extend(_analyze_inheritance(candidate, diagnostics))
+            type_evidence.extend(
+                _analyze_inheritance(
+                    candidate,
+                    diagnostics,
+                    class_identities,
+                    module_names,
+                )
+            )
 
         relation_evidence: list[_RelationEvidence] = []
         for evidence in type_evidence:
@@ -268,7 +278,7 @@ class PythonSnapshotAnalyzer:
                 evidence,
                 parsed_by_module,
                 module_names,
-                class_by_full_name,
+                class_identities,
                 entity_by_id,
             )
             if target is None:
@@ -838,11 +848,20 @@ def _render_type(
 
 
 def _analyze_class_members(
-    candidate: _ClassCandidate, diagnostics: list[Diagnostic]
+    candidate: _ClassCandidate,
+    diagnostics: list[Diagnostic],
+    class_identities: frozenset[tuple[str, str]],
+    modules: frozenset[str],
 ) -> tuple[tuple[PythonMember, ...], tuple[_TypeEvidence, ...]]:
     path = candidate.parsed.indexed.path
     entity_id = candidate.entity_id
-    renderer = SafeTypeExpressionRenderer(candidate.parsed.bindings)
+    renderer = SafeTypeExpressionRenderer(
+        candidate.parsed.bindings,
+        current_module=candidate.parsed.indexed.module,
+        owner_qualified_name=candidate.qualified_name,
+        class_identities=class_identities,
+        modules=modules,
+    )
     field_declarations, callables = _class_declarations(candidate)
     members: list[PythonMember] = []
     type_evidence: list[_TypeEvidence] = []
@@ -1143,7 +1162,7 @@ def _type_evidence(
         return ()
     occurrences = rendered.occurrences
     if relation_kind is RelationKind.INHERITANCE:
-        occurrences = tuple(item for item in occurrences[:1] if item.role is TypeReferenceRole.HEAD)
+        occurrences = (rendered.outer_head,) if rendered.outer_head is not None else ()
     return tuple(
         _TypeEvidence(
             occurrence,
@@ -1158,9 +1177,18 @@ def _type_evidence(
 
 
 def _analyze_inheritance(
-    candidate: _ClassCandidate, diagnostics: list[Diagnostic]
+    candidate: _ClassCandidate,
+    diagnostics: list[Diagnostic],
+    class_identities: frozenset[tuple[str, str]],
+    modules: frozenset[str],
 ) -> tuple[_TypeEvidence, ...]:
-    renderer = SafeTypeExpressionRenderer(candidate.parsed.bindings)
+    renderer = SafeTypeExpressionRenderer(
+        candidate.parsed.bindings,
+        current_module=candidate.parsed.indexed.module,
+        owner_qualified_name=candidate.qualified_name,
+        class_identities=class_identities,
+        modules=modules,
+    )
     evidence: list[_TypeEvidence] = []
     for index, base in enumerate(candidate.node.bases):
         site = TypeReferenceSite(
@@ -1192,7 +1220,7 @@ def _resolve_type_reference(
     evidence: _TypeEvidence,
     parsed_by_module: dict[str, _ParsedModule],
     modules: frozenset[str],
-    class_by_full_name: dict[str, PythonClassEntity],
+    class_identities: frozenset[tuple[str, str]],
     entity_by_id: dict[str, PythonClassEntity],
 ) -> RelationTarget | None:
     occurrence = evidence.occurrence
@@ -1201,60 +1229,59 @@ def _resolve_type_reference(
         return None
 
     owner = entity_by_id[occurrence.owner_class_id]
-    owner_parts = owner.qualified_name.split(".")
-    spelling_text = ".".join(spelling)
-    for length in range(len(owner_parts), -1, -1):
-        prefix = ".".join(owner_parts[:length])
-        candidate_name = ".".join(part for part in (evidence.module, prefix, spelling_text) if part)
-        local = class_by_full_name.get(candidate_name)
-        if local is not None:
-            return RelationTarget(
-                TargetResolution.INTERNAL,
-                TargetKind.CLASS,
-                local.id,
-                f"{local.module}.{local.qualified_name}",
-            )
-
-    binding = _binding_map(parsed_by_module[evidence.module].bindings).get(spelling[0])
-    explicit_import = binding is not None
-    if binding is not None:
-        suffix = ".".join(spelling[1:])
-        candidate_name = (
-            binding.canonical_name if not suffix else f"{binding.canonical_name}.{suffix}"
-        )
-    else:
-        candidate_name = spelling_text
-
-    internal_class = class_by_full_name.get(candidate_name)
-    if internal_class is not None:
+    candidate = _construct_type_reference_candidate(
+        spelling,
+        _binding_map(parsed_by_module[evidence.module].bindings),
+        current_module=evidence.module,
+        owner_qualified_name=owner.qualified_name,
+        class_identities=class_identities,
+        modules=modules,
+    )
+    if candidate.internal_class is not None:
+        module, qualified_name = candidate.internal_class
+        internal_class = entity_by_id[f"python:class:{module}:{qualified_name}"]
         return RelationTarget(
             TargetResolution.INTERNAL,
             TargetKind.CLASS,
             internal_class.id,
             f"{internal_class.module}.{internal_class.qualified_name}",
         )
-    if candidate_name in modules:
+    if (
+        candidate.binding_kind is BindingKind.MODULE
+        and candidate.binding_exact
+        and candidate.candidate_name in modules
+    ):
         return RelationTarget(
             TargetResolution.INTERNAL,
             TargetKind.MODULE,
-            f"python:module:{candidate_name}",
-            candidate_name,
+            f"python:module:{candidate.candidate_name}",
+            candidate.candidate_name,
         )
     if (
-        (not explicit_import and len(spelling) == 1 and spelling[0] in _BUILTIN_TYPES)
-        or candidate_name.startswith("builtins.")
-        or candidate_name.startswith("typing.")
-        or candidate_name.startswith("typing_extensions.")
+        (not candidate.explicit_import and len(spelling) == 1 and spelling[0] in _BUILTIN_TYPES)
+        or candidate.candidate_name.startswith("builtins.")
+        or candidate.candidate_name.startswith("typing.")
+        or candidate.candidate_name.startswith("typing_extensions.")
     ):
         return None
-    if explicit_import:
+    if candidate.explicit_import:
         target_kind = (
             TargetKind.MODULE
-            if binding is not None and binding.kind is BindingKind.MODULE and len(spelling) == 1
+            if candidate.binding_kind is BindingKind.MODULE and candidate.binding_exact
             else TargetKind.SYMBOL
         )
-        return RelationTarget(TargetResolution.EXTERNAL, target_kind, None, candidate_name)
-    return RelationTarget(TargetResolution.UNKNOWN, TargetKind.SYMBOL, None, spelling_text)
+        return RelationTarget(
+            TargetResolution.EXTERNAL,
+            target_kind,
+            None,
+            candidate.candidate_name,
+        )
+    return RelationTarget(
+        TargetResolution.UNKNOWN,
+        TargetKind.SYMBOL,
+        None,
+        candidate.original_name,
+    )
 
 
 def _type_origin_rank(kind: TypeReferenceSiteKind) -> int:
