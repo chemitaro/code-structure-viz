@@ -1,0 +1,1 @@
+{"type":"diagnostic","schema":"code-structure-viz.diagnostic/v1","code":"CSV-PY-003","severity":"error","domain":"python","path":"src/app/broken.py","symbol":null,"line":1,"recoverable":true,"message":"Python source could not be parsed with the v1 Python 3.12 grammar."}

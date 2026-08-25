@@ -1,0 +1,37 @@
+@startuml
+title Python structure snapshot
+left to right direction
+skinparam classAttributeIconSize 0
+hide empty members
+package "domain.base" as M_6ade217bb638f2a39a31b2dce66fa070215e8f5ccb793a8f61010bfb9367f728 {
+  class "Base" as C_11919d71456ee78ee510ecfca585ecc99fef6f07d726ab046085c54c17e5e542 {
+  }
+}
+package "domain.order" as M_37d211ee9783c95d7f38f5cb5020dc6d86fec1f18609eb63cbb96c6fb204b26c {
+  class "Order" as C_279f2e538a60bc23ca792a782fb8e862836959c79162e2f30a95610a9cbf7eb6 {
+    field identifier : int
+    field state : State
+    property current_state(getter) : State
+    method __init__(state: State) : None
+  }
+  class "Order.State" as C_75ec6093a691ae420046e3e6360b4e26c610d18ab7769eca5efa9d3f2bd0e06b {
+  }
+}
+package "domain.service" as M_11f3078539e8af78843664d41dbe47b21f7aefedb2a5fdd396cd592612dce5ef {
+  class "OrderService" as C_69b6ae92abd28ba8ab448b403f20d0c2678e99370ae04ebc19bef9db581fcfcb {
+    method submit(order: domain.order.Order, gateway: external.gateway.Gateway) : domain.order.Order
+  }
+}
+C_11919d71456ee78ee510ecfca585ecc99fef6f07d726ab046085c54c17e5e542 <|-- C_279f2e538a60bc23ca792a782fb8e862836959c79162e2f30a95610a9cbf7eb6 : 継承
+C_279f2e538a60bc23ca792a782fb8e862836959c79162e2f30a95610a9cbf7eb6 *-- C_75ec6093a691ae420046e3e6360b4e26c610d18ab7769eca5efa9d3f2bd0e06b : 合成
+C_279f2e538a60bc23ca792a782fb8e862836959c79162e2f30a95610a9cbf7eb6 ..> C_75ec6093a691ae420046e3e6360b4e26c610d18ab7769eca5efa9d3f2bd0e06b : 型依存
+C_69b6ae92abd28ba8ab448b403f20d0c2678e99370ae04ebc19bef9db581fcfcb ..> C_279f2e538a60bc23ca792a782fb8e862836959c79162e2f30a95610a9cbf7eb6 : 型依存
+M_37d211ee9783c95d7f38f5cb5020dc6d86fec1f18609eb63cbb96c6fb204b26c ..> M_6ade217bb638f2a39a31b2dce66fa070215e8f5ccb793a8f61010bfb9367f728 : import依存
+M_11f3078539e8af78843664d41dbe47b21f7aefedb2a5fdd396cd592612dce5ef ..> M_37d211ee9783c95d7f38f5cb5020dc6d86fec1f18609eb63cbb96c6fb204b26c : import依存
+legend right
+  <|-- 継承
+  *-- 合成
+  ..> 型依存
+  package ..> package import依存
+endlegend
+@enduml

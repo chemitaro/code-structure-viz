@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "code-structure-viz"
+version = "0.1.0.dev0"
+description = "Static code structure snapshots for coding agents and humans"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+code-structure-viz = "code_structure_viz.cli.main:main"
+
+[dependency-groups]
+dev = [
+  "jsonschema>=4.25,<5",
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<9",
+  "pytest-cov>=6,<8",
+  "ruff>=0.12,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_structure_viz"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/.python-version",
+  "/THIRD_PARTY_LICENSES.md",
+  "/docs/contracts",
+  "/pyproject.toml",
+  "/schemas",
+  "/src",
+  "/uv.lock",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+  ".agents",
+  "spec-dock",
+  "tests/fixtures",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = ["src"]
+exclude = ["^tests/fixtures/"]

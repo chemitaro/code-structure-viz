@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeStructureViz unavailable stdout result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "schema",
+    "selector",
+    "availability",
+    "stable_reason",
+    "artifact"
+  ],
+  "properties": {
+    "type": {"const": "stdout_result"},
+    "schema": {"const": "code-structure-viz.stdout-result/v1"},
+    "selector": {
+      "enum": ["manifest", "python:semantic-json", "python:plantuml"]
+    },
+    "availability": {"const": false},
+    "domain_status": {"enum": ["not_applicable", "incomplete"]},
+    "run_status": {"enum": ["fatal", "interrupted"]},
+    "stable_reason": {
+      "enum": [
+        "domain_not_applicable",
+        "domain_payload_unavailable",
+        "run_fatal",
+        "final_manifest_unavailable",
+        "run_interrupted"
+      ]
+    },
+    "artifact": {"type": "null"}
+  },
+  "oneOf": [
+    {"required": ["domain_status"], "not": {"required": ["run_status"]}},
+    {"required": ["run_status"], "not": {"required": ["domain_status"]}}
+  ]
+}

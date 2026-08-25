@@ -1,0 +1,2 @@
+class FromRoot:
+    pass

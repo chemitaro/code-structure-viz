@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeStructureViz run summary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "schema", "run_status", "exit_code", "domains", "manifest"],
+  "properties": {
+    "type": {"const": "run_summary"},
+    "schema": {"const": "code-structure-viz.run-summary/v1"},
+    "run_status": {
+      "enum": ["complete", "not_applicable", "incomplete", "fatal", "interrupted"]
+    },
+    "exit_code": {"enum": [0, 1, 3, 130]},
+    "domains": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["domain", "status"],
+            "properties": {
+              "domain": {"const": "python"},
+              "status": {"enum": ["complete", "not_applicable"]}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["domain", "status", "incomplete_kind"],
+            "properties": {
+              "domain": {"const": "python"},
+              "status": {"const": "incomplete"},
+              "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]}
+            }
+          }
+        ]
+      }
+    },
+    "manifest": {
+      "oneOf": [{"const": "run-manifest.json"}, {"type": "null"}]
+    }
+  }
+}

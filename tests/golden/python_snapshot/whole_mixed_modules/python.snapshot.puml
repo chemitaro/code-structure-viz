@@ -1,0 +1,24 @@
+@startuml
+title Python structure snapshot
+left to right direction
+skinparam classAttributeIconSize 0
+hide empty members
+package "app.entry" as M_8a21b263c755dd7a636d9387f9e4d0aeeaee6a709be533869ccee25c8ad5753d {
+  note "classなし" as N_EMPTY_1f06a8960eca398fb485e052a0411518dd85234b12d9b2137c8f9ea9cbf28d05
+}
+package "app.helpers" as M_3a2fc3b842673c21a4b142b48af050763124e43715f32af4b8aab89273e5e189 {
+  note "classなし" as N_EMPTY_e03ce1e0fdd4260ad41ef55eadce92375c8ef94d91d08ca1d4d3a7223b9e6040
+}
+package "app.model" as M_2b786c7685fd2f5d5684ddb8a70a975bd760eb0ce65570ef2244a10869631808 {
+  class "Model" as C_d55eb9677045c9fc0f2fc23b70b8162ff255b9abeb0a4bdc6fd344ad68ee27de {
+  }
+}
+M_8a21b263c755dd7a636d9387f9e4d0aeeaee6a709be533869ccee25c8ad5753d ..> M_3a2fc3b842673c21a4b142b48af050763124e43715f32af4b8aab89273e5e189 : import依存
+M_8a21b263c755dd7a636d9387f9e4d0aeeaee6a709be533869ccee25c8ad5753d ..> M_2b786c7685fd2f5d5684ddb8a70a975bd760eb0ce65570ef2244a10869631808 : import依存
+legend right
+  <|-- 継承
+  *-- 合成
+  ..> 型依存
+  package ..> package import依存
+endlegend
+@enduml

@@ -1,0 +1,1 @@
+"""Python adapter integration tests."""

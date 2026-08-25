@@ -1,0 +1,19 @@
+@startuml
+title Python structure snapshot
+left to right direction
+skinparam classAttributeIconSize 0
+hide empty members
+package "app.a" as M_de20bf4b2586afea89ef156114cfa20a8ab0be066d2bf05ac7397b7a78dd6927 {
+  note "classなし" as N_EMPTY_39a88b3cc6fc7c56c7083dd86b17c058d373d69c247f51bd2d3698023d2ef416
+}
+package "app.b" as M_f364321d2d7256bdb44d3eb1171ee961729680b6d8b193029dc5e051e167f0e1 {
+  note "classなし" as N_EMPTY_7819976ce0ccf98ef3d25e3d19355928ff58f9f7af0b886545a1d4bba0f2ae68
+}
+M_de20bf4b2586afea89ef156114cfa20a8ab0be066d2bf05ac7397b7a78dd6927 ..> M_f364321d2d7256bdb44d3eb1171ee961729680b6d8b193029dc5e051e167f0e1 : import依存
+legend right
+  <|-- 継承
+  *-- 合成
+  ..> 型依存
+  package ..> package import依存
+endlegend
+@enduml

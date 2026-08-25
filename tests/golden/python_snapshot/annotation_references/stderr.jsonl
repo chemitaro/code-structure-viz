@@ -1,0 +1,1 @@
+{"type":"diagnostic","schema":"code-structure-viz.diagnostic/v1","code":"CSV-PY-008","severity":"warning","domain":"python","path":"src/app/references.py","symbol":"Missing","line":19,"recoverable":true,"message":"Python reference could not be resolved statically."}

@@ -1,0 +1,17 @@
+@startuml
+title Python structure snapshot
+left to right direction
+skinparam classAttributeIconSize 0
+hide empty members
+note "不完全なsnapshot: 除外fileとcoverageはrun-manifest.jsonを参照" as N_INCOMPLETE
+package "app.good" as M_9b1d1d7d3ad689b69f9eb6d31036c66abada7e3d927573adb381eff132a78da8 {
+  class "Good" as C_c1f9816d210fc90cff4a054a778a6988e63551384cd7c92aa54f0f05faa4c9ba {
+  }
+}
+legend right
+  <|-- 継承
+  *-- 合成
+  ..> 型依存
+  package ..> package import依存
+endlegend
+@enduml

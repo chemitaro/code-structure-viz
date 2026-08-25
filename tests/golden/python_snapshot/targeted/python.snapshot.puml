@@ -1,0 +1,24 @@
+@startuml
+title Python structure snapshot
+left to right direction
+skinparam classAttributeIconSize 0
+hide empty members
+package "app.a" as M_de20bf4b2586afea89ef156114cfa20a8ab0be066d2bf05ac7397b7a78dd6927 {
+  class "A" as C_46748c9f452b734002b9aa740860095ca9af42fc8e64684effc66badeddd2be2 {
+    field dependency : app.b.B
+  }
+}
+package "app.b" as M_f364321d2d7256bdb44d3eb1171ee961729680b6d8b193029dc5e051e167f0e1 {
+  class "B" as C_efc22e7d64eb22b93c38bf517fc448b02804a85829d97c58f1936f416dc6e8a9 {
+    field dependency : app.c.C
+  }
+}
+C_46748c9f452b734002b9aa740860095ca9af42fc8e64684effc66badeddd2be2 *-- C_efc22e7d64eb22b93c38bf517fc448b02804a85829d97c58f1936f416dc6e8a9 : 合成
+M_de20bf4b2586afea89ef156114cfa20a8ab0be066d2bf05ac7397b7a78dd6927 ..> M_f364321d2d7256bdb44d3eb1171ee961729680b6d8b193029dc5e051e167f0e1 : import依存
+legend right
+  <|-- 継承
+  *-- 合成
+  ..> 型依存
+  package ..> package import依存
+endlegend
+@enduml

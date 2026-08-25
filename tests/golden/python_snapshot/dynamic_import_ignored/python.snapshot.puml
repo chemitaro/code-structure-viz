@@ -1,0 +1,16 @@
+@startuml
+title Python structure snapshot
+left to right direction
+skinparam classAttributeIconSize 0
+hide empty members
+package "app.dynamic" as M_0ee5251f3ee10d86e0595a837089a7ac49a180a83fe026c4ab8bbf5da34a5bda {
+  class "Safe" as C_c8bac84e12bba1a835bc77b66c9a9c08c5d1fff6df209996ea7168c10031137a {
+  }
+}
+legend right
+  <|-- 継承
+  *-- 合成
+  ..> 型依存
+  package ..> package import依存
+endlegend
+@enduml

@@ -1,0 +1,28 @@
+@startuml
+title Python structure snapshot
+left to right direction
+skinparam classAttributeIconSize 0
+hide empty members
+package "app.references" as M_e1965cc0cf6cd078db52891266914e33febaeb71ea1e38ac4982e1a11c813617 {
+  class "Box" as C_53809985f0f095834d394d1936f99ef464910cd6bac587785d6adeff24daafd6 {
+  }
+  class "Foo" as C_cd8ad5696a290a005e5866a997be5014aa92faec2c01bb2b59fed64480e8be16 {
+  }
+  class "Outer" as C_2dd419f84c94d798c88a8cb2bbde678f208580b10af9919ae291c53426fbc3cf {
+    field external : external.models.External
+    field missing : Missing
+    field nested : Inner
+    field same : list[Foo]
+  }
+  class "Outer.Inner" as C_ced449181cae391e2275b3ef310bbebfeb66251999be11f7f59c6a788cf73953 {
+  }
+}
+C_2dd419f84c94d798c88a8cb2bbde678f208580b10af9919ae291c53426fbc3cf *-- C_cd8ad5696a290a005e5866a997be5014aa92faec2c01bb2b59fed64480e8be16 : 合成
+C_2dd419f84c94d798c88a8cb2bbde678f208580b10af9919ae291c53426fbc3cf *-- C_ced449181cae391e2275b3ef310bbebfeb66251999be11f7f59c6a788cf73953 : 合成
+legend right
+  <|-- 継承
+  *-- 合成
+  ..> 型依存
+  package ..> package import依存
+endlegend
+@enduml

@@ -1,0 +1,471 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeStructureViz run manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "schema",
+    "tool",
+    "contracts",
+    "adapters",
+    "command",
+    "request",
+    "source",
+    "config",
+    "run",
+    "domains",
+    "artifacts",
+    "diagnostics"
+  ],
+  "properties": {
+    "type": {"const": "run_manifest"},
+    "schema": {"const": "code-structure-viz.run-manifest/v1"},
+    "tool": {"$ref": "#/$defs/tool"},
+    "contracts": {"$ref": "#/$defs/contracts"},
+    "adapters": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {"$ref": "#/$defs/adapter"}
+    },
+    "command": {"$ref": "#/$defs/command"},
+    "request": {"$ref": "#/$defs/request"},
+    "source": {"$ref": "#/$defs/source"},
+    "config": {"$ref": "#/$defs/config"},
+    "run": {"$ref": "#/$defs/run"},
+    "domains": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {"$ref": "#/$defs/domain"}
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/artifact"}
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/diagnostic"}
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "code-structure-viz"},
+        "version": {"const": "0.1.0.dev0"}
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "config",
+        "diagnostic",
+        "source_view",
+        "semantic",
+        "manifest",
+        "run_summary",
+        "stdout_result",
+        "plantuml"
+      ],
+      "properties": {
+        "config": {"const": "code-structure-viz.config/v1"},
+        "diagnostic": {"const": "code-structure-viz.diagnostic/v1"},
+        "source_view": {"const": "code-structure-viz.source-view/v1"},
+        "semantic": {"const": "code-structure-viz.semantic/v1"},
+        "manifest": {"const": "code-structure-viz.run-manifest/v1"},
+        "run_summary": {"const": "code-structure-viz.run-summary/v1"},
+        "stdout_result": {"const": "code-structure-viz.stdout-result/v1"},
+        "plantuml": {"const": "code-structure-viz.plantuml/python/v1"}
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "name", "version"],
+      "properties": {
+        "domain": {"const": "python"},
+        "name": {"const": "python-ast"},
+        "version": {"const": "1"}
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "domain", "formats", "stdout_selector"],
+      "properties": {
+        "name": {"const": "snapshot"},
+        "domain": {"const": "python"},
+        "formats": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"enum": ["semantic-json", "plantuml"]}
+        },
+        "stdout_selector": {
+          "enum": [null, "manifest", "python:semantic-json", "python:plantuml"]
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"enum": ["path", "module", "class"]},
+        "value": {"type": "string", "minLength": 1}
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targets", "upstream_depth", "downstream_depth"],
+      "properties": {
+        "targets": {"type": "array", "items": {"$ref": "#/$defs/target"}},
+        "upstream_depth": {"type": "integer", "minimum": 0},
+        "downstream_depth": {"type": "integer", "minimum": 0}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "kind", "head_commit", "fingerprint", "file_count"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.source-view/v1"},
+        "kind": {"const": "working-tree"},
+        "head_commit": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+            {"type": "null"}
+          ]
+        },
+        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "file_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "resolved_python": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_roots", "include", "exclude"],
+      "properties": {
+        "source_roots": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "include": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "exclude": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "resolved_traversal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["upstream_depth", "downstream_depth"],
+      "properties": {
+        "upstream_depth": {"type": "integer", "minimum": 0},
+        "downstream_depth": {"type": "integer", "minimum": 0}
+      }
+    },
+    "resolved_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_entities"],
+      "properties": {"max_entities": {"type": "integer", "minimum": 1}}
+    },
+    "resolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python", "traversal", "limits"],
+      "properties": {
+        "python": {"$ref": "#/$defs/resolved_python"},
+        "traversal": {"$ref": "#/$defs/resolved_traversal"},
+        "limits": {"$ref": "#/$defs/resolved_limits"}
+      }
+    },
+    "value_sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "python_source_roots",
+        "python_include",
+        "python_exclude",
+        "upstream_depth",
+        "downstream_depth",
+        "max_entities"
+      ],
+      "properties": {
+        "python_source_roots": {"enum": ["builtin", "repository", "explicit"]},
+        "python_include": {"enum": ["builtin", "repository", "explicit"]},
+        "python_exclude": {"enum": ["builtin", "repository", "explicit"]},
+        "upstream_depth": {"enum": ["builtin", "repository", "explicit", "cli"]},
+        "downstream_depth": {"enum": ["builtin", "repository", "explicit", "cli"]},
+        "max_entities": {"enum": ["builtin", "repository", "explicit", "cli"]}
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "source", "sha256", "resolved", "value_sources"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.config/v1"},
+        "source": {"enum": ["builtin", "repository", "explicit"]},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "resolved": {"$ref": "#/$defs/resolved"},
+        "value_sources": {"$ref": "#/$defs/value_sources"}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "exit_code", "fingerprint"],
+      "properties": {
+        "status": {"enum": ["complete", "not_applicable", "incomplete"]},
+        "exit_code": {"enum": [0, 3]},
+        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "failed_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "stage", "diagnostic_code"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "stage": {
+          "enum": [
+            "read",
+            "path_safety",
+            "encoding",
+            "parse",
+            "module_identity",
+            "module_collision"
+          ]
+        },
+        "diagnostic_code": {
+          "enum": [
+            "CSV-SOURCE-002",
+            "CSV-SOURCE-004",
+            "CSV-PY-001",
+            "CSV-PY-002",
+            "CSV-PY-003",
+            "CSV-PY-004",
+            "CSV-PY-005"
+          ]
+        }
+      }
+    },
+    "frontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "kind", "reference", "reason"],
+      "properties": {
+        "direction": {"enum": ["upstream", "downstream", "failure"]},
+        "kind": {"enum": ["module", "class", "symbol", "file"]},
+        "reference": {"type": "string", "minLength": 1},
+        "reason": {
+          "enum": [
+            "depth_limit",
+            "unresolved_reference",
+            "failed_source",
+            "unsupported_scope",
+            "star_import",
+            "identity_collision"
+          ]
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_files",
+        "parsed_files",
+        "failed_files",
+        "selected_modules",
+        "selected_entities",
+        "frontier"
+      ],
+      "properties": {
+        "candidate_files": {"type": "integer", "minimum": 0},
+        "parsed_files": {"type": "integer", "minimum": 0},
+        "failed_files": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/failed_file"}
+        },
+        "selected_modules": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "selected_entities": {"type": "integer", "minimum": 0},
+        "frontier": {"type": "array", "items": {"$ref": "#/$defs/frontier"}}
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "requested", "resolved", "actual", "source"],
+      "properties": {
+        "name": {"const": "max_entities"},
+        "requested": {
+          "oneOf": [
+            {"type": "integer", "minimum": 1},
+            {"type": "null"}
+          ]
+        },
+        "resolved": {"type": "integer", "minimum": 1},
+        "actual": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "source": {"enum": ["builtin", "repository", "explicit", "cli"]}
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "schema",
+        "code",
+        "severity",
+        "domain",
+        "path",
+        "symbol",
+        "line",
+        "recoverable",
+        "message"
+      ],
+      "properties": {
+        "type": {"const": "diagnostic"},
+        "schema": {"const": "code-structure-viz.diagnostic/v1"},
+        "code": {"type": "string", "pattern": "^CSV-[A-Z]+-[0-9]{3}$"},
+        "severity": {"enum": ["error", "warning", "info"]},
+        "domain": {"enum": ["python", null]},
+        "path": {"type": ["string", "null"]},
+        "symbol": {"type": ["string", "null"]},
+        "line": {"type": ["integer", "null"], "minimum": 1},
+        "recoverable": {"type": "boolean"},
+        "message": {"type": "string", "minLength": 1}
+      }
+    },
+    "domain_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "status",
+        "payload_available",
+        "entity_count",
+        "coverage",
+        "budget",
+        "artifact_paths",
+        "diagnostics"
+      ],
+      "properties": {
+        "domain": {"const": "python"},
+        "status": {"enum": ["complete", "not_applicable", "incomplete"]},
+        "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]},
+        "payload_available": {"type": "boolean"},
+        "entity_count": {"type": ["integer", "null"], "minimum": 0},
+        "coverage": {"$ref": "#/$defs/coverage"},
+        "budget": {"$ref": "#/$defs/budget"},
+        "artifact_paths": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["python.snapshot.semantic.json", "python.snapshot.puml"]
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/diagnostic"}
+        }
+      }
+    },
+    "domain": {
+      "allOf": [
+        {"$ref": "#/$defs/domain_base"},
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "status": {"const": "complete"},
+                "payload_available": {"const": true},
+                "entity_count": {"type": "integer", "minimum": 0}
+              },
+              "not": {"required": ["incomplete_kind"]}
+            },
+            {
+              "properties": {
+                "status": {"const": "not_applicable"},
+                "payload_available": {"const": false},
+                "entity_count": {"const": 0},
+                "artifact_paths": {"maxItems": 0},
+                "diagnostics": {"maxItems": 0}
+              },
+              "not": {"required": ["incomplete_kind"]}
+            },
+            {
+              "properties": {
+                "status": {"const": "incomplete"},
+                "incomplete_kind": {"const": "partial_safe"},
+                "payload_available": {"const": true},
+                "entity_count": {"type": "integer", "minimum": 0}
+              },
+              "required": ["incomplete_kind"]
+            },
+            {
+              "properties": {
+                "status": {"const": "incomplete"},
+                "incomplete_kind": {"const": "payload_unavailable"},
+                "payload_available": {"const": false},
+                "artifact_paths": {"maxItems": 0}
+              },
+              "required": ["incomplete_kind"]
+            }
+          ]
+        }
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "domain",
+        "format",
+        "media_type",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "path": {"enum": ["python.snapshot.semantic.json", "python.snapshot.puml"]},
+        "domain": {"const": "python"},
+        "format": {"enum": ["semantic-json", "plantuml"]},
+        "media_type": {
+          "enum": ["application/json", "text/vnd.plantuml; charset=utf-8"]
+        },
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

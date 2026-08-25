@@ -1,0 +1,34 @@
+@startuml
+title Python structure snapshot
+left to right direction
+skinparam classAttributeIconSize 0
+hide empty members
+package "app.model" as M_2b786c7685fd2f5d5684ddb8a70a975bd760eb0ce65570ef2244a10869631808 {
+  class "Alpha" as C_fc5be2345f3dba457deb1764738be9512b975b45e666fbc6f82a60b6fa3707e7 {
+  }
+  class "Beta" as C_6fca67c95de7cc2a99191b5f1fafb1430f96f79f853dda58e4eab63034fce33f {
+  }
+  class "Modèle" as C_f62ca16890221142e233e88980c8a63c573d2f8beb26c7c7f27c2da730f3a574 {
+    field annotated : typing.Annotated[Alpha, ?]
+    field literal : typing.Literal[?, ?]
+    field pair : tuple[Alpha, Beta]
+    field single : tuple[Alpha]
+    field union : Alpha | Beta | None
+    field unsupported : ?
+    field value : ?
+    method duplicate(value: Alpha) : None
+    method duplicate(value: Beta) : None
+    method signature(a: Alpha, /, b: Beta = …, *items: Alpha, flag: bool, **meta: object) : None
+  }
+}
+C_f62ca16890221142e233e88980c8a63c573d2f8beb26c7c7f27c2da730f3a574 *-- C_fc5be2345f3dba457deb1764738be9512b975b45e666fbc6f82a60b6fa3707e7 : 合成
+C_f62ca16890221142e233e88980c8a63c573d2f8beb26c7c7f27c2da730f3a574 *-- C_6fca67c95de7cc2a99191b5f1fafb1430f96f79f853dda58e4eab63034fce33f : 合成
+C_f62ca16890221142e233e88980c8a63c573d2f8beb26c7c7f27c2da730f3a574 ..> C_fc5be2345f3dba457deb1764738be9512b975b45e666fbc6f82a60b6fa3707e7 : 型依存
+C_f62ca16890221142e233e88980c8a63c573d2f8beb26c7c7f27c2da730f3a574 ..> C_6fca67c95de7cc2a99191b5f1fafb1430f96f79f853dda58e4eab63034fce33f : 型依存
+legend right
+  <|-- 継承
+  *-- 合成
+  ..> 型依存
+  package ..> package import依存
+endlegend
+@enduml

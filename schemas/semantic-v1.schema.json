@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeStructureViz Python semantic snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "schema",
+    "domain",
+    "document_kind",
+    "status",
+    "source",
+    "request",
+    "coverage",
+    "entities",
+    "members",
+    "relations",
+    "diagnostics"
+  ],
+  "properties": {
+    "type": {"const": "semantic_snapshot"},
+    "schema": {"const": "code-structure-viz.semantic/v1"},
+    "domain": {"const": "python"},
+    "document_kind": {"const": "snapshot"},
+    "status": {"enum": ["complete", "incomplete"]},
+    "incomplete_kind": {"const": "partial_safe"},
+    "source": {"$ref": "#/$defs/source"},
+    "request": {"$ref": "#/$defs/request"},
+    "coverage": {"$ref": "#/$defs/coverage"},
+    "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}},
+    "members": {"type": "array", "items": {"$ref": "#/$defs/member"}},
+    "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
+    "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
+  },
+  "oneOf": [
+    {
+      "properties": {"status": {"const": "complete"}},
+      "not": {"required": ["incomplete_kind"]}
+    },
+    {
+      "properties": {
+        "status": {"const": "incomplete"},
+        "incomplete_kind": {"const": "partial_safe"}
+      },
+      "required": ["incomplete_kind"]
+    }
+  ],
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "kind", "head_commit", "fingerprint", "file_count"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.source-view/v1"},
+        "kind": {"const": "working-tree"},
+        "head_commit": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+            {"type": "null"}
+          ]
+        },
+        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "file_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"enum": ["path", "module", "class"]},
+        "value": {"type": "string", "minLength": 1}
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targets", "upstream_depth", "downstream_depth"],
+      "properties": {
+        "targets": {"type": "array", "items": {"$ref": "#/$defs/target"}},
+        "upstream_depth": {"type": "integer", "minimum": 0},
+        "downstream_depth": {"type": "integer", "minimum": 0}
+      }
+    },
+    "failed_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "stage", "diagnostic_code"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "stage": {
+          "enum": [
+            "read",
+            "path_safety",
+            "encoding",
+            "parse",
+            "module_identity",
+            "module_collision"
+          ]
+        },
+        "diagnostic_code": {
+          "enum": [
+            "CSV-SOURCE-002",
+            "CSV-SOURCE-004",
+            "CSV-PY-001",
+            "CSV-PY-002",
+            "CSV-PY-003",
+            "CSV-PY-004",
+            "CSV-PY-005"
+          ]
+        }
+      }
+    },
+    "frontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "kind", "reference", "reason"],
+      "properties": {
+        "direction": {"enum": ["upstream", "downstream", "failure"]},
+        "kind": {"enum": ["module", "class", "symbol", "file"]},
+        "reference": {"type": "string", "minLength": 1},
+        "reason": {
+          "enum": [
+            "depth_limit",
+            "unresolved_reference",
+            "failed_source",
+            "unsupported_scope",
+            "star_import",
+            "identity_collision"
+          ]
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_files",
+        "parsed_files",
+        "failed_files",
+        "selected_modules",
+        "selected_entities",
+        "frontier"
+      ],
+      "properties": {
+        "candidate_files": {"type": "integer", "minimum": 0},
+        "parsed_files": {"type": "integer", "minimum": 0},
+        "failed_files": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/failed_file"}
+        },
+        "selected_modules": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "selected_entities": {"type": "integer", "minimum": 0},
+        "frontier": {"type": "array", "items": {"$ref": "#/$defs/frontier"}}
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_line", "end_line"],
+      "properties": {
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1}
+      }
+    },
+    "decorator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "called"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "called": {"type": "boolean"}
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "module",
+        "qualified_name",
+        "name",
+        "path",
+        "range",
+        "decorators"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^python:class:"},
+        "kind": {"const": "class"},
+        "module": {"type": "string", "minLength": 1},
+        "qualified_name": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "range": {"$ref": "#/$defs/range"},
+        "decorators": {"type": "array", "items": {"$ref": "#/$defs/decorator"}}
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "annotation", "has_default"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "kind": {
+          "enum": [
+            "positional_only",
+            "positional_or_keyword",
+            "var_positional",
+            "keyword_only",
+            "var_keyword"
+          ]
+        },
+        "annotation": {"type": ["string", "null"]},
+        "has_default": {"type": "boolean"}
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["async", "parameters", "returns"],
+      "properties": {
+        "async": {"type": "boolean"},
+        "parameters": {"type": "array", "items": {"$ref": "#/$defs/parameter"}},
+        "returns": {"type": ["string", "null"]}
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner_id",
+        "kind",
+        "name",
+        "scope",
+        "property_role",
+        "method_kind",
+        "annotation",
+        "signature",
+        "decorators",
+        "range"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^python:member:[0-9a-f]{64}$"},
+        "owner_id": {"type": "string", "pattern": "^python:class:"},
+        "kind": {"enum": ["field", "property", "method"]},
+        "name": {"type": "string", "minLength": 1},
+        "scope": {"enum": ["class", "instance", null]},
+        "property_role": {"enum": ["getter", "setter", "deleter", null]},
+        "method_kind": {"enum": ["instance", "class", "static", null]},
+        "annotation": {"type": ["string", "null"]},
+        "signature": {
+          "oneOf": [{"$ref": "#/$defs/signature"}, {"type": "null"}]
+        },
+        "decorators": {"type": "array", "items": {"$ref": "#/$defs/decorator"}},
+        "range": {"$ref": "#/$defs/range"}
+      }
+    },
+    "relation_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resolution", "kind", "id", "name"],
+      "properties": {
+        "resolution": {"enum": ["internal", "external", "unknown"]},
+        "kind": {"enum": ["class", "module", "symbol"]},
+        "id": {"type": ["string", "null"]},
+        "name": {"type": "string", "minLength": 1}
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "source_id",
+        "target",
+        "via_member_id",
+        "annotation",
+        "range"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^python:relation:[0-9a-f]{64}$"},
+        "kind": {
+          "enum": ["inheritance", "composition", "typed_dependency", "import_dependency"]
+        },
+        "source_id": {"type": "string", "pattern": "^python:(?:class|module):"},
+        "target": {"$ref": "#/$defs/relation_target"},
+        "via_member_id": {"type": ["string", "null"]},
+        "annotation": {"type": ["string", "null"]},
+        "range": {"$ref": "#/$defs/range"}
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "schema",
+        "code",
+        "severity",
+        "domain",
+        "path",
+        "symbol",
+        "line",
+        "recoverable",
+        "message"
+      ],
+      "properties": {
+        "type": {"const": "diagnostic"},
+        "schema": {"const": "code-structure-viz.diagnostic/v1"},
+        "code": {"type": "string", "pattern": "^CSV-"},
+        "severity": {"enum": ["error", "warning", "info"]},
+        "domain": {"enum": ["python", null]},
+        "path": {"type": ["string", "null"]},
+        "symbol": {"type": ["string", "null"]},
+        "line": {"type": ["integer", "null"], "minimum": 1},
+        "recoverable": {"type": "boolean"},
+        "message": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}
