@@ -155,7 +155,9 @@ def _validate_glob(value: str, *, key: str) -> None:
     if (
         not value
         or "\\" in value
+        or "\0" in value
         or path.is_absolute()
+        or value != path.as_posix()
         or any(token in value for token in ("!", "[", "]", "{", "}"))
         or any(part in {"", ".", ".."} for part in path.parts)
     ):

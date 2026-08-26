@@ -76,6 +76,33 @@ def test_unborn_source_view_has_null_head_commit(tmp_path: Path) -> None:
     assert view.failures == ()
 
 
+def test_descriptor_anchored_source_read_survives_repository_path_swap(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "module.py").write_bytes(b"class Original:\n    pass\n")
+    alternate = tmp_path / "alternate"
+    alternate.mkdir()
+    (alternate / "module.py").write_bytes(b"class Alternate:\n    pass\n")
+    repository_descriptor = os.open(repository, os.O_RDONLY)
+    displaced = tmp_path / "displaced"
+    try:
+        repository.rename(displaced)
+        alternate.rename(repository)
+        view = SourceViewBuilder(
+            repository,
+            tmp_path / "stage",
+            repository_descriptor=repository_descriptor,
+        ).build(
+            Commit("1" * 40),
+            (_entry("module.py"),),
+            PythonConfig((".",), ("**/*.py",), ()),
+        )
+    finally:
+        os.close(repository_descriptor)
+
+    assert view.files[0].content == b"class Original:\n    pass\n"
+
+
 def test_nfc_collision_becomes_one_failure_and_neither_path_wins(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

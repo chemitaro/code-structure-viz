@@ -154,6 +154,30 @@ def test_semantic_schema_accepts_zero_class_vector_and_rejects_shape_mutations()
         validator.validate({**value, "entities": None})
 
 
+def test_package_root_relative_import_renders_schema_valid_semantic_artifact(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "app.py").write_text("from ...foo import Bar\n", encoding="utf-8")
+    initialize_repository(repository)
+    output = tmp_path / "output"
+
+    result = run_cli(repository, output)
+
+    assert result.returncode == 0
+    semantic = json.loads((output / "python.snapshot.semantic.json").read_bytes())
+    _validator("semantic-v1.schema.json").validate(semantic)
+    relation = semantic["relations"][0]
+    assert relation["kind"] == "import_dependency"
+    assert relation["target"] == {
+        "resolution": "external",
+        "kind": "module",
+        "id": None,
+        "name": "relative-import",
+    }
+
+
 @pytest.mark.parametrize(
     "path",
     sorted(SEMANTIC_GOLDEN_ROOT.glob("*/python.snapshot.semantic.json")),

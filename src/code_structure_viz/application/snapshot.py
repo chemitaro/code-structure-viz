@@ -77,6 +77,7 @@ class SnapshotApplication:
                 repository,
                 transaction.staging_root,
                 staging_root_descriptor=transaction.staging_root_descriptor,
+                repository_descriptor=transaction.repository_descriptor,
             )
             source_view = source_builder.build(head_state, entries, config.python)
             analysis = PythonSnapshotAnalyzer().analyze(

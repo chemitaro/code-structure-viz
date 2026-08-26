@@ -192,8 +192,19 @@ def _read_flags() -> int:
     return flags
 
 
-def _open_parent_without_symlinks(repository: Path, relative: PurePosixPath) -> int:
-    descriptor = os.open(repository, _directory_flags())
+def _open_repository_descriptor(repository: Path, repository_descriptor: int | None) -> int:
+    if repository_descriptor is not None:
+        return os.dup(repository_descriptor)
+    return os.open(repository, _directory_flags())
+
+
+def _open_parent_without_symlinks(
+    repository: Path,
+    relative: PurePosixPath,
+    *,
+    repository_descriptor: int | None = None,
+) -> int:
+    descriptor = _open_repository_descriptor(repository, repository_descriptor)
     try:
         for component in relative.parts[:-1]:
             before = os.stat(component, dir_fd=descriptor, follow_symlinks=False)
@@ -248,12 +259,14 @@ def _symlink_target_parts(
 def _resolve_repository_file(
     repository: Path,
     relative: PurePosixPath,
+    *,
+    repository_descriptor: int | None = None,
 ) -> tuple[PurePosixPath, int, str, os.stat_result]:
     pending = list(_collapse_relative_parts(relative.parts))
     if not pending:
         raise _UnsafeSymlinkError
     resolved: list[str] = []
-    descriptor = os.open(repository, _directory_flags())
+    descriptor = _open_repository_descriptor(repository, repository_descriptor)
     symlink_count = 0
     try:
         while pending:
@@ -274,7 +287,7 @@ def _resolve_repository_file(
                 )
                 resolved.clear()
                 os.close(descriptor)
-                descriptor = os.open(repository, _directory_flags())
+                descriptor = _open_repository_descriptor(repository, repository_descriptor)
                 continue
             if pending:
                 if not stat.S_ISDIR(before.st_mode):
@@ -304,10 +317,12 @@ class SourceViewBuilder:
         staging_root: Path,
         *,
         staging_root_descriptor: int | None = None,
+        repository_descriptor: int | None = None,
     ) -> None:
-        self.repository = repository.resolve()
+        self.repository = repository if repository.is_absolute() else repository.resolve()
         self.staging_root = staging_root
         self._staging_root_descriptor = staging_root_descriptor
+        self._repository_descriptor = repository_descriptor
 
     def build(
         self,
@@ -461,13 +476,7 @@ class SourceViewBuilder:
                     matched = False
                     for left in normalized_groups[paths[left_index]]:
                         for right in normalized_groups[paths[right_index]]:
-                            try:
-                                matched = os.path.samefile(
-                                    self.repository.joinpath(*PurePosixPath(left.raw_text).parts),
-                                    self.repository.joinpath(*PurePosixPath(right.raw_text).parts),
-                                )
-                            except OSError:
-                                matched = False
+                            matched = self._samefile(left, right)
                             if matched:
                                 break
                         if matched:
@@ -487,6 +496,40 @@ class SourceViewBuilder:
             )
         )
 
+    def _samefile(self, left: EnumeratedPath, right: EnumeratedPath) -> bool:
+        if self._repository_descriptor is None:
+            try:
+                return os.path.samefile(
+                    self.repository.joinpath(*PurePosixPath(left.raw_text).parts),
+                    self.repository.joinpath(*PurePosixPath(right.raw_text).parts),
+                )
+            except OSError:
+                return False
+
+        descriptors: list[int] = []
+        try:
+            _left_path, _left_parent, _left_name, left_stat = _resolve_repository_file(
+                self.repository,
+                PurePosixPath(left.raw_text),
+                repository_descriptor=self._repository_descriptor,
+            )
+            descriptors.append(_left_parent)
+            _right_path, _right_parent, _right_name, right_stat = _resolve_repository_file(
+                self.repository,
+                PurePosixPath(right.raw_text),
+                repository_descriptor=self._repository_descriptor,
+            )
+            descriptors.append(_right_parent)
+            return (left_stat.st_dev, left_stat.st_ino) == (right_stat.st_dev, right_stat.st_ino)
+        except _ConcurrentMutationError as error:
+            raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
+        except (OSError, RuntimeError, ValueError, _UnsafeSymlinkError):
+            return False
+        finally:
+            for descriptor in descriptors:
+                with suppress(OSError):
+                    os.close(descriptor)
+
     def _freeze(
         self, entry: EnumeratedPath, *, write_frozen: bool
     ) -> SourceFile | SourceAcquisitionFailure | None:
@@ -495,7 +538,11 @@ class SourceViewBuilder:
         source_parent_descriptor: int | None = None
         target_parent_descriptor: int | None = None
         try:
-            source_parent_descriptor = _open_parent_without_symlinks(self.repository, physical_path)
+            source_parent_descriptor = _open_parent_without_symlinks(
+                self.repository,
+                physical_path,
+                repository_descriptor=self._repository_descriptor,
+            )
             source_name = physical_path.name
             logical_before = os.stat(
                 source_name,
@@ -537,7 +584,11 @@ class SourceViewBuilder:
                         target_parent_descriptor,
                         target_name,
                         target_before,
-                    ) = _resolve_repository_file(self.repository, initial_target)
+                    ) = _resolve_repository_file(
+                        self.repository,
+                        initial_target,
+                        repository_descriptor=self._repository_descriptor,
+                    )
                 except _ConcurrentMutationError:
                     raise
                 except (OSError, RuntimeError, ValueError, _UnsafeSymlinkError) as error:

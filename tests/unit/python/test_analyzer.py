@@ -17,6 +17,7 @@ from code_structure_viz.adapters.python.model import (
     ParameterKind,
     PropertyRole,
     RelationKind,
+    TargetKind,
     TargetResolution,
 )
 from code_structure_viz.adapters.python.module_index import PythonModuleIndex
@@ -399,6 +400,18 @@ wrapper('third.mod')
     assert result.relations == ()
     assert result.frontier == ()
     assert result.diagnostics == ()
+
+
+def test_relative_import_beyond_package_root_is_external_module_target() -> None:
+    result = _analyze({"src/app.py": b"from ...foo import Bar\n"})
+
+    assert len(result.relations) == 1
+    relation = result.relations[0]
+    assert relation.kind is RelationKind.IMPORT_DEPENDENCY
+    assert relation.target.resolution is TargetResolution.EXTERNAL
+    assert relation.target.kind is TargetKind.MODULE
+    assert relation.target.id is None
+    assert relation.target.name == "relative-import"
 
 
 def test_deep_symbolic_decorator_and_legacy_type_parameter_callee_are_bounded() -> None:

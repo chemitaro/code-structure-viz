@@ -420,6 +420,12 @@ class OutputTransaction:
             raise RuntimeError("output transaction has not begun")
         return self._staging_descriptor
 
+    @property
+    def repository_descriptor(self) -> int:
+        if self._repository_descriptor is None:
+            raise RuntimeError("output transaction repository is closed")
+        return self._repository_descriptor
+
     def begin(self) -> Path:
         if self._staging_root is not None:
             raise RuntimeError("output transaction already began")

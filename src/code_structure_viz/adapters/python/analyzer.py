@@ -1316,8 +1316,11 @@ def _import_relation_evidence(
     frontier: list[CoverageFrontier] = []
     for item in imports:
         if item.module is None:
+            # The v1 schema reserves unknown targets for symbols. An
+            # unresolvable explicit relative import therefore remains an
+            # external module reference with no synthetic module identity.
             target = RelationTarget(
-                TargetResolution.UNKNOWN, TargetKind.MODULE, None, "relative-import"
+                TargetResolution.EXTERNAL, TargetKind.MODULE, None, "relative-import"
             )
         elif item.module in modules:
             target = RelationTarget(

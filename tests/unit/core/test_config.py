@@ -217,6 +217,22 @@ max_entities = 500
     assert caught.value.diagnostic.code.value == "CSV-CONFIG-004"
 
 
+@pytest.mark.parametrize("include", ["./**/*.py", "a//**/*.py", "a/", "a/./*.py"])
+def test_explicit_config_rejects_noncanonical_posix_glob(tmp_path: Path, include: str) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config_path = tmp_path / "noncanonical.toml"
+    config_path.write_text(
+        _COMPLETE_CONFIG.replace('include = ["**/*.py"]', f'include = ["{include}"]'),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigResolutionError) as caught:
+        resolve_config(_request(repo, tmp_path / "output", "--config", str(config_path)), repo)
+
+    assert caught.value.diagnostic.code.value == "CSV-CONFIG-004"
+
+
 @pytest.mark.parametrize(
     ("include", "exclude"),
     [
