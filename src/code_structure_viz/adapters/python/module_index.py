@@ -59,6 +59,7 @@ class PythonModuleIndex:
     def build(cls, source_view: SourceView, config: PythonConfig) -> PythonModuleIndex:
         failures: list[FailedSourceFile] = []
         diagnostics: list[Diagnostic] = []
+        collision_paths: dict[str, list[PurePosixPath]] = {}
         for source_failure in source_view.failures:
             stage = (
                 FailedStage.READ
@@ -72,11 +73,25 @@ class PythonModuleIndex:
                     source_failure.diagnostic_code,
                 )
             )
+            if source_failure.diagnostic_code is DiagnosticCode.SOURCE_PATH_COLLISION:
+                collision_paths.setdefault(source_failure.path.as_posix().casefold(), []).append(
+                    source_failure.path
+                )
+                continue
             diagnostics.append(
                 diagnostic(
                     source_failure.diagnostic_code,
                     domain="python",
                     path=source_failure.path.as_posix(),
+                )
+            )
+        for group_paths in collision_paths.values():
+            representative_path = min(group_paths, key=_path_key)
+            diagnostics.append(
+                diagnostic(
+                    DiagnosticCode.SOURCE_PATH_COLLISION,
+                    domain="python",
+                    path=representative_path.as_posix(),
                 )
             )
 

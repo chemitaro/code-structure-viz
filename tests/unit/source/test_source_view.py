@@ -98,6 +98,28 @@ def test_nfc_collision_becomes_one_failure_and_neither_path_wins(tmp_path: Path)
     assert failure.diagnostic_code.value == "CSV-SOURCE-004"
 
 
+def test_casefold_samefile_collision_keeps_each_canonical_path_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "Foo.py").write_bytes(b"class Foo:\n    pass\n")
+    (repo / "foo.py").write_bytes(b"class foo:\n    pass\n")
+
+    monkeypatch.setattr(os.path, "samefile", lambda _left, _right: True)
+
+    view = SourceViewBuilder(repo, tmp_path / "stage").build(
+        Commit("2" * 40),
+        (_entry("Foo.py"), _entry("foo.py")),
+        PythonConfig((".",), ("**/*.py",), ()),
+    )
+
+    assert view.files == ()
+    assert tuple(item.path.as_posix() for item in view.failures) == ("Foo.py", "foo.py")
+    assert all(item.diagnostic_code.value == "CSV-SOURCE-004" for item in view.failures)
+
+
 def test_single_physical_spelling_is_read_without_replacing_it_with_logical_identity(
     tmp_path: Path,
 ) -> None:

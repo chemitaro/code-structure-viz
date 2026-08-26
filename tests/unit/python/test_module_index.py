@@ -100,3 +100,30 @@ def test_source_acquisition_failure_is_preserved_in_domain_coverage() -> None:
     assert index.failures[0].path == PurePosixPath("src/link.py")
     assert index.failures[0].stage.value == "path_safety"
     assert index.diagnostics[0].code.value == "CSV-SOURCE-002"
+
+
+def test_casefold_collision_emits_one_group_diagnostic_and_preserves_descriptors() -> None:
+    failures = (
+        SourceAcquisitionFailure(
+            PurePosixPath("Foo.py"),
+            AcquisitionStage.PATH_SAFETY,
+            DiagnosticCode.SOURCE_PATH_COLLISION,
+        ),
+        SourceAcquisitionFailure(
+            PurePosixPath("foo.py"),
+            AcquisitionStage.PATH_SAFETY,
+            DiagnosticCode.SOURCE_PATH_COLLISION,
+        ),
+    )
+
+    index = PythonModuleIndex.build(
+        _view(failures=failures), PythonConfig((".",), ("**/*.py",), ())
+    )
+
+    assert index.candidate_file_count == 2
+    assert tuple(item.path.as_posix() for item in index.failures) == ("Foo.py", "foo.py")
+    assert tuple(
+        (item.code.value, item.path)
+        for item in index.diagnostics
+        if item.code is DiagnosticCode.SOURCE_PATH_COLLISION
+    ) == (("CSV-SOURCE-004", "Foo.py"),)
