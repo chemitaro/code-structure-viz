@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -195,6 +196,31 @@ def test_output_transaction_abort_removes_frozen_source_and_payload_bytes(
 
     assert not staging_root.exists()
     assert not (tmp_path / "result").exists()
+
+
+def test_output_transaction_abort_cleans_source_beyond_python_recursion_limit(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+
+    nested = transaction.staging_root / "source"
+    for _ in range(200):
+        nested /= "d"
+        nested.mkdir()
+    (nested / "secret.py").write_bytes(b"secret")
+    staging_root = transaction.staging_root
+
+    original_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(100)
+    try:
+        transaction.abort()
+    finally:
+        sys.setrecursionlimit(original_limit)
+
+    assert not staging_root.exists()
 
 
 def test_output_transaction_never_replaces_destination_created_at_commit(

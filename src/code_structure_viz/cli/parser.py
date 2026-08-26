@@ -5,7 +5,7 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, cast
+from typing import Literal, cast
 
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
 from code_structure_viz.core.path_safety import lexical_absolute
@@ -63,7 +63,6 @@ _SINGLE_OPTIONS = frozenset(
 _REPEATABLE_OPTIONS = frozenset({"--target", "--format"})
 _DIFF_OPTIONS = frozenset({"--from", "--to", "--pr-target", "--max-changed-paths"})
 _ASCII_DECIMAL = re.compile(r"[0-9]+\Z", flags=re.ASCII)
-_MAX_DECIMAL_DIGITS: Final = 4_300
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,12 +78,13 @@ def _usage(code: DiagnosticCode, *, option: str | None = None) -> CliUsageError:
 
 
 def _parse_non_negative(value: str) -> int:
-    if _ASCII_DECIMAL.fullmatch(value) is None or len(value) > _MAX_DECIMAL_DIGITS:
+    if _ASCII_DECIMAL.fullmatch(value) is None:
         raise _usage(DiagnosticCode.USAGE_GRAMMAR)
-    try:
-        return int(value, 10)
-    except ValueError as error:
-        raise _usage(DiagnosticCode.USAGE_GRAMMAR) from error
+    parsed = 0
+    for offset in range(0, len(value), 9):
+        chunk = value[offset : offset + 9]
+        parsed = parsed * (10 ** len(chunk)) + int(chunk, 10)
+    return parsed
 
 
 def _parse_positive(value: str) -> int:
@@ -193,7 +193,7 @@ def _validate_usage_priority(argv: Sequence[str]) -> None:
         values = occurrences.get(option, [])
         if values:
             option_index, value_index, value = values[0]
-            if _ASCII_DECIMAL.fullmatch(value) is None or len(value) > _MAX_DECIMAL_DIGITS:
+            if _ASCII_DECIMAL.fullmatch(value) is None:
                 candidates.append(_UsageCandidate(0, value_index, DiagnosticCode.USAGE_GRAMMAR))
             if not target_values:
                 candidates.append(_UsageCandidate(0, option_index, DiagnosticCode.USAGE_GRAMMAR))
@@ -201,11 +201,7 @@ def _validate_usage_priority(argv: Sequence[str]) -> None:
     max_values = occurrences.get("--max-entities", [])
     if max_values:
         _option_index, value_index, value = max_values[0]
-        if (
-            _ASCII_DECIMAL.fullmatch(value) is None
-            or len(value) > _MAX_DECIMAL_DIGITS
-            or not value.strip("0")
-        ):
+        if _ASCII_DECIMAL.fullmatch(value) is None or not value.strip("0"):
             candidates.append(_UsageCandidate(0, value_index, DiagnosticCode.USAGE_GRAMMAR))
 
     stdout_values = occurrences.get("--stdout", [])

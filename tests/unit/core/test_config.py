@@ -218,18 +218,17 @@ max_entities = 500
 
 
 @pytest.mark.parametrize(
-    ("include", "exclude", "expected_key"),
+    ("include", "exclude"),
     [
-        (["/".join(["**"] * 257 + ["*.py"])], [], "python.include"),
-        ([f"module_{index}/**/*.py" for index in range(257)], [], "python.include"),
-        (["**/*.py"], ["a" * 4097], "python.exclude"),
+        (["/".join(["**"] * 257 + ["*.py"])], []),
+        ([f"module_{index}/**/*.py" for index in range(257)], []),
+        (["**/*.py"], ["a" * 4097]),
     ],
 )
-def test_glob_pattern_count_length_and_depth_have_closed_complexity_bounds(
+def test_glob_patterns_have_no_implicit_complexity_limit(
     tmp_path: Path,
     include: list[str],
     exclude: list[str],
-    expected_key: str,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -245,10 +244,7 @@ def test_glob_pattern_count_length_and_depth_have_closed_complexity_bounds(
         encoding="utf-8",
     )
 
-    with pytest.raises(ConfigResolutionError) as caught:
-        resolve_config(_request(repo, tmp_path / "output", "--config", str(config_path)), repo)
+    config = resolve_config(_request(repo, tmp_path / "output", "--config", str(config_path)), repo)
 
-    assert caught.value.diagnostic.code.value == "CSV-CONFIG-004"
-    assert caught.value.diagnostic.message == (
-        f"Configuration value '{expected_key}' is invalid for config v1."
-    )
+    assert config.python.include == tuple(include)
+    assert config.python.exclude == tuple(exclude)

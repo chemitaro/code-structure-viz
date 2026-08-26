@@ -152,23 +152,23 @@ def test_max_entities_accepts_only_positive_ascii_decimal(value: str) -> None:
     assert caught.value.diagnostic.code.value == "CSV-USAGE-001"
 
 
-def test_arbitrarily_long_decimal_is_a_closed_usage_error_not_a_conversion_exception() -> None:
-    with pytest.raises(CliUsageError) as caught:
-        parse_cli(
-            [
-                "snapshot",
-                "--repo",
-                ".",
-                "--output-dir",
-                "../output",
-                "--domain",
-                "python",
-                "--max-entities",
-                "9" * 10_000,
-            ]
-        )
+def test_arbitrarily_long_decimal_is_parsed_without_conversion_exception() -> None:
+    request = parse_cli(
+        [
+            "snapshot",
+            "--repo",
+            ".",
+            "--output-dir",
+            "../output",
+            "--domain",
+            "python",
+            "--max-entities",
+            "9" * 10_000,
+        ]
+    )
 
-    assert caught.value.diagnostic.code.value == "CSV-USAGE-001"
+    assert request.max_entities_override is not None
+    assert request.max_entities_override.bit_length() > 30_000
 
 
 @pytest.mark.parametrize(

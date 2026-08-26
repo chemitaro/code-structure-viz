@@ -93,9 +93,6 @@ _TOP_LEVEL_MISSING_KEYS: Final[dict[str, str]] = {
     "traversal": "traversal.upstream_depth",
     "limits": "limits.max_entities",
 }
-_MAX_GLOB_PATTERNS: Final = 256
-_MAX_GLOB_LENGTH: Final = 4096
-_MAX_GLOB_SEGMENTS: Final = 256
 
 
 def _error(code: DiagnosticCode, *, key: str | None = None) -> ConfigResolutionError:
@@ -157,8 +154,6 @@ def _validate_glob(value: str, *, key: str) -> None:
     path = PurePosixPath(value)
     if (
         not value
-        or len(value) > _MAX_GLOB_LENGTH
-        or len(path.parts) > _MAX_GLOB_SEGMENTS
         or "\\" in value
         or path.is_absolute()
         or any(token in value for token in ("!", "[", "]", "{", "}"))
@@ -215,10 +210,6 @@ def _decode_config(data: object, *, source: ConfigSource, repo: Path) -> Resolve
     )
     include = _string_array(python["include"], key="python.include", allow_empty=False)
     exclude = _string_array(python["exclude"], key="python.exclude", allow_empty=True)
-    if len(include) > _MAX_GLOB_PATTERNS:
-        raise _error(DiagnosticCode.CONFIG_VALUE, key="python.include")
-    if len(exclude) > _MAX_GLOB_PATTERNS:
-        raise _error(DiagnosticCode.CONFIG_VALUE, key="python.exclude")
     for value in source_roots:
         _validate_source_root(value, repo=repo, require_exists=True)
     for value in include:

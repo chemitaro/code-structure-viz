@@ -10,6 +10,7 @@ import sys
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
+from typing import Protocol
 
 from code_structure_viz.artifacts.manifest import (
     ArtifactDescriptor,
@@ -41,6 +42,12 @@ class OutputTransactionError(RuntimeError):
 
 class PublicationInterrupted(OutputTransactionError):
     pass
+
+
+class _DirectoryScanner(Protocol):
+    def __next__(self) -> os.DirEntry[str]: ...
+
+    def close(self) -> None: ...
 
 
 def _error(code: DiagnosticCode) -> OutputTransactionError:
@@ -152,18 +159,47 @@ def _read_file(directory_descriptor: int, name: str) -> bytes:
 
 
 def _remove_directory_contents(descriptor: int) -> None:
-    for entry in os.scandir(descriptor):
-        entry_stat = os.stat(entry.name, dir_fd=descriptor, follow_symlinks=False)
-        if stat.S_ISDIR(entry_stat.st_mode) and not stat.S_ISLNK(entry_stat.st_mode):
-            child = os.open(entry.name, _directory_flags(), dir_fd=descriptor)
+    stack: list[tuple[int, int | None, str | None, _DirectoryScanner]] = [
+        (descriptor, None, None, os.scandir(descriptor))
+    ]
+    try:
+        while stack:
+            current, parent, name, scanner = stack[-1]
             try:
-                _remove_directory_contents(child)
-            finally:
-                os.close(child)
-            os.rmdir(entry.name, dir_fd=descriptor)
-        else:
-            os.unlink(entry.name, dir_fd=descriptor)
-    os.fsync(descriptor)
+                entry = next(scanner)
+            except StopIteration:
+                stack.pop()
+                closed = False
+                try:
+                    scanner.close()
+                    os.fsync(current)
+                    if parent is not None and name is not None:
+                        os.close(current)
+                        closed = True
+                        os.rmdir(name, dir_fd=parent)
+                finally:
+                    if parent is not None and not closed:
+                        with suppress(OSError):
+                            os.close(current)
+                continue
+            entry_stat = os.stat(entry.name, dir_fd=current, follow_symlinks=False)
+            if stat.S_ISDIR(entry_stat.st_mode) and not stat.S_ISLNK(entry_stat.st_mode):
+                child = os.open(entry.name, _directory_flags(), dir_fd=current)
+                try:
+                    child_scanner = os.scandir(child)
+                except BaseException:
+                    os.close(child)
+                    raise
+                stack.append((child, current, entry.name, child_scanner))
+            else:
+                os.unlink(entry.name, dir_fd=current)
+    finally:
+        for current, parent, _name, scanner in reversed(stack):
+            with suppress(OSError):
+                scanner.close()
+            if parent is not None:
+                with suppress(OSError):
+                    os.close(current)
 
 
 def _rename_noreplace(
