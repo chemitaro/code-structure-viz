@@ -518,17 +518,26 @@ class SubscriptBase(A[B]): pass
         if relation.kind is RelationKind.INHERITANCE
     )
 
-    assert inheritance == (
+    assert {
+        (source_id, resolution, target_name, annotation)
+        for source_id, resolution, target_name, annotation in inheritance
+    } == {
+        (
+            "python:class:pkg.inheritance:AnnotatedBase",
+            "internal",
+            "pkg.inheritance.A",
+            "typing.Annotated[A, ?]",
+        ),
         (
             "python:class:pkg.inheritance:SubscriptBase",
             "internal",
             "pkg.inheritance.A",
             "A[B]",
         ),
-    )
+    }
 
 
-def test_conflicting_field_annotations_merge_to_unknown_without_guessing_relations() -> None:
+def test_conflicting_field_annotations_merge_to_unknown_but_keep_relations() -> None:
     result = _analyze(
         {
             "src/pkg/conflict.py": b"""
@@ -546,7 +555,15 @@ class Owner:
     value = next(item for item in result.members if item.name == "value")
     assert value.annotation == "?"
     assert value.range.start_line == 7
-    assert not any(item.via_member_id == value.id for item in result.relations)
+    relations = {
+        (item.target.name, item.annotation)
+        for item in result.relations
+        if item.kind is RelationKind.COMPOSITION and item.via_member_id == value.id
+    }
+    assert relations == {
+        ("pkg.conflict.A", "A"),
+        ("pkg.conflict.B", "B"),
+    }
     conflict = [item for item in result.diagnostics if item.code.value == "CSV-PY-013"]
     assert len(conflict) == 1
     assert conflict[0].symbol == value.id

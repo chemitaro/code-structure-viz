@@ -374,6 +374,7 @@ class SafeTypeExpressionRenderer:
                         f"{operation.canonical_base}[{first.text}, ?]",
                         first.occurrences,
                         True,
+                        first.outer_head_index,
                     )
                 )
                 continue

@@ -934,17 +934,15 @@ def _analyze_class_members(
                     line=member.range.start_line,
                 )
             )
-        elif annotation is not None:
-            for rendered, declaration in rendered_items:
-                type_evidence.extend(
-                    _type_evidence(
-                        rendered,
-                        candidate,
-                        declaration.type_parameters,
-                        RelationKind.COMPOSITION,
-                    )
+        for rendered, declaration in rendered_items:
+            type_evidence.extend(
+                _type_evidence(
+                    rendered,
+                    candidate,
+                    declaration.type_parameters,
+                    RelationKind.COMPOSITION,
                 )
-
+            )
     callable_groups: dict[
         tuple[MemberKind, str, PropertyRole | None, MethodKind | None],
         list[_CallableDeclaration],
