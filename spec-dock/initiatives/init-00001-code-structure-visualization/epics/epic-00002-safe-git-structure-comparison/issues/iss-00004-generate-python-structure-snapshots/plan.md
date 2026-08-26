@@ -5,7 +5,7 @@ ID: "iss-00004"
 関連GitHub: ["#4"]
 package_sequence_key: "ISSUE-01"
 状態: "draft"
-最終更新: "2026-08-25"
+最終更新: "2026-08-26"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -43,6 +43,7 @@ completionはfile作成数ではなく、`I01-AC-001`〜`I01-AC-009`、trace mat
 
 - canonical Requirement/Design/Planのadoptionはmain orchestrator / userのsingle-writer authorityで行う。本Planのproduct commit sequenceへcanonical R/D/P replacement commitを混ぜない。
 - 実装者はcanonical R/D/P、accepted ADR、parent R/D/P、`.meta.json`、noncanonical Artifactを勝手に編集しない。
+- planned-history pathの例外として、既に公開済みのas-built履歴を履歴書き換えなしで受理するかどうかは、main orchestrator / userだけが明示的に決定できる。実装者が自身の履歴やTDD証跡を事後承認してはならない。
 - public contract変更が必要ならcode/schema/goldenを先に変更せず、stop conditionとしてorchestratorへ返す。
 - noncanonical explanation Artifactを実装source of truthにしない。特にIssue ID、Requirement数、entity overrun、partial publication、planned pathの古い記述を採用しない。
 - 実装結果、実行log、残余riskは完了後にcanonical `report.md`へ別途記録する。本Planをexecution logへ変えない。
@@ -98,6 +99,19 @@ uv --version
 7. **COMMIT**: tracked deliverableとtestだけを一commitにする。failing test、`xfail`で隠したintended behavior、cache、temp output、generated venv、secretをcommitしない。
 
 REDの一時状態はworking tree内で観測し、red-only commitを作らない。各listed commitは単独checkoutでその時点の全testがgreenでなければならない。`--no-verify`、automatic `git add -A`、unrelated amend、force pushを実装手順に含めない。
+
+### 公開済み履歴に対する approved as-built path
+
+上記のplanned-history pathは、production implementationが存在しないbaselineから実装を開始する通常経路であり、C1〜C6の独立commit、RED/GREEN/REFACTOR、単独checkoutのgreen条件を変更しない。実装後に同じ履歴を再現するための空commit、rename-only commit、事後的なTDD証跡の創作は認めない。
+
+ただし、実装と後続hardeningが既にremoteへ公開され、最終treeと全issue gateがgreenで、履歴を書き換えないことをmain orchestrator / userが明示承認した場合に限り、次のapproved as-built pathで完了判定を行える。
+
+- 実際のcommit range、各commitの責務、C1〜C6とのmany-to-many対応、検証結果をcanonical `report.md`へ記録する。
+- 現在の履歴で各C1〜C6が単独greenだった、または当初から計画順で実行されたとは主張しない。
+- Requirement、Design、public contract、acceptance、security、determinism、packaging、CI、rollback条件を緩和しない。
+- C1〜C6のlogical responsibilityはtraceabilityのために保持するが、実際のcommit boundaryやrollback unitを後付けで一対一に再構成しない。
+- 既存SHA、review参照、CI結果、clone済み利用者を保全し、force push、empty attestation commit、履歴rewriteを行わない。
+- approved as-built pathを採用した場合も、Plan/Reportの変更はガバナンス差分に限定し、製品コードの挙動変更を同じ変更へ混在させない。
 
 ## 順序・commit boundaries
 
@@ -740,6 +754,8 @@ trace gap、orphan Requirement/Design/Plan/Test、同じIDの意味違い、上�
 4. parent R/D/P、accepted ADR、SpecDock metadata、noncanonical Artifactはrevert対象にしない。
 5. canonical R/D/P adoption自体を戻す場合はorchestratorがexact replacement commitをwhole-file revertする。
 
+approved as-built pathでは、実際の公開commit rangeをrollback対象として扱い、存在しないC1〜C6の単独rollback境界を主張しない。履歴の保存とrollbackの単位は別の証跡としてReportへ記録する。
+
 ### forward recovery
 
 - unsafe patternをcompleteへ残さず、`partial_safe`または`payload_unavailable`へ狭める。
@@ -774,9 +790,23 @@ Issue implementation-readyおよびimplementation completeの判定を分ける�
 
 ### implementation complete
 
+#### planned-history path
+
 - C1〜C6がlisted message/責務で存在し、各commit単独でgreen。
 - I01-AC-001〜I01-AC-009のevidenceが揃う。
 - issue gate全成功、clean status、forbidden scope 0件。
 - wheel/offline/minimum/latest/macOS/security/determinism/SpecDock validation成功。
 - residual risk、unsupported static pattern、dependency/license inventory、implementation evidenceをReportへ渡す。
 - Python diff、SQLAlchemy、Next、all-domain、product HTMLへは進まず、ISSUE-02へversioned contractだけをhandoffする。
+
+#### approved as-built path
+
+planned-history pathを実行できずに実装・hardeningが既にremoteへ公開された場合は、main orchestrator / userの明示承認があり、かつ次の条件をすべて満たすときだけこのpathを使用できる。
+
+- 既存の公開履歴をrebase、rewrite、force push、empty attestation commitで変更しない。
+- `report.md`に実際のcommit range、commitごとの責務、C1〜C6とのmany-to-many trace、検証結果、未観測の過去TDDを記録する。
+- C1〜C6の各commitが単独greenだったこと、または計画順で実行されたことを完了証拠として主張しない。
+- I01-AC-001〜I01-AC-009、issue gate全成功、clean status、forbidden scope 0件、wheel/offline/minimum/latest/macOS/security/determinism/SpecDock validation成功を満たす。
+- Requirement、Design、public contract、security、determinism、packaging、rollback条件を弱めない。
+- governance-only差分を確認し、製品コード、schema、golden、test、CIに不要な変更がないことを確認する。
+- Final Quality Gateが新しいcanonical PlanとReportを対象に再評価され、P0/P1が0件である。
