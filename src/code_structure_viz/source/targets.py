@@ -33,6 +33,10 @@ def _valid_identifier_path(value: str) -> bool:
 
 def parse_target(raw: str) -> TargetSpec:
     """Parse one closed v1 path/module/class target."""
+    try:
+        raw.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise ValueError("target must be valid UTF-8") from error
     if raw.count(":") != 1:
         raise ValueError("target must contain one kind prefix")
     kind, raw_value = raw.split(":", 1)

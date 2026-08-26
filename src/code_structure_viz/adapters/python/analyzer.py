@@ -374,8 +374,12 @@ class PythonSnapshotAnalyzer:
                 type_comments=False,
                 feature_version=(3, 12),
             )
-        except SyntaxError as error:
-            line = error.lineno if error.lineno is not None and error.lineno > 0 else None
+        except (SyntaxError, ValueError, RecursionError) as error:
+            line = (
+                error.lineno
+                if isinstance(error, SyntaxError) and error.lineno is not None and error.lineno > 0
+                else None
+            )
             failures.append(
                 FailedSourceFile(indexed.path, FailedStage.PARSE, DiagnosticCode.PY_PARSE)
             )
@@ -420,13 +424,17 @@ def _internal_range(node: ast.AST) -> SourceRangeWithColumns:
 
 
 def _symbol(node: ast.expr) -> tuple[str, ...] | None:
-    if isinstance(node, ast.Name):
-        return (unicodedata.normalize("NFC", node.id),)
-    if isinstance(node, ast.Attribute):
-        prefix = _symbol(node.value)
-        if prefix is not None:
-            return (*prefix, unicodedata.normalize("NFC", node.attr))
-    return None
+    attributes: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        attributes.append(unicodedata.normalize("NFC", current.attr))
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    return (
+        unicodedata.normalize("NFC", current.id),
+        *reversed(attributes),
+    )
 
 
 def _binding_map(bindings: tuple[ImportBinding, ...]) -> dict[str, ImportBinding]:

@@ -238,6 +238,36 @@ def test_unrepresentable_config_values_are_closed_usage_errors_without_artifacts
     }
 
 
+def test_deep_toml_array_is_a_closed_usage_error_without_artifacts(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    initialize_repository(repository)
+    config = tmp_path / "config.toml"
+    nested_array = "[" * 1_500 + '"**/*.py"' + "]" * 1_500
+    config.write_text(
+        _COMPLETE_CONFIG.replace('include = ["**/*.py"]', f"include = {nested_array}"),
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    result = run_cli(repository, output, "--config", str(config))
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert not output.exists()
+    assert json.loads(result.stderr) == {
+        "type": "diagnostic",
+        "schema": "code-structure-viz.diagnostic/v1",
+        "code": "CSV-CONFIG-002",
+        "severity": "error",
+        "domain": None,
+        "path": None,
+        "symbol": None,
+        "line": None,
+        "recoverable": False,
+        "message": "Configuration is not valid TOML.",
+    }
+
+
 @pytest.mark.parametrize(
     ("removed", "expected_key"),
     [

@@ -295,7 +295,7 @@ def _load(path: Path, *, source: ConfigSource, repo: Path) -> ResolvedConfig:
         raise _error(DiagnosticCode.CONFIG_TOML) from exc
     except tomllib.TOMLDecodeError as exc:
         raise _error(DiagnosticCode.CONFIG_TOML) from exc
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
         raise _error(DiagnosticCode.CONFIG_TOML) from exc
     return _decode_config(parsed, source=source, repo=repo)
 

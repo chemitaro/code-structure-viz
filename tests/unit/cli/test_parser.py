@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -288,3 +289,40 @@ def test_usage_failure_writes_one_canonical_diagnostic_and_empty_stdout(
         b'"symbol":null,"line":null,"recoverable":false,'
         b'"message":"Command line does not match the snapshot v1 grammar."}\n'
     )
+
+
+def test_surrogateescaped_target_is_a_canonical_usage_error_without_traceback(
+    capsysbinary: pytest.CaptureFixture[bytes],
+) -> None:
+    surrogateescaped = chr(0xDCFF)
+
+    exit_code = main(
+        [
+            "snapshot",
+            "--repo",
+            ".",
+            "--output-dir",
+            "../output",
+            "--domain",
+            "python",
+            "--target",
+            f"path:src/{surrogateescaped}.py",
+        ]
+    )
+
+    captured = capsysbinary.readouterr()
+    assert exit_code == 2
+    assert captured.out == b""
+    assert json.loads(captured.err) == {
+        "type": "diagnostic",
+        "schema": "code-structure-viz.diagnostic/v1",
+        "code": "CSV-USAGE-001",
+        "severity": "error",
+        "domain": None,
+        "path": None,
+        "symbol": None,
+        "line": None,
+        "recoverable": False,
+        "message": "Command line does not match the snapshot v1 grammar.",
+    }
+    assert b"Traceback" not in captured.err

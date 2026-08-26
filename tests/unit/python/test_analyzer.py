@@ -1,6 +1,11 @@
+import ast
 import hashlib
 from pathlib import PurePosixPath
+from types import SimpleNamespace
 
+import pytest
+
+import code_structure_viz.adapters.python.analyzer as analyzer_module
 from code_structure_viz.adapters.python.analyzer import (
     PythonAnalysisResult,
     PythonSnapshotAnalyzer,
@@ -280,6 +285,32 @@ def test_nested_quoted_forward_annotation_is_a_literal_without_reference_leak() 
     assert "private.Secret" not in repr(result)
 
 
+def test_lone_surrogate_forward_annotation_is_a_closed_unsupported_site() -> None:
+    source = 'class Owner:\n    value: "\\ud800"\n'.encode("ascii")
+
+    result = _analyze({"src/pkg/forward.py": source})
+
+    assert result.members[0].annotation == "?"
+    assert result.relations == ()
+    assert [item.code.value for item in result.diagnostics] == ["CSV-PY-011"]
+    assert "\\ud800" not in repr(result)
+
+
+def test_outer_parser_recursion_is_a_file_local_parse_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def parser_failure(*_args: object, **_kwargs: object) -> ast.AST:
+        raise RecursionError
+
+    monkeypatch.setattr(analyzer_module, "ast", SimpleNamespace(parse=parser_failure))
+
+    result = _analyze({"src/pkg/deep.py": b"class Owner:\n    pass\n"})
+
+    assert result.entities == ()
+    assert tuple(item.stage.value for item in result.failures) == ("parse",)
+    assert [item.code.value for item in result.diagnostics] == ["CSV-PY-003"]
+
+
 def test_encoding_and_parse_failures_are_isolated_per_file() -> None:
     result = _analyze(
         {
@@ -323,6 +354,20 @@ wrapper('third.mod')
     assert result.relations == ()
     assert result.frontier == ()
     assert result.diagnostics == ()
+
+
+def test_deep_symbolic_decorator_and_legacy_type_parameter_callee_are_bounded() -> None:
+    dotted = ".".join(["pkg"] * 1_500)
+    sources = (
+        f"@{dotted}.decorator\nclass Owner:\n    pass\n",
+        f'T = {dotted}.TypeVar("T")\nclass Owner:\n    pass\n',
+    )
+
+    for source in sources:
+        result = _analyze({"src/pkg/deep.py": source.encode("utf-8")})
+
+        assert tuple(entity.name for entity in result.entities) == ("Owner",)
+        assert result.failures == ()
 
 
 def test_duplicate_class_identity_excludes_all_colliding_declarations() -> None:
