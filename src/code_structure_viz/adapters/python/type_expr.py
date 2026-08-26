@@ -97,6 +97,43 @@ class _RenderedNode:
 
 
 @dataclass(frozen=True, slots=True)
+class _RenderTask:
+    node: ast.expr
+    role: TypeReferenceRole
+    range_override: SourceRangeWithColumns | None
+    allow_forward: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _CombineForward:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class _CombineAnnotated:
+    canonical_base: str
+
+
+@dataclass(frozen=True, slots=True)
+class _CombineSubscript:
+    canonical_base: str
+    base_spelling: tuple[str, ...]
+    base_node: ast.expr
+    range_override: SourceRangeWithColumns | None
+    argument_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class _CombineTuple:
+    item_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class _CombineUnion:
+    leaf_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class _TypeReferenceCandidate:
     original_name: str
     candidate_name: str
@@ -109,8 +146,6 @@ class _TypeReferenceCandidate:
 
 _LITERAL_NAMES = frozenset({"typing.Literal", "typing_extensions.Literal"})
 _ANNOTATED_NAMES = frozenset({"typing.Annotated", "typing_extensions.Annotated"})
-_MAX_TYPE_EXPRESSION_NODES = 4_096
-_MAX_TYPE_EXPRESSION_DEPTH = 256
 
 
 class SafeTypeExpressionRenderer:
@@ -139,8 +174,6 @@ class SafeTypeExpressionRenderer:
         self._modules = modules
 
     def render(self, node: ast.expr, site: TypeReferenceSite) -> RenderedType:
-        if not _within_complexity_budget(node):
-            return RenderedType("?", (), False, None)
         rendered = self._render_node(
             node,
             TypeReferenceRole.HEAD,
@@ -178,144 +211,242 @@ class SafeTypeExpressionRenderer:
         range_override: SourceRangeWithColumns | None,
         allow_forward: bool,
     ) -> _RenderedNode:
-        symbol = _symbol(node)
-        if symbol is not None:
-            return _RenderedNode(
-                self._candidate(symbol).rendered_name,
-                (_OccurrenceDraft(symbol, role, range_override or _range(node)),),
-                True,
-                0 if role is TypeReferenceRole.HEAD else None,
-            )
-
-        if isinstance(node, ast.Subscript):
-            base = _symbol(node.value)
-            if base is None:
-                return _unsupported()
-            base_candidate = self._candidate(base)
-            canonical_base = base_candidate.rendered_name
-            arguments = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
-            if (
-                base_candidate.internal_class is None
-                and base_candidate.candidate_name in _LITERAL_NAMES
-            ):
-                if not arguments:
-                    return _unsupported()
-                return _RenderedNode(
-                    f"{canonical_base}[{', '.join('?' for _ in arguments)}]", (), True
+        pending: list[
+            _RenderTask
+            | _CombineForward
+            | _CombineAnnotated
+            | _CombineSubscript
+            | _CombineTuple
+            | _CombineUnion
+        ] = [_RenderTask(node, role, range_override, allow_forward)]
+        results: list[_RenderedNode] = []
+        while pending:
+            operation = pending.pop()
+            if isinstance(operation, _RenderTask):
+                symbol = _symbol(operation.node)
+                if symbol is not None:
+                    results.append(
+                        _RenderedNode(
+                            self._candidate(symbol).rendered_name,
+                            (
+                                _OccurrenceDraft(
+                                    symbol,
+                                    operation.role,
+                                    operation.range_override or _range(operation.node),
+                                ),
+                            ),
+                            True,
+                            0 if operation.role is TypeReferenceRole.HEAD else None,
+                        )
+                    )
+                    continue
+                if isinstance(operation.node, ast.Subscript):
+                    base = _symbol(operation.node.value)
+                    if base is None:
+                        results.append(_unsupported())
+                        continue
+                    base_candidate = self._candidate(base)
+                    canonical_base = base_candidate.rendered_name
+                    arguments = (
+                        operation.node.slice.elts
+                        if isinstance(operation.node.slice, ast.Tuple)
+                        else [operation.node.slice]
+                    )
+                    if (
+                        base_candidate.internal_class is None
+                        and base_candidate.candidate_name in _LITERAL_NAMES
+                    ):
+                        results.append(
+                            _unsupported()
+                            if not arguments
+                            else _RenderedNode(
+                                f"{canonical_base}[{', '.join('?' for _ in arguments)}]", (), True
+                            )
+                        )
+                        continue
+                    if (
+                        base_candidate.internal_class is None
+                        and base_candidate.candidate_name in _ANNOTATED_NAMES
+                    ):
+                        if len(arguments) < 2:
+                            results.append(_unsupported())
+                            continue
+                        pending.append(_CombineAnnotated(canonical_base))
+                        pending.append(
+                            _RenderTask(
+                                arguments[0],
+                                operation.role,
+                                operation.range_override,
+                                operation.allow_forward,
+                            )
+                        )
+                        continue
+                    if not arguments:
+                        results.append(_unsupported())
+                        continue
+                    pending.append(
+                        _CombineSubscript(
+                            canonical_base,
+                            base,
+                            operation.node.value,
+                            operation.range_override,
+                            len(arguments),
+                        )
+                    )
+                    for argument in reversed(arguments):
+                        pending.append(
+                            _RenderTask(
+                                argument,
+                                TypeReferenceRole.ARGUMENT,
+                                operation.range_override,
+                                operation.allow_forward,
+                            )
+                        )
+                    continue
+                if isinstance(operation.node, ast.Tuple):
+                    pending.append(_CombineTuple(len(operation.node.elts)))
+                    for item in reversed(operation.node.elts):
+                        pending.append(
+                            _RenderTask(
+                                item,
+                                operation.role,
+                                operation.range_override,
+                                operation.allow_forward,
+                            )
+                        )
+                    continue
+                if isinstance(operation.node, ast.BinOp) and isinstance(
+                    operation.node.op, ast.BitOr
+                ):
+                    leaves = _union_leaves(operation.node)
+                    pending.append(_CombineUnion(len(leaves)))
+                    for leaf in reversed(leaves):
+                        pending.append(
+                            _RenderTask(
+                                leaf,
+                                operation.role,
+                                operation.range_override,
+                                operation.allow_forward,
+                            )
+                        )
+                    continue
+                if isinstance(operation.node, ast.Constant):
+                    if operation.node.value is None:
+                        results.append(_RenderedNode("None", (), True))
+                    elif operation.node.value is Ellipsis:
+                        results.append(_RenderedNode("...", (), True))
+                    elif isinstance(operation.node.value, str):
+                        if not operation.allow_forward:
+                            results.append(_RenderedNode("?", (), True))
+                            continue
+                        try:
+                            parsed = ast.parse(
+                                operation.node.value,
+                                filename="<forward-annotation>",
+                                mode="eval",
+                                feature_version=(3, 12),
+                            ).body
+                        except (SyntaxError, ValueError, RecursionError):
+                            results.append(_unsupported())
+                            continue
+                        pending.append(_CombineForward())
+                        pending.append(
+                            _RenderTask(
+                                parsed,
+                                operation.role,
+                                operation.range_override or _range(operation.node),
+                                False,
+                            )
+                        )
+                    else:
+                        results.append(_RenderedNode("?", (), True))
+                    continue
+                results.append(_unsupported())
+                continue
+            if isinstance(operation, _CombineForward):
+                continue
+            if isinstance(operation, _CombineAnnotated):
+                first = results.pop()
+                results.append(
+                    _unsupported()
+                    if not first.supported
+                    else _RenderedNode(
+                        f"{operation.canonical_base}[{first.text}, ?]",
+                        first.occurrences,
+                        True,
+                    )
                 )
-            if (
-                base_candidate.internal_class is None
-                and base_candidate.candidate_name in _ANNOTATED_NAMES
-            ):
-                if len(arguments) < 2:
-                    return _unsupported()
-                first = self._render_node(
-                    arguments[0],
-                    role,
-                    range_override=range_override,
-                    allow_forward=allow_forward,
+                continue
+            if isinstance(operation, _CombineSubscript):
+                rendered_arguments = results[-operation.argument_count :]
+                del results[-operation.argument_count :]
+                if any(not item.supported for item in rendered_arguments):
+                    results.append(_unsupported())
+                    continue
+                results.append(
+                    _RenderedNode(
+                        (
+                            f"{operation.canonical_base}["
+                            f"{', '.join(item.text for item in rendered_arguments)}]"
+                        ),
+                        (
+                            _OccurrenceDraft(
+                                operation.base_spelling,
+                                TypeReferenceRole.HEAD,
+                                operation.range_override or _range(operation.base_node),
+                            ),
+                            *(
+                                occurrence
+                                for item in rendered_arguments
+                                for occurrence in item.occurrences
+                            ),
+                        ),
+                        True,
+                        0,
+                    )
                 )
-                if not first.supported:
-                    return _unsupported()
-                return _RenderedNode(f"{canonical_base}[{first.text}, ?]", first.occurrences, True)
-
-            base_occurrence = _OccurrenceDraft(
-                base,
-                TypeReferenceRole.HEAD,
-                range_override or _range(node.value),
-            )
-            rendered_arguments = tuple(
-                self._render_node(
-                    argument,
-                    TypeReferenceRole.ARGUMENT,
-                    range_override=range_override,
-                    allow_forward=allow_forward,
+                continue
+            if isinstance(operation, _CombineTuple):
+                items = results[-operation.item_count :] if operation.item_count else []
+                if operation.item_count:
+                    del results[-operation.item_count :]
+                if any(not item.supported for item in items):
+                    results.append(_unsupported())
+                    continue
+                if not items:
+                    text = "()"
+                elif len(items) == 1:
+                    text = f"({items[0].text},)"
+                else:
+                    text = f"({', '.join(item.text for item in items)})"
+                results.append(
+                    _RenderedNode(
+                        text,
+                        tuple(occurrence for item in items for occurrence in item.occurrences),
+                        True,
+                    )
                 )
-                for argument in arguments
-            )
-            if not arguments or any(not item.supported for item in rendered_arguments):
-                return _unsupported()
-            return _RenderedNode(
-                f"{canonical_base}[{', '.join(item.text for item in rendered_arguments)}]",
-                (
-                    base_occurrence,
-                    *(occurrence for item in rendered_arguments for occurrence in item.occurrences),
-                ),
-                True,
-                0,
-            )
-
-        if isinstance(node, ast.Tuple):
-            items = tuple(
-                self._render_node(
-                    item,
-                    role,
-                    range_override=range_override,
-                    allow_forward=allow_forward,
+                continue
+            if isinstance(operation, _CombineUnion):
+                rendered_leaves = results[-operation.leaf_count :]
+                del results[-operation.leaf_count :]
+                if any(not item.supported for item in rendered_leaves):
+                    results.append(_unsupported())
+                    continue
+                results.append(
+                    _RenderedNode(
+                        " | ".join(item.text for item in rendered_leaves),
+                        tuple(
+                            occurrence
+                            for item in rendered_leaves
+                            for occurrence in item.occurrences
+                        ),
+                        True,
+                    )
                 )
-                for item in node.elts
-            )
-            if any(not item.supported for item in items):
-                return _unsupported()
-            if not items:
-                text = "()"
-            elif len(items) == 1:
-                text = f"({items[0].text},)"
-            else:
-                text = f"({', '.join(item.text for item in items)})"
-            return _RenderedNode(
-                text,
-                tuple(occurrence for item in items for occurrence in item.occurrences),
-                True,
-            )
-
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-            leaves = _union_leaves(node)
-            rendered_leaves = tuple(
-                self._render_node(
-                    leaf,
-                    role,
-                    range_override=range_override,
-                    allow_forward=allow_forward,
-                )
-                for leaf in leaves
-            )
-            if any(not item.supported for item in rendered_leaves):
-                return _unsupported()
-            return _RenderedNode(
-                " | ".join(item.text for item in rendered_leaves),
-                tuple(occurrence for item in rendered_leaves for occurrence in item.occurrences),
-                True,
-            )
-
-        if isinstance(node, ast.Constant):
-            if node.value is None:
-                return _RenderedNode("None", (), True)
-            if node.value is Ellipsis:
-                return _RenderedNode("...", (), True)
-            if isinstance(node.value, str):
-                if not allow_forward:
-                    return _RenderedNode("?", (), True)
-                try:
-                    parsed = ast.parse(
-                        node.value,
-                        filename="<forward-annotation>",
-                        mode="eval",
-                        feature_version=(3, 12),
-                    ).body
-                except (SyntaxError, ValueError, RecursionError):
-                    return _unsupported()
-                if not _within_complexity_budget(parsed):
-                    return _unsupported()
-                return self._render_node(
-                    parsed,
-                    role,
-                    range_override=range_override or _range(node),
-                    allow_forward=False,
-                )
-            return _RenderedNode("?", (), True)
-
-        return _unsupported()
+                continue
+            raise RuntimeError(f"unknown render operation: {type(operation).__name__}")
+        return results.pop()
 
     def _candidate(self, spelling: tuple[str, ...]) -> _TypeReferenceCandidate:
         return _construct_type_reference_candidate(
@@ -398,21 +529,6 @@ def _find_exact_class(
 
 def _unsupported() -> _RenderedNode:
     return _RenderedNode("?", (), False)
-
-
-def _within_complexity_budget(node: ast.expr) -> bool:
-    pending: list[tuple[ast.AST, int]] = [(node, 1)]
-    node_count = 0
-    while pending:
-        current, depth = pending.pop()
-        node_count += 1
-        if node_count > _MAX_TYPE_EXPRESSION_NODES or depth > _MAX_TYPE_EXPRESSION_DEPTH:
-            return False
-        for child in ast.iter_child_nodes(current):
-            pending.append((child, depth + 1))
-            if node_count + len(pending) > _MAX_TYPE_EXPRESSION_NODES:
-                return False
-    return True
 
 
 def _symbol(node: ast.expr) -> tuple[str, ...] | None:

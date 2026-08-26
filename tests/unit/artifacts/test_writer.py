@@ -30,6 +30,44 @@ def test_output_transaction_publishes_the_closed_file_set_by_directory_rename(
     assert not staging_root.exists()
 
 
+def test_output_transaction_allows_relative_paths_containing_repository_spelling(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    output = tmp_path / "result"
+    relative_path = f"src/{repository.as_posix().lstrip('/')}/model.py"
+    transaction = OutputTransaction(repository, output)
+    transaction.begin()
+
+    transaction.stage_payload(
+        "semantic-json",
+        f'{{"path":"{relative_path}"}}\n'.encode(),
+    )
+    transaction.stage_manifest(b'{"type":"run_manifest"}\n')
+    transaction.commit()
+
+    assert (output / "python.snapshot.semantic.json").exists()
+
+
+def test_output_transaction_rejects_an_absolute_repository_path_value(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+
+    with pytest.raises(OutputTransactionError) as caught:
+        transaction.stage_payload(
+            "semantic-json",
+            f'{{"path":"{repository.as_posix()}/model.py"}}\n'.encode(),
+        )
+
+    assert caught.value.diagnostic.code is DiagnosticCode.INTERNAL_INVARIANT
+    transaction.abort()
+
+
 def test_output_transaction_rejects_existing_or_inside_repository_destination(
     tmp_path: Path,
 ) -> None:

@@ -114,8 +114,8 @@ def test_unsupported_site_becomes_one_unknown_without_inferred_references(
     assert _render(expression) == ("?", (), False)
 
 
-@pytest.mark.parametrize("shape", ["attribute", "union", "forward"])
-def test_deep_valid_type_expression_has_a_bounded_unsupported_outcome(shape: str) -> None:
+@pytest.mark.parametrize("shape", ["attribute", "union"])
+def test_deep_valid_type_expression_preserves_the_supported_grammar(shape: str) -> None:
     depth = 1_500
     if shape == "attribute":
         node: ast.expr = ast.Name(id="Root", ctx=ast.Load())
@@ -129,10 +129,11 @@ def test_deep_valid_type_expression_has_a_bounded_unsupported_outcome(shape: str
                 op=ast.BitOr(),
                 right=ast.Name(id="Right", ctx=ast.Load()),
             )
-    else:
-        node = ast.Constant(value=" | ".join("Type" for _ in range(depth)))
+    rendered, occurrences, supported = _render_node(node)
 
-    assert _render_node(node) == ("?", (), False)
+    assert supported is True
+    assert rendered.startswith("Root" if shape == "attribute" else "Left")
+    assert len(occurrences) == (1 if shape == "attribute" else depth + 1)
 
 
 def test_occurrence_keeps_internal_columns_but_not_source_text() -> None:

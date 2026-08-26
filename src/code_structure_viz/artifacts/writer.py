@@ -30,6 +30,7 @@ _PLANTUML_RELATION = re.compile(
     r"(?:C|M)_[0-9a-f]{64} (?:<\|--|\*--|\.\.>) (?:C|M)_[0-9a-f]{64} : "
     r"(?:継承|合成|型依存|import依存)"
 )
+_PRIVATE_PATH_BOUNDARIES = frozenset(" \t\r\n\"'=:([]{<")
 
 
 class OutputTransactionError(RuntimeError):
@@ -225,6 +226,52 @@ def _canonical_json_bytes(content: bytes) -> bool:
         return encode_canonical_json(value) == content
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
         return False
+
+
+def _contains_private_path_token(value: str, private_path: str) -> bool:
+    start = 0
+    while (index := value.find(private_path, start)) >= 0:
+        before = value[index - 1] if index else ""
+        end = index + len(private_path)
+        after = value[end] if end < len(value) else ""
+        if (not before or before in _PRIVATE_PATH_BOUNDARIES) and (
+            not after or after == "/" or after in _PRIVATE_PATH_BOUNDARIES
+        ):
+            return True
+        start = end
+    return False
+
+
+def _contains_private_path(value: object, private_paths: tuple[str, ...]) -> bool:
+    if isinstance(value, str):
+        return any(_contains_private_path_token(value, path) for path in private_paths)
+    if isinstance(value, dict):
+        return any(
+            _contains_private_path(key, private_paths)
+            or _contains_private_path(item, private_paths)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_private_path(item, private_paths) for item in value)
+    return False
+
+
+def _contains_private_paths(
+    relative_path: str,
+    content: bytes,
+    private_paths: tuple[str, ...],
+) -> bool:
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return False
+    if relative_path == "python.snapshot.puml":
+        return any(_contains_private_path_token(text, path) for path in private_paths)
+    try:
+        value = json.loads(text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    return _contains_private_path(value, private_paths)
 
 
 def _valid_plantuml(content: bytes) -> bool:
@@ -490,11 +537,11 @@ class OutputTransaction:
             raise _error(DiagnosticCode.OUTPUT_DESTINATION) from error
 
     def _validate_content(self, relative_path: str, content: bytes) -> None:
-        private_values = (
-            str(self.repository).encode("utf-8"),
-            str(self.staging_root).encode("utf-8"),
+        private_paths = (
+            str(self.repository),
+            str(self.staging_root),
         )
-        if b"\0" in content or any(value and value in content for value in private_values):
+        if b"\0" in content or _contains_private_paths(relative_path, content, private_paths):
             raise _error(DiagnosticCode.INTERNAL_INVARIANT)
         valid = (
             _valid_plantuml(content)
