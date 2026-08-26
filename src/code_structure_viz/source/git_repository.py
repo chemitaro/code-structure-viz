@@ -105,8 +105,11 @@ class GitRepositoryReader:
         self.repository = repository
         self._runner = runner or SubprocessRunner()
         self._environment = _safe_environment()
+        self._validated_identity: tuple[int, int] | None = None
 
     def _git(self, *arguments: str) -> CommandResult:
+        if self._validated_identity is not None and not self.repository_is_current():
+            raise _fatal(DiagnosticCode.REPO_ROOT)
         argv = (
             "git",
             "-C",
@@ -157,7 +160,26 @@ class GitRepositoryReader:
             raise _fatal(DiagnosticCode.REPO_ROOT) from error
         if actual != expected:
             raise _fatal(DiagnosticCode.REPO_ROOT)
+        try:
+            identity = expected.stat(follow_symlinks=False)
+        except OSError as error:
+            raise _fatal(DiagnosticCode.REPO_ROOT) from error
+        self._validated_identity = (identity.st_dev, identity.st_ino)
         return expected
+
+    @property
+    def repository_identity(self) -> tuple[int, int] | None:
+        return self._validated_identity
+
+    def repository_is_current(self) -> bool:
+        identity = self._validated_identity
+        if identity is None or has_symlink_component(self.repository):
+            return identity is None
+        try:
+            current = self.repository.stat(follow_symlinks=False)
+        except OSError:
+            return False
+        return (current.st_dev, current.st_ino) == identity
 
     def resolve_head_state(self) -> HeadState:
         resolved = self._git("rev-parse", "--verify", "HEAD^{commit}")

@@ -62,7 +62,11 @@ class SnapshotApplication:
             repository_reader = GitRepositoryReader(request.repo)
             repository_reader.validate_git_version()
             repository = repository_reader.validate_repository_root()
-            transaction = OutputTransaction(repository, request.output_dir)
+            transaction = OutputTransaction(
+                repository,
+                request.output_dir,
+                repository_identity=repository_reader.repository_identity,
+            )
             config = resolve_config(request, repository)
             head_state = repository_reader.resolve_head_state()
             entries = repository_reader.enumerate_path_entries()

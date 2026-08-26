@@ -73,6 +73,7 @@ class SourceView:
     fingerprint: str
     schema: str = _SCHEMA
     kind: str = _KIND
+    collision_groups: tuple[tuple[PurePosixPath, ...], ...] = ()
 
     def fingerprint_value(self) -> dict[str, object]:
         return {
@@ -388,7 +389,8 @@ class SourceViewBuilder:
         write_frozen: bool,
     ) -> SourceView:
         candidates = tuple(entry for entry in entries if _is_candidate(entry.normalized, config))
-        collision_paths = self._collision_paths(candidates)
+        collision_groups = self._collision_groups(candidates)
+        collision_paths = frozenset(path for group in collision_groups for path in group)
         failures = [
             SourceAcquisitionFailure(
                 path,
@@ -422,32 +424,68 @@ class SourceViewBuilder:
             files=ordered_files,
             failures=ordered_failures,
             fingerprint=fingerprint,
+            collision_groups=collision_groups,
         )
 
-    def _collision_paths(self, candidates: tuple[EnumeratedPath, ...]) -> frozenset[PurePosixPath]:
+    def _collision_groups(
+        self, candidates: tuple[EnumeratedPath, ...]
+    ) -> tuple[tuple[PurePosixPath, ...], ...]:
         normalized_groups: dict[PurePosixPath, list[EnumeratedPath]] = {}
         for entry in candidates:
             normalized_groups.setdefault(entry.normalized, []).append(entry)
-        collision_paths = {path for path, group in normalized_groups.items() if len(group) > 1}
+        paths = tuple(normalized_groups)
+        parents = list(range(len(paths)))
+        collision_nodes = {
+            index for index, path in enumerate(paths) if len(normalized_groups[path]) > 1
+        }
 
-        case_groups: dict[str, list[EnumeratedPath]] = {}
-        for path, group in normalized_groups.items():
-            if len(group) == 1:
-                case_groups.setdefault(path.as_posix().casefold(), []).append(group[0])
+        def find(index: int) -> int:
+            while parents[index] != index:
+                parents[index] = parents[parents[index]]
+                index = parents[index]
+            return index
+
+        def union(left: int, right: int) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root == right_root:
+                return
+            parents[right_root] = left_root
+
+        case_groups: dict[str, list[int]] = {}
+        for index, path in enumerate(paths):
+            case_groups.setdefault(path.as_posix().casefold(), []).append(index)
         for group in case_groups.values():
-            if len(group) < 2:
-                continue
-            for index, left in enumerate(group):
-                for right in group[index + 1 :]:
-                    try:
-                        if os.path.samefile(
-                            self.repository.joinpath(*PurePosixPath(left.raw_text).parts),
-                            self.repository.joinpath(*PurePosixPath(right.raw_text).parts),
-                        ):
-                            collision_paths.update((left.normalized, right.normalized))
-                    except OSError:
-                        continue
-        return frozenset(collision_paths)
+            for left_offset, left_index in enumerate(group):
+                for right_index in group[left_offset + 1 :]:
+                    matched = False
+                    for left in normalized_groups[paths[left_index]]:
+                        for right in normalized_groups[paths[right_index]]:
+                            try:
+                                matched = os.path.samefile(
+                                    self.repository.joinpath(*PurePosixPath(left.raw_text).parts),
+                                    self.repository.joinpath(*PurePosixPath(right.raw_text).parts),
+                                )
+                            except OSError:
+                                matched = False
+                            if matched:
+                                break
+                        if matched:
+                            break
+                    if matched:
+                        union(left_index, right_index)
+                        collision_nodes.update((left_index, right_index))
+
+        components: dict[int, list[PurePosixPath]] = {}
+        for index, path in enumerate(paths):
+            if index in collision_nodes:
+                components.setdefault(find(index), []).append(path)
+        return tuple(
+            sorted(
+                (tuple(sorted(component, key=_path_key)) for component in components.values()),
+                key=lambda component: tuple(_path_key(path) for path in component),
+            )
+        )
 
     def _freeze(
         self, entry: EnumeratedPath, *, write_frozen: bool

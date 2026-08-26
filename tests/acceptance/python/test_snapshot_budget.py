@@ -70,6 +70,21 @@ def test_positive_cli_budget_override_admits_600_classes(tmp_path: Path) -> None
     }
 
 
+def test_arbitrarily_long_cli_budget_reaches_config_digest_and_publication(
+    tmp_path: Path,
+) -> None:
+    repository = _repository_with_classes(tmp_path, 1)
+    output = tmp_path / "output"
+    value = "9" * 10_000
+
+    result = run_cli(repository, output, "--max-entities", value)
+
+    assert result.returncode == 0, result.stderr
+    manifest = (output / "run-manifest.json").read_bytes()
+    assert b'"requested":' + value.encode("ascii") in manifest
+    assert b'"resolved":' + value.encode("ascii") in manifest
+
+
 def test_invalid_cli_budget_is_usage_error_before_output(tmp_path: Path) -> None:
     repository = _repository_with_classes(tmp_path, 1)
     output = tmp_path / "output"

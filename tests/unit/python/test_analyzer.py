@@ -276,6 +276,51 @@ class Owner:
     assert adopted_targets == {"pkg.properties.GetterReturn", "pkg.properties.SetterValue"}
 
 
+def test_property_setter_value_uses_first_positional_receiver_only() -> None:
+    result = _analyze(
+        {
+            "src/pkg/properties.py": b"""
+class ByName: pass
+class KeywordOnly: pass
+
+class Owner:
+    @property
+    def by_name(self):
+        return None
+
+    @by_name.setter
+    def by_name(self, cls: ByName):
+        pass
+
+    @property
+    def keyword_only(self):
+        return None
+
+    @keyword_only.setter
+    def keyword_only(*, self: KeywordOnly):
+        pass
+"""
+        }
+    )
+
+    setters = {
+        member.name: member
+        for member in result.members
+        if member.kind is MemberKind.PROPERTY and member.property_role is PropertyRole.SETTER
+    }
+    assert {name: member.annotation for name, member in setters.items()} == {
+        "by_name": "ByName",
+        "keyword_only": "KeywordOnly",
+    }
+    setter_ids = {member.id for member in setters.values()}
+    adopted_targets = {
+        relation.target.name
+        for relation in result.relations
+        if relation.kind is RelationKind.TYPED_DEPENDENCY and relation.via_member_id in setter_ids
+    }
+    assert adopted_targets == {"pkg.properties.ByName", "pkg.properties.KeywordOnly"}
+
+
 def test_nested_quoted_forward_annotation_is_a_literal_without_reference_leak() -> None:
     result = _analyze({"src/pkg/forward.py": b"class Owner:\n    value: \"'private.Secret'\"\n"})
 

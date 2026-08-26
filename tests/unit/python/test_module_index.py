@@ -27,8 +27,9 @@ def _source(path: str, content: bytes = b"pass\n") -> SourceFile:
 def _view(
     *files: SourceFile,
     failures: tuple[SourceAcquisitionFailure, ...] = (),
+    collision_groups: tuple[tuple[PurePosixPath, ...], ...] = (),
 ) -> SourceView:
-    return SourceView(None, files, failures, "0" * 64)
+    return SourceView(None, files, failures, "0" * 64, collision_groups=collision_groups)
 
 
 def test_module_mapping_uses_longest_root_and_init_rules() -> None:
@@ -117,7 +118,11 @@ def test_casefold_collision_emits_one_group_diagnostic_and_preserves_descriptors
     )
 
     index = PythonModuleIndex.build(
-        _view(failures=failures), PythonConfig((".",), ("**/*.py",), ())
+        _view(
+            failures=failures,
+            collision_groups=((PurePosixPath("Foo.py"), PurePosixPath("foo.py")),),
+        ),
+        PythonConfig((".",), ("**/*.py",), ()),
     )
 
     assert index.candidate_file_count == 2
@@ -127,3 +132,26 @@ def test_casefold_collision_emits_one_group_diagnostic_and_preserves_descriptors
         for item in index.diagnostics
         if item.code is DiagnosticCode.SOURCE_PATH_COLLISION
     ) == (("CSV-SOURCE-004", "Foo.py"),)
+
+
+def test_independent_collision_groups_emit_one_diagnostic_each() -> None:
+    failures = tuple(
+        SourceAcquisitionFailure(
+            path, AcquisitionStage.PATH_SAFETY, DiagnosticCode.SOURCE_PATH_COLLISION
+        )
+        for path in (PurePosixPath("É.py"), PurePosixPath("é.py"))
+    )
+
+    index = PythonModuleIndex.build(
+        _view(
+            failures=failures,
+            collision_groups=((PurePosixPath("É.py"),), (PurePosixPath("é.py"),)),
+        ),
+        PythonConfig((".",), ("**/*.py",), ()),
+    )
+
+    assert tuple(
+        (item.code.value, item.path)
+        for item in index.diagnostics
+        if item.code is DiagnosticCode.SOURCE_PATH_COLLISION
+    ) == (("CSV-SOURCE-004", "É.py"), ("CSV-SOURCE-004", "é.py"))

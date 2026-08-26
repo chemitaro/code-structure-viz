@@ -18,7 +18,7 @@ from code_structure_viz.artifacts.manifest import (
 )
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
 from code_structure_viz.core.path_safety import has_symlink_component, lexical_absolute
-from code_structure_viz.semantic.canonical_json import encode_canonical_json
+from code_structure_viz.semantic.canonical_json import encode_canonical_json, parse_json_integer
 
 _FINAL_PATHS = frozenset(
     {
@@ -258,7 +258,7 @@ def _canonical_json_bytes(content: bytes) -> bool:
             return False
         if content.endswith(b"\n\n"):
             return False
-        value = json.loads(content.decode("utf-8", errors="strict"))
+        value = json.loads(content.decode("utf-8", errors="strict"), parse_int=parse_json_integer)
         return encode_canonical_json(value) == content
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
         return False
@@ -354,10 +354,23 @@ def _valid_plantuml(content: bytes) -> bool:
 
 
 class OutputTransaction:
-    def __init__(self, repository: Path, output_dir: Path) -> None:
+    def __init__(
+        self,
+        repository: Path,
+        output_dir: Path,
+        *,
+        repository_identity: tuple[int, int] | None = None,
+    ) -> None:
         parent_descriptor: int | None = None
+        repository_descriptor: int | None = None
         try:
             self.repository = repository.resolve(strict=True)
+            repository_descriptor = _open_directory_without_symlinks(self.repository)
+            if (
+                repository_identity is not None
+                and _stat_identity(os.fstat(repository_descriptor)) != repository_identity
+            ):
+                raise OSError
             self.output_dir = lexical_absolute(output_dir)
             if has_symlink_component(self.output_dir):
                 raise OSError
@@ -367,18 +380,24 @@ class OutputTransaction:
             parent_descriptor = _open_directory_without_symlinks(parent)
             physically_inside_repository = _descriptor_is_within(parent_descriptor, self.repository)
             parent_is_current = _descriptor_matches_path(parent_descriptor, parent)
+            repository_is_current = _descriptor_matches_path(repository_descriptor, self.repository)
             destination_exists = _entry_exists(parent_descriptor, self.output_dir.name)
         except OSError as error:
             if parent_descriptor is not None:
                 os.close(parent_descriptor)
+            if repository_descriptor is not None:
+                os.close(repository_descriptor)
             raise _error(DiagnosticCode.OUTPUT_DESTINATION) from error
         if _is_within(self.output_dir, self.repository) or physically_inside_repository:
             os.close(parent_descriptor)
+            os.close(repository_descriptor)
             raise _error(DiagnosticCode.OUTPUT_INSIDE_REPO)
-        if destination_exists or not parent_is_current:
+        if destination_exists or not parent_is_current or not repository_is_current:
             os.close(parent_descriptor)
+            os.close(repository_descriptor)
             raise _error(DiagnosticCode.OUTPUT_DESTINATION)
         self.parent = parent
+        self._repository_descriptor: int | None = repository_descriptor
         self._parent_descriptor: int | None = parent_descriptor
         self._staging_root: Path | None = None
         self._staging_name: str | None = None
@@ -435,8 +454,10 @@ class OutputTransaction:
                 _directory_flags(),
                 dir_fd=self._staging_descriptor,
             )
-            if not self._parent_is_current() or not _descriptor_matches_path(
-                self._staging_descriptor, self._staging_root
+            if (
+                not self._repository_is_current()
+                or not self._parent_is_current()
+                or not _descriptor_matches_path(self._staging_descriptor, self._staging_root)
             ):
                 raise OSError
         except OSError as error:
@@ -495,14 +516,16 @@ class OutputTransaction:
         parent_descriptor = self._require_parent_descriptor()
         staging_descriptor = self._require_staging_descriptor()
         try:
-            if not self._parent_is_current():
+            if not self._repository_is_current() or not self._parent_is_current():
                 raise _error(DiagnosticCode.OUTPUT_DESTINATION)
             self._remove_frozen_source()
             os.fsync(self._require_artifacts_descriptor())
             if cancellation_probe():
                 raise PublicationInterrupted(diagnostic(DiagnosticCode.INTERRUPTED))
-            if not self._parent_is_current() or _entry_exists(
-                parent_descriptor, self.output_dir.name
+            if (
+                not self._repository_is_current()
+                or not self._parent_is_current()
+                or _entry_exists(parent_descriptor, self.output_dir.name)
             ):
                 raise _error(DiagnosticCode.OUTPUT_DESTINATION)
             _rename_noreplace(
@@ -530,6 +553,7 @@ class OutputTransaction:
         with suppress(OSError):
             os.fsync(parent_descriptor)
         self._close_descriptor("_parent_descriptor")
+        self._close_descriptor("_repository_descriptor")
 
     def abort(self) -> None:
         if self._committed:
@@ -547,6 +571,7 @@ class OutputTransaction:
             with suppress(OSError):
                 os.rmdir(self._staging_name, dir_fd=parent_descriptor)
         self._close_descriptor("_parent_descriptor")
+        self._close_descriptor("_repository_descriptor")
 
     def _write(self, relative_path: str, content: bytes) -> None:
         if relative_path not in _FINAL_PATHS or type(content) is not bytes:
@@ -604,6 +629,10 @@ class OutputTransaction:
         descriptor = self._parent_descriptor
         return descriptor is not None and _descriptor_matches_path(descriptor, self.parent)
 
+    def _repository_is_current(self) -> bool:
+        descriptor = self._repository_descriptor
+        return descriptor is not None and _descriptor_matches_path(descriptor, self.repository)
+
     def _require_parent_descriptor(self) -> int:
         if self._parent_descriptor is None:
             raise _error(DiagnosticCode.OUTPUT_DESTINATION)
@@ -631,3 +660,4 @@ class OutputTransaction:
         self._close_descriptor("_artifacts_descriptor")
         self._close_descriptor("_staging_descriptor")
         self._close_descriptor("_parent_descriptor")
+        self._close_descriptor("_repository_descriptor")

@@ -86,6 +86,25 @@ def test_output_transaction_rejects_existing_or_inside_repository_destination(
     assert inside_error.value.diagnostic.code is DiagnosticCode.OUTPUT_INSIDE_REPO
 
 
+def test_output_transaction_binds_validated_repository_identity(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    identity_stat = repository.stat()
+    repository.rename(tmp_path / "displaced-repo")
+    repository.mkdir()
+
+    with pytest.raises(OutputTransactionError) as caught:
+        OutputTransaction(
+            repository,
+            tmp_path / "result",
+            repository_identity=(identity_stat.st_dev, identity_stat.st_ino),
+        )
+
+    assert caught.value.diagnostic.code is DiagnosticCode.OUTPUT_DESTINATION
+
+
 def test_output_transaction_rejects_alternate_case_physical_repository_alias(
     tmp_path: Path,
 ) -> None:
@@ -179,6 +198,32 @@ def test_output_transaction_parent_swap_cannot_redirect_artifacts_or_publication
     assert list((shadow_staging / "artifacts").iterdir()) == []
     assert not (repository / "result").exists()
     assert list(displaced_parent.iterdir()) == []
+
+
+def test_output_transaction_rejects_repository_replacement_before_publication(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    displaced_repository = tmp_path / "displaced-repo"
+    transaction = OutputTransaction(repository, replacement / "result")
+    transaction.begin()
+    transaction.stage_payload("semantic-json", b"{}\n")
+    transaction.stage_manifest(b'{"type":"run_manifest"}\n')
+
+    repository.rename(displaced_repository)
+    repository.symlink_to(replacement, target_is_directory=True)
+    try:
+        with pytest.raises(OutputTransactionError) as caught:
+            transaction.commit()
+    finally:
+        transaction.abort()
+
+    assert caught.value.diagnostic.code is DiagnosticCode.OUTPUT_DESTINATION
+    assert not (replacement / "result").exists()
+    assert list(displaced_repository.iterdir()) == []
 
 
 def test_output_transaction_abort_removes_frozen_source_and_payload_bytes(

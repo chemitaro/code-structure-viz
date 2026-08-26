@@ -204,6 +204,25 @@ def test_only_missing_valid_symbolic_branch_is_unborn(tmp_path: Path) -> None:
     ]
 
 
+def test_validated_repository_identity_rejects_path_replacement(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    displaced = tmp_path / "displaced-repo"
+    runner = ScriptedRunner([_result(0, f"{repo}\n".encode())])
+    reader = GitRepositoryReader(repo, runner=runner)
+
+    assert reader.validate_repository_root() == repo
+    repo.rename(displaced)
+    repo.mkdir()
+
+    assert not reader.repository_is_current()
+    with pytest.raises(GitReadError) as caught:
+        reader.resolve_head_state()
+    assert caught.value.diagnostic.code.value == "CSV-REPO-001"
+
+
 @pytest.mark.parametrize(
     "results",
     [

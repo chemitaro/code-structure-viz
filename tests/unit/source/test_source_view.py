@@ -1,4 +1,5 @@
 import os
+import unicodedata
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
 
@@ -118,6 +119,65 @@ def test_casefold_samefile_collision_keeps_each_canonical_path_descriptor(
     assert view.files == ()
     assert tuple(item.path.as_posix() for item in view.failures) == ("Foo.py", "foo.py")
     assert all(item.diagnostic_code.value == "CSV-SOURCE-004" for item in view.failures)
+
+
+def test_mixed_nfc_and_casefold_samefile_collision_forms_one_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    canonical = "É.py"
+    decomposed = "E\u0301.py"
+    lower = "é.py"
+    for name in (canonical, decomposed, lower):
+        (repo / name).write_bytes(b"class Value:\n    pass\n")
+
+    def samefile(left: os.PathLike[str] | str, right: os.PathLike[str] | str) -> bool:
+        return {Path(left).name, Path(right).name} == {decomposed, lower}
+
+    monkeypatch.setattr(os.path, "samefile", samefile)
+
+    view = SourceViewBuilder(repo, tmp_path / "stage").build(
+        Commit("2" * 40),
+        (
+            EnumeratedPath(canonical, PurePosixPath(canonical)),
+            EnumeratedPath(decomposed, PurePosixPath(unicodedata.normalize("NFC", decomposed))),
+            EnumeratedPath(lower, PurePosixPath(lower)),
+        ),
+        PythonConfig((".",), ("**/*.py",), ()),
+    )
+
+    assert view.files == ()
+    assert view.collision_groups == ((PurePosixPath(canonical), PurePosixPath(lower)),)
+    assert tuple(item.path.as_posix() for item in view.failures) == (canonical, lower)
+
+
+def test_independent_nfc_collision_groups_with_same_casefold_stay_separate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    names = ("É.py", "E\u0301.py", "é.py", "e\u0301.py")
+    for name in names:
+        (repo / name).write_bytes(b"class Value:\n    pass\n")
+    monkeypatch.setattr(os.path, "samefile", lambda _left, _right: False)
+
+    view = SourceViewBuilder(repo, tmp_path / "stage").build(
+        Commit("2" * 40),
+        tuple(
+            EnumeratedPath(name, PurePosixPath(unicodedata.normalize("NFC", name)))
+            for name in names
+        ),
+        PythonConfig((".",), ("**/*.py",), ()),
+    )
+
+    assert view.files == ()
+    assert view.collision_groups == (
+        (PurePosixPath("É.py"),),
+        (PurePosixPath("é.py"),),
+    )
 
 
 def test_single_physical_spelling_is_read_without_replacing_it_with_logical_identity(

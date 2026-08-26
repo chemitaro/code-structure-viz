@@ -1007,13 +1007,11 @@ def _analyze_class_members(
                 if property_role is PropertyRole.GETTER:
                     annotation = signature.returns
                 elif property_role is PropertyRole.SETTER:
-                    annotation = next(
-                        (
-                            parameter.annotation
-                            for parameter in signature.parameters
-                            if parameter.name not in {"self", "cls"}
-                        ),
-                        None,
+                    value_index = _property_value_parameter_index(signature.parameters)
+                    annotation = (
+                        signature.parameters[value_index].annotation
+                        if value_index is not None
+                        else None
                     )
                 else:
                     annotation = None
@@ -1045,14 +1043,7 @@ def _analyze_class_members(
                 if property_role is PropertyRole.GETTER:
                     adopted_types = (rendered_return,)
                 elif property_role is PropertyRole.SETTER:
-                    value_index = next(
-                        (
-                            index
-                            for index, parameter in enumerate(signature.parameters)
-                            if parameter.name not in {"self", "cls"}
-                        ),
-                        None,
-                    )
+                    value_index = _property_value_parameter_index(signature.parameters)
                     adopted_types = (
                         rendered_parameters[value_index] if value_index is not None else None,
                     )
@@ -1091,6 +1082,24 @@ def _parameter_records(
     if arguments.kwarg is not None:
         result.append((arguments.kwarg, ParameterKind.VAR_KEYWORD, False))
     return tuple(result)
+
+
+def _property_value_parameter_index(parameters: tuple[Parameter, ...]) -> int | None:
+    """Return the setter value parameter after an optional positional receiver."""
+    receiver_index = 0
+    if (
+        parameters
+        and parameters[0].name in {"self", "cls"}
+        and parameters[0].kind
+        in {
+            ParameterKind.POSITIONAL_ONLY,
+            ParameterKind.POSITIONAL_OR_KEYWORD,
+        }
+    ):
+        receiver_index = 1
+    if receiver_index >= len(parameters):
+        return None
+    return receiver_index
 
 
 def _signature(

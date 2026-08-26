@@ -59,7 +59,7 @@ class PythonModuleIndex:
     def build(cls, source_view: SourceView, config: PythonConfig) -> PythonModuleIndex:
         failures: list[FailedSourceFile] = []
         diagnostics: list[Diagnostic] = []
-        collision_paths: dict[str, list[PurePosixPath]] = {}
+        collision_failure_paths: set[PurePosixPath] = set()
         for source_failure in source_view.failures:
             stage = (
                 FailedStage.READ
@@ -74,9 +74,7 @@ class PythonModuleIndex:
                 )
             )
             if source_failure.diagnostic_code is DiagnosticCode.SOURCE_PATH_COLLISION:
-                collision_paths.setdefault(source_failure.path.as_posix().casefold(), []).append(
-                    source_failure.path
-                )
+                collision_failure_paths.add(source_failure.path)
                 continue
             diagnostics.append(
                 diagnostic(
@@ -85,13 +83,30 @@ class PythonModuleIndex:
                     path=source_failure.path.as_posix(),
                 )
             )
-        for group_paths in collision_paths.values():
-            representative_path = min(group_paths, key=_path_key)
+        covered_collision_paths: set[PurePosixPath] = set()
+        for collision_group in source_view.collision_groups:
+            group_paths = tuple(
+                sorted(
+                    (path for path in collision_group if path in collision_failure_paths),
+                    key=_path_key,
+                )
+            )
+            if not group_paths:
+                continue
+            covered_collision_paths.update(group_paths)
             diagnostics.append(
                 diagnostic(
                     DiagnosticCode.SOURCE_PATH_COLLISION,
                     domain="python",
-                    path=representative_path.as_posix(),
+                    path=group_paths[0].as_posix(),
+                )
+            )
+        for path in sorted(collision_failure_paths - covered_collision_paths, key=_path_key):
+            diagnostics.append(
+                diagnostic(
+                    DiagnosticCode.SOURCE_PATH_COLLISION,
+                    domain="python",
+                    path=path.as_posix(),
                 )
             )
 
