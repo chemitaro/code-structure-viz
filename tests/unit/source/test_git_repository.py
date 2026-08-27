@@ -26,6 +26,8 @@ from code_structure_viz.source.git_repository import (
     _ignore_authority_file_digest,
     _ignore_authority_gitignore_digest,
     _parse_git_bool,
+    _parse_git_bool_records,
+    _parse_git_common_dir,
     _parse_git_config_name_only,
     _parse_git_config_records,
     _raw_modes_equal,
@@ -292,9 +294,15 @@ def test_enumerate_paths_strictly_decodes_nul_delimited_utf8_and_normalizes_nfc(
         [
             _result(1),
             _result(1),
-            _result(0),
             _result(1),
             _result(1),
+            _result(0, f"{repo / '.git'}\n".encode()),
+            _result(0, "src/cafe\u0301.py\0README\0".encode()),
+            _result(1),
+            _result(1),
+            _result(1),
+            _result(1),
+            _result(0, f"{repo / '.git'}\n".encode()),
             _result(0, "src/cafe\u0301.py\0README\0".encode()),
         ]
     )
@@ -318,10 +326,15 @@ def test_non_utf8_git_path_is_fatal_without_synthetic_path(tmp_path: Path) -> No
         [
             _result(1),
             _result(1),
-            _result(0),
             _result(1),
             _result(1),
+            _result(0, f"{repo / '.git'}\n".encode()),
             _result(0, b"good.py\0bad-\xff.py\0"),
+            _result(1),
+            _result(1),
+            _result(1),
+            _result(1),
+            _result(0, f"{repo / '.git'}\n".encode()),
         ]
     )
 
@@ -455,6 +468,37 @@ def test_git_bool_parser_rejects_malformed_or_enum_values(value: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("payload", "expected"),
+    (
+        (b"", None),
+        (b"core.ignorecase\ntrue\0", True),
+        (b"core.ignorecase\nfalse\0", False),
+    ),
+)
+def test_git_ignore_case_records_accept_absent_or_one_strict_boolean(
+    payload: bytes,
+    expected: bool | None,
+) -> None:
+    assert _parse_git_bool_records(payload, "core.ignorecase") is expected
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"core.ignorecase\ntrue\0core.ignorecase\nfalse\0",
+        b"core.ignorecase\nmaybe\0",
+        b"core.filemode\nfalse\0",
+        b"core.ignorecase\ntrue",
+    ),
+)
+def test_git_ignore_case_records_reject_duplicate_unknown_or_malformed_values(
+    payload: bytes,
+) -> None:
+    with pytest.raises(ValueError):
+        _parse_git_bool_records(payload, "core.ignorecase")
+
+
+@pytest.mark.parametrize(
     "payload",
     (
         b"core.filemode\nfalse",
@@ -468,8 +512,9 @@ def test_git_config_null_parser_rejects_malformed_records(payload: bytes) -> Non
 
 
 def test_git_config_name_only_parser_is_strict_and_value_free() -> None:
-    assert _parse_git_config_name_only(b"core.excludesfile\0include.path\0") == (
+    assert _parse_git_config_name_only(b"core.excludesfile\0core.ignorecase\0include.path\0") == (
         "core.excludesfile",
+        "core.ignorecase",
         "include.path",
     )
 
@@ -490,6 +535,29 @@ def test_git_config_name_only_parser_rejects_malformed_or_oversized_output(
 ) -> None:
     with pytest.raises(ValueError):
         _parse_git_config_name_only(payload)
+
+
+def test_git_common_dir_parser_accepts_one_absolute_utf8_path() -> None:
+    assert _parse_git_common_dir(b"/repo/.git\n") == Path("/repo/.git")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"relative/.git\n",
+        b"/repo/.git",
+        b"/repo/.git\n/other/.git\n",
+        b"/repo/.git\x00\n",
+        b"/repo/.git\xff\n",
+        b"/repo/.git\n\n",
+        b"x" * (64 * 1024 + 1),
+    ),
+)
+def test_git_common_dir_parser_rejects_malformed_or_unbounded_output(
+    payload: bytes,
+) -> None:
+    with pytest.raises(ValueError):
+        _parse_git_common_dir(payload)
 
 
 @pytest.mark.parametrize("key", ("core.excludesfile", "include.path"))
@@ -859,6 +927,113 @@ def test_untracked_observation_orders_paths_and_binds_authority_profile() -> Non
     assert observation.authority_digest == profile.digest
 
 
+def test_ignore_profile_digest_binds_ignore_case_and_common_directory_identity() -> None:
+    base = IgnoreAuthorityProfile(
+        "config",
+        "gitignore",
+        "exclude",
+        common_git_dir_identity="common-a",
+        core_ignore_case=False,
+    )
+    changed_case = IgnoreAuthorityProfile(
+        "config",
+        "gitignore",
+        "exclude",
+        common_git_dir_identity="common-a",
+        core_ignore_case=True,
+    )
+    changed_common = IgnoreAuthorityProfile(
+        "config",
+        "gitignore",
+        "exclude",
+        common_git_dir_identity="common-b",
+        core_ignore_case=False,
+    )
+
+    assert base.digest != changed_case.digest
+    assert base.digest != changed_common.digest
+
+
+def test_ignore_case_config_prefers_worktree_value_when_present(tmp_path: Path) -> None:
+    location = tmp_path / "nested"
+    git_dir = tmp_path / "git"
+    location.mkdir()
+    git_dir.mkdir()
+    (git_dir / "config.worktree").write_bytes(b"[core]\n\tignoreCase = true\n")
+    runner = ScriptedRunner(
+        [
+            _result(0, b"core.ignorecase\nfalse\0"),
+            _result(0, b"core.ignorecase\ntrue\0"),
+        ]
+    )
+
+    value = GitRepositoryReader(location, runner=runner)._ignore_case_config_value(
+        location,
+        git_dir,
+    )
+
+    assert value is True
+    assert all("--no-includes" in command for command, _env in runner.calls)
+    assert any("--local" in command for command, _env in runner.calls)
+    assert any("--worktree" in command for command, _env in runner.calls)
+
+
+def test_git_common_dir_resolution_requires_contained_worktree_binding(
+    tmp_path: Path,
+) -> None:
+    location = tmp_path / "nested"
+    common = tmp_path / "common"
+    git_dir = common / "worktrees" / "nested"
+    location.mkdir()
+    git_dir.mkdir(parents=True)
+    common_result = _result(0, f"{common}\n".encode())
+    reader = GitRepositoryReader(location, runner=ScriptedRunner([common_result]))
+
+    resolved, identity = reader._resolve_git_common_dir(location, git_dir)
+
+    assert resolved == common
+    assert identity.startswith(f"{common}:")
+
+
+def test_git_common_dir_resolution_rejects_outside_worktree_binding(
+    tmp_path: Path,
+) -> None:
+    location = tmp_path / "nested"
+    common = tmp_path / "common"
+    outside = tmp_path / "outside"
+    git_dir = common / "worktrees" / "nested"
+    location.mkdir()
+    git_dir.mkdir(parents=True)
+    outside.mkdir()
+    reader = GitRepositoryReader(
+        location,
+        runner=ScriptedRunner([_result(0, f"{outside}\n".encode())]),
+    )
+
+    with pytest.raises(GitReadError) as caught:
+        reader._resolve_git_common_dir(location, git_dir)
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+
+
+def test_git_common_dir_resolution_maps_malformed_command_output_to_diff_fatal(
+    tmp_path: Path,
+) -> None:
+    location = tmp_path / "nested"
+    git_dir = tmp_path / "git"
+    location.mkdir()
+    git_dir.mkdir()
+    reader = GitRepositoryReader(
+        location,
+        runner=ScriptedRunner([_result(0, b"relative.git\n")]),
+    )
+
+    with pytest.raises(GitReadError) as caught:
+        reader._resolve_git_common_dir(location, git_dir)
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+
+
 def test_gitlink_profile_commands_are_bounded_metadata_only(tmp_path: Path) -> None:
     location = tmp_path / "nested"
     git_dir = tmp_path / "git"
@@ -889,9 +1064,15 @@ def test_untracked_observation_commands_exclude_forbidden_git_helpers(tmp_path: 
         [
             _result(1),
             _result(1),
+            _result(1),
+            _result(1),
+            _result(0, f"{git_dir}\n".encode()),
             _result(0, b"z.txt\0a.txt\0"),
             _result(1),
             _result(1),
+            _result(1),
+            _result(1),
+            _result(0, f"{git_dir}\n".encode()),
         ]
     )
 
@@ -906,8 +1087,10 @@ def test_untracked_observation_commands_exclude_forbidden_git_helpers(tmp_path: 
     assert all("diff" not in command for command in commands)
     assert all("hash-object" not in command for command in commands)
     assert all("--path" not in command for command in commands)
-    assert all("--no-includes" in command for command in commands[:2] + commands[3:])
-    assert "ls-files" in commands[2]
+    assert all("--no-includes" in command for command in commands if "config" in command)
+    assert "ls-files" in commands[5]
+    assert commands[5][0:2] == ("git", "-C")
+    assert "core.ignoreCase=false" in commands[5]
 
 
 def test_path_enumeration_reuses_untracked_observation_without_second_others_query(
@@ -920,9 +1103,15 @@ def test_path_enumeration_reuses_untracked_observation_without_second_others_que
         [
             _result(1),
             _result(1),
+            _result(1),
+            _result(1),
+            _result(0, f"{git_dir}\n".encode()),
             _result(0, b"untracked.py\0"),
             _result(1),
             _result(1),
+            _result(1),
+            _result(1),
+            _result(0, f"{git_dir}\n".encode()),
             _result(0, b"tracked.py\0"),
         ]
     )

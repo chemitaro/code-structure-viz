@@ -53,6 +53,8 @@ production acceptance trace に P1 gap が見つかった。以下の remediatio
 | I02-PLAN-021 | clean baselineを使ったgitlink acceptanceと、autocrlf/eol/filter/index flag/core.filemode/profile driftのfail-closed回帰を追加 | `tests/helpers/diff.py`, `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_git_repository.py` | 完了 |
 | I02-PLAN-022 | `--exclude-standard` の ignore authority を `IgnoreAuthorityProfile` と `UntrackedObservation` に閉じ、外部 `core.excludesFile`/`include.*` と unsafe ignore file を初期観測で拒否。許可された `.gitignore`/`info/exclude` の bounded digest と start/final observation drift を内部 state に束ねる | `source/git_repository.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py` | 完了 |
 | I02-PLAN-023 | 外部 ignore による untracked omission、include、許可された ignore、ignore file drift を top-level/nested の production `diff` CLI で回帰し、no-publication・診断・親側 gitlink `M` の境界を検証 | `tests/acceptance/python/test_diff_cli.py`, `tests/security/test_python_static_boundary.py` | 完了 |
+| I02-PLAN-024 | `core.ignoreCase` を strict capture/profile digest と untracked command の明示 `-c` 値へ束ね、linked worktree の verified common Git directory と common `info/exclude` を ignore authority として観測 | `source/git_repository.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py` | 完了 |
+| I02-PLAN-025 | `core.ignoreCase` の omission/race、linked-worktree common `info/exclude` の stable/drift を clean top-level/nested production CLIで回帰し、command allowlist・redaction・no-publicationを固定 | `tests/acceptance/python/test_diff_cli.py`, `tests/security/test_python_static_boundary.py` | 完了 |
 
 ## 3. 実装詳細
 
@@ -178,6 +180,18 @@ unavailable `stdout-result/v1`、selector 無指定の `run-summary/v1` を stde
   include/includeIf、通常の `.gitignore`/`info/exclude` の ignored behavior、allowed ignore fileの初期/最終変化
   （`CSV-SOURCE-001`）をproduction CLIで検証し、unit/securityではname-only parser、bounded digest、unsafe file、
   ordering、observation reuse、forbidden helper absenceを固定した。
+- I02-PLAN-024 では、local/worktree `core.ignoreCase` を absent/strict boolean/duplicate・malformed の閉世界値
+  として取得し、capture済み値を `ls-files --others --exclude-standard` の command scopeへ明示的に渡す。linked
+  worktreeでは `rev-parse --path-format=absolute --git-common-dir` の単一絶対・non-symlink・containment・binding
+  identityを検証し、effective common Git directory の regular `info/exclude` をdigest化する。per-worktree
+  `info/exclude`をauthorityの代用にせず、common binding/exclude digestと`core_ignore_case`を
+  `IgnoreAuthorityProfile`およびnested `GitlinkComparisonProfile`へ含める。初期不成立は`CSV-DIFF-003`、
+  公開直前のdriftは`CSV-SOURCE-001`、public schemaは不変とする。
+- I02-PLAN-025 では、case-folded ignore matchingを再現するtop-level/nestedのclean fixture、観測中の設定変化、
+  linked-worktree common `info/exclude` のstable/drift fixtureをproduction CLIで追加する。unit/securityでは
+  strict値 parser、明示 `-c` binding、common-dir path/identity containment、no absolute path/value/pattern leak、
+  `rev-parse`/config/ls-files以外のhelper禁止を固定する。Redへ戻す条件は、旧実装ではunsafe success、新実装では
+  `CSV-DIFF-003`または`CSV-SOURCE-001`・no-publicationとなるdiscriminating evidenceである。
 
 ## 4. 受入れテストとコマンド
 
@@ -213,12 +227,12 @@ git diff --check
 | I02-REQ-006 | I02-DES-006 | I02-PLAN-006 | `test_git_read_only.py`, `test_file_change_hunk_redaction.py`, snapshot regression |
 | I02-REQ-007 | I02-DES-007 | I02-PLAN-007 | `test_file_changes.py`, `test_diff_cli.py` |
 | I02-REQ-008 | I02-DES-008 | I02-PLAN-008 | `test_stdout_selector.py`, `test_diff_fail_closed.py` |
-| I02-REQ-009 | I02-DES-009, I02-DES-012 | I02-PLAN-013, 017, 022, 023 | `test_diff_cli.py`, `test_git_repository.py`, `test_source_view.py`, `test_file_changes.py` |
-| I02-REQ-010 | I02-DES-010, I02-DES-012 | I02-PLAN-014, 018〜023 | `test_diff_cli.py`, `test_git_repository.py`, `test_file_changes.py` |
+| I02-REQ-009 | I02-DES-009, I02-DES-012 | I02-PLAN-013, 017, 022〜025 | `test_diff_cli.py`, `test_git_repository.py`, `test_source_view.py`, `test_file_changes.py` |
+| I02-REQ-010 | I02-DES-010, I02-DES-012 | I02-PLAN-014, 018〜025 | `test_diff_cli.py`, `test_git_repository.py`, `test_file_changes.py` |
 | I02-REQ-011 | I02-DES-011 | I02-PLAN-015 | `test_diff_cli.py`, `test_json_schemas.py` |
 
-P1 remediation は I02-REQ-009 → I02-DES-009 → I02-PLAN-017、I02-REQ-010 → I02-DES-010 →
-I02-PLAN-018〜021 の経路で trace し、public schema versionは変更しない。
+P1 remediation は I02-REQ-009 → I02-DES-009, I02-DES-012 → I02-PLAN-017, 022〜025、
+I02-REQ-010 → I02-DES-010, I02-DES-012 → I02-PLAN-018〜025 の経路で trace し、public schema versionは変更しない。
 
 Downstream Issue は `docs/contracts/source-view-v1.md`、`docs/contracts/file-change-set-v1.md`、
 `docs/contracts/python-semantic-v1.md`、`docs/contracts/run-manifest-v1.md`、`docs/contracts/stdout-v1.md`

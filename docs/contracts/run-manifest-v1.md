@@ -114,3 +114,16 @@ working tree 内の regular `.gitignore`（全階層をboundedに走査）と検
 symlink/non-regular/上限超過、観測中のprofile変化は `CSV-SOURCE-001`（初期は`CSV-DIFF-003`）として
 manifestを公開しない。外部パス、設定値、ignore patternは出力せず、nested gitlinkではこのignore digestを
 `GitlinkComparisonProfile`へ含める。public manifest shape/versionは変更しない。
+
+ignore matching の追加 authority である `core.ignoreCase` も閉世界で束縛する。local/worktree
+scopeを `--no-includes` で取得し、値がない場合は `false`、値がある場合は重複なく strict boolean として
+解釈できる場合だけ許可する。captureした値は untracked 列挙 command に
+`-c core.ignoreCase=true|false` として明示し、profile digestへ含める。不正値、重複、scope解決不能は初期
+`CSV-DIFF-003` とし、値・設定pathはmanifestへ出力しない。
+
+linked worktreeでは `git rev-parse --path-format=absolute --git-common-dir` の単一UTF-8絶対pathを検証し、
+per-worktree Git directory自身またはその `worktrees/` descendant に束縛された non-symlink directoryだけを
+有効とする。common directoryのbinding identityと直下 `info/exclude` の bounded digestを
+`IgnoreAuthorityProfile`へ含め、per-worktree `info/exclude`をcommon authorityの代用にしない。開始時と公開直前の
+common binding、`core.ignoreCase`、common exclude、untracked observationの不一致は
+`CSV-SOURCE-001`、初期の解決不能は `CSV-DIFF-003` とし、public manifest shape/versionは変更しない。

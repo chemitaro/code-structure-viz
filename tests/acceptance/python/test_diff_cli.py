@@ -11,6 +11,7 @@ import pytest
 
 from tests.helpers.diff import (
     create_clean_gitlink_repository,
+    create_clean_linked_gitlink_repository,
     create_gitlink_repository,
     create_raw_path_collision_repository,
     create_raw_path_transition_repository,
@@ -909,8 +910,7 @@ def test_allowed_ignore_file_mutation_between_observations_is_source_fatal(
     ignored = repository / ".gitignore"
     proxy = _git_proxy(
         tmp_path,
-        "if sys.argv[-5:] == "
-        "['ls-files', '-z', '--others', '--exclude-standard', '--']:\n"
+        "if 'ls-files' in sys.argv and '--others' in sys.argv:\n"
         f"    counter = pathlib.Path({str(counter)!r})\n"
         "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
         "    counter.write_text(str(count))\n"
@@ -925,6 +925,143 @@ def test_allowed_ignore_file_mutation_between_observations_is_source_fatal(
 
     assert result.returncode == 1
     assert b"CSV-SOURCE-001" in result.stderr
+    assert not output.exists()
+
+
+def test_top_level_core_ignore_case_is_explicitly_bound(
+    tmp_path: Path,
+) -> None:
+    repository, before, _after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: int\n# after\n",
+    )
+    subprocess.run(
+        ("git", "-C", str(repository), "config", "core.ignoreCase", "true"),
+        check=True,
+        capture_output=True,
+    )
+    (repository / "casefold-secret").write_text("untracked\n", encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", before)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert {item["new_path"] for item in file_changes["files"]} == {
+        "casefold-secret",
+        "src/app.py",
+    }
+
+
+def test_top_level_core_ignore_case_change_during_observation_is_initial_fatal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: int\n# after\n",
+    )
+    subprocess.run(
+        ("git", "-C", str(repository), "config", "core.ignoreCase", "false"),
+        check=True,
+        capture_output=True,
+    )
+    marker = tmp_path / "ignore-case-race"
+    proxy = _git_proxy(
+        tmp_path,
+        "if 'ls-files' in sys.argv and '--others' in sys.argv:\n"
+        f"    race = pathlib.Path({str(marker)!r})\n"
+        "    if not race.exists():\n"
+        "        race.write_text('1')\n"
+        f"        subprocess.run(('git', '-C', {str(repository)!r}, 'config', "
+        "'core.ignoreCase', 'true'), check=True, capture_output=True)\n",
+    )
+    monkeypatch.setenv("PATH", f"{proxy}{os.pathsep}{os.environ['PATH']}")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert b"ignore-case-race" not in result.stderr
+    assert not output.exists()
+
+
+def test_nested_core_ignore_case_is_explicitly_bound(
+    tmp_path: Path,
+) -> None:
+    repository, parent_head, nested, _nested_head = create_clean_gitlink_repository(tmp_path)
+    subprocess.run(
+        ("git", "-C", str(nested), "config", "core.ignoreCase", "true"),
+        check=True,
+        capture_output=True,
+    )
+    (nested / "nested-casefold-secret").write_text("untracked\n", encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert file_changes["files"] == [
+        {"status": "M", "old_path": "src/component", "new_path": "src/component", "hunks": []}
+    ]
+
+
+def test_linked_worktree_uses_common_info_exclude_as_stable_authority(
+    tmp_path: Path,
+) -> None:
+    repository, parent_head, nested, _nested_head, common = create_clean_linked_gitlink_repository(
+        tmp_path
+    )
+    marker = "linked-common-ignore-secret"
+    with (common / "info" / "exclude").open("a", encoding="utf-8") as stream:
+        stream.write(f"{marker}\n")
+    (nested / marker).write_text("ignored\n", encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert file_changes["files"] == []
+
+
+@pytest.mark.parametrize("phase", ("initial", "final"))
+def test_linked_worktree_common_info_exclude_drift_is_fatal_without_leak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    repository, parent_head, nested, _nested_head, common = create_clean_linked_gitlink_repository(
+        tmp_path
+    )
+    marker = "linked-common-drift-secret"
+    counter = tmp_path / "linked-nested-observations"
+    proxy = _git_proxy(
+        tmp_path,
+        "if 'ls-files' in sys.argv and '--others' in sys.argv and "
+        f"{str(nested)!r} in sys.argv:\n"
+        f"    counter = pathlib.Path({str(counter)!r})\n"
+        "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "    counter.write_text(str(count))\n"
+        f"    if count == {(1 if phase == 'initial' else 2)!r}:\n"
+        f"        with pathlib.Path({str(common / 'info' / 'exclude')!r}).open("
+        "'a', encoding='utf-8') as stream:\n"
+        f"            stream.write('{marker}\\n')\n",
+    )
+    monkeypatch.setenv("PATH", f"{proxy}{os.pathsep}{os.environ['PATH']}")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 1
+    expected = b"CSV-DIFF-003" if phase == "initial" else b"CSV-SOURCE-001"
+    assert expected in result.stderr
+    assert str(common).encode() not in result.stderr
+    assert marker.encode() not in result.stderr
     assert not output.exists()
 
 

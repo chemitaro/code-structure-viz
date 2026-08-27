@@ -76,6 +76,19 @@ bounded digest化した。開始・公開直前のauthority/path observation dri
 gitlink profileにもignore digestを束ねた。clean top-level/nested fixture、include、allowed ignore、ignore file
 driftをproduction CLIとunit/securityで回帰し、外部パス・設定値・patternを出力しないことを確認した。
 
+同じStrict Final Quality Gateの継続レビュー（reviewed SHA `dd40493577288f75797328826e61cc8fd46543fe`）では、
+P1-040（`core.ignoreCase` が untracked matching を変えても profile へ束縛されない）と P1-041（linked
+worktree の common Git directory 側 `info/exclude` を production 経路で検証していない）が残存した。
+Red側の事実認定を同じレビュー会話へ返し、Blue側で閉世界の修正契約を具体化した。local/worktree
+`core.ignoreCase` は absent を `false` とし、strict boolean の単一値だけを許可して profile digest へ含め、
+untracked列挙へ `-c core.ignoreCase=true|false` を明示する。linked worktree は
+`rev-parse --path-format=absolute --git-common-dir` の検証済み common directory とその直下の
+`info/exclude` を実効 authority とし、per-worktree 側を代用しない。初期不成立は `CSV-DIFF-003`、
+公開直前の drift は `CSV-SOURCE-001`、いずれも no-publication とする。Luna MAX coder がこの契約と
+top-level/nested/linked の discriminating production CLI 回帰を実装し、公開schemaは変更しなかった。
+focused unit 135件、diff CLI acceptance 68件、static security 4件、full suite 596件/1 skipped が
+通過している。次の同一SHA Strict Final Quality GateでP1-040/041の閉鎖を判定する。
+
 ## Remediation evidence
 
 前回の Final Quality Gate review（campaign `iss-00005-implementation-final-quality-r1`）で検出された
@@ -117,6 +130,13 @@ P1 は次のように修正した。
   `CSV-DIFF-003`、許可fileの変更や再観測不一致は `CSV-SOURCE-001` とし、nested gitlink profileへignore digestを
   含めた。production CLIで外部ignoreによるtop-level budget過小count、nested clean縮退、include、allowed ignore、
   driftを回帰した（P1-040/041）。
+- `core.ignoreCase` を local/worktree の strict boolean profile として観測し、値がない場合も `false` として
+  `ls-files --others --exclude-standard` の `-c` command scopeへ明示した。値の重複・不正・scope解決不能は
+  `CSV-DIFF-003` とし、profile digestへ値を含め、公開直前の変化を `CSV-SOURCE-001` へ変換する。
+- linked worktree の `git-common-dir` を単一絶対UTF-8・non-symlink・containment・binding identity付きで解決し、
+  common `info/exclude`をbounded digestと `--exclude-from` authorityへ束ねた。per-worktree `info/exclude` は
+  代用せず、common binding/excludeの stable/drift、case-folded top-level/nested omission、no-publication、
+  パス/値/pattern非漏えいを production CLI と static/unit tests で回帰した（P1-040/041 remediation）。
 - gitlink acceptanceは親OIDとnested HEAD/tree/indexが一致するclean baselineを別fixtureで作り、親側が既に
   dirtyなためにobserver誤判定を隠さないようにした。tracked/untracked dirty、autocrlf true/input、
   `.gitattributes` eol、skip-worktree/assume-unchanged、core.filemode=false、profile driftをproduction CLIで

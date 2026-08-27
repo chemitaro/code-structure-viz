@@ -40,7 +40,8 @@ _MAX_IGNORE_AUTHORITY_FILES: Final[int] = 8192
 _GITLINK_PROFILE_SCHEMA: Final = "code-structure-viz.gitlink-comparison-profile/v1"
 _IGNORE_PROFILE_SCHEMA: Final = "code-structure-viz.ignore-authority-profile/v1"
 _UNTRACKED_OBSERVATION_SCHEMA: Final = "code-structure-viz.untracked-observation/v1"
-_IGNORE_CONFIG_PATTERN: Final = r"^(core\.excludesfile|include.*)$"
+_IGNORE_CONFIG_PATTERN: Final = r"^(core\.(excludesfile|ignorecase)|include.*)$"
+_IGNORE_CASE_CONFIG_PATTERN: Final = r"^core\.ignorecase$"
 _GITLINK_CONFIG_PATTERN: Final = (
     r"^(core\.(autocrlf|attributesfile|eol|filemode|symlinks)|"
     r"filter\..*|diff\..*|include.*)$"
@@ -307,6 +308,9 @@ class IgnoreAuthorityProfile:
     gitignore_digest: str | None
     info_exclude_digest: str | None
     allowed: bool = True
+    common_git_dir_identity: str = ""
+    core_ignore_case: bool = False
+    common_git_dir: Path | None = None
 
     @property
     def digest(self) -> str:
@@ -316,6 +320,8 @@ class IgnoreAuthorityProfile:
             "gitignore_digest": self.gitignore_digest,
             "info_exclude_digest": self.info_exclude_digest,
             "allowed": self.allowed,
+            "common_git_dir_identity": self.common_git_dir_identity,
+            "core_ignore_case": self.core_ignore_case,
         }
         return hashlib.sha256(encode_canonical_json(value)).hexdigest()
 
@@ -575,7 +581,27 @@ class GitRepositoryReader:
             observed_location,
             observed_git_dir,
         )
-        arguments = ("ls-files", "-z", "--others", "--exclude-standard", "--")
+        ignore_case = "true" if authority_before.core_ignore_case else "false"
+        linked_worktree = authority_before.common_git_dir not in {
+            None,
+            observed_git_dir,
+        }
+        arguments: tuple[str, ...] = (
+            "-c",
+            f"core.ignoreCase={ignore_case}",
+            "ls-files",
+            "-z",
+            "--others",
+            "--exclude-standard",
+        )
+        if linked_worktree and authority_before.info_exclude_digest is not None:
+            if authority_before.common_git_dir is None:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+            arguments += (
+                "--exclude-from",
+                str(authority_before.common_git_dir / "info" / "exclude"),
+            )
+        arguments += ("--",)
         result = (
             self._git(*arguments)
             if not nested
@@ -603,8 +629,13 @@ class GitRepositoryReader:
             for _scope, key in config_records
         ):
             raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        core_ignore_case = self._ignore_case_config_value(location, git_dir)
+        common_git_dir, common_git_dir_identity = self._resolve_git_common_dir(
+            location,
+            git_dir,
+        )
         try:
-            info = git_dir / "info"
+            info = common_git_dir / "info"
             if has_symlink_component(info):
                 raise OSError("Git info directory is unsafe")
             try:
@@ -615,6 +646,25 @@ class GitRepositoryReader:
                 stat.S_ISLNK(info_stat.st_mode) or not stat.S_ISDIR(info_stat.st_mode)
             ):
                 raise OSError("Git info directory is unsafe")
+            if common_git_dir != git_dir:
+                worktree_info = git_dir / "info"
+                try:
+                    worktree_info_stat = worktree_info.lstat()
+                except FileNotFoundError:
+                    worktree_info_stat = None
+                if worktree_info_stat is not None and (
+                    stat.S_ISLNK(worktree_info_stat.st_mode)
+                    or not stat.S_ISDIR(worktree_info_stat.st_mode)
+                ):
+                    raise OSError("per-worktree Git info directory is unsafe")
+                if worktree_info_stat is not None:
+                    worktree_exclude = worktree_info / "exclude"
+                    try:
+                        worktree_exclude_stat = worktree_exclude.lstat()
+                    except FileNotFoundError:
+                        worktree_exclude_stat = None
+                    if worktree_exclude_stat is not None:
+                        raise OSError("per-worktree Git exclude is unsupported")
             gitignore_digest = _ignore_authority_gitignore_digest(location, git_dir)
             info_exclude_digest = _ignore_authority_file_digest(info / "exclude")
         except OSError as error:
@@ -623,7 +673,91 @@ class GitRepositoryReader:
             config_keys_digest=_ignore_config_digest(config_records),
             gitignore_digest=gitignore_digest,
             info_exclude_digest=info_exclude_digest,
+            common_git_dir_identity=common_git_dir_identity,
+            core_ignore_case=core_ignore_case,
+            common_git_dir=common_git_dir,
         )
+
+    def _ignore_case_config_value(self, location: Path, git_dir: Path) -> bool:
+        try:
+            worktree_config_present = _is_regular_file(git_dir / "config.worktree")
+            linked_worktree = _is_linked_worktree_git_dir(git_dir)
+        except OSError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        values: dict[str, bool | None] = {}
+        for scope in ("local", "worktree"):
+            if scope == "worktree" and linked_worktree and not worktree_config_present:
+                continue
+            arguments = (
+                "config",
+                "--null",
+                "--no-includes",
+                f"--{scope}",
+                "--get-regexp",
+                _IGNORE_CASE_CONFIG_PATTERN,
+            )
+            result = (
+                self._git(*arguments)
+                if location == self.repository
+                else self._git_at(location, *arguments, git_dir=git_dir)
+            )
+            if result.returncode not in {0, 1} or result.stderr:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+            try:
+                value = _parse_git_bool_records(result.stdout, "core.ignorecase")
+            except ValueError as error:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+            values[scope] = value
+        selected = values.get("worktree") if worktree_config_present else None
+        if selected is None:
+            selected = values.get("local")
+        return bool(selected) if selected is not None else False
+
+    def _resolve_git_common_dir(
+        self,
+        location: Path,
+        git_dir: Path,
+    ) -> tuple[Path, str]:
+        try:
+            git_identity_before = self._binding_identity(git_dir)
+        except GitReadError:
+            raise
+        result = (
+            self._git("rev-parse", "--path-format=absolute", "--git-common-dir")
+            if location == self.repository
+            else self._git_at(
+                location,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+                git_dir=git_dir,
+            )
+        )
+        if result.returncode != 0 or result.stderr:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        try:
+            common_path = _parse_git_common_dir(result.stdout)
+            if has_symlink_component(common_path):
+                raise OSError("common Git directory is unsafe")
+            common_resolved = common_path.resolve(strict=True)
+            if has_symlink_component(common_resolved):
+                raise OSError("common Git directory is unsafe")
+            if not common_resolved.is_dir():
+                raise OSError("common Git directory is not a directory")
+            common_identity = self._binding_identity(common_resolved)
+            git_resolved = git_dir.resolve(strict=True)
+            if git_resolved != common_resolved and not _is_relative_to(
+                git_resolved,
+                common_resolved / "worktrees",
+            ):
+                raise OSError("per-worktree Git directory is outside common directory")
+            git_identity_after = self._binding_identity(git_dir)
+            common_identity_after = self._binding_identity(common_resolved)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        if git_identity_before != git_identity_after or common_identity != common_identity_after:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return common_resolved, common_identity
 
     def _ignore_config_records(
         self,
@@ -633,9 +767,12 @@ class GitRepositoryReader:
         records: list[tuple[str, str]] = []
         try:
             worktree_config_present = _is_regular_file(git_dir / "config.worktree")
+            linked_worktree = _is_linked_worktree_git_dir(git_dir)
         except OSError as error:
             raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
         for scope in ("local", "worktree"):
+            if scope == "worktree" and linked_worktree and not worktree_config_present:
+                continue
             arguments = (
                 "config",
                 "--null",
@@ -1045,9 +1182,12 @@ class GitRepositoryReader:
         records: list[tuple[str, str, str]] = []
         try:
             worktree_config_present = _is_regular_file(git_dir / "config.worktree")
+            linked_worktree = _is_linked_worktree_git_dir(git_dir)
         except OSError as error:
             raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
         for scope in ("local", "worktree"):
+            if scope == "worktree" and linked_worktree and not worktree_config_present:
+                continue
             result = self._git_at(
                 location,
                 "config",
@@ -1679,10 +1819,44 @@ def _parse_git_config_name_only(payload: bytes) -> tuple[str, ...]:
             raise ValueError("Git config key is not ASCII") from error
         if any(ord(character) < 0x20 or ord(character) == 0x7F for character in key):
             raise ValueError("Git config key contains a control character")
-        if key != "core.excludesfile" and not key.startswith("include"):
+        if key not in {"core.excludesfile", "core.ignorecase"} and not key.startswith("include"):
             raise ValueError("Git config key is outside the ignore authority query")
         values.append(key)
     return tuple(values)
+
+
+def _parse_git_bool_records(payload: bytes, expected_key: str) -> bool | None:
+    records = _parse_git_config_records(payload)
+    if any(key != expected_key for key, _value in records):
+        raise ValueError("Git config output contains an unexpected key")
+    if len(records) > 1:
+        raise ValueError("Git config output contains duplicate values")
+    if not records:
+        return None
+    value = _parse_git_bool(records[0][1])
+    if value is None:
+        raise ValueError("Git config boolean value is malformed")
+    return value
+
+
+def _parse_git_common_dir(payload: bytes) -> Path:
+    if len(payload) > _MAX_GITLINK_METADATA_BYTES:
+        raise ValueError("Git common directory output exceeds the bounded profile limit")
+    if not payload.endswith(b"\n") or payload.count(b"\n") != 1:
+        raise ValueError("Git common directory output is not one line")
+    raw_path = payload[:-1]
+    if not raw_path or b"\0" in raw_path:
+        raise ValueError("Git common directory output is empty or NUL terminated")
+    try:
+        value = raw_path.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise ValueError("Git common directory output is not UTF-8") from error
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
+        raise ValueError("Git common directory output contains a control character")
+    path = Path(value)
+    if not path.is_absolute():
+        raise ValueError("Git common directory output is not absolute")
+    return path
 
 
 def _parse_git_bool(value: str) -> bool | None:
@@ -1759,6 +1933,17 @@ def _is_regular_file(path: Path) -> bool:
         return False
     if stat.S_ISLNK(value.st_mode) or not stat.S_ISREG(value.st_mode):
         raise OSError("nested Git config source is unsafe")
+    return True
+
+
+def _is_linked_worktree_git_dir(git_dir: Path) -> bool:
+    path = git_dir / "commondir"
+    try:
+        value = path.lstat()
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(value.st_mode) or not stat.S_ISREG(value.st_mode):
+        raise OSError("linked worktree metadata is unsafe")
     return True
 
 

@@ -41,3 +41,14 @@ Git dir の regular `info/exclude` に限り、内容と安全な署名をbounde
 `UntrackedObservation`（digestとdeterministic path集合）が一致しない場合は`CSV-SOURCE-001`とし、実在する
 untracked pathを外部ignoreで隠した成功結果、changed-path budgetの過小count、nested gitlinkのclean縮退を
 公開しない。authority digestは内部stateだけに保持し、public FileChangeSetのshape/versionは変更しない。
+
+ignore matchingを決める `core.ignoreCase` は local/worktree scopeから strict boolean として captureする。
+未設定は `false` とし、capture値を `-c core.ignoreCase=true|false` として untracked 列挙へ明示的に渡す。
+値の重複・不正・scope解決不能は初期 `CSV-DIFF-003`、開始後のprofile driftは
+`CSV-SOURCE-001` とし、値・設定pathは FileChangeSetへ漏らさない。
+
+linked worktreeのignore authorityはper-worktree Git directoryに暗黙依存しない。
+`git rev-parse --path-format=absolute --git-common-dir` で検証した common Git directory（自身または
+`worktrees/` descendant の containment、non-symlink directory）と、その直下の regular `info/exclude`を
+profileへ束ねる。common binding/common excludeの開始・終了不一致は `CSV-SOURCE-001`、初期解決不能は
+`CSV-DIFF-003` とし、public FileChangeSetのshape/versionは変更しない。
