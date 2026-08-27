@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from pathlib import PurePosixPath
 
 from code_structure_viz.adapters.python.analyzer import PythonSnapshotAnalyzer
 from code_structure_viz.adapters.python.diff_renderer import (
@@ -52,6 +51,7 @@ from code_structure_viz.source.endpoints import (
     EndpointResolutionError,
 )
 from code_structure_viz.source.file_changes import (
+    DuplicateCanonicalPathError,
     FileChangeSet,
     attach_content_hunks,
     build_working_tree_file_change_set,
@@ -65,6 +65,8 @@ from code_structure_viz.source.git_repository import (
     EnumeratedPath,
     GitIndexEntry,
     GitInterruptedError,
+    GitlinkWorktreeState,
+    GitPathIdentity,
     GitReadError,
     GitRepositoryReader,
     HeadState,
@@ -98,8 +100,9 @@ class DiffApplication:
         working_source_authority: SourceView | None = None
         working_entries: tuple[EnumeratedPath, ...] = ()
         index_entries: tuple[GitIndexEntry, ...] = ()
-        untracked_paths: tuple[PurePosixPath, ...] = ()
-        unmerged_paths: tuple[PurePosixPath, ...] = ()
+        untracked_entries: tuple[GitPathIdentity, ...] = ()
+        unmerged_entries: tuple[GitPathIdentity, ...] = ()
+        gitlink_states: tuple[GitlinkWorktreeState, ...] = ()
         semantic_result: SemanticDiffResult | None = None
         try:
             self._checkpoint()
@@ -114,8 +117,9 @@ class DiffApplication:
             if working_tree_requested:
                 working_entries = reader.enumerate_path_entries()
                 index_entries = reader.enumerate_index_entries()
-                untracked_paths = reader.enumerate_untracked_paths()
-                unmerged_paths = reader.enumerate_unmerged_paths()
+                untracked_entries = reader.enumerate_untracked_entries()
+                unmerged_entries = reader.enumerate_unmerged_entries()
+                gitlink_states = reader.enumerate_gitlink_states(index_entries)
             self._checkpoint()
             endpoints = ComparisonEndpointResolver(
                 reader,
@@ -149,9 +153,12 @@ class DiffApplication:
                     start_head,
                     working_entries,
                     config.python,
-                    untracked_paths=frozenset(untracked_paths),
-                    unmerged_paths=frozenset(unmerged_paths),
+                    untracked_paths=frozenset(item.canonical_path for item in untracked_entries),
+                    unmerged_paths=frozenset(item.canonical_path for item in unmerged_entries),
                     index_entries=index_entries,
+                    untracked_entries=untracked_entries,
+                    unmerged_entries=unmerged_entries,
+                    gitlink_states=gitlink_states,
                 )
                 working_source_authority = after_source
             before_source = build_commit_source_view(reader, Commit(before_id), config.python)
@@ -309,12 +316,14 @@ class DiffApplication:
                 current_head = reader.resolve_head_state()
                 current_entries = reader.enumerate_path_entries()
                 current_index_entries = reader.enumerate_index_entries()
-                current_untracked = reader.enumerate_untracked_paths()
-                current_unmerged = reader.enumerate_unmerged_paths()
+                current_untracked = reader.enumerate_untracked_entries()
+                current_unmerged = reader.enumerate_unmerged_entries()
+                current_gitlink_states = reader.enumerate_gitlink_states(current_index_entries)
                 if (
                     current_index_entries != index_entries
-                    or current_untracked != untracked_paths
-                    or current_unmerged != unmerged_paths
+                    or current_untracked != untracked_entries
+                    or current_unmerged != unmerged_entries
+                    or current_gitlink_states != gitlink_states
                 ):
                     raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT))
                 assert working_freezer is not None
@@ -324,9 +333,12 @@ class DiffApplication:
                     current_head,
                     current_entries,
                     config.python,
-                    untracked_paths=frozenset(current_untracked),
-                    unmerged_paths=frozenset(current_unmerged),
+                    untracked_paths=frozenset(item.canonical_path for item in current_untracked),
+                    unmerged_paths=frozenset(item.canonical_path for item in current_unmerged),
                     index_entries=current_index_entries,
+                    untracked_entries=current_untracked,
+                    unmerged_entries=current_unmerged,
+                    gitlink_states=current_gitlink_states,
                 )
             self._artifacts_bound(transaction.read_staged_artifacts())
             transaction.commit(self._cancelled)
@@ -345,6 +357,8 @@ class DiffApplication:
             return RunOutcome.fatal((error.diagnostic,))
         except SourceViewBuildError as error:
             return RunOutcome.fatal((error.diagnostic,))
+        except DuplicateCanonicalPathError:
+            return RunOutcome.fatal((diagnostic(DiagnosticCode.DIFF_FILE_CHANGE),))
         except Exception:
             return RunOutcome.fatal((diagnostic(DiagnosticCode.INTERNAL_INVARIANT),))
         finally:

@@ -9,6 +9,7 @@ from code_structure_viz.source.git_repository import (
     CommandResult,
     Commit,
     GitIndexEntry,
+    GitPathIdentityCollisionFatal,
     GitReadError,
     GitRepositoryReader,
     SubprocessRunner,
@@ -325,7 +326,8 @@ def test_index_inventory_preserves_mode_object_stage_and_deterministic_path_orde
                 + b"100644 "
                 + first_object.encode("ascii")
                 + b" 0\tsrc/a.py\0",
-            )
+            ),
+            _result(0, b"H src/z.py\0H src/a.py\0"),
         ]
     )
 
@@ -336,6 +338,80 @@ def test_index_inventory_preserves_mode_object_stage_and_deterministic_path_orde
         GitIndexEntry(PurePosixPath("src/z.py"), second_object, "100755", 2),
     )
     assert runner.calls[0][0][5:] == ("ls-files", "--stage", "-z", "--cached", "--")
+
+
+def test_index_inventory_preserves_raw_spelling_and_skip_worktree_flag(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    object_id = "a" * 40
+    runner = ScriptedRunner(
+        [
+            _result(0, b"100644 " + object_id.encode("ascii") + b" 0	cafe\xcc\x81.py\0"),
+            _result(0, b"S cafe\xcc\x81.py\0"),
+        ]
+    )
+
+    entries = GitRepositoryReader(repo, runner=runner).enumerate_index_entries()
+
+    assert entries[0].path == PurePosixPath("café.py")
+    assert entries[0].raw_text == "cafe\u0301.py"
+    assert entries[0].skip_worktree is True
+    assert [call[0][5:] for call in runner.calls] == [
+        ("ls-files", "--stage", "-z", "--cached", "--"),
+        ("ls-files", "-t", "-z", "--cached", "--"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "flags_payload",
+    (
+        b"X src/app.py\0",
+        b"H src/app.py\0S src/app.py\0",
+        b"M src/app.py\0S src/app.py\0",
+    ),
+)
+def test_index_flag_protocol_rejects_malformed_or_duplicate_records(
+    tmp_path: Path,
+    flags_payload: bytes,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    object_id = "a" * 40
+    runner = ScriptedRunner(
+        [
+            _result(0, b"100644 " + object_id.encode("ascii") + b" 0	src/app.py\0"),
+            _result(0, flags_payload),
+        ]
+    )
+
+    with pytest.raises(GitReadError) as caught:
+        GitRepositoryReader(repo, runner=runner).enumerate_index_entries()
+
+    assert caught.value.diagnostic.code.value == "CSV-INTERNAL-001"
+
+
+def test_commit_tree_rejects_distinct_raw_spellings_with_one_nfc_identity(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    object_id = "a" * 40
+    payload = (
+        b"100644 blob "
+        + object_id.encode("ascii")
+        + b" 1\tdocs/caf\xc3\xa9.txt\0"
+        + b"100644 blob "
+        + object_id.encode("ascii")
+        + b" 1\tdocs/cafe\xcc\x81.txt\0"
+    )
+    runner = ScriptedRunner([_result(0, payload)])
+
+    with pytest.raises(GitPathIdentityCollisionFatal) as caught:
+        GitRepositoryReader(repo, runner=runner).enumerate_commit_tree(object_id)
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
 
 
 @pytest.mark.parametrize(

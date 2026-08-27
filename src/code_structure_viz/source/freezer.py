@@ -5,13 +5,16 @@ from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from code_structure_viz.core.config import PythonConfig
-from code_structure_viz.core.diagnostics import DiagnosticCode
+from code_structure_viz.core.diagnostics import DiagnosticCode, diagnostic
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
 from code_structure_viz.source.git_repository import (
     Commit,
     CommitTreeEntry,
     EnumeratedPath,
     GitIndexEntry,
+    GitlinkWorktreeState,
+    GitPathIdentity,
+    GitPathIdentityCollisionFatal,
     GitRepositoryReader,
     HeadState,
 )
@@ -45,6 +48,7 @@ class WorkingTreeFreezer:
             staging_root_descriptor=staging_root_descriptor,
             repository_descriptor=repository_descriptor,
             cancelled=cancelled,
+            fatal_path_identity_collisions=True,
         )
 
     def freeze(
@@ -56,6 +60,9 @@ class WorkingTreeFreezer:
         untracked_paths: frozenset[PurePosixPath] = frozenset(),
         unmerged_paths: frozenset[PurePosixPath] = frozenset(),
         index_entries: tuple[GitIndexEntry, ...] = (),
+        untracked_entries: tuple[GitPathIdentity, ...] = (),
+        unmerged_entries: tuple[GitPathIdentity, ...] = (),
+        gitlink_states: tuple[GitlinkWorktreeState, ...] = (),
     ) -> SourceView:
         return self._builder.build(
             head_state,
@@ -65,6 +72,9 @@ class WorkingTreeFreezer:
             untracked_paths=untracked_paths,
             unmerged_paths=unmerged_paths,
             index_entries=index_entries,
+            untracked_entries=untracked_entries,
+            unmerged_entries=unmerged_entries,
+            gitlink_states=gitlink_states,
         )
 
     def assert_unchanged(
@@ -77,6 +87,9 @@ class WorkingTreeFreezer:
         untracked_paths: frozenset[PurePosixPath] = frozenset(),
         unmerged_paths: frozenset[PurePosixPath] = frozenset(),
         index_entries: tuple[GitIndexEntry, ...] = (),
+        untracked_entries: tuple[GitPathIdentity, ...] = (),
+        unmerged_entries: tuple[GitPathIdentity, ...] = (),
+        gitlink_states: tuple[GitlinkWorktreeState, ...] = (),
     ) -> None:
         self._builder.assert_unchanged(
             initial,
@@ -86,6 +99,9 @@ class WorkingTreeFreezer:
             untracked_paths=untracked_paths,
             unmerged_paths=unmerged_paths,
             index_entries=index_entries,
+            untracked_entries=untracked_entries,
+            unmerged_entries=unmerged_entries,
+            gitlink_states=gitlink_states,
         )
 
 
@@ -96,6 +112,7 @@ def build_commit_source_view(
 ) -> SourceView:
     """Build an immutable SourceView directly from local Git blobs."""
     tree = reader.enumerate_commit_tree(commit.object_id)
+    _validate_tree_identities(tree)
     candidates = tuple(item for item in tree if _is_candidate(item.path, config))
     collision_groups = _collision_groups(candidates)
     collision_paths = {path for group in collision_groups for path in group}
@@ -217,3 +234,12 @@ def _collision_groups(
             key=lambda group: tuple(_path_key(path) for path in group),
         )
     )
+
+
+def _validate_tree_identities(entries: tuple[CommitTreeEntry, ...]) -> None:
+    raw_by_path: dict[PurePosixPath, str] = {}
+    for item in entries:
+        previous = raw_by_path.get(item.path)
+        if previous is not None:
+            raise GitPathIdentityCollisionFatal(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE))
+        raw_by_path[item.path] = item.raw_text or item.path.as_posix()

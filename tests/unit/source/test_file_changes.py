@@ -6,6 +6,7 @@ import pytest
 
 from code_structure_viz.source.file_changes import (
     ContentSideState,
+    DuplicateCanonicalPathError,
     FileChange,
     attach_content_hunks,
     build_working_tree_file_change_set,
@@ -69,6 +70,37 @@ def test_working_tree_change_set_counts_unreadable_untracked_path() -> None:
     assert [(item.status, item.path) for item in result] == [
         ("?", PurePosixPath("src/unreadable.py"))
     ]
+
+
+def test_working_tree_change_set_rejects_duplicate_canonical_inventory_paths() -> None:
+    canonical = PurePosixPath("src/café.py")
+    duplicate = SourceInventoryEntry(
+        canonical,
+        "src/cafe\u0301.py",
+        "regular",
+        1,
+        "b",
+    )
+
+    with pytest.raises(DuplicateCanonicalPathError):
+        build_working_tree_file_change_set(
+            (_inventory("src/café.py", "a"),),
+            (_inventory("src/café.py", "a"), duplicate),
+        )
+
+
+def test_content_evidence_rejects_duplicate_canonical_inventory_paths() -> None:
+    canonical = PurePosixPath("src/café.py")
+    duplicate = SourceInventoryEntry(
+        canonical,
+        "src/cafe\u0301.py",
+        "regular",
+        1,
+        "b",
+    )
+
+    with pytest.raises(DuplicateCanonicalPathError):
+        content_evidence_from_inventory((_inventory("src/café.py", "a"), duplicate))
 
 
 def test_same_path_tracking_transition_cannot_be_reused_as_copy_source() -> None:

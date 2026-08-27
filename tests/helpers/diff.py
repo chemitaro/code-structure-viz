@@ -87,6 +87,95 @@ def create_unmerged_repository(
     return repository, base
 
 
+def create_gitlink_repository(tmp_path: Path) -> tuple[Path, str, Path, str]:
+    """Create a parent repository with a tracked gitlink whose nested HEAD moves."""
+    repository = tmp_path / "repo"
+    nested = repository / "src" / "component"
+    (repository / "src").mkdir(parents=True)
+    nested.mkdir()
+    _git(repository, "init", "--quiet", "--initial-branch=main")
+    _git(nested, "init", "--quiet", "--initial-branch=main")
+    (nested / "README").write_text("nested before\n", encoding="utf-8")
+    _git(nested, "add", ".")
+    _git(nested, "commit", "--quiet", "--message=before", env=_commit_env())
+    (repository / "src" / "app.py").write_text("class Order:\n    amount: int\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "--quiet", "--message=parent", env=_commit_env())
+    parent_head = _head(repository)
+
+    (nested / "README").write_text("nested after\n", encoding="utf-8")
+    _git(nested, "add", ".")
+    _git(nested, "commit", "--quiet", "--message=after", env=_commit_env())
+    nested_head = _head(nested)
+    return repository, parent_head, nested, nested_head
+
+
+def create_raw_path_collision_repository(tmp_path: Path) -> tuple[Path, str, str]:
+    """Create a commit tree containing distinct NFC/NFD spellings of one path."""
+    repository = tmp_path / "repo"
+    (repository / "src").mkdir(parents=True)
+    _git(repository, "init", "--quiet", "--initial-branch=main")
+    (repository / "src" / "app.py").write_text("class Order:\n    amount: int\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "--quiet", "--message=before", env=_commit_env())
+    before = _head(repository)
+
+    app_blob = subprocess.check_output(
+        ("git", "-C", str(repository), "rev-parse", f"{before}:src/app.py"),
+        text=True,
+    ).strip()
+    composed = "café.txt".encode()
+    decomposed = "cafe\u0301.txt".encode("utf-8")
+    first_blob = _git_bytes(repository, "hash-object", "-w", "--stdin", input_bytes=b"nfc\n")
+    second_blob = _git_bytes(repository, "hash-object", "-w", "--stdin", input_bytes=b"nfd\n")
+    docs_tree = _git_bytes(
+        repository,
+        "mktree",
+        "-z",
+        input_bytes=(
+            b"100644 blob "
+            + first_blob
+            + b"\t"
+            + composed
+            + b"\0"
+            + b"100644 blob "
+            + second_blob
+            + b"\t"
+            + decomposed
+            + b"\0"
+        ),
+    )
+    root_tree = _git_bytes(
+        repository,
+        "mktree",
+        "-z",
+        input_bytes=(
+            b"040000 tree "
+            + docs_tree
+            + b"\tdocs\0"
+            + b"040000 tree "
+            + _git_bytes(
+                repository,
+                "mktree",
+                "-z",
+                input_bytes=b"100644 blob " + app_blob.encode("ascii") + b"\tapp.py\0",
+            )
+            + b"\tsrc\0"
+        ),
+    )
+    after = _git_bytes(
+        repository,
+        "commit-tree",
+        root_tree.decode("ascii"),
+        "-p",
+        before,
+        input_bytes=b"collision\n",
+        env=_commit_env(),
+    )
+    _git(repository, "update-ref", "refs/heads/collision", after.decode("ascii"))
+    return repository, before, after.decode("ascii")
+
+
 def run_diff_cli(
     repository: Path,
     output: Path,
@@ -158,3 +247,19 @@ def _git(
         check=True,
         env=env,
     )
+
+
+def _git_bytes(
+    repository: Path,
+    *arguments: str,
+    input_bytes: bytes,
+    env: dict[str, str] | None = None,
+) -> bytes:
+    completed = subprocess.run(
+        ("git", "-C", str(repository), *arguments),
+        input=input_bytes,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+    return completed.stdout.strip()

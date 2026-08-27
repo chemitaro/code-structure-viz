@@ -321,9 +321,60 @@ def test_schemas_accept_captured_complete_diff_json(tmp_path: Path) -> None:
     _validator("semantic-v1.schema.json").validate(
         json.loads((output / "python.diff.semantic.json").read_bytes())
     )
-    _validator("run-manifest-v1.schema.json").validate(
-        json.loads((output / "run-manifest.json").read_bytes())
-    )
+    manifest = json.loads((output / "run-manifest.json").read_bytes())
+    validator = _validator("run-manifest-v1.schema.json")
+    validator.validate(manifest)
+    missing_observations = deepcopy(manifest)
+    missing_observations["comparison"].pop("candidate_observations")
+    with pytest.raises(ValidationError):
+        validator.validate(missing_observations)
+    before = manifest["comparison"]["resolved"]["before"]
+    manifest["comparison"]["candidate_observations"] = [
+        {
+            "ordinal": 0,
+            "origin": "config-upstream",
+            "reference": "refs/remotes/upstream/a",
+            "resolved_object": before,
+            "merge_base": None,
+            "disposition": "no-merge-base",
+        },
+        {
+            "ordinal": 1,
+            "origin": "config-upstream",
+            "reference": "refs/remotes/upstream/b",
+            "resolved_object": before,
+            "merge_base": before,
+            "disposition": "selected",
+        },
+    ]
+    validator.validate(manifest)
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                **manifest,
+                "comparison": {
+                    **manifest["comparison"],
+                    "candidate_observations": [
+                        {**manifest["comparison"]["candidate_observations"][0], "origin": "other"}
+                    ],
+                },
+            }
+        )
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                **manifest,
+                "comparison": {
+                    **manifest["comparison"],
+                    "candidate_observations": [
+                        {
+                            **manifest["comparison"]["candidate_observations"][0],
+                            "extra": True,
+                        }
+                    ],
+                },
+            }
+        )
 
 
 def test_manifest_schema_accepts_incomplete_diff_descriptor_and_comparison_config(

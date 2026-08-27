@@ -49,6 +49,9 @@ coding agent が named endpoint で before/after Python semantic snapshot を安
 | I02-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
 | I02-REQ-007 | slice-specific boundary | FileChangeSetはA/M/D/R/C/T/U/?とold/new line-range metadata、content-independent hunk IDだけをevidenceとして保持する。implicit changed-path default 1,000とentity default 500は別gateで、valid explicit overrideとactual countをmanifestへ記録する。 |
 | I02-REQ-008 | stdout contract | `--stdout SELECTOR`を高々1回のclosed selectorとして検証し、available exact bytes、unavailable result、selectorなしsummary、stderr diagnostics、exit 2 no-publicationを提供する。 |
+| I02-REQ-009 | Git path identity and index state | Gitが返すraw UTF-8 path spellingをcanonical NFC pathと別に保持し、異なるraw spellingが同一canonical pathへ収束する場合は `CSV-DIFF-003` のrun-level fatal（exit 1・公開なし）とする。`skip-worktree` の欠落ファイルを実削除へ変換せず、index blobの再構築も行わない。 |
+| I02-REQ-010 | gitlink boundary | mode `160000` はsuperprojectの1 pathとして扱い、nested repositoryのHEAD差分、tracked/staged dirty、untracked dirtyを親側の1件の `M` として分類する。nested sourceを解析せず、nested stateの読取不能または公開直前の変化はfatalとする。 |
+| I02-REQ-011 | implicit-base provenance | implicit base解決では候補のordinal、origin、requested reference、resolved object、merge-base、dispositionを評価順に記録する。明示endpointでは候補配列を空にし、implicitでは選択候補を一件だけ記録する。 |
 
 ### I02-REQ-001
 
@@ -75,6 +78,30 @@ FileChangeSetはA/M/D/R/C/T/U/?とold/new line-range metadata、content-independ
 
 `--stdout SELECTOR`を高々1回のclosed selectorとして検証し、available exact bytes、unavailable result、selectorなしsummary、stderr diagnostics、exit 2 no-publicationを提供する。
 
+### I02-REQ-009
+
+Gitのpath identityをraw UTF-8 spellingとNFC canonical pathの組として保持する。index、commit tree、
+working-tree、untracked、unmergedのどの列挙経路でも、異なるraw spellingが同一canonical pathへ収束した
+場合は、canonical mapの上書きや一方のwinner選択をせず `CSV-DIFF-003` のrun-level fatal（exit 1・
+semantic JSON/PlantUML/manifest公開なし）とする。indexのskip-worktree flagを観測し、skip-worktree pathが
+作業木に欠落している場合は `sparse-unavailable` としてpayload unavailable（exit 3）にし、実削除 `D` や
+index blobの再構築に変換しない。
+
+### I02-REQ-010
+
+mode `160000` のgitlinkはsuperprojectの一つのpathとして扱う。nested repositoryのHEADがindex objectと
+異なる、tracked/staged contentがdirty、またはuntracked contentがある場合は、nested pathを列挙・解析せず
+親側FileChangeSetの一件の `M` とする。nested stateを安全に読めない場合、または開始時と公開直前でstateが
+変化した場合は `CSV-DIFF-003`/`CSV-SOURCE-001` のrun-level fatalとする。
+
+### I02-REQ-011
+
+implicit base解決の候補評価を、候補のordinal、origin、requested reference、resolved object、merge-base、
+disposition（`selected`、`no-merge-base`、`unresolved`、`not-evaluated`）としてmanifestへ記録する。
+explicit `from`/`to` のrunはcandidate observationを空配列とし、implicit runはselected observationを
+一件だけ持つ。selected observationのreference/merge-baseとtop-level provenanceは一致し、候補配列の順序と
+ordinalは同一入力で決定的でなければならない。
+
 ## 2026-08-27 のレビュー対応決定
 
 Red/Blue レビューで確認した境界を、実装と受入れの共通 authority として次のように固定する。
@@ -84,6 +111,10 @@ Red/Blue レビューで確認した境界を、実装と受入れの共通 auth
 - hunk の content evidence は `absent`、`available`、`unavailable` を区別する。取得できない、digest が一致しない、binary/上限超過の bytes を `b\"\"` として扱わず、available bytes のみから行範囲を計算する。affected Python path は `payload_unavailable`・exit 3・safe file-change/manifest のみ、非 Python path は偽の hunk を出さない。commit blob/object の欠損または read failure は run fatal・exit 1・公開なしとする。
 - unmerged (`U`) は before side を一度だけ実際に解析し、その同じ observation の semantic side、coverage、diagnostic から safe manifest を構成する。after は未解析 `analysis-failed` として記録し、synthetic zero coverage で before の実測結果を上書きしない。
 - `[comparison].upstream_ref` は既存 config contract どおり参照名前空間として deterministic に子 ref へ展開する。explicit target、展開した候補、built-in 候補の順序と merge-base は provenance に記録し、fetch/checkout/ref mutation は行わない。
+- Git path identity は raw UTF-8 spelling と NFC canonical path の組として扱う。index、commit tree、working-tree、untracked、unmerged のいずれかで異なる raw spelling が同一 canonical pathへ収束した場合は、どちらかをwinnerにせず `CSV-DIFF-003`・exit 1・semantic/PlantUML/manifest公開なしとする。内部 map/content evidence がcanonical keyを上書きすることも許可しない。
+- indexの `skip-worktree` flag は `git ls-files -t --cached` から同じraw identityを照合して取得する。skip-worktree pathが作業木に欠落していても `sparse-unavailable` として `payload_unavailable`（exit 3）へ縮退し、`D` やcanonical empty side、index blobの再構築へ変換しない。通常tracked pathの欠落だけを実削除 `D` とする。
+- mode `160000` のgitlinkはnested sourceの再帰解析をせず、nested HEAD、tracked/staged diff、untracked pathのread-only stateを親側inventoryへ記録する。HEADがindex objectと異なる、tracked/staged dirty、またはuntracked dirtyなら親側FileChangeSetの一件の `M` とする。nested `.git`/HEAD/stateが安全に読めない場合は `CSV-DIFF-003` のrun-level fatalとする。
+- implicit base候補は評価順を固定し、各候補の `ordinal`、`origin`、`reference`、`resolved_object`、`merge_base`、`disposition` を manifest の `comparison.candidate_observations` に記録する。明示 `from` を持つrunは空配列、implicit runは選択済み候補一件と未評価候補を含む deterministic 配列とする。
 
 上記は既存 `file-change-set/v1`、`source-view/v1`、`run-manifest/v1` の public schema version を変更しない。レビュー対応の acceptance は production CLI/application 経路で status、budget、hunk、U coverage、missing-object、drift、valid override、schema/publication を検証する。
 
@@ -227,8 +258,12 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 | I02-AC-009 | FileChangeSet hunkがrange/status/content-independent IDだけを持ち、raw patch/context/source/comment/literal/secret/absolute pathを全channelへ出さない。 | I02-AT-009 |
 | I02-AC-010 | 501 diagram entitiesはdomain `incomplete_kind: payload_unavailable`・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid 600 overrideは通常公開する。 | I02-AT-010 |
 | I02-AC-011 | stdout selectorのvalid/invalid/duplicate/domain/format、available exact-byte、not_applicable/payload_unavailable/fatal/interrupt result、selectorなしsummaryをtable-drivenに満たす。 | I02-AT-011 |
+| I02-AC-012 | skip-worktreeで欠落したPython pathは実削除 `D` にならず、affected domainのsafe `file-changes.json`/manifestとexit 3だけを公開する。skip flagのない欠落pathは `D` とする。 | `tests/acceptance/python/test_diff_cli.py::test_missing_skip_worktree_python_is_unavailable_not_actual_deletion`, `::test_missing_non_skip_worktree_python_remains_actual_deletion` |
+| I02-AC-013 | dirtyまたはnested HEADが変化したgitlinkはnested内容を公開せず親側の一件の `M` として数え、公開直前のgitlink state driftはexit 1・公開なしになる。 | `tests/acceptance/python/test_diff_cli.py::test_dirty_gitlink_is_one_superproject_change`, `::test_dirty_gitlink_contents_are_one_superproject_change`, `::test_gitlink_state_drift_before_publication_is_fatal` |
+| I02-AC-014 | NFC/NFDの異なるraw Git pathが同一canonical pathへ収束したcommit treeはwinnerを選ばず、`CSV-DIFF-003`・exit 1・Artifact 0件になる。 | `tests/acceptance/python/test_diff_cli.py::test_non_python_nfc_nfd_collision_is_run_fatal_without_publication` |
+| I02-AC-015 | implicit base候補は評価順・origin・resolved object・merge-base・dispositionをdeterministicにmanifestへ記録し、explicit endpointは空配列を記録する。同一入力の再実行でbytesが一致する。 | `tests/acceptance/python/test_diff_cli.py::test_implicit_candidate_observations_record_rejected_then_selected_refs`, `::test_explicit_endpoints_publish_empty_candidate_observations` |
 
-- **I02-AC-001〜I02-AC-011 がすべて満たされ、planned test command が clean checkout で成功すること。**
+- **I02-AC-001〜I02-AC-015 がすべて満たされ、planned test command が clean checkout で成功すること。**
 - Requirement、Design、Plan の trace table が一致し、unresolved acceptance gap がないこと。
 - release boundary: ISSUE-01と合わせてPython domain preview。shared Git comparison contractを後続diff slicesへ渡す。
 

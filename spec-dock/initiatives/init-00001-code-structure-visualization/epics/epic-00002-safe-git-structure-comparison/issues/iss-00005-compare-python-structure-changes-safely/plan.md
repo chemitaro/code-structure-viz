@@ -42,6 +42,10 @@ production acceptance trace に P1 gap が見つかった。以下の remediatio
 | I02-PLAN-010 | all-changed-path bounded content evidence、availability typing、terminator-preserving ranges、no fake hunk | `source/file_changes.py`, `source/freezer.py`, `application/diff.py` | 完了 |
 | I02-PLAN-011 | U branch の side/coverage/diagnostic を一回の observation から構成 | `application/diff.py`, `tests/acceptance/python/test_domain_presence_diff.py` | 完了 |
 | I02-PLAN-012 | AC-003/007/008/009/010 の production-route regression、drift/missing-object/publication/schema evidence | `tests/acceptance/python/test_diff_cli.py`, `tests/acceptance/python/test_diff_entity_budget.py`, `tests/unit/source/**` | 完了 |
+| I02-PLAN-013 | raw Git path identity、NFC/NFD collision、duplicate canonical map、index skip-worktree state | `source/git_repository.py`, `source/source_view.py`, `source/file_changes.py`, `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/**` | 完了 |
+| I02-PLAN-014 | mode `160000` gitlink の nested HEAD/tracked/staged/untracked state、親側一件 `M`、公開直前 drift | `source/git_repository.py`, `source/source_view.py`, `source/file_changes.py`, `application/diff.py`, `tests/acceptance/python/test_diff_cli.py` | 完了 |
+| I02-PLAN-015 | implicit base候補の評価順・origin・resolved object・merge-base・dispositionをmanifestへ記録 | `source/endpoints.py`, `schemas/run-manifest-v1.schema.json`, `tests/acceptance/python/test_diff_cli.py`, `tests/contracts/test_json_schemas.py` | 完了 |
+| I02-PLAN-016 | Strictレビューの履歴SHAと現行検証を混同しないReport/証跡運用へ同期 | `report.md`, `docs/contracts/run-manifest-v1.md`, Strict review workbench | 完了 |
 
 ## 3. 実装詳細
 
@@ -116,6 +120,20 @@ unavailable `stdout-result/v1`、selector 無指定の `run-summary/v1` を stde
   LF/CRLF、unavailable、missing commit object、working-tree drift、valid entity override、U coverage を
   検証した。unit protocol tests と schema/security suite を合わせ、publication file set と no-publication
   boundary を確認した。
+- I02-PLAN-013 では、Gitのraw UTF-8 spellingをNFC canonical pathから分離した `GitPathIdentity` を導入し、
+  index/tree/untracked/unmergedの異なるraw spellingが同一canonical pathへ収束した時点で
+  `CSV-DIFF-003`・exit 1・公開なしとした。indexのskip-worktree flagをraw identityで照合し、欠落pathを
+  `sparse-unavailable` として扱ってindex blobの再構築と実削除 `D` を防いだ。canonical map/content evidence
+  のduplicate上書きも拒否した。
+- I02-PLAN-014 では、mode `160000` をnested sourceへ展開せず、nested HEAD、tracked/staged diff、untracked
+  dirtyを `GitlinkWorktreeState` としてread-only観測した。いずれかの変更は親側の一件の `M`、安全な再読取の
+  不一致は `CSV-SOURCE-001` fatalとし、nested pathのhunk・secret・stderrを公開しない。
+- I02-PLAN-015 では、implicit base候補をdeterministicにdeduplicateし、各候補のordinal/origin/reference/
+  resolved object/merge-base/dispositionを `comparison.candidate_observations`へ記録した。explicit endpoint
+  は空配列、implicitはselected一件を必須とし、`ComparisonEndpoints` constructorで整合性を検証した。
+- I02-PLAN-016 では、過去のStrictレビューで検証したSHAを「現行SHA」と記載せず、Reportを履歴receiptとして
+  明示する。現行のlocal/upstream/GitHub SHA、テスト結果、Strict pass判定は同一SHAを束ねた外部検証証跡で
+  確認し、Report内の古い数値を現行証拠として再利用しない。
 
 ## 4. 受入れテストとコマンド
 
@@ -151,6 +169,9 @@ git diff --check
 | I02-REQ-006 | I02-DES-006 | I02-PLAN-006 | `test_git_read_only.py`, `test_file_change_hunk_redaction.py`, snapshot regression |
 | I02-REQ-007 | I02-DES-007 | I02-PLAN-007 | `test_file_changes.py`, `test_diff_cli.py` |
 | I02-REQ-008 | I02-DES-008 | I02-PLAN-008 | `test_stdout_selector.py`, `test_diff_fail_closed.py` |
+| I02-REQ-009 | I02-DES-009 | I02-PLAN-013 | `test_diff_cli.py`, `test_git_repository.py`, `test_source_view.py`, `test_file_changes.py` |
+| I02-REQ-010 | I02-DES-010 | I02-PLAN-014 | `test_diff_cli.py`, `test_git_repository.py`, `test_file_changes.py` |
+| I02-REQ-011 | I02-DES-011 | I02-PLAN-015 | `test_diff_cli.py`, `test_json_schemas.py` |
 
 Downstream Issue は `docs/contracts/source-view-v1.md`、`docs/contracts/file-change-set-v1.md`、
 `docs/contracts/python-semantic-v1.md`、`docs/contracts/run-manifest-v1.md`、`docs/contracts/stdout-v1.md`

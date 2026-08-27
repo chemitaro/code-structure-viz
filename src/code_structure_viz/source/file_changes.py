@@ -28,6 +28,10 @@ class ContentSideState(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+class DuplicateCanonicalPathError(ValueError):
+    """Raised when a canonical path map would silently overwrite an entry."""
+
+
 @dataclass(frozen=True, slots=True)
 class ContentEvidence:
     state: ContentSideState
@@ -313,8 +317,8 @@ def build_working_tree_file_change_set(
     after: str | None = None,
 ) -> FileChangeSet:
     """Build a working-tree change inventory without invoking Git's conversion filters."""
-    before_map = {item.path: item for item in before_inventory}
-    after_map = {item.path: item for item in after_inventory}
+    before_map = _inventory_map(before_inventory)
+    after_map = _inventory_map(after_inventory)
     changes: list[FileChange] = []
     deleted: dict[PurePosixPath, Any] = {}
     added: dict[PurePosixPath, Any] = {}
@@ -355,6 +359,14 @@ def build_working_tree_file_change_set(
             continue
         left_kind = getattr(left, "kind", None)
         right_kind = getattr(right, "kind", None)
+        if left_kind == right_kind == "gitlink":
+            if _gitlink_changed(left, right):
+                changes.append(FileChange("M", path, path))
+            classified_same_paths.add(path)
+            continue
+        if _sparse_state_matches_index(left, right):
+            classified_same_paths.add(path)
+            continue
         if left_kind != right_kind:
             status = (
                 "T"
@@ -428,6 +440,45 @@ def _cross_path_identity(value: Any) -> tuple[str, str] | None:
     return kind, digest
 
 
+def _inventory_map(values: Iterable[Any]) -> dict[PurePosixPath, Any]:
+    result: dict[PurePosixPath, Any] = {}
+    for item in values:
+        path = getattr(item, "path", None)
+        if not isinstance(path, PurePosixPath):
+            raise DuplicateCanonicalPathError("inventory path is invalid")
+        raw_path = getattr(item, "raw_path", path.as_posix())
+        if not isinstance(raw_path, str):
+            raise DuplicateCanonicalPathError("inventory raw path is invalid")
+        if path in result:
+            raise DuplicateCanonicalPathError("inventory contains a duplicate canonical path")
+        result[path] = item
+    return result
+
+
+def _sparse_state_matches_index(left: Any, right: Any) -> bool:
+    left_sparse = getattr(left, "materialization_state", None) == "sparse-unavailable"
+    right_sparse = getattr(right, "materialization_state", None) == "sparse-unavailable"
+    if left_sparse == right_sparse:
+        return False
+    return (
+        getattr(left, "index_object_id", None) is not None
+        and getattr(left, "index_object_id", None) == getattr(right, "index_object_id", None)
+        and getattr(left, "git_mode", None) == getattr(right, "git_mode", None)
+    )
+
+
+def _gitlink_changed(left: Any, right: Any) -> bool:
+    right_current = getattr(right, "worktree_object_id", None)
+    right_index = getattr(right, "index_object_id", None)
+    if right_current is not None and right_index is not None and right_current != right_index:
+        return True
+    if bool(getattr(right, "worktree_dirty", False)):
+        return True
+    return getattr(left, "index_object_id", getattr(left, "object_id", None)) != getattr(
+        right, "index_object_id", getattr(right, "object_id", None)
+    ) or getattr(left, "git_mode", None) != getattr(right, "git_mode", None)
+
+
 def _line_ranges(before: bytes, after: bytes) -> tuple[tuple[int, int, int, int], ...]:
     left = before.splitlines(keepends=True)
     right = after.splitlines(keepends=True)
@@ -457,6 +508,8 @@ def content_evidence_from_inventory(
 ) -> dict[PurePosixPath, ContentEvidence]:
     evidence: dict[PurePosixPath, ContentEvidence] = {}
     for item in inventory:
+        if item.path in evidence:
+            raise DuplicateCanonicalPathError("content evidence contains a duplicate path")
         availability = getattr(item, "availability", "unavailable")
         content = getattr(item, "content", None)
         digest = getattr(item, "digest", None)
@@ -608,6 +661,7 @@ def _change_sort_key(value: FileChange) -> bytes:
 __all__ = [
     "ContentEvidence",
     "ContentSideState",
+    "DuplicateCanonicalPathError",
     "FileChange",
     "FileChangeSet",
     "HunkMetadata",

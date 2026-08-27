@@ -20,6 +20,7 @@ from code_structure_viz.source.source_view import (
     SourceFileKind,
     SourceInterruptedError,
     SourceViewBuilder,
+    SourceViewBuildError,
 )
 
 
@@ -140,27 +141,41 @@ def test_descriptor_anchored_source_read_survives_repository_path_swap(tmp_path:
     assert view.files[0].content == b"class Original:\n    pass\n"
 
 
-def test_nfc_collision_becomes_one_failure_and_neither_path_wins(tmp_path: Path) -> None:
+def test_nfc_collision_is_run_fatal_before_candidate_filtering(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     config = PythonConfig((".",), ("**/*.py",), ())
     composed = PurePosixPath("caf\u00e9.py")
 
-    view = SourceViewBuilder(repo, tmp_path / "stage").build(
-        Commit("2" * 40),
-        (
-            EnumeratedPath("caf\u00e9.py", composed),
-            EnumeratedPath("cafe\u0301.py", composed),
-        ),
-        config,
-    )
+    with pytest.raises(SourceViewBuildError) as caught:
+        SourceViewBuilder(repo, tmp_path / "stage", fatal_path_identity_collisions=True).build(
+            Commit("2" * 40),
+            (
+                EnumeratedPath("caf\u00e9.py", composed),
+                EnumeratedPath("cafe\u0301.py", composed),
+            ),
+            config,
+        )
 
-    assert view.files == ()
-    assert len(view.failures) == 1
-    failure = view.failures[0]
-    assert failure.path == composed
-    assert failure.stage.value == "path_safety"
-    assert failure.diagnostic_code.value == "CSV-SOURCE-004"
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+
+
+def test_non_python_nfc_collision_is_run_fatal_before_candidate_filtering(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    composed = PurePosixPath("docs/caf\u00e9.txt")
+
+    with pytest.raises(SourceViewBuildError) as caught:
+        SourceViewBuilder(repo, tmp_path / "stage", fatal_path_identity_collisions=True).build(
+            Commit("2" * 40),
+            (
+                EnumeratedPath("docs/caf\u00e9.txt", composed),
+                EnumeratedPath("docs/cafe\u0301.txt", composed),
+            ),
+            PythonConfig(("src",), ("**/*.py",), ()),
+        )
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
 
 
 def test_casefold_samefile_collision_keeps_each_canonical_path_descriptor(
@@ -185,7 +200,7 @@ def test_casefold_samefile_collision_keeps_each_canonical_path_descriptor(
     assert all(item.diagnostic_code.value == "CSV-SOURCE-004" for item in view.failures)
 
 
-def test_mixed_nfc_and_casefold_samefile_collision_forms_one_group(
+def test_mixed_nfc_and_casefold_collision_is_run_fatal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -202,22 +217,21 @@ def test_mixed_nfc_and_casefold_samefile_collision_forms_one_group(
 
     monkeypatch.setattr(os.path, "samefile", samefile)
 
-    view = SourceViewBuilder(repo, tmp_path / "stage").build(
-        Commit("2" * 40),
-        (
-            EnumeratedPath(canonical, PurePosixPath(canonical)),
-            EnumeratedPath(decomposed, PurePosixPath(unicodedata.normalize("NFC", decomposed))),
-            EnumeratedPath(lower, PurePosixPath(lower)),
-        ),
-        PythonConfig((".",), ("**/*.py",), ()),
-    )
+    with pytest.raises(SourceViewBuildError) as caught:
+        SourceViewBuilder(repo, tmp_path / "stage", fatal_path_identity_collisions=True).build(
+            Commit("2" * 40),
+            (
+                EnumeratedPath(canonical, PurePosixPath(canonical)),
+                EnumeratedPath(decomposed, PurePosixPath(unicodedata.normalize("NFC", decomposed))),
+                EnumeratedPath(lower, PurePosixPath(lower)),
+            ),
+            PythonConfig((".",), ("**/*.py",), ()),
+        )
 
-    assert view.files == ()
-    assert view.collision_groups == ((PurePosixPath(canonical), PurePosixPath(lower)),)
-    assert tuple(item.path.as_posix() for item in view.failures) == (canonical, lower)
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
 
 
-def test_independent_nfc_collision_groups_with_same_casefold_stay_separate(
+def test_independent_nfc_collision_groups_are_run_fatal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -228,20 +242,17 @@ def test_independent_nfc_collision_groups_with_same_casefold_stay_separate(
         (repo / name).write_bytes(b"class Value:\n    pass\n")
     monkeypatch.setattr(os.path, "samefile", lambda _left, _right: False)
 
-    view = SourceViewBuilder(repo, tmp_path / "stage").build(
-        Commit("2" * 40),
-        tuple(
-            EnumeratedPath(name, PurePosixPath(unicodedata.normalize("NFC", name)))
-            for name in names
-        ),
-        PythonConfig((".",), ("**/*.py",), ()),
-    )
+    with pytest.raises(SourceViewBuildError) as caught:
+        SourceViewBuilder(repo, tmp_path / "stage", fatal_path_identity_collisions=True).build(
+            Commit("2" * 40),
+            tuple(
+                EnumeratedPath(name, PurePosixPath(unicodedata.normalize("NFC", name)))
+                for name in names
+            ),
+            PythonConfig((".",), ("**/*.py",), ()),
+        )
 
-    assert view.files == ()
-    assert view.collision_groups == (
-        (PurePosixPath("É.py"),),
-        (PurePosixPath("é.py"),),
-    )
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
 
 
 def test_single_physical_spelling_is_read_without_replacing_it_with_logical_identity(

@@ -35,9 +35,15 @@ content の fail-closed、H3=before の実測結果を保持する U outcome、H
 
 修正は同じ branch の Luna MAX coder lane で TDD の Red→Green として実施し、既知 P1 を検出する production
 CLI regression を追加した。commit object 欠損の扱いは正本契約との照合で一度修正し、最終的に run fatal
-（exit 1・公開なし）へ戻した。現行候補 commit は
-`7daf0372f101dd992335a379e1fee6686a92bf15` で、local HEAD、configured upstream、GitHub branch tip の
-三者が一致している。Final Quality Gate はこの SHA に対して再実行するまで未完了である。
+（exit 1・公開なし）へ戻した。続くStrict Blue継続セッションでは、追加P1をA（raw Git identity/index/
+sparse/gitlink）、B（候補根拠とSHA証跡）、C（production acceptance coverage）へ再分類し、H5〜H8として
+対応を具体化した。Luna MAX coder laneでH5〜H7（skip-worktree、gitlink、raw/NFC collision、candidate
+observations）をproduction経路と受入れテストへ反映した。
+
+このReportに記載する `7daf0372f101dd992335a379e1fee6686a92bf15` および
+`202e8a8bf9cf1f9c3073f0864e7d0b340a688a46` は履歴receiptであり、現行SHAではない。後続commitを含む
+local/upstream/GitHub SHAの一致とFinal Quality Gateの判定は、Reportとは独立した同一SHAの外部検証receiptで
+のみ確定する。
 
 ## Remediation evidence
 
@@ -76,8 +82,9 @@ P1 は次のように修正した。
   codes を manifest schema へ追加した。U path は before を一度だけ解析し、その同一結果から semantic
   side・実測 coverage・parse diagnostics を構成する。未解析 after だけを source fingerprint 付き
   `analysis-failed` として記録し、synthetic coverage が before の実測結果を上書きしない。
-- Design/Plan/Requirement を実装済み path/symbol、H1/H2/H3/H4 境界、remediation step、test file へ同期し、
-  仮想の planned path を除去した。
+- Design/Plan/Requirement を実装済み path/symbol、H1〜H8 境界、remediation step、test file へ同期し、
+  仮想の planned path を除去した。`run-manifest/v1` の candidate observations、path identity、sparse、
+  gitlink stateの契約も正本へ同期した。
 
 P2 の改善候補（relation/status のより豊かな PlantUML primitive、blob read batching、無関係 U path の
 domain-local attribution、Unicode path policy のさらなる共通化、unborn HEAD の explicit endpoint
@@ -87,11 +94,11 @@ composability）は review-response に記録し、今回の acceptance gate で
 
 - `src/code_structure_viz/application/diff.py`: endpoint から publication までの one-run orchestration、
   changed-path/entity gate、drift/cancellation、domain outcome。
-- `src/code_structure_viz/source/endpoints.py`: named endpoint、implicit base、start HEAD provenance。
+- `src/code_structure_viz/source/endpoints.py`: named endpoint、implicit base、start HEAD provenance、candidate observations。
 - `src/code_structure_viz/source/freezer.py` / `source/source_view.py`: commit/frozen working-tree の
   immutable source view、secure read、inventory、fingerprint。
 - `src/code_structure_viz/source/git_repository.py`: Git allowlist、fixed environment、bounded child、
-  commit tree/blob、untracked/unmerged metadata。
+  commit tree/blob、raw path identity、index skip-worktree、untracked/unmerged、gitlink metadata。
 - `src/code_structure_viz/source/file_changes.py`: status、range、ordinal、content-independent hunk ID、
   bounded parser、frozen-content hunk。
 - `src/code_structure_viz/semantic/diff.py` / `adapters/python/matcher.py`: presence、canonical empty、
@@ -101,24 +108,30 @@ composability）は review-response に記録し、今回の acceptance gate で
 - `schemas/file-change-set-v1.schema.json`、`semantic-v1.schema.json`、`run-manifest-v1.schema.json`、
   `diagnostic-v1.schema.json`、`docs/contracts/**`: closed public contracts。
 
-## Verification
+## Verification receipts
 
-2026-08-27 に commit `7daf0372f101dd992335a379e1fee6686a92bf15` と同じ内容の branch working tree で次を実行した。
+この節のSHAと結果は履歴receiptであり、後続commitを含む現行branchの証明ではない。特に
+`7daf0372f101dd992335a379e1fee6686a92bf15` と
+`202e8a8bf9cf1f9c3073f0864e7d0b340a688a46` は、後続のH5〜H7変更およびReport同期より前の観測点である。
+これらをlocal HEAD、configured upstream、GitHub branch tipの「現行三者一致」として再利用してはならない。
 
-- `uv run pytest -q`: **450 passed, 1 skipped**
-- U path の Red→Green acceptance: **2 failed, 5 passed** → **7 passed**
-- related diff focused suite（endpoint/status/hunk/U/budget/schema/security を含む）: **170 passed, 1 skipped**
-- `uv run ruff format --check .`: **成功（107 files already formatted）**
+H5〜H7を含む作業木での独立再検証receiptは次のとおりである。
+
+- focused source unit: **64 passed**
+- acceptance/contract/security: **108 passed**
+- full suite: **467 passed, 1 skipped**
+- `uv run ruff format --check .`: **成功**
 - `uv run ruff check .`: **成功**
-- `uv run mypy src tests`: **成功（98 source files）**
+- `uv run mypy src tests`: **成功**
 - `uv build`: **成功**
-- `python3 ./spec-dock/scripts/spec-dock validate`: **成功（nodes=10）**
+- `python3 ./spec-dock/scripts/spec-dock validate`: **成功**
 - `git diff --check`: **成功**
 
-重点 suite は endpoint/presence/budget/stdout、canonical status（R/C/T/D+?）、semantic seed/impact/move、
-source/Git safety、hunk redaction・non-Python・LF/CRLF・unavailable、schema の実ファイルへ trace され、
-full suite に含まれる。生成した diff の semantic JSON、run manifest、file-change set は同梱 schema で検証し、
-working-tree run は publication 前に index/path/untracked/unmerged state と fingerprint drift を再確認する。
+最終的な現行SHA、local/upstream/GitHub一致、clean checkout、Final Quality Gateの
+`review_status: pass` は、Reportの履歴値ではなく、公開直前に取得した同一SHAの外部検証receiptで判定する。
+重点suiteはendpoint/presence/budget/stdout、canonical status（R/C/T/D+?）、sparse/gitlink/raw path
+identity/candidate provenance、semantic seed/impact/move、source/Git safety、hunk redaction・non-Python・
+LF/CRLF・unavailable、schemaへtraceされる。
 
 ## Residual Risks / Follow-ups
 

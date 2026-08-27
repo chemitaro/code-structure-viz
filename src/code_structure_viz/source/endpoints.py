@@ -13,6 +13,47 @@ class EndpointKind(StrEnum):
     WORKING_TREE = "frozen-working-tree"
 
 
+class CandidateOrigin(StrEnum):
+    PR_TARGET = "pr-target"
+    CONFIG_TARGET = "config-target"
+    CONFIG_UPSTREAM = "config-upstream"
+    BUILTIN = "builtin"
+
+
+class CandidateDisposition(StrEnum):
+    UNRESOLVED = "unresolved"
+    NO_MERGE_BASE = "no-merge-base"
+    SELECTED = "selected"
+    NOT_EVALUATED = "not-evaluated"
+
+
+@dataclass(frozen=True, slots=True)
+class BaseCandidateObservation:
+    ordinal: int
+    origin: CandidateOrigin
+    reference: str
+    resolved_object: str | None
+    merge_base: str | None
+    disposition: CandidateDisposition
+
+    def to_json_value(self) -> dict[str, object]:
+        return {
+            "ordinal": self.ordinal,
+            "origin": self.origin.value,
+            "reference": self.reference,
+            "resolved_object": self.resolved_object,
+            "merge_base": self.merge_base,
+            "disposition": self.disposition.value,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ImplicitBaseResolution:
+    selected_reference: str
+    selected_merge_base: str
+    observations: tuple[BaseCandidateObservation, ...]
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedEndpoint:
     requested: str
@@ -34,6 +75,28 @@ class ComparisonEndpoints:
     resolution_method: str
     requested_from: str | None = None
     requested_to: str | None = None
+    candidate_observations: tuple[BaseCandidateObservation, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.candidate_observations:
+            if self.selected_base_candidate is not None or self.merge_base is not None:
+                raise ValueError("explicit endpoint provenance cannot select an implicit base")
+            return
+        expected_ordinals = tuple(range(len(self.candidate_observations)))
+        if tuple(item.ordinal for item in self.candidate_observations) != expected_ordinals:
+            raise ValueError("candidate observation ordinals are not deterministic")
+        selected = tuple(
+            item
+            for item in self.candidate_observations
+            if item.disposition is CandidateDisposition.SELECTED
+        )
+        if len(selected) != 1:
+            raise ValueError("implicit endpoint requires exactly one selected candidate")
+        if (
+            selected[0].reference != self.selected_base_candidate
+            or selected[0].merge_base != self.merge_base
+        ):
+            raise ValueError("selected candidate does not match endpoint provenance")
 
     def provenance_value(self) -> dict[str, object]:
         return {
@@ -51,6 +114,9 @@ class ComparisonEndpoints:
             "selected_base_candidate": self.selected_base_candidate,
             "merge_base": self.merge_base,
             "resolution_method": self.resolution_method,
+            "candidate_observations": [
+                item.to_json_value() for item in self.candidate_observations
+            ],
         }
 
 
@@ -115,24 +181,25 @@ class ComparisonEndpointResolver:
                     from_ref,
                     to_ref,
                 )
-            candidate, merge_base = self._resolve_implicit_base(
+            resolution = self._resolve_implicit_base(
                 anchor,
                 pr_target=pr_target,
             )
             before = ResolvedEndpoint(
-                requested=merge_base,
+                requested=resolution.selected_merge_base,
                 kind=EndpointKind.COMMIT,
-                commit=Commit(merge_base),
+                commit=Commit(resolution.selected_merge_base),
             )
             return ComparisonEndpoints(
                 before,
                 after,
                 anchor.object_id,
-                candidate,
-                merge_base,
+                resolution.selected_reference,
+                resolution.selected_merge_base,
                 "implicit-base-from-start-head-anchor",
                 from_ref,
                 to_ref,
+                resolution.observations,
             )
 
         current_head = start_head
@@ -152,19 +219,24 @@ class ComparisonEndpointResolver:
         endpoint_anchor = after.commit or current_head
         if endpoint_anchor is None:
             raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT))
-        candidate, merge_base = self._resolve_implicit_base(
+        resolution = self._resolve_implicit_base(
             endpoint_anchor,
             pr_target=pr_target,
         )
         return ComparisonEndpoints(
-            ResolvedEndpoint(merge_base, EndpointKind.COMMIT, Commit(merge_base)),
+            ResolvedEndpoint(
+                resolution.selected_merge_base,
+                EndpointKind.COMMIT,
+                Commit(resolution.selected_merge_base),
+            ),
             after,
             current_head.object_id if current_head is not None else None,
-            candidate,
-            merge_base,
+            resolution.selected_reference,
+            resolution.selected_merge_base,
             "implicit-base-from-endpoint-anchor",
             from_ref,
             to_ref,
+            resolution.observations,
         )
 
     def _head_commit(self) -> Commit:
@@ -193,13 +265,17 @@ class ComparisonEndpointResolver:
         anchor: Commit,
         *,
         pr_target: str | None,
-    ) -> tuple[str, str]:
-        explicit_candidates: list[str] = []
+    ) -> ImplicitBaseResolution:
+        explicit_candidates: list[tuple[str, CandidateOrigin]] = []
         if pr_target is not None:
-            explicit_candidates.append(validate_endpoint_text(pr_target))
+            explicit_candidates.append(
+                (validate_endpoint_text(pr_target), CandidateOrigin.PR_TARGET)
+            )
         target_ref = self.comparison.target_ref
-        if target_ref is not None and target_ref not in explicit_candidates:
-            explicit_candidates.append(validate_endpoint_text(target_ref))
+        if target_ref is not None and target_ref not in {item[0] for item in explicit_candidates}:
+            explicit_candidates.append(
+                (validate_endpoint_text(target_ref), CandidateOrigin.CONFIG_TARGET)
+            )
         upstream_ref = self.comparison.upstream_ref
         if upstream_ref is not None:
             namespace = validate_endpoint_text(upstream_ref)
@@ -210,23 +286,79 @@ class ComparisonEndpointResolver:
             if not upstream_candidates:
                 raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT))
             explicit_candidates.extend(
-                candidate
+                (candidate, CandidateOrigin.CONFIG_UPSTREAM)
                 for candidate in upstream_candidates
-                if candidate not in explicit_candidates
+                if candidate not in {item[0] for item in explicit_candidates}
             )
 
-        candidates = [*explicit_candidates, "refs/remotes/origin/HEAD"]
-        candidates.extend(f"refs/heads/{name}" for name in ("main", "develop", "master"))
-        for position, candidate in enumerate(candidates):
+        candidate_specs = [
+            *explicit_candidates,
+            ("refs/remotes/origin/HEAD", CandidateOrigin.BUILTIN),
+            *(
+                (f"refs/heads/{name}", CandidateOrigin.BUILTIN)
+                for name in ("main", "develop", "master")
+            ),
+        ]
+        deduplicated: list[tuple[str, CandidateOrigin]] = []
+        seen: set[str] = set()
+        for candidate, origin in candidate_specs:
+            if candidate not in seen:
+                deduplicated.append((candidate, origin))
+                seen.add(candidate)
+        observations: list[BaseCandidateObservation] = []
+        for position, (candidate, origin) in enumerate(deduplicated):
             try:
                 resolved = self.reader.resolve_commit(candidate)
             except GitReadError as error:
-                if position < len(explicit_candidates):
+                observations.append(
+                    BaseCandidateObservation(
+                        position,
+                        origin,
+                        candidate,
+                        None,
+                        None,
+                        CandidateDisposition.UNRESOLVED,
+                    )
+                )
+                if origin is not CandidateOrigin.BUILTIN:
                     raise EndpointResolutionError(
                         diagnostic(DiagnosticCode.DIFF_ENDPOINT)
                     ) from error
                 continue
             merge_base = self.reader.resolve_merge_base(resolved.object_id, anchor.object_id)
             if merge_base is not None:
-                return candidate, merge_base
+                observations.append(
+                    BaseCandidateObservation(
+                        position,
+                        origin,
+                        candidate,
+                        resolved.object_id,
+                        merge_base,
+                        CandidateDisposition.SELECTED,
+                    )
+                )
+                observations.extend(
+                    BaseCandidateObservation(
+                        next_position,
+                        next_origin,
+                        next_candidate,
+                        None,
+                        None,
+                        CandidateDisposition.NOT_EVALUATED,
+                    )
+                    for next_position, (next_candidate, next_origin) in enumerate(
+                        deduplicated[position + 1 :], start=position + 1
+                    )
+                )
+                return ImplicitBaseResolution(candidate, merge_base, tuple(observations))
+            observations.append(
+                BaseCandidateObservation(
+                    position,
+                    origin,
+                    candidate,
+                    resolved.object_id,
+                    None,
+                    CandidateDisposition.NO_MERGE_BASE,
+                )
+            )
         raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT))

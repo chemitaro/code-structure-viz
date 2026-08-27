@@ -36,7 +36,7 @@ manifest.
 
 - `request.from`、`request.to`、`request.pr_target`、resolved traversal depth
 - `comparison`: caller の requested endpoint、resolved before/after object、endpoint kind、start HEAD anchor、
-  selected base candidate、merge-base、resolution method
+  selected base candidate、merge-base、resolution method、implicit base candidate observations
 - `sources.before`/`sources.after`: immutable side の schema、kind、head、fingerprint、file count
 - `semantic_sides.before`/`semantic_sides.after`: semantic side の kind/digest/status
 - `file_change_set`: `code-structure-viz.file-change-set/v1` object
@@ -56,3 +56,35 @@ endpoint/object/drift/security failure は manifest を作らない run fatal �
 `DiffManifestBuilder` の run fingerprint preimage は endpoint、sources、semantic side、file-change
 metadata、budget、status を含む。output directory、staging path、timestamp、PID、source body、Git
 stderr は含まれない。同一入力で key order、Artifact bytes、descriptor SHA-256 が一致する。
+
+### Candidate provenance
+
+`comparison.candidate_observations` はdiff manifestで常に出力する。明示 `from`/`to` のrunは空配列、
+implicit baseのrunは、評価順にdeduplicateした各候補を次のclosed objectとして記録する。
+
+```json
+{
+  "ordinal": 0,
+  "origin": "config-upstream",
+  "reference": "refs/remotes/upstream/main",
+  "resolved_object": "<sha-or-null>",
+  "merge_base": "<sha-or-null>",
+  "disposition": "selected"
+}
+```
+
+`origin` は `pr-target`、`config-target`、`config-upstream`、`builtin` のいずれか、
+`disposition` は `unresolved`、`no-merge-base`、`selected`、`not-evaluated` のいずれかである。
+implicit配列はordinal連番かつselected一件で、`selected_base_candidate`/`merge_base` とselected
+observationの値が一致しなければならない。builtin候補の解決失敗は観測して次候補へ進めるが、
+explicit/config候補の解決失敗はendpoint fatalでありmanifestを公開しない。
+
+### Working-tree special states
+
+working-treeの内部source inventoryはraw Git path spelling、NFC canonical path、index mode/object、
+skip-worktree、gitlink nested stateを保持する。これらの内部証拠はfingerprintとFileChangeSet分類に
+のみ使い、nested source bytesやGit stderrをmanifestへ漏らさない。skip-worktreeで欠落したpathは
+`sparse-unavailable`/`payload_unavailable`として扱い、実削除 `D` やindex blob再構築へ変換しない。
+mode `160000` のgitlinkはnested HEAD・tracked/staged dirty・untracked dirtyを親側の一件の `M` に
+集約し、nested stateの読取不能または公開直前の変化はrun fatalとする。異なるraw spellingが同一NFC
+canonical pathへ収束する場合は `CSV-DIFF-003` のrun fatalとしてどちらかをwinnerにしない。

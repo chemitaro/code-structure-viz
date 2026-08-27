@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from tests.helpers.diff import (
+    create_gitlink_repository,
+    create_raw_path_collision_repository,
     create_two_commit_repository,
     create_two_commit_repository_from_files,
     run_diff_cli,
@@ -23,7 +25,7 @@ def _git_proxy(tmp_path: Path, behavior: str) -> Path:
     shim.parent.mkdir(exist_ok=True)
     shim.write_text(
         "#!/usr/bin/env python3\n"
-        "import os, pathlib, sys\n"
+        "import os, pathlib, subprocess, sys\n"
         f"{behavior}\n"
         f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n",
         encoding="utf-8",
@@ -158,6 +160,300 @@ upstream_ref = "refs/remotes/upstream"
         "target_ref": None,
         "upstream_ref": "refs/remotes/upstream",
     }
+
+
+def test_implicit_candidate_observations_record_rejected_then_selected_refs(
+    tmp_path: Path,
+) -> None:
+    repository, before, _after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    unrelated = (
+        subprocess.run(
+            ("git", "-C", str(repository), "commit-tree", empty_tree, "-m", "unrelated"),
+            input=b"",
+            capture_output=True,
+            check=True,
+            env={
+                **os.environ,
+                **{
+                    "GIT_AUTHOR_NAME": "Code Structure Viz Fixture",
+                    "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+                    "GIT_COMMITTER_NAME": "Code Structure Viz Fixture",
+                    "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+                },
+            },
+        )
+        .stdout.decode("ascii")
+        .strip()
+    )
+    subprocess.run(
+        ("git", "-C", str(repository), "update-ref", "refs/remotes/upstream/a", unrelated),
+        check=True,
+    )
+    subprocess.run(
+        ("git", "-C", str(repository), "update-ref", "refs/remotes/upstream/b", before),
+        check=True,
+    )
+    config = tmp_path / "config.toml"
+    config.write_text(
+        """schema = \"code-structure-viz.config/v1\"
+[python]
+source_roots = [\"src\"]
+include = [\"**/*.py\"]
+exclude = []
+[traversal]
+upstream_depth = 1
+downstream_depth = 1
+[limits]
+max_entities = 500
+[comparison]
+upstream_ref = \"refs/remotes/upstream\"
+""",
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--config", str(config))
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    comparison = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))[
+        "comparison"
+    ]
+    assert comparison["candidate_observations"] == [
+        {
+            "ordinal": 0,
+            "origin": "config-upstream",
+            "reference": "refs/remotes/upstream/a",
+            "resolved_object": unrelated,
+            "merge_base": None,
+            "disposition": "no-merge-base",
+        },
+        {
+            "ordinal": 1,
+            "origin": "config-upstream",
+            "reference": "refs/remotes/upstream/b",
+            "resolved_object": before,
+            "merge_base": before,
+            "disposition": "selected",
+        },
+        {
+            "ordinal": 2,
+            "origin": "builtin",
+            "reference": "refs/remotes/origin/HEAD",
+            "resolved_object": None,
+            "merge_base": None,
+            "disposition": "not-evaluated",
+        },
+        {
+            "ordinal": 3,
+            "origin": "builtin",
+            "reference": "refs/heads/main",
+            "resolved_object": None,
+            "merge_base": None,
+            "disposition": "not-evaluated",
+        },
+        {
+            "ordinal": 4,
+            "origin": "builtin",
+            "reference": "refs/heads/develop",
+            "resolved_object": None,
+            "merge_base": None,
+            "disposition": "not-evaluated",
+        },
+        {
+            "ordinal": 5,
+            "origin": "builtin",
+            "reference": "refs/heads/master",
+            "resolved_object": None,
+            "merge_base": None,
+            "disposition": "not-evaluated",
+        },
+    ]
+    second_output = tmp_path / "second-output"
+    second_result = run_diff_cli(repository, second_output, "--config", str(config))
+    assert second_result.returncode == 0, second_result.stderr.decode("utf-8", errors="replace")
+    assert (output / "run-manifest.json").read_bytes() == (
+        second_output / "run-manifest.json"
+    ).read_bytes()
+
+
+def test_explicit_endpoints_publish_empty_candidate_observations(tmp_path: Path) -> None:
+    repository, before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+
+    result = run_diff_cli(
+        repository,
+        tmp_path / "output",
+        "--from",
+        before,
+        "--to",
+        after,
+    )
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    comparison = json.loads(
+        (tmp_path / "output" / "run-manifest.json").read_text(encoding="utf-8")
+    )["comparison"]
+    assert comparison["candidate_observations"] == []
+    assert comparison["selected_base_candidate"] is None
+    assert comparison["merge_base"] is None
+
+
+def test_missing_skip_worktree_python_is_unavailable_not_actual_deletion(tmp_path: Path) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    subprocess.run(
+        ("git", "-C", str(repository), "update-index", "--skip-worktree", "--", "src/app.py"),
+        check=True,
+    )
+    (repository / "src" / "app.py").unlink()
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 3, result.stderr.decode("utf-8", errors="replace")
+    assert {path.name for path in output.iterdir()} == {"file-changes.json", "run-manifest.json"}
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert file_changes["files"] == []
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["domains"][0]["incomplete_kind"] == "payload_unavailable"
+    assert manifest["domains"][0]["payload_available"] is False
+
+
+def test_missing_non_skip_worktree_python_remains_actual_deletion(tmp_path: Path) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    (repository / "src" / "app.py").unlink()
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("D", "src/app.py", None)]
+
+
+def test_dirty_gitlink_is_one_superproject_change(tmp_path: Path) -> None:
+    repository, parent_head, _nested, _nested_head = create_gitlink_repository(tmp_path)
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("M", "src/component", "src/component")]
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["changed_path_budget"]["actual"] == 1
+    assert b"nested after" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("dirty_kind", ("tracked", "untracked"))
+def test_dirty_gitlink_contents_are_one_superproject_change(
+    tmp_path: Path,
+    dirty_kind: str,
+) -> None:
+    repository, parent_head, nested, _nested_head = create_gitlink_repository(tmp_path)
+    subprocess.run(
+        ("git", "-C", str(nested), "reset", "--hard", "HEAD^"),
+        check=True,
+        capture_output=True,
+    )
+    if dirty_kind == "tracked":
+        (nested / "README").write_text("nested dirty\n", encoding="utf-8")
+    else:
+        (nested / "untracked.txt").write_text("nested untracked\n", encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("M", "src/component", "src/component")]
+
+
+def test_gitlink_state_drift_before_publication_is_fatal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, parent_head, nested, nested_head = create_gitlink_repository(tmp_path)
+    (nested / "README").write_text("nested final\n", encoding="utf-8")
+    subprocess.run(
+        ("git", "-C", str(nested), "add", "."),
+        check=True,
+    )
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(nested),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--quiet",
+            "--message=final",
+        ),
+        check=True,
+    )
+    nested_final_head = subprocess.check_output(
+        ("git", "-C", str(nested), "rev-parse", "HEAD"),
+        text=True,
+    ).strip()
+    subprocess.run(("git", "-C", str(nested), "reset", "--hard", nested_head), check=True)
+    counter = tmp_path / "gitlink-head-count"
+    proxy = _git_proxy(
+        tmp_path,
+        "if sys.argv[1:3] == ['-C', "
+        f"{str(nested)!r}] and sys.argv[-3:] == ['rev-parse', '--verify', 'HEAD^{{commit}}']:\n"
+        f"    counter = pathlib.Path({str(counter)!r})\n"
+        "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "    counter.write_text(str(count))\n"
+        "    if count == 2:\n"
+        f"        subprocess.run(({'git'!r}, '-C', {str(nested)!r}, 'reset', '--hard', "
+        f"{str(nested_final_head)!r}), stdin=subprocess.DEVNULL, capture_output=True, "
+        "check=True)",
+    )
+    monkeypatch.setenv("PATH", f"{proxy}{os.pathsep}{os.environ['PATH']}")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 1
+    assert b"CSV-SOURCE-001" in result.stderr
+    assert not output.exists()
+    assert list(tmp_path.glob(".code-structure-viz-staging-*")) == []
+
+
+def test_non_python_nfc_nfd_collision_is_run_fatal_without_publication(tmp_path: Path) -> None:
+    repository, _before, after = create_raw_path_collision_repository(tmp_path)
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", after, "--to", after)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert not output.exists()
+    assert b"cafe" not in result.stderr
 
 
 def test_untracked_paths_are_counted_before_python_analysis(tmp_path: Path) -> None:

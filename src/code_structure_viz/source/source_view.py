@@ -19,6 +19,8 @@ from code_structure_viz.source.git_repository import (
     Commit,
     EnumeratedPath,
     GitIndexEntry,
+    GitlinkWorktreeState,
+    GitPathIdentity,
     HeadState,
 )
 
@@ -72,6 +74,16 @@ class SourceInventoryEntry:
     availability: str = "available"
     unmerged: bool = False
     content: bytes | None = field(default=None, repr=False, compare=False)
+    materialization_state: str = "present"
+    index_object_id: str | None = None
+    worktree_object_id: str | None = None
+    worktree_dirty: bool = False
+    tracked_content_dirty: bool = False
+    untracked_content_dirty: bool = False
+
+    def __post_init__(self) -> None:
+        if self.index_object_id is None and self.object_id is not None:
+            object.__setattr__(self, "index_object_id", self.object_id)
 
     def descriptor_value(self) -> dict[str, object]:
         return {
@@ -85,6 +97,12 @@ class SourceInventoryEntry:
             "object_id": self.object_id,
             "availability": self.availability,
             "unmerged": self.unmerged,
+            "materialization_state": self.materialization_state,
+            "index_object_id": self.index_object_id,
+            "worktree_object_id": self.worktree_object_id,
+            "worktree_dirty": self.worktree_dirty,
+            "tracked_content_dirty": self.tracked_content_dirty,
+            "untracked_content_dirty": self.untracked_content_dirty,
         }
 
 
@@ -399,12 +417,14 @@ class SourceViewBuilder:
         staging_root_descriptor: int | None = None,
         repository_descriptor: int | None = None,
         cancelled: Callable[[], bool] | None = None,
+        fatal_path_identity_collisions: bool = False,
     ) -> None:
         self.repository = repository if repository.is_absolute() else repository.resolve()
         self.staging_root = staging_root
         self._staging_root_descriptor = staging_root_descriptor
         self._repository_descriptor = repository_descriptor
         self._cancelled = cancelled or (lambda: False)
+        self._fatal_path_identity_collisions = fatal_path_identity_collisions
 
     def build(
         self,
@@ -416,6 +436,9 @@ class SourceViewBuilder:
         untracked_paths: frozenset[PurePosixPath] = frozenset(),
         unmerged_paths: frozenset[PurePosixPath] = frozenset(),
         index_entries: tuple[GitIndexEntry, ...] = (),
+        untracked_entries: tuple[GitPathIdentity, ...] = (),
+        unmerged_entries: tuple[GitPathIdentity, ...] = (),
+        gitlink_states: tuple[GitlinkWorktreeState, ...] = (),
     ) -> SourceView:
         self._prepare_staging()
         return self._collect(
@@ -427,6 +450,9 @@ class SourceViewBuilder:
             untracked_paths=untracked_paths,
             unmerged_paths=unmerged_paths,
             index_entries=index_entries,
+            untracked_entries=untracked_entries,
+            unmerged_entries=unmerged_entries,
+            gitlink_states=gitlink_states,
         )
 
     def assert_unchanged(
@@ -439,6 +465,9 @@ class SourceViewBuilder:
         untracked_paths: frozenset[PurePosixPath] = frozenset(),
         unmerged_paths: frozenset[PurePosixPath] = frozenset(),
         index_entries: tuple[GitIndexEntry, ...] = (),
+        untracked_entries: tuple[GitPathIdentity, ...] = (),
+        unmerged_entries: tuple[GitPathIdentity, ...] = (),
+        gitlink_states: tuple[GitlinkWorktreeState, ...] = (),
     ) -> None:
         try:
             current = self._collect(
@@ -450,6 +479,9 @@ class SourceViewBuilder:
                 untracked_paths=untracked_paths,
                 unmerged_paths=unmerged_paths,
                 index_entries=index_entries,
+                untracked_entries=untracked_entries,
+                unmerged_entries=unmerged_entries,
+                gitlink_states=gitlink_states,
             )
         except SourceViewBuildError as error:
             raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
@@ -518,19 +550,40 @@ class SourceViewBuilder:
         untracked_paths: frozenset[PurePosixPath] = frozenset(),
         unmerged_paths: frozenset[PurePosixPath] = frozenset(),
         index_entries: tuple[GitIndexEntry, ...] = (),
+        untracked_entries: tuple[GitPathIdentity, ...] = (),
+        unmerged_entries: tuple[GitPathIdentity, ...] = (),
+        gitlink_states: tuple[GitlinkWorktreeState, ...] = (),
     ) -> SourceView:
         self._checkpoint()
+        if self._fatal_path_identity_collisions:
+            self._validate_identities(
+                entries,
+                index_entries,
+                untracked_entries,
+                unmerged_entries,
+            )
         inventory_before = (
             self._inventory(
                 entries,
                 untracked_paths=untracked_paths,
                 unmerged_paths=unmerged_paths,
                 index_entries=index_entries,
+                untracked_entries=untracked_entries,
+                unmerged_entries=unmerged_entries,
+                gitlink_states=gitlink_states,
             )
             if include_inventory
             else ()
         )
-        candidates = tuple(entry for entry in entries if _is_candidate(entry.normalized, config))
+        unavailable_unmerged = frozenset(unmerged_paths) | frozenset(
+            item.canonical_path for item in unmerged_entries
+        )
+        candidates = tuple(
+            entry
+            for entry in entries
+            if _is_candidate(entry.normalized, config)
+            and entry.normalized not in unavailable_unmerged
+        )
         collision_groups = self._collision_groups(candidates)
         collision_paths = frozenset(path for group in collision_groups for path in group)
         failures = [
@@ -542,9 +595,23 @@ class SourceViewBuilder:
             for path in collision_paths
         ]
         files: list[SourceFile] = []
+        inventory_by_path = {item.path: item for item in inventory_before}
         for entry in candidates:
             self._checkpoint()
             if entry.normalized in collision_paths:
+                continue
+            inventory_entry = inventory_by_path.get(entry.normalized)
+            if (
+                inventory_entry is not None
+                and inventory_entry.materialization_state == "sparse-unavailable"
+            ):
+                failures.append(
+                    SourceAcquisitionFailure(
+                        entry.normalized,
+                        AcquisitionStage.READ,
+                        DiagnosticCode.PY_READ,
+                    )
+                )
                 continue
             frozen = self._freeze(entry, write_frozen=write_frozen)
             if isinstance(frozen, SourceFile):
@@ -560,6 +627,9 @@ class SourceViewBuilder:
                 untracked_paths=untracked_paths,
                 unmerged_paths=unmerged_paths,
                 index_entries=index_entries,
+                untracked_entries=untracked_entries,
+                unmerged_entries=unmerged_entries,
+                gitlink_states=gitlink_states,
             )
             if include_inventory
             else inventory_before
@@ -586,6 +656,27 @@ class SourceViewBuilder:
             ),
         )
 
+    @staticmethod
+    def _validate_identities(
+        entries: tuple[EnumeratedPath, ...],
+        index_entries: tuple[GitIndexEntry, ...],
+        untracked_entries: tuple[GitPathIdentity, ...],
+        unmerged_entries: tuple[GitPathIdentity, ...],
+    ) -> None:
+        canonical_to_raw: dict[PurePosixPath, str] = {}
+        identities: tuple[GitPathIdentity, ...] = (
+            tuple(item.identity for item in entries)
+            + tuple(item.identity for item in index_entries)
+            + untracked_entries
+            + unmerged_entries
+        )
+        for identity in identities:
+            previous = canonical_to_raw.get(identity.canonical_path)
+            if previous is None:
+                canonical_to_raw[identity.canonical_path] = identity.raw_text
+            elif previous != identity.raw_text:
+                raise SourceViewBuildError(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE))
+
     def _inventory(
         self,
         entries: tuple[EnumeratedPath, ...],
@@ -593,10 +684,22 @@ class SourceViewBuilder:
         untracked_paths: frozenset[PurePosixPath],
         unmerged_paths: frozenset[PurePosixPath],
         index_entries: tuple[GitIndexEntry, ...],
+        untracked_entries: tuple[GitPathIdentity, ...],
+        unmerged_entries: tuple[GitPathIdentity, ...],
+        gitlink_states: tuple[GitlinkWorktreeState, ...],
     ) -> tuple[SourceInventoryEntry, ...]:
         values: list[SourceInventoryEntry] = []
-        index_by_path = {item.path: item for item in index_entries if item.stage == 0}
+        index_by_path: dict[PurePosixPath, GitIndexEntry] = {}
+        for item in index_entries:
+            if item.stage != 0:
+                continue
+            if item.path in index_by_path:
+                raise SourceViewBuildError(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE))
+            index_by_path[item.path] = item
         tracked_paths = {item.path for item in index_entries}
+        untracked_by_path = {item.canonical_path: item for item in untracked_entries}
+        unmerged_by_path = {item.canonical_path: item for item in unmerged_entries}
+        gitlink_by_path = {item.identity.canonical_path: item for item in gitlink_states}
         for entry in entries:
             self._checkpoint()
             logical_path = entry.normalized
@@ -606,12 +709,16 @@ class SourceViewBuilder:
                 "tracked"
                 if logical_path in tracked_paths
                 else "untracked"
-                if logical_path in untracked_paths
+                if logical_path in untracked_paths or logical_path in untracked_by_path
                 else "tracked"
             )
+            unmerged = logical_path in unmerged_paths or logical_path in unmerged_by_path
+            gitlink_state = gitlink_by_path.get(logical_path)
             parent_descriptor: int | None = None
             try:
                 if index_entry is not None and index_entry.mode == "160000":
+                    if gitlink_state is None:
+                        raise SourceViewBuildError(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE))
                     values.append(
                         SourceInventoryEntry(
                             logical_path,
@@ -623,7 +730,14 @@ class SourceViewBuilder:
                             index_entry.mode,
                             index_entry.object_id,
                             "unavailable",
-                            logical_path in unmerged_paths,
+                            unmerged,
+                            None,
+                            gitlink_state.materialization_state,
+                            index_entry.object_id,
+                            gitlink_state.current_head,
+                            gitlink_state.dirty,
+                            gitlink_state.tracked_content_dirty,
+                            gitlink_state.untracked_content_dirty,
                         )
                     )
                     continue
@@ -647,7 +761,9 @@ class SourceViewBuilder:
                             "120000",
                             index_entry.object_id if index_entry is not None else None,
                             "unavailable",
-                            logical_path in unmerged_paths,
+                            unmerged,
+                            None,
+                            "unavailable",
                         )
                     )
                     continue
@@ -663,7 +779,9 @@ class SourceViewBuilder:
                             None,
                             index_entry.object_id if index_entry is not None else None,
                             "unavailable",
-                            logical_path in unmerged_paths,
+                            unmerged,
+                            None,
+                            "unavailable",
                         )
                     )
                     continue
@@ -691,8 +809,9 @@ class SourceViewBuilder:
                         "100755" if before.st_mode & 0o111 else "100644",
                         index_entry.object_id if index_entry is not None else None,
                         "available",
-                        logical_path in unmerged_paths,
+                        unmerged,
                         content,
+                        "present",
                     )
                 )
             except _ConcurrentMutationError as error:
@@ -702,14 +821,22 @@ class SourceViewBuilder:
                     SourceInventoryEntry(
                         logical_path,
                         entry.raw_text,
-                        "missing",
+                        "sparse-unavailable"
+                        if index_entry is not None and index_entry.skip_worktree
+                        else "missing",
                         None,
                         None,
                         tracking_state,
                         index_entry.mode if index_entry is not None else None,
                         index_entry.object_id if index_entry is not None else None,
-                        "absent",
-                        logical_path in unmerged_paths,
+                        "unavailable" if index_entry and index_entry.skip_worktree else "absent",
+                        unmerged,
+                        None,
+                        (
+                            "sparse-unavailable"
+                            if index_entry and index_entry.skip_worktree
+                            else "absent"
+                        ),
                     )
                 )
             except (_UnsafeSymlinkError, OSError):
@@ -724,7 +851,9 @@ class SourceViewBuilder:
                         None,
                         index_entry.object_id if index_entry is not None else None,
                         "unavailable",
-                        logical_path in unmerged_paths,
+                        unmerged,
+                        None,
+                        "unavailable",
                     )
                 )
             finally:

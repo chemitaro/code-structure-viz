@@ -30,17 +30,20 @@ as-built 設計である。Issue の状態は SpecDock の完了処理前なの�
 | I02-DES-006 | I02-REQ-006 | Git command allowlist、固定環境、静的 AST 解析、bounded subprocess、canonical JSON、atomic publication を採用する。 |
 | I02-DES-007 | I02-REQ-007 | Hunk は status、path、行範囲、ordinal、content-independent ID だけを持つ value object とする。working-tree では凍結済み bytes の `SequenceMatcher` から範囲を作る。 |
 | I02-DES-008 | I02-REQ-008 | `--stdout` は closed selector を acquisition 前に検証し、公開済み bytes の複製または typed unavailable result を返す。 |
+| I02-DES-009 | I02-REQ-009 | `GitPathIdentity` が raw UTF-8 spelling と NFC canonical pathを併記し、canonical collision、duplicate inventory、skip-worktree欠落をfail-closedで処理する。 |
+| I02-DES-010 | I02-REQ-010 | `GitlinkWorktreeState` がmode `160000` pathごとにnested HEAD、tracked/staged dirty、untracked dirtyをread-only観測し、親側FileChangeSetへ一件の `M` として投影する。 |
+| I02-DES-011 | I02-REQ-011 | `BaseCandidateObservation` がimplicit base候補のordinal/origin/reference/object/merge-base/dispositionを保持し、`ComparisonEndpoints` がselected候補と配列の整合性を検証する。 |
 
 ## 2. 実装コンポーネント
 
 | path / symbol | 責務 | 状態 |
 | --- | --- | --- |
 | `src/code_structure_viz/application/diff.py::DiffApplication` | 1 run の orchestration、gate、publication、cancellation | 実装済み |
-| `src/code_structure_viz/source/git_repository.py::GitRepositoryReader` | Git version/root/ref/tree/blob/name-status 読み取り、untracked/unmerged 列挙。固定環境で read-only 実行 | 実装済み |
-| `src/code_structure_viz/source/endpoints.py::ComparisonEndpointResolver` | `from`/`to`、`head`、`working-tree`、implicit base、start HEAD anchor の解決 | 実装済み |
+| `src/code_structure_viz/source/git_repository.py::GitRepositoryReader` | Git version/root/ref/tree/blob/name-status 読み取り、raw path identity、index stage/skip-worktree、untracked/unmerged、gitlink state 列挙。固定環境で read-only 実行 | 実装済み |
+| `src/code_structure_viz/source/endpoints.py::ComparisonEndpointResolver` | `from`/`to`、`head`、`working-tree`、implicit base、start HEAD anchor、候補評価 provenance の解決 | 実装済み |
 | `src/code_structure_viz/source/freezer.py::WorkingTreeFreezer` | working-tree source を repository 外 staging へ凍結し、再読取時に drift を検出 | 実装済み |
-| `src/code_structure_viz/source/source_view.py::SourceViewBuilder` / `SourceView` | secure file read、NFC/path collision、fingerprint、inventory | 実装済み |
-| `src/code_structure_viz/source/file_changes.py::FileChangeSet` / `HunkMetadata` | Git metadata と frozen bytes からの metadata-only file change evidence | 実装済み |
+| `src/code_structure_viz/source/source_view.py::SourceViewBuilder` / `SourceView` | secure file read、raw/NFC path identity collision、skip-worktree sparse state、gitlink state、fingerprint、inventory | 実装済み |
+| `src/code_structure_viz/source/file_changes.py::FileChangeSet` / `HunkMetadata` | Git metadata と frozen bytes からの metadata-only file change evidence。duplicate canonical map、sparse、gitlinkを安全に分類 | 実装済み |
 | `src/code_structure_viz/semantic/diff.py::DomainPresenceResolver` / `SemanticDiffer` / `ImpactExplorer` | side 分類、canonical empty、entity/member/relation delta、union impact | 実装済み |
 | `src/code_structure_viz/adapters/python/matcher.py::PythonMoveMatcher` | name evidence、exact structural fingerprint、one-to-one の高信頼 move だけを採用 | 実装済み |
 | `src/code_structure_viz/adapters/python/diff_renderer.py` | semantic diff JSON と member-level PlantUML の deterministic rendering | 実装済み |
@@ -74,16 +77,18 @@ source acquisition 前の usage error（exit 2、stdout 空、Artifact なし）
 
 implicit candidate は `--pr-target`、config の target/upstream、`origin/HEAD`、local
 `main`/`develop`/`master` の順で、既存 local object に merge-base があるものだけを採用する。
-fetch、checkout、worktree/index/ref mutation は行わない。provenance には caller の
-`requested.from`/`requested.to`、resolved object ID、start HEAD、candidate、merge-base、method を記録する。
+評価した候補は `BaseCandidateObservation` として順序を保持し、候補のorigin、requested reference、
+resolved object、merge-base、`selected`/`no-merge-base`/`unresolved`/`not-evaluated` dispositionを
+`comparison.candidate_observations`へ出力する。明示endpointでは空配列、implicitではselectedを一件だけ
+含む。fetch、checkout、worktree/index/ref mutation は行わない。
 
 ## 4. source acquisition と cancellation
 
-1. run 開始に Git version、repository identity、HEAD、tracked/cached/untracked path、unmerged path を取得する。
+1. run 開始に Git version、repository identity、HEAD、tracked/cached/untracked path、unmerged path、index stage/mode/object/skip-worktree、gitlink nested state を取得する。
 2. commit side は `ls-tree` を一度列挙し、blob bytes を一度だけ読み、`SourceView` を構築する。missing object は domain empty に変換せず fatal とし、candidate `.py` の non-blob または working-tree の non-regular/read failure は `CSV-PY-001` の failed source として記録する。
 3. working-tree side は `WorkingTreeFreezer` が secure descriptor read と symlink/path/collision checks を行い、repository 外の staging へコピーする。source bytes と inventory を同じ run の証拠にする。
 4. 解析中・公開直前に cancellation checkpoint を置く。Git 子プロセスは process group として bounded stdout/stderr で監視し、cancel 時は terminate/kill して exit 130 を返す。
-5. working-tree 公開直前に HEAD、path enumeration、untracked、unmerged、source inventory/fingerprint を再取得して開始時と比較する。不一致は `CSV-SOURCE-001` の fatal とし、staging を公開しない。
+5. working-tree 公開直前に HEAD、path enumeration、index flags、untracked、unmerged、gitlink nested state、source inventory/fingerprint を再取得して開始時と比較する。不一致は `CSV-SOURCE-001` の fatal とし、staging を公開しない。
 
 `SourceView` の公開 fingerprint は source schema、head、file descriptor、failures の canonical bytes
 から作る。working-tree の内部 `SourceInventoryEntry` は path、raw path、kind、size、digest に加えて
@@ -94,6 +99,32 @@ source body、absolute staging path、Git stderr へ渡さない。inventory の
 取得不能な path を absent または canonical empty side へ変換しない。commit side の blob/object 欠損・
 read failure は `GitReadError` をそのまま run fatal にし、working-tree の bounded content evidence の
 みが domain-local `payload_unavailable` へ縮退できる。
+
+### 4.1 path identity、sparse checkout、gitlink
+
+GitのNUL-delimited path bytesは各sourceで `GitPathIdentity(raw_text, canonical_path)` に変換する。
+`raw_text` はUTF-8 strict decodeした元の綴り、`canonical_path` は安全なrepository-relative NFC pathであり、
+内部 sort/mapの前に両方を保持する。複数sourceまたは同一sourceで異なるraw spellingが同じcanonical pathへ
+収束した場合、canonical keyの上書きやwinner選択をせず `CSV-DIFF-003` でrun fatalにする。
+
+index stage 0のmode/objectは `git ls-files --stage -z --cached`、skip-worktree flagは
+`git ls-files -t -z --cached`からraw identityごとに照合する。skip-worktree pathが作業木に欠落した場合の
+inventoryは `materialization_state: "sparse-unavailable"`、`availability: "unavailable"` とし、通常の削除
+`D`やGit blobの再構築へ変換しない。skip flagのない欠落tracked pathだけを `absent`/`D` とする。
+
+mode `160000` はsuperprojectのgitlinkとしてsource fileへ展開しない。`GitlinkWorktreeState` は安全な
+nested repositoryに対してHEAD、working/staged tracked diff、untracked pathの有無だけをread-onlyで観測する。
+HEADがindex objectと異なる、tracked/staged dirty、またはuntracked dirtyなら、親側の同じpathを一件の `M`
+としてFileChangeSetへ渡す。nestedの内容、秘密、stderrは公開しない。nested stateの欠落、symlink、protocol
+異常、または公開直前の変化は `CSV-DIFF-003`/`CSV-SOURCE-001` のfatalとする。
+
+### 4.2 implicit candidate provenance
+
+`ComparisonEndpointResolver._resolve_implicit_base` は候補をdeduplicateした評価順のtupleとして保持する。
+解決失敗はbuiltin候補なら `unresolved` として記録して次候補へ進み、explicit/config候補のunresolvedは
+endpoint fatalとする。merge-baseなしは `no-merge-base`、最初の成功は `selected`、後続候補は
+`not-evaluated` とする。`ComparisonEndpoints.__post_init__` がordinal連番、selected一件、selected
+reference/merge-baseとの一致を検証し、明示endpointのselected/merge-base混入を拒否する。
 
 ## 5. FileChangeSet
 
@@ -113,6 +144,12 @@ production diff lifecycle はこの raw patch helper を呼ばない。
 `hunk_id` は status/path/range/ordinal の canonical JSON の SHA-256 であり、patch body、context、
 source、comment、literal、secret、absolute path を保持しない。path は repository-relative NFC
 UTF-8 のみで、sort は UTF-8 bytes order とする。
+
+index-only stateはhunk本文の代用にしない。skip-worktreeで欠落したregular pathは `sparse-unavailable`
+として `unavailable` content evidenceを持ち、`D`やfake hunkを生成しない。通常tracked pathの欠落だけが
+`absent`/`D`となる。mode `160000` のgitlinkはnested repositoryの変更を親側の同一path一件の `M` に集約し、
+nested pathのFileChangeSetやhunkを生成しない。gitlink stateの安全な再取得が開始時と一致しなければ、
+`CSV-SOURCE-001` fatalで公開を停止する。
 
 working-tree classifier は budget より前に次の順で canonical record を確定する。同一 path の tracked→
 untracked は `D` と `?`、mode-only は `M`、regular/symlink/gitlink 間は `T`、identity が一意な cross-
@@ -169,6 +206,10 @@ Artifact は公開後の exact bytes を複製し、unavailable は `stdout-resu
 `run-summary/v1` の canonical JSON 1 行を返す。diagnostic は stderr のみで、source/body/secret/
 absolute path/Git stderr/traceback を含めない。
 
+`run-manifest/v1` の `comparison.candidate_observations` は常に出力する。explicit `from`/`to` は空配列、
+implicit baseは評価順の候補配列（selected候補一件、必要ならno-merge-base/unresolved/not-evaluated）を
+出力し、`selected_base_candidate` と `merge_base` はselected observationと同じ値でなければならない。
+
 ## 8. 公開契約と検証対象
 
 更新した schema は `schemas/file-change-set-v1.schema.json`、`semantic-v1.schema.json`、
@@ -184,7 +225,8 @@ diff fingerprint はそれぞれの正本入力から独立に計算する。
 | 観測領域 | 実装テスト |
 | --- | --- |
 | endpoint、working-tree、budget、CLI | `tests/acceptance/python/test_diff_cli.py`, `tests/acceptance/git/test_changed_path_budget.py` |
-| working-tree status authority、R/C/T、tracked transition、mode、drift、missing object | `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_file_changes.py`, `tests/unit/source/test_git_repository.py` |
+| working-tree status authority、R/C/T、tracked transition、mode、drift、missing object、sparse、gitlink | `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_file_changes.py`, `tests/unit/source/test_git_repository.py` |
+| raw Git path identity、NFC collision、implicit candidate provenance | `tests/acceptance/python/test_diff_cli.py`, `tests/contracts/test_json_schemas.py`, `tests/unit/source/test_git_repository.py`, `tests/unit/source/test_source_view.py` |
 | all-path hunk evidence、non-Python、LF/CRLF、unavailable | `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_file_changes.py` |
 | domain presence、entity budget、stdout | `tests/acceptance/python/test_domain_presence_diff.py`, `test_diff_entity_budget.py`, `test_stdout_selector.py` |
 | semantic seed、impact、move | `tests/acceptance/python/test_semantic_seed.py`, `tests/integration/python/test_impact_union_graph.py`, `test_move_matching.py` |

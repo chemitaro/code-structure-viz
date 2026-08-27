@@ -352,7 +352,8 @@
         "start_head_anchor",
         "selected_base_candidate",
         "merge_base",
-        "resolution_method"
+        "resolution_method",
+        "candidate_observations"
       ],
       "properties": {
         "requested": {
@@ -396,7 +397,43 @@
             {"type": "null"}
           ]
         },
-        "resolution_method": {"type": "string", "minLength": 1}
+        "resolution_method": {"type": "string", "minLength": 1},
+        "candidate_observations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/candidate_observation"}
+        }
+      }
+    },
+    "candidate_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ordinal",
+        "origin",
+        "reference",
+        "resolved_object",
+        "merge_base",
+        "disposition"
+      ],
+      "properties": {
+        "ordinal": {"type": "integer", "minimum": 0},
+        "origin": {"enum": ["pr-target", "config-target", "config-upstream", "builtin"]},
+        "reference": {"type": "string", "minLength": 1},
+        "resolved_object": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+            {"type": "null"}
+          ]
+        },
+        "merge_base": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+            {"type": "null"}
+          ]
+        },
+        "disposition": {
+          "enum": ["unresolved", "no-merge-base", "selected", "not-evaluated"]
+        }
       }
     },
     "semantic_side": {
