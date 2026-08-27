@@ -5,9 +5,7 @@ from tests.helpers.python_snapshot import snapshot_from_text
 
 
 def test_comments_and_import_order_do_not_create_semantic_seeds() -> None:
-    before = snapshot_from_text(
-        "import os\nimport typing\n\nclass Order:\n    amount: int\n"
-    )
+    before = snapshot_from_text("import os\nimport typing\n\nclass Order:\n    amount: int\n")
     after = snapshot_from_text(
         "# documentation only\nimport typing\nimport os\n\nclass Order:\n    amount: int\n"
     )
@@ -40,7 +38,7 @@ def test_member_change_seeds_only_its_owner() -> None:
     assert result.seeds == ("python:class:app:Order",)
 
 
-def test_class_only_change_is_reported_without_becoming_a_semantic_seed() -> None:
+def test_class_only_change_is_reported_and_becomes_a_semantic_seed() -> None:
     before = snapshot_from_text("class Order:\n    amount: int\n")
     after = snapshot_from_text("@dataclass\nclass Order:\n    amount: int\n")
 
@@ -48,17 +46,13 @@ def test_class_only_change_is_reported_without_becoming_a_semantic_seed() -> Non
 
     assert len(result.entities) == 1
     assert result.entities[0].status.value == "modified"
-    assert result.seeds == ()
+    assert result.seeds == ("python:class:app:Order",)
     assert result.entity_count == 1
 
 
 def test_relation_change_seeds_relation_source_and_exposes_removed_target_context() -> None:
-    before = snapshot_from_text(
-        "class Base:\n    pass\n\nclass Order:\n    value: Base\n"
-    )
-    after = snapshot_from_text(
-        "class Base:\n    pass\n\nclass Order:\n    value: str\n"
-    )
+    before = snapshot_from_text("class Base:\n    pass\n\nclass Order:\n    value: Base\n")
+    after = snapshot_from_text("class Base:\n    pass\n\nclass Order:\n    value: str\n")
 
     result = SemanticDiffer().compare(before, after)
 

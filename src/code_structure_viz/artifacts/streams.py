@@ -129,9 +129,7 @@ class StdoutEmitter:
         if domain.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE:
             return _domain_unavailable(selector, domain.status, "domain_payload_unavailable")
         candidates = (_DIFF_DOMAIN_PATHS[selector.format], _DOMAIN_PATHS[selector.format])
-        relative_path = next(
-            (item for item in candidates if item in domain.artifact_paths), None
-        )
+        relative_path = next((item for item in candidates if item in domain.artifact_paths), None)
         if relative_path is None:
             raise ValueError("selected domain artifact was not published")
         if published_artifacts is not None:

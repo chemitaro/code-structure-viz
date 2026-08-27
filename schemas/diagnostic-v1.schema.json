@@ -36,6 +36,9 @@
         "CSV-REPO-002",
         "CSV-OUTPUT-001",
         "CSV-OUTPUT-002",
+        "CSV-DIFF-001",
+        "CSV-DIFF-002",
+        "CSV-DIFF-003",
         "CSV-SOURCE-001",
         "CSV-SOURCE-002",
         "CSV-SOURCE-003",
@@ -313,6 +316,24 @@
         },
         {
           "properties": {
+            "code": {"const": "CSV-DIFF-001"},
+            "message": {"const": "Comparison endpoint or implicit base could not be resolved safely."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-DIFF-002"},
+            "message": {"const": "Changed path count exceeds the resolved comparison limit."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-DIFF-003"},
+            "message": {"const": "Git changed-path metadata could not be read safely."}
+          }
+        },
+        {
+          "properties": {
             "code": {"const": "CSV-INTERNAL-001"},
             "message": {
               "const": "Internal snapshot contract invariant failed before publication."
@@ -348,6 +369,9 @@
                 "CSV-REPO-002",
                 "CSV-OUTPUT-001",
                 "CSV-OUTPUT-002",
+                "CSV-DIFF-001",
+                "CSV-DIFF-002",
+                "CSV-DIFF-003",
                 "CSV-SOURCE-001",
                 "CSV-SOURCE-002",
                 "CSV-SOURCE-003",
@@ -424,6 +448,9 @@
                 "CSV-OUTPUT-002",
                 "CSV-SOURCE-001",
                 "CSV-SOURCE-003",
+                "CSV-DIFF-001",
+                "CSV-DIFF-002",
+                "CSV-DIFF-003",
                 "CSV-INTERNAL-001",
                 "CSV-INTERRUPT-001"
               ]

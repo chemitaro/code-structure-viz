@@ -32,12 +32,14 @@ class ComparisonEndpoints:
     selected_base_candidate: str | None
     merge_base: str | None
     resolution_method: str
+    requested_from: str | None = None
+    requested_to: str | None = None
 
     def provenance_value(self) -> dict[str, object]:
         return {
             "requested": {
-                "from": self.before.requested,
-                "to": self.after.requested,
+                "from": self.requested_from,
+                "to": self.requested_to,
             },
             "resolved": {
                 "before": self.before.object_id,
@@ -102,7 +104,7 @@ class ComparisonEndpointResolver:
                 commit=None,
             )
             if from_ref is not None:
-                before = self._commit_endpoint(from_ref)
+                before = self._commit_endpoint(from_ref, start_head=anchor)
                 return ComparisonEndpoints(
                     before,
                     after,
@@ -110,6 +112,8 @@ class ComparisonEndpointResolver:
                     None,
                     None,
                     "explicit-from-to-working-tree",
+                    from_ref,
+                    to_ref,
                 )
             candidate, merge_base = self._resolve_implicit_base(
                 anchor,
@@ -127,31 +131,40 @@ class ComparisonEndpointResolver:
                 candidate,
                 merge_base,
                 "implicit-base-from-start-head-anchor",
+                from_ref,
+                to_ref,
             )
 
-        current_head = start_head or self._head_commit()
-        after = self._commit_endpoint(to_ref or "head")
+        current_head = start_head
+        after = self._commit_endpoint(to_ref or "head", start_head=current_head)
         if from_ref is not None:
-            before = self._commit_endpoint(from_ref)
+            before = self._commit_endpoint(from_ref, start_head=current_head)
             return ComparisonEndpoints(
                 before,
                 after,
-                current_head.object_id,
+                current_head.object_id if current_head is not None else None,
                 None,
                 None,
                 "explicit-from-to",
+                from_ref,
+                to_ref,
             )
+        endpoint_anchor = after.commit or current_head
+        if endpoint_anchor is None:
+            raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT))
         candidate, merge_base = self._resolve_implicit_base(
-            after.commit or current_head,
+            endpoint_anchor,
             pr_target=pr_target,
         )
         return ComparisonEndpoints(
             ResolvedEndpoint(merge_base, EndpointKind.COMMIT, Commit(merge_base)),
             after,
-            current_head.object_id,
+            current_head.object_id if current_head is not None else None,
             candidate,
             merge_base,
             "implicit-base-from-endpoint-anchor",
+            from_ref,
+            to_ref,
         )
 
     def _head_commit(self) -> Commit:
@@ -160,11 +173,13 @@ class ComparisonEndpointResolver:
             raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT))
         return state
 
-    def _commit_endpoint(self, requested: str) -> ResolvedEndpoint:
+    def _commit_endpoint(
+        self, requested: str, *, start_head: Commit | None = None
+    ) -> ResolvedEndpoint:
         if requested == "working-tree":
             raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT))
         if requested == "head":
-            commit = self._head_commit()
+            commit = start_head or self._head_commit()
             return ResolvedEndpoint("head", EndpointKind.COMMIT, commit)
         safe = validate_endpoint_text(requested)
         try:

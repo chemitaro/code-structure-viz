@@ -10,18 +10,14 @@ def test_unique_structural_class_move_is_reported_as_moved() -> None:
     before = snapshot_from_files(
         {
             "src/old.py": (
-                "class Order:\n"
-                "    def total(self, amount: int) -> int:\n"
-                "        return amount\n"
+                "class Order:\n    def total(self, amount: int) -> int:\n        return amount\n"
             )
         }
     )
     after = snapshot_from_files(
         {
             "src/new.py": (
-                "class Order:\n"
-                "    def total(self, amount: int) -> int:\n"
-                "        return amount\n"
+                "class Order:\n    def total(self, amount: int) -> int:\n        return amount\n"
             )
         }
     )
@@ -74,3 +70,13 @@ def test_existing_identity_is_not_misclassified_when_duplicate_is_added() -> Non
     assert result.entities[0].after is not None
     after_value = cast(dict[str, object], result.entities[0].after)
     assert after_value["qualified_name"] == "Copy"
+
+
+def test_unrelated_structurally_equal_class_is_not_misclassified_as_a_move() -> None:
+    before = snapshot_from_files({"src/old.py": "class Legacy:\n    amount: int\n"})
+    after = snapshot_from_files({"src/new.py": "class Replacement:\n    amount: int\n"})
+
+    result = SemanticDiffer().compare(before, after)
+
+    assert result.matching == ()
+    assert [item.status.value for item in result.entities] == ["added", "removed"]

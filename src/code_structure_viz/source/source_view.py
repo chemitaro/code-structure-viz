@@ -5,6 +5,7 @@ import hashlib
 import os
 import stat
 import unicodedata
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -52,6 +53,26 @@ class SourceFile:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceInventoryEntry:
+    """Internal immutable working-tree entry used for drift and diff evidence."""
+
+    path: PurePosixPath
+    raw_path: str
+    kind: str
+    size_bytes: int | None
+    digest: str | None
+
+    def descriptor_value(self) -> dict[str, object]:
+        return {
+            "path": self.path.as_posix(),
+            "raw_path": self.raw_path,
+            "kind": self.kind,
+            "size_bytes": self.size_bytes,
+            "digest": self.digest,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class SourceAcquisitionFailure:
     path: PurePosixPath
     stage: AcquisitionStage
@@ -74,6 +95,8 @@ class SourceView:
     schema: str = _SCHEMA
     kind: str = _KIND
     collision_groups: tuple[tuple[PurePosixPath, ...], ...] = ()
+    inventory: tuple[SourceInventoryEntry, ...] = ()
+    state_fingerprint: str | None = None
 
     def fingerprint_value(self) -> dict[str, object]:
         return {
@@ -95,6 +118,10 @@ class SourceDriftError(SourceViewBuildError):
     pass
 
 
+class SourceInterruptedError(SourceViewBuildError):
+    pass
+
+
 class _UnsafeSymlinkError(Exception):
     pass
 
@@ -113,6 +140,10 @@ def _failure_key(value: SourceAcquisitionFailure) -> tuple[bytes, bytes, bytes]:
         value.stage.value.encode("utf-8"),
         value.diagnostic_code.value.encode("utf-8"),
     )
+
+
+def _inventory_key(value: SourceInventoryEntry) -> tuple[bytes, bytes]:
+    return (value.raw_path.encode("utf-8"), _path_key(value.path))
 
 
 def _head_commit(state: HeadState) -> str | None:
@@ -318,20 +349,30 @@ class SourceViewBuilder:
         *,
         staging_root_descriptor: int | None = None,
         repository_descriptor: int | None = None,
+        cancelled: Callable[[], bool] | None = None,
     ) -> None:
         self.repository = repository if repository.is_absolute() else repository.resolve()
         self.staging_root = staging_root
         self._staging_root_descriptor = staging_root_descriptor
         self._repository_descriptor = repository_descriptor
+        self._cancelled = cancelled or (lambda: False)
 
     def build(
         self,
         head_state: HeadState,
         entries: tuple[EnumeratedPath, ...],
         config: PythonConfig,
+        *,
+        include_inventory: bool = False,
     ) -> SourceView:
         self._prepare_staging()
-        return self._collect(head_state, entries, config, write_frozen=True)
+        return self._collect(
+            head_state,
+            entries,
+            config,
+            write_frozen=True,
+            include_inventory=include_inventory,
+        )
 
     def assert_unchanged(
         self,
@@ -341,10 +382,19 @@ class SourceViewBuilder:
         config: PythonConfig,
     ) -> None:
         try:
-            current = self._collect(head_state, entries, config, write_frozen=False)
+            current = self._collect(
+                head_state,
+                entries,
+                config,
+                write_frozen=False,
+                include_inventory=True,
+            )
         except SourceViewBuildError as error:
             raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
-        if current.fingerprint != initial.fingerprint:
+        if current.fingerprint != initial.fingerprint or (
+            initial.state_fingerprint is not None
+            and current.state_fingerprint != initial.state_fingerprint
+        ):
             raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT))
 
     def _prepare_staging(self) -> None:
@@ -402,7 +452,10 @@ class SourceViewBuilder:
         config: PythonConfig,
         *,
         write_frozen: bool,
+        include_inventory: bool = False,
     ) -> SourceView:
+        self._checkpoint()
+        inventory_before = self._inventory(entries) if include_inventory else ()
         candidates = tuple(entry for entry in entries if _is_candidate(entry.normalized, config))
         collision_groups = self._collision_groups(candidates)
         collision_paths = frozenset(path for group in collision_groups for path in group)
@@ -416,6 +469,7 @@ class SourceViewBuilder:
         ]
         files: list[SourceFile] = []
         for entry in candidates:
+            self._checkpoint()
             if entry.normalized in collision_paths:
                 continue
             frozen = self._freeze(entry, write_frozen=write_frozen)
@@ -426,6 +480,9 @@ class SourceViewBuilder:
 
         ordered_files = tuple(sorted(files, key=lambda item: _path_key(item.path)))
         ordered_failures = tuple(sorted(failures, key=_failure_key))
+        inventory_after = self._inventory(entries) if include_inventory else inventory_before
+        if include_inventory and inventory_after != inventory_before:
+            raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT))
         value = {
             "schema": _SCHEMA,
             "kind": _KIND,
@@ -440,7 +497,96 @@ class SourceViewBuilder:
             failures=ordered_failures,
             fingerprint=fingerprint,
             collision_groups=collision_groups,
+            inventory=inventory_after,
+            state_fingerprint=(
+                _state_fingerprint(head_state, inventory_after) if include_inventory else None
+            ),
         )
+
+    def _inventory(self, entries: tuple[EnumeratedPath, ...]) -> tuple[SourceInventoryEntry, ...]:
+        values: list[SourceInventoryEntry] = []
+        for entry in entries:
+            self._checkpoint()
+            logical_path = entry.normalized
+            physical_path = PurePosixPath(entry.raw_text)
+            parent_descriptor: int | None = None
+            try:
+                parent_descriptor = _open_parent_without_symlinks(
+                    self.repository,
+                    physical_path,
+                    repository_descriptor=self._repository_descriptor,
+                )
+                name = physical_path.name
+                before = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+                if stat.S_ISLNK(before.st_mode):
+                    target = os.readlink(name, dir_fd=parent_descriptor)
+                    values.append(
+                        SourceInventoryEntry(
+                            logical_path,
+                            entry.raw_text,
+                            "symlink",
+                            len(os.fsencode(target)),
+                            hashlib.sha256(os.fsencode(target)).hexdigest(),
+                        )
+                    )
+                    continue
+                if not stat.S_ISREG(before.st_mode):
+                    values.append(
+                        SourceInventoryEntry(
+                            logical_path,
+                            entry.raw_text,
+                            "other",
+                            before.st_size,
+                            None,
+                        )
+                    )
+                    continue
+                fd = os.open(name, _read_flags(), dir_fd=parent_descriptor)
+                try:
+                    opened_before = os.fstat(fd)
+                    content = _read_fd(fd)
+                    opened_after = os.fstat(fd)
+                finally:
+                    os.close(fd)
+                if (
+                    _stat_signature(before) != _stat_signature(opened_before)
+                    or _stat_signature(opened_before) != _stat_signature(opened_after)
+                    or len(content) != opened_after.st_size
+                ):
+                    raise _ConcurrentMutationError
+                values.append(
+                    SourceInventoryEntry(
+                        logical_path,
+                        entry.raw_text,
+                        "regular",
+                        len(content),
+                        hashlib.sha256(content).hexdigest(),
+                    )
+                )
+            except _ConcurrentMutationError as error:
+                raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
+            except FileNotFoundError:
+                values.append(
+                    SourceInventoryEntry(logical_path, entry.raw_text, "missing", None, None)
+                )
+            except (_UnsafeSymlinkError, OSError):
+                values.append(
+                    SourceInventoryEntry(
+                        logical_path,
+                        entry.raw_text,
+                        "unavailable",
+                        None,
+                        None,
+                    )
+                )
+            finally:
+                if parent_descriptor is not None:
+                    os.close(parent_descriptor)
+        return tuple(sorted(values, key=_inventory_key))
+
+    def _checkpoint(self) -> None:
+        if self._cancelled():
+            raise SourceInterruptedError(diagnostic(DiagnosticCode.INTERRUPTED))
 
     def _collision_groups(
         self, candidates: tuple[EnumeratedPath, ...]
@@ -747,3 +893,15 @@ class SourceViewBuilder:
         finally:
             if directory_descriptor is not None:
                 os.close(directory_descriptor)
+
+
+def _state_fingerprint(
+    head_state: HeadState,
+    inventory: tuple[SourceInventoryEntry, ...],
+) -> str:
+    value = {
+        "schema": "code-structure-viz.working-tree-state/v1",
+        "head_commit": _head_commit(head_state),
+        "inventory": [item.descriptor_value() for item in inventory],
+    }
+    return hashlib.sha256(encode_canonical_json(value)).hexdigest()

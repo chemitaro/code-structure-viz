@@ -60,9 +60,7 @@ def test_diff_resolves_closed_endpoint_and_output_format_grammar() -> None:
     assert request.to_ref == "head"
     assert request.max_changed_paths_override == 42
     assert request.formats == ("plantuml",)
-    assert request.stdout_selector == DomainFormatSelector(
-        domain="python", format="plantuml"
-    )
+    assert request.stdout_selector == DomainFormatSelector(domain="python", format="plantuml")
 
 
 @pytest.mark.parametrize(

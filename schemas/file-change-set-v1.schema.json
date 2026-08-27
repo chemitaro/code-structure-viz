@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeStructureViz file change set v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "before", "after", "files"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.file-change-set/v1"},
+    "before": {
+      "oneOf": [
+        {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        {"type": "null"}
+      ]
+    },
+    "after": {
+      "oneOf": [
+        {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        {"type": "null"}
+      ]
+    },
+    "files": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/file"}
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["old_start", "old_line_count", "new_start", "new_line_count", "ordinal", "hunk_id"],
+      "properties": {
+        "old_start": {"type": "integer", "minimum": 0},
+        "old_line_count": {"type": "integer", "minimum": 0},
+        "new_start": {"type": "integer", "minimum": 0},
+        "new_line_count": {"type": "integer", "minimum": 0},
+        "ordinal": {"type": "integer", "minimum": 0},
+        "hunk_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "old_path", "new_path", "hunks"],
+      "properties": {
+        "status": {"enum": ["A", "M", "D", "R", "C", "T", "U", "?"]},
+        "old_path": {"oneOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
+        "new_path": {"oneOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
+        "hunks": {"type": "array", "items": {"$ref": "#/$defs/range"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"enum": ["A", "?"]}}},
+          "then": {"properties": {"old_path": {"type": "null"}, "new_path": {"$ref": "#/$defs/path"}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "D"}}},
+          "then": {"properties": {"old_path": {"$ref": "#/$defs/path"}, "new_path": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"status": {"enum": ["M", "T", "U"]}}},
+          "then": {"properties": {"old_path": {"$ref": "#/$defs/path"}, "new_path": {"$ref": "#/$defs/path"}}}
+        }
+      ]
+    }
+  }
+}

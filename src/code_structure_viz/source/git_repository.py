@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import re
+import selectors
 import subprocess
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Final, Protocol
+from typing import BinaryIO, Final, Protocol, cast
 
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
 from code_structure_viz.core.path_safety import has_symlink_component
@@ -24,6 +26,8 @@ _FIXED_ENV: Final[dict[str, str]] = {
     "GIT_PAGER": "cat",
     "PAGER": "cat",
     "NO_COLOR": "1",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
 }
 
 
@@ -38,8 +42,33 @@ class CommandRunner(Protocol):
     def run(self, argv: tuple[str, ...], env: Mapping[str, str]) -> CommandResult: ...
 
 
+class GitReadError(RuntimeError):
+    def __init__(self, value: Diagnostic) -> None:
+        self.diagnostic = value
+        super().__init__(value.message)
+
+
+class GitInterruptedError(GitReadError):
+    """Raised when a Git child is terminated by the caller's cancellation signal."""
+
+
 class SubprocessRunner:
+    def __init__(
+        self,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+        max_output_bytes: int = 64 * 1024 * 1024,
+    ) -> None:
+        self._cancelled = cancelled
+        self._max_output_bytes = max_output_bytes
+
     def run(self, argv: tuple[str, ...], env: Mapping[str, str]) -> CommandResult:
+        if self._cancelled is None:
+            return self._run_without_cancellation(argv, env)
+        return self._run_with_cancellation(argv, env)
+
+    @staticmethod
+    def _run_without_cancellation(argv: tuple[str, ...], env: Mapping[str, str]) -> CommandResult:
         try:
             completed = subprocess.run(
                 argv,
@@ -53,6 +82,76 @@ class SubprocessRunner:
         except OSError:
             return CommandResult(127, b"", b"")
         return CommandResult(completed.returncode, completed.stdout, completed.stderr)
+
+    def _run_with_cancellation(
+        self, argv: tuple[str, ...], env: Mapping[str, str]
+    ) -> CommandResult:
+        try:
+            process = subprocess.Popen(
+                argv,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                shell=False,
+                start_new_session=True,
+            )
+        except OSError:
+            return CommandResult(127, b"", b"")
+
+        assert process.stdout is not None
+        assert process.stderr is not None
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+        chunks: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
+        sizes = {"stdout": 0, "stderr": 0}
+        try:
+            while selector.get_map():
+                if self._cancelled is not None and self._cancelled():
+                    _terminate_process_group(process)
+                    raise GitInterruptedError(diagnostic(DiagnosticCode.INTERRUPTED))
+                for key, _events in selector.select(timeout=0.05):
+                    stream = cast(BinaryIO, key.fileobj)
+                    chunk = stream.read(64 * 1024)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        stream.close()
+                        continue
+                    name = str(key.data)
+                    sizes[name] += len(chunk)
+                    if sizes[name] > self._max_output_bytes:
+                        _terminate_process_group(process)
+                        return CommandResult(125, b"", b"")
+                    chunks[name].append(chunk)
+            returncode = process.wait()
+            return CommandResult(
+                returncode,
+                b"".join(chunks["stdout"]),
+                b"".join(chunks["stderr"]),
+            )
+        finally:
+            selector.close()
+            if process.poll() is None:
+                _terminate_process_group(process)
+            with suppress(OSError):
+                process.wait(timeout=1)
+
+
+def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    try:
+        os.killpg(process.pid, 15)
+    except OSError:
+        with suppress(OSError):
+            process.terminate()
+    try:
+        process.wait(timeout=0.2)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, 9)
+        except OSError:
+            with suppress(OSError):
+                process.kill()
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,12 +181,6 @@ class EnumeratedPath:
     normalized: PurePosixPath
 
 
-class GitReadError(RuntimeError):
-    def __init__(self, value: Diagnostic) -> None:
-        self.diagnostic = value
-        super().__init__(value.message)
-
-
 class UnrepresentableGitPathFatal(GitReadError):
     pass
 
@@ -109,13 +202,22 @@ def _path_protocol_fatal() -> GitReadError:
 
 
 class GitRepositoryReader:
-    def __init__(self, repository: Path, *, runner: CommandRunner | None = None) -> None:
+    def __init__(
+        self,
+        repository: Path,
+        *,
+        runner: CommandRunner | None = None,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> None:
         self.repository = repository
-        self._runner = runner or SubprocessRunner()
+        self._cancelled = cancelled or (lambda: False)
+        self._runner = runner or SubprocessRunner(cancelled=self._cancelled)
         self._environment = _safe_environment()
         self._validated_identity: tuple[int, int] | None = None
 
     def _git(self, *arguments: str) -> CommandResult:
+        if self._cancelled():
+            raise GitInterruptedError(diagnostic(DiagnosticCode.INTERRUPTED))
         if self._validated_identity is not None and not self.repository_is_current():
             raise _fatal(DiagnosticCode.REPO_ROOT)
         argv = (
@@ -126,10 +228,17 @@ class GitRepositoryReader:
             "core.fsmonitor=false",
             *arguments,
         )
-        return self._runner.run(argv, self._environment)
+        result = self._runner.run(argv, self._environment)
+        if self._cancelled():
+            raise GitInterruptedError(diagnostic(DiagnosticCode.INTERRUPTED))
+        return result
 
     def validate_git_version(self) -> None:
+        if self._cancelled():
+            raise GitInterruptedError(diagnostic(DiagnosticCode.INTERRUPTED))
         result = self._runner.run(("git", "--version"), self._environment)
+        if self._cancelled():
+            raise GitInterruptedError(diagnostic(DiagnosticCode.INTERRUPTED))
         if (
             result.returncode != 0
             or not result.stdout.endswith(b"\n")
@@ -247,6 +356,37 @@ class GitRepositoryReader:
             entries.append(EnumeratedPath(decoded, PurePosixPath(normalized)))
         return tuple(entries)
 
+    def enumerate_untracked_paths(self) -> tuple[PurePosixPath, ...]:
+        result = self._git("ls-files", "-z", "--others", "--exclude-standard", "--")
+        if result.returncode != 0:
+            raise _path_protocol_fatal()
+        return _decode_path_list(result.stdout)
+
+    def enumerate_unmerged_paths(self) -> tuple[PurePosixPath, ...]:
+        result = self._git("ls-files", "-u", "-z", "--")
+        if result.returncode != 0:
+            raise _path_protocol_fatal()
+        fields = result.stdout.split(b"\0")
+        if fields and fields[-1] == b"":
+            fields.pop()
+        values: set[PurePosixPath] = set()
+        for field in fields:
+            try:
+                metadata, raw_path = field.split(b"\t", 1)
+                mode, object_id, stage = metadata.split(b" ", 2)
+                if (
+                    len(mode) != 6
+                    or any(character not in b"01234567" for character in mode)
+                    or len(object_id) not in {40, 64}
+                    or any(character not in b"0123456789abcdefABCDEF" for character in object_id)
+                    or stage not in {b"1", b"2", b"3"}
+                ):
+                    raise ValueError
+                values.add(_decode_git_path(raw_path))
+            except (UnicodeDecodeError, ValueError) as error:
+                raise _path_protocol_fatal() from error
+        return tuple(sorted(values, key=lambda item: item.as_posix().encode("utf-8")))
+
     def enumerate_paths(self) -> tuple[PurePosixPath, ...]:
         return tuple(entry.normalized for entry in self.enumerate_path_entries())
 
@@ -363,3 +503,24 @@ def _is_safe_relative_git_path(value: str) -> bool:
         return False
     parts = value.split("/")
     return all(part not in {"", ".", ".."} for part in parts)
+
+
+def _decode_git_path(raw: bytes) -> PurePosixPath:
+    try:
+        decoded = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise UnrepresentableGitPathFatal(diagnostic(DiagnosticCode.SOURCE_NON_UTF8)) from error
+    normalized = unicodedata.normalize("NFC", decoded)
+    if not _is_safe_relative_git_path(normalized):
+        raise ValueError("unsafe Git path")
+    return PurePosixPath(normalized)
+
+
+def _decode_path_list(payload: bytes) -> tuple[PurePosixPath, ...]:
+    fields = payload.split(b"\0")
+    if fields and fields[-1] == b"":
+        fields.pop()
+    if any(not field for field in fields):
+        raise _path_protocol_fatal()
+    values = {_decode_git_path(field) for field in fields}
+    return tuple(sorted(values, key=lambda item: item.as_posix().encode("utf-8")))

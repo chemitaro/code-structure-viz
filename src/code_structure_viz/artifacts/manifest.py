@@ -293,6 +293,7 @@ class DiffManifestBuilder:
         file_changes: object,
         artifacts: tuple[ArtifactDescriptor, ...],
         changed_path_budget: object | None = None,
+        semantic_sides: Mapping[str, object] | None = None,
     ) -> bytes:
         if len(outcome.domains) != 1 or outcome.manifest_relative_path != "run-manifest.json":
             raise ValueError("diff manifest requires one Python domain")
@@ -365,6 +366,7 @@ class DiffManifestBuilder:
                 "before": _source_value(before_source),
                 "after": _source_value(after_source),
             },
+            "semantic_sides": dict(semantic_sides or {}),
             "file_change_set": file_change_value,
             "changed_path_budget": (
                 changed_path_budget.to_json_value()
@@ -408,6 +410,7 @@ class DiffManifestBuilder:
                 "before": _source_value(before_source),
                 "after": _source_value(after_source),
             },
+            "semantic_sides": dict(semantic_sides or {}),
             "file_change_set": file_change_value,
             "changed_path_budget": (
                 changed_path_budget.to_json_value()

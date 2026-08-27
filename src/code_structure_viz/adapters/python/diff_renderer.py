@@ -80,8 +80,7 @@ def render_plantuml_diff(result: SemanticDiffResult) -> bytes:
             if entity_delta is not None and entity_delta.after is not None
             else entity_delta.before
             if entity_delta is not None
-            else
-            after_entities.get(identity) or before_entities.get(identity)
+            else after_entities.get(identity) or before_entities.get(identity)
         )
         if not isinstance(value, dict):
             continue
@@ -117,7 +116,7 @@ def render_plantuml_diff(result: SemanticDiffResult) -> bytes:
         marker, color = _status_style(delta.status.value)
         lines.append(
             f'  note "{_escape(marker + " relation " + delta.identity)}" '
-            f'as {_note_alias("relation:" + delta.identity)} {color}'
+            f"as {_note_alias('relation:' + delta.identity)} {color}"
         )
 
     lines.extend(
@@ -187,11 +186,11 @@ def _member_line(
                 rendered_parameters = ""
             returns = str(signature.get("returns") or "?")
             return (
-                f'    {_escape(marker + " method " + name + "(" + rendered_parameters + ")")}'
+                f"    {_escape(marker + ' method ' + name + '(' + rendered_parameters + ')')}"
                 f" : {_escape(returns)} {color}"
             )
     annotation = str(value.get("annotation") or "?")
-    return f'    {_escape(marker + " " + kind + " " + name)} : {_escape(annotation)} {color}'
+    return f"    {_escape(marker + ' ' + kind + ' ' + name)} : {_escape(annotation)} {color}"
 
 
 def _parameter_text(value: dict[str, object]) -> str:

@@ -28,3 +28,27 @@ semantic coverage object, records the `max_entities` budget decision, lists
 only published payload paths, and carries domain diagnostics. Root diagnostics
 are reserved for valid-run diagnostics outside the domain; fatal runs have no
 manifest.
+
+## Diff run
+
+`diff` は同じ `run-manifest/v1` root を使うが、snapshot の `source`/`request` shape を流用せず、
+次の field を追加する。
+
+- `request.from`、`request.to`、`request.pr_target`、resolved traversal depth
+- `comparison`: caller の requested endpoint、resolved before/after object、endpoint kind、start HEAD anchor、
+  selected base candidate、merge-base、resolution method
+- `sources.before`/`sources.after`: immutable side の schema、kind、head、fingerprint、file count
+- `semantic_sides.before`/`semantic_sides.after`: semantic side の kind/digest/status
+- `file_change_set`: `code-structure-viz.file-change-set/v1` object
+- `changed_path_budget`: requested/resolved/actual/source
+
+diff Artifact descriptors は `file-changes.json`（`file-change-set`）、requested format の
+`python.diff.semantic.json`、`python.diff.puml` の順に並ぶ。domain `artifact_paths` には semantic
+JSON/PlantUML のみを記録し、file-change descriptor は run-level `artifacts` に残す。analysis
+failure、entity budget overrun、unmerged path は `incomplete_kind: "payload_unavailable"`、
+`payload_available: false` とし、affected semantic payload を列挙しない。changed-path overrun、
+endpoint/object/drift/security failure は manifest を作らない run fatal である。
+
+`DiffManifestBuilder` の run fingerprint preimage は endpoint、sources、semantic side、file-change
+metadata、budget、status を含む。output directory、staging path、timestamp、PID、source body、Git
+stderr は含まれない。同一入力で key order、Artifact bytes、descriptor SHA-256 が一致する。

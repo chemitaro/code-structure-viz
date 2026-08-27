@@ -43,6 +43,7 @@ class PythonMoveMatcher:
                 after_item
                 for after_item in unmatched_after
                 if _has_identity_change(before_item, after_item)
+                and _has_name_evidence(before_item, after_item)
                 and before_fingerprints[before_item.id] == after_fingerprints[after_item.id]
             ]
             if len(candidates) != 1:
@@ -96,6 +97,11 @@ def _has_identity_change(before: PythonClassEntity, after: PythonClassEntity) ->
         or before.name != after.name
         or before.path != after.path
     )
+
+
+def _has_name_evidence(before: PythonClassEntity, after: PythonClassEntity) -> bool:
+    """Require a stable class-name signal independent of structural equality."""
+    return before.name == after.name or before.qualified_name == after.qualified_name
 
 
 def _member_fingerprint(member: PythonMember) -> dict[str, object]:

@@ -483,9 +483,7 @@ def parse_diff_cli(argv: Sequence[str]) -> DiffCliRequest:
             else None
         ),
         max_entities_override=(
-            _parse_positive(values["--max-entities"])
-            if "--max-entities" in values
-            else None
+            _parse_positive(values["--max-entities"]) if "--max-entities" in values else None
         ),
         formats=resolved_formats,
         stdout_selector=stdout_selector,

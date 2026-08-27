@@ -12,6 +12,7 @@ from tests.helpers.acceptance import (
     initialize_repository,
     run_cli,
 )
+from tests.helpers.diff import create_two_commit_repository_from_files, run_diff_cli
 
 ROOT = Path(__file__).resolve().parents[2]
 SEMANTIC_GOLDEN_ROOT = ROOT / "tests" / "golden" / "python_snapshot"
@@ -37,6 +38,7 @@ def _validator(name: str) -> Draft202012Validator:
     "name",
     [
         "diagnostic-v1.schema.json",
+        "file-change-set-v1.schema.json",
         "run-manifest-v1.schema.json",
         "run-summary-v1.schema.json",
         "semantic-v1.schema.json",
@@ -67,6 +69,43 @@ def test_diagnostic_schema_accepts_exact_vector_and_rejects_extra_field() -> Non
 
     with pytest.raises(ValidationError):
         _validator("diagnostic-v1.schema.json").validate({**value, "source": "secret"})
+
+
+@pytest.mark.parametrize(
+    "code_message",
+    (
+        (
+            "CSV-DIFF-001",
+            "Comparison endpoint or implicit base could not be resolved safely.",
+        ),
+        (
+            "CSV-DIFF-002",
+            "Changed path count exceeds the resolved comparison limit.",
+        ),
+        (
+            "CSV-DIFF-003",
+            "Git changed-path metadata could not be read safely.",
+        ),
+    ),
+)
+def test_diagnostic_schema_accepts_diff_diagnostic_vectors(
+    code_message: tuple[str, str],
+) -> None:
+    code, message = code_message
+    _validator("diagnostic-v1.schema.json").validate(
+        {
+            "type": "diagnostic",
+            "schema": "code-structure-viz.diagnostic/v1",
+            "code": code,
+            "severity": "error",
+            "domain": None,
+            "path": None,
+            "symbol": None,
+            "line": None,
+            "recoverable": False,
+            "message": message,
+        }
+    )
 
 
 @pytest.mark.parametrize(
@@ -264,6 +303,27 @@ def test_schemas_accept_captured_complete_and_unavailable_cli_json(
         validator.validate({**manifest, "absolute_path": "/private/secret"})
     with pytest.raises(ValidationError):
         validator.validate({**manifest, "artifacts": [{"path": "run-manifest.json"}]})
+
+
+def test_schemas_accept_captured_complete_diff_json(tmp_path: Path) -> None:
+    repository, before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files={"src/app.py": "class Order:\n    amount: int\n"},
+        after_files={"src/app.py": "class Order:\n    amount: str\n"},
+    )
+    output = tmp_path / "output"
+    result = run_diff_cli(repository.resolve(), output, "--from", before, "--to", after)
+
+    assert result.returncode == 0
+    _validator("file-change-set-v1.schema.json").validate(
+        json.loads((output / "file-changes.json").read_bytes())
+    )
+    _validator("semantic-v1.schema.json").validate(
+        json.loads((output / "python.diff.semantic.json").read_bytes())
+    )
+    _validator("run-manifest-v1.schema.json").validate(
+        json.loads((output / "run-manifest.json").read_bytes())
+    )
 
 
 def test_semantic_schema_rejects_member_and_relation_target_discriminant_mutations() -> None:

@@ -71,6 +71,19 @@ def _encode_json(value: object) -> str:
     raise TypeError(f"unsupported canonical JSON value: {type(value).__name__}")
 
 
+def _encode_json_sorted(value: object) -> str:
+    if isinstance(value, Mapping):
+        items = sorted(value.items(), key=lambda item: str(item[0]).encode("utf-8"))
+        return (
+            "{"
+            + ",".join(f"{_encode_json(key)}:{_encode_json_sorted(item)}" for key, item in items)
+            + "}"
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return "[" + ",".join(_encode_json_sorted(item) for item in value) + "]"
+    return _encode_json(value)
+
+
 def encode_canonical_json(value: object, field_order: object | None = None) -> bytes:
     """Encode a closed DTO as deterministic UTF-8 JSON with one final LF.
 
@@ -80,3 +93,9 @@ def encode_canonical_json(value: object, field_order: object | None = None) -> b
     del field_order
     normalized = _normalize(value)
     return (_encode_json(normalized) + "\n").encode("utf-8")
+
+
+def encode_sorted_canonical_json(value: object) -> bytes:
+    """Encode canonical JSON with recursively UTF-8 key-sorted objects."""
+    normalized = _normalize(value)
+    return (_encode_json_sorted(normalized) + "\n").encode("utf-8")

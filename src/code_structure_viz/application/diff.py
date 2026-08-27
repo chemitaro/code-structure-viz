@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import PurePosixPath
 
 from code_structure_viz.adapters.python.analyzer import PythonSnapshotAnalyzer
 from code_structure_viz.adapters.python.diff_renderer import (
@@ -52,17 +53,25 @@ from code_structure_viz.source.endpoints import (
 )
 from code_structure_viz.source.file_changes import (
     FileChangeSet,
+    attach_content_hunks,
+    build_working_tree_file_change_set,
     parse_name_status,
-    parse_unified_hunks,
 )
 from code_structure_viz.source.freezer import WorkingTreeFreezer, build_commit_source_view
 from code_structure_viz.source.git_repository import (
     Commit,
+    EnumeratedPath,
+    GitInterruptedError,
     GitReadError,
     GitRepositoryReader,
     HeadState,
 )
-from code_structure_viz.source.source_view import SourceView, SourceViewBuildError
+from code_structure_viz.source.source_view import (
+    SourceDriftError,
+    SourceInterruptedError,
+    SourceView,
+    SourceViewBuildError,
+)
 
 _DIFF_ARTIFACT_FORMATS = {"semantic-json": "semantic-json", "plantuml": "plantuml"}
 
@@ -81,15 +90,26 @@ class DiffApplication:
 
     def run(self, request: DiffCliRequest) -> RunOutcome:
         transaction: OutputTransaction | None = None
+        working_freezer: WorkingTreeFreezer | None = None
+        working_entries: tuple[EnumeratedPath, ...] = ()
+        untracked_paths: tuple[PurePosixPath, ...] = ()
+        unmerged_paths: tuple[PurePosixPath, ...] = ()
+        semantic_result: SemanticDiffResult | None = None
         try:
             self._checkpoint()
             if request.from_ref == "working-tree":
                 return RunOutcome.usage((diagnostic(DiagnosticCode.USAGE_GRAMMAR),))
-            reader = GitRepositoryReader(request.repo)
+            reader = GitRepositoryReader(request.repo, cancelled=self._cancelled)
             reader.validate_git_version()
             repository = reader.validate_repository_root()
             config = resolve_config(request, repository)
             start_head = reader.resolve_head_state()
+            working_tree_requested = request.to_ref in {None, "working-tree"}
+            if working_tree_requested:
+                working_entries = reader.enumerate_path_entries()
+                untracked_paths = reader.enumerate_untracked_paths()
+                unmerged_paths = reader.enumerate_unmerged_paths()
+            self._checkpoint()
             endpoints = ComparisonEndpointResolver(
                 reader,
                 comparison=config.comparison,
@@ -103,13 +123,56 @@ class DiffApplication:
             if before_id is None:
                 raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT))
             after_id = endpoints.after.object_id
-            name_status = reader.diff_name_status(before_id, after_id)
-            try:
-                changed_paths = parse_name_status(name_status)
-            except ValueError as error:
-                raise GitReadError(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE)) from error
+
+            transaction = OutputTransaction(
+                repository,
+                request.output_dir,
+                repository_identity=reader.repository_identity,
+            )
+            transaction.begin()
+            if endpoints.after.kind is EndpointKind.WORKING_TREE:
+                working_freezer = WorkingTreeFreezer(
+                    repository,
+                    transaction.staging_root,
+                    staging_root_descriptor=transaction.staging_root_descriptor,
+                    repository_descriptor=transaction.repository_descriptor,
+                    cancelled=self._cancelled,
+                )
+                after_source = working_freezer.freeze(start_head, working_entries, config.python)
+            before_source = build_commit_source_view(reader, Commit(before_id), config.python)
+            if endpoints.after.kind is EndpointKind.WORKING_TREE:
+                assert working_freezer is not None
+                file_changes = build_working_tree_file_change_set(
+                    before_source.inventory,
+                    after_source.inventory,
+                    untracked_paths=untracked_paths,
+                    unmerged_paths=unmerged_paths,
+                    before_contents=_source_contents(before_source),
+                    after_contents=_source_contents(after_source),
+                    before=before_id,
+                    after=None,
+                )
+            else:
+                if endpoints.after.commit is None:
+                    raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT))
+                after_source = build_commit_source_view(
+                    reader,
+                    endpoints.after.commit,
+                    config.python,
+                )
+                try:
+                    changed_paths = parse_name_status(reader.diff_name_status(before_id, after_id))
+                except ValueError as error:
+                    raise GitReadError(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE)) from error
+                file_changes = attach_content_hunks(
+                    changed_paths,
+                    before_contents=_source_contents(before_source),
+                    after_contents=_source_contents(after_source),
+                    before=before_id,
+                    after=after_id,
+                )
             changed_path_budget = ChangedPathBudgetGate().admit(
-                actual=len(changed_paths),
+                actual=file_changes.count,
                 requested=request.max_changed_paths_override,
                 resolved=(request.max_changed_paths_override or 1000),
                 source=(
@@ -120,40 +183,17 @@ class DiffApplication:
             )
             if not changed_path_budget.admitted:
                 return RunOutcome.fatal((diagnostic(DiagnosticCode.DIFF_CHANGED_PATH_BUDGET),))
-            has_unmerged = any(item.status == "U" for item in changed_paths)
-            if has_unmerged:
-                file_changes = FileChangeSet(changed_paths, before=before_id, after=after_id)
-            else:
-                patch = reader.diff_patch(before_id, after_id)
-                try:
-                    file_changes = FileChangeSet(
-                        parse_unified_hunks(patch, changed_paths),
-                        before=before_id,
-                        after=after_id,
-                    )
-                except ValueError as error:
-                    raise GitReadError(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE)) from error
-
-            transaction = OutputTransaction(
-                repository,
-                request.output_dir,
-                repository_identity=reader.repository_identity,
-            )
-            transaction.begin()
-            before_source = build_commit_source_view(reader, Commit(before_id), config.python)
-            after_source = self._build_after_source(
-                reader,
-                endpoints.after.kind is EndpointKind.WORKING_TREE,
-                endpoints.after.commit,
-                transaction,
-                start_head,
-                config,
-            )
+            has_unmerged = any(item.status == "U" for item in file_changes)
+            self._checkpoint()
+            semantic_sides: dict[str, object]
             if has_unmerged:
                 domain = self._unmerged_domain(request, config, before_source, after_source)
+                semantic_sides = _failed_side_values(before_source, after_source)
             else:
                 before_selection = self._analyze(before_source, config)
+                self._checkpoint()
                 after_selection = self._analyze(after_source, config)
+                self._checkpoint()
                 before_snapshot, before_failed, before_coverage = self._selection_snapshot(
                     before_selection
                 )
@@ -184,6 +224,10 @@ class DiffApplication:
                     (*before_selection.diagnostics, *after_selection.diagnostics)
                 )
                 semantic_result = _with_diagnostics(semantic_result, diagnostics)
+                semantic_sides = {
+                    "before": semantic_result.before.to_json_value(),
+                    "after": semantic_result.after.to_json_value(),
+                }
                 domain = self._domain_outcome(
                     request,
                     config,
@@ -196,6 +240,8 @@ class DiffApplication:
             change_content = _file_change_content(file_changes)
             transaction.stage_diff_payload("file-change-set", change_content)
             if domain.payload_available:
+                if semantic_result is None:
+                    raise ValueError("available diff outcome lost its semantic result")
                 for format_value in request.formats:
                     if format_value == "semantic-json":
                         content = render_semantic_diff(semantic_result, file_changes)
@@ -218,17 +264,19 @@ class DiffApplication:
                 file_changes=file_changes,
                 artifacts=transaction.descriptors,
                 changed_path_budget=changed_path_budget.budget,
+                semantic_sides=semantic_sides,
             )
             transaction.stage_manifest(manifest)
+            self._checkpoint()
             if endpoints.after.kind is EndpointKind.WORKING_TREE:
                 current_head = reader.resolve_head_state()
                 current_entries = reader.enumerate_path_entries()
-                WorkingTreeFreezer(
-                    repository,
-                    transaction.staging_root,
-                    staging_root_descriptor=transaction.staging_root_descriptor,
-                    repository_descriptor=transaction.repository_descriptor,
-                ).assert_unchanged(
+                current_untracked = reader.enumerate_untracked_paths()
+                current_unmerged = reader.enumerate_unmerged_paths()
+                if current_untracked != untracked_paths or current_unmerged != unmerged_paths:
+                    raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT))
+                assert working_freezer is not None
+                working_freezer.assert_unchanged(
                     after_source,
                     current_head,
                     current_entries,
@@ -241,7 +289,11 @@ class DiffApplication:
             return RunOutcome.usage((error.diagnostic,))
         except EndpointResolutionError as error:
             return RunOutcome.fatal((error.diagnostic,))
+        except GitInterruptedError:
+            return RunOutcome.interrupted((diagnostic(DiagnosticCode.INTERRUPTED),))
         except PublicationInterrupted:
+            return RunOutcome.interrupted((diagnostic(DiagnosticCode.INTERRUPTED),))
+        except SourceInterruptedError:
             return RunOutcome.interrupted((diagnostic(DiagnosticCode.INTERRUPTED),))
         except (GitReadError, OutputTransactionError) as error:
             return RunOutcome.fatal((error.diagnostic,))
@@ -255,9 +307,7 @@ class DiffApplication:
 
     @staticmethod
     def _analyze(source: SourceView, config: ResolvedConfig) -> PythonSelectionResult:
-        analysis = PythonSnapshotAnalyzer().analyze(
-            PythonModuleIndex.build(source, config.python)
-        )
+        analysis = PythonSnapshotAnalyzer().analyze(PythonModuleIndex.build(source, config.python))
         return PythonTargetSelector().select(
             analysis,
             (),
@@ -414,3 +464,26 @@ def _diff_coverage(
 
 def _file_change_content(file_changes: FileChangeSet) -> bytes:
     return encode_canonical_json(file_changes.to_json_value())
+
+
+def _source_contents(source: SourceView) -> dict[PurePosixPath, bytes]:
+    return {item.path: item.content for item in source.files}
+
+
+def _failed_side_values(before: SourceView, after: SourceView) -> dict[str, object]:
+    return {
+        "before": DomainPresenceResolver.side(
+            None,
+            digest=before.fingerprint,
+            head_commit=before.head_commit,
+            file_count=len(before.files),
+            analysis_failed=True,
+        ).to_json_value(),
+        "after": DomainPresenceResolver.side(
+            None,
+            digest=after.fingerprint,
+            head_commit=after.head_commit,
+            file_count=len(after.files),
+            analysis_failed=True,
+        ).to_json_value(),
+    }

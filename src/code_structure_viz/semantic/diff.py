@@ -16,7 +16,12 @@ from code_structure_viz.adapters.python.model import (
     relation_sort_key,
 )
 from code_structure_viz.core.diagnostics import Diagnostic
-from code_structure_viz.semantic.canonical_json import encode_canonical_json
+from code_structure_viz.semantic.canonical_json import (
+    encode_canonical_json,
+    encode_sorted_canonical_json,
+)
+
+_DIFF_SCHEMA = "code-structure-viz.semantic/v1"
 
 
 class DeltaStatus(StrEnum):
@@ -45,6 +50,7 @@ class DiffSide:
     def to_json_value(self) -> dict[str, object]:
         return {
             "kind": self.kind.value,
+            "domain": "python",
             "schema": self.schema,
             "digest": self.digest,
             "head_commit": self.head_commit,
@@ -126,7 +132,7 @@ class CanonicalEmptySide:
 
     @classmethod
     def bytes(cls) -> bytes:
-        return encode_canonical_json(cls.value())
+        return encode_sorted_canonical_json(cls.value())
 
     @classmethod
     def digest(cls) -> str:
@@ -150,7 +156,7 @@ class DomainPresenceResolver:
         if analysis_failed:
             return DiffSide(
                 SideKind.ANALYSIS_FAILED,
-                "code-structure-viz.semantic/v1",
+                _DIFF_SCHEMA,
                 digest or "",
                 head_commit,
                 file_count,
@@ -160,7 +166,7 @@ class DomainPresenceResolver:
             return CanonicalEmptySide.side()
         return DiffSide(
             SideKind.REAL,
-            "code-structure-viz.semantic/v1",
+            _DIFF_SCHEMA,
             digest or _snapshot_digest(snapshot),
             head_commit,
             file_count,
@@ -216,7 +222,7 @@ class SemanticDiffer:
         entities, entity_matches = _entity_deltas(before_snapshot, after_snapshot)
         members = _member_deltas(before_snapshot, after_snapshot, entity_matches)
         relations = _relation_deltas(before_snapshot, after_snapshot, entity_matches)
-        seeds = _seeds(members, relations)
+        seeds = _seeds(entities, members, relations)
         impact = ImpactExplorer().explore(
             before_snapshot,
             after_snapshot,
@@ -270,9 +276,9 @@ def _walk(adjacency: dict[str, set[str]], seeds: set[str], depth: int) -> tuple[
     visited: set[str] = set()
     frontier = set(seeds)
     for _ in range(max(0, depth)):
-        next_nodes = {
-            target for node in frontier for target in adjacency.get(node, set())
-        } - visited - seeds
+        next_nodes = (
+            {target for node in frontier for target in adjacency.get(node, set())} - visited - seeds
+        )
         if not next_nodes:
             break
         visited.update(next_nodes)
@@ -327,9 +333,7 @@ def _entity_deltas(
                 match,
             )
         )
-    deltas.sort(
-        key=lambda item: (item.identity.encode("utf-8"), item.status.value.encode("utf-8"))
-    )
+    deltas.sort(key=lambda item: (item.identity.encode("utf-8"), item.status.value.encode("utf-8")))
     return tuple(deltas), matches
 
 
@@ -448,10 +452,15 @@ def _relation_deltas(
 
 
 def _seeds(
+    entities: tuple[SemanticDelta, ...],
     members: tuple[SemanticDelta, ...],
     relations: tuple[SemanticDelta, ...],
 ) -> set[str]:
     values: set[str] = set()
+    for delta in entities:
+        for side in (delta.before, delta.after):
+            if isinstance(side, dict) and isinstance(side.get("id"), str):
+                values.add(side["id"])
     for delta in members:
         for side in (delta.before, delta.after):
             if isinstance(side, dict) and isinstance(side.get("owner_id"), str):
@@ -468,9 +477,7 @@ def _snapshot_digest(snapshot: PythonSnapshot) -> str:
         "entities": [
             _entity_value(item) for item in sorted(snapshot.entities, key=entity_sort_key)
         ],
-        "members": [
-            _member_value(item) for item in sorted(snapshot.members, key=member_sort_key)
-        ],
+        "members": [_member_value(item) for item in sorted(snapshot.members, key=member_sort_key)],
         "relations": [
             _relation_value(item) for item in sorted(snapshot.relations, key=relation_sort_key)
         ],

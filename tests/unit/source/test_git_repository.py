@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
@@ -116,6 +117,8 @@ def test_git_child_environment_drops_repository_config_object_and_trace_injectio
             "GIT_PAGER",
             "PAGER",
             "NO_COLOR",
+            "GIT_NO_LAZY_FETCH",
+            "GIT_NO_REPLACE_OBJECTS",
         }
     )
 
@@ -135,6 +138,18 @@ def test_subprocess_runner_starts_git_in_an_independent_signal_session(
 
     assert result.returncode == 0
     assert captured["start_new_session"] is True
+
+
+def test_subprocess_runner_terminates_the_process_group_on_cancellation() -> None:
+    runner = SubprocessRunner(cancelled=lambda: True)
+
+    with pytest.raises(GitReadError) as caught:
+        runner.run(
+            (sys.executable, "-c", "import time; time.sleep(30)"),
+            {"PATH": "/usr/bin"},
+        )
+
+    assert caught.value.diagnostic.code.value == "CSV-INTERRUPT-001"
 
 
 @pytest.mark.parametrize(

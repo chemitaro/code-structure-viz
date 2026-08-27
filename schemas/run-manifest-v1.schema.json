@@ -11,7 +11,6 @@
     "adapters",
     "command",
     "request",
-    "source",
     "config",
     "run",
     "domains",
@@ -32,6 +31,19 @@
     "command": {"$ref": "#/$defs/command"},
     "request": {"$ref": "#/$defs/request"},
     "source": {"$ref": "#/$defs/source"},
+    "comparison": {"$ref": "#/$defs/comparison"},
+    "sources": {"$ref": "#/$defs/sources"},
+    "semantic_sides": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after"],
+      "properties": {
+        "before": {"$ref": "#/$defs/semantic_side"},
+        "after": {"$ref": "#/$defs/semantic_side"}
+      }
+    },
+    "file_change_set": {"$ref": "#/$defs/file_change_set"},
+    "changed_path_budget": {"$ref": "#/$defs/changed_path_budget"},
     "config": {"$ref": "#/$defs/config"},
     "run": {"$ref": "#/$defs/run"},
     "domains": {
@@ -42,7 +54,7 @@
     },
     "artifacts": {
       "type": "array",
-      "maxItems": 2,
+      "maxItems": 3,
       "items": {"$ref": "#/$defs/artifact"}
     },
     "diagnostics": {
@@ -140,6 +152,41 @@
         },
         "artifacts": {"maxItems": 0}
       }
+    },
+    {
+      "properties": {
+        "command": {"properties": {"name": {"const": "diff"}}},
+        "run": {
+          "properties": {
+            "status": {"const": "not_applicable"},
+            "exit_code": {"const": 0}
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {"const": "not_applicable"},
+                "payload_available": {"const": false},
+                "artifact_paths": {"maxItems": 0}
+              }
+            }
+          ]
+        },
+        "artifacts": {"minItems": 1}
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"command": {"properties": {"name": {"const": "snapshot"}}}}},
+      "then": {"required": ["source"]}
+    },
+    {
+      "if": {"properties": {"command": {"properties": {"name": {"const": "diff"}}}}},
+      "then": {
+        "required": ["comparison", "sources", "semantic_sides", "file_change_set", "changed_path_budget"]
+      }
     }
   ],
   "$defs": {
@@ -173,7 +220,8 @@
         "manifest": {"const": "code-structure-viz.run-manifest/v1"},
         "run_summary": {"const": "code-structure-viz.run-summary/v1"},
         "stdout_result": {"const": "code-structure-viz.stdout-result/v1"},
-        "plantuml": {"const": "code-structure-viz.plantuml/python/v1"}
+        "plantuml": {"const": "code-structure-viz.plantuml/python/v1"},
+        "file_change_set": {"const": "code-structure-viz.file-change-set/v1"}
       }
     },
     "adapter": {
@@ -191,12 +239,12 @@
       "additionalProperties": false,
       "required": ["name", "domain", "formats", "stdout_selector"],
       "properties": {
-        "name": {"const": "snapshot"},
+        "name": {"enum": ["snapshot", "diff"]},
         "domain": {"const": "python"},
         "formats": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 2,
+          "maxItems": 3,
           "uniqueItems": true,
           "items": {"enum": ["semantic-json", "plantuml"]}
         },
@@ -217,12 +265,23 @@
     "request": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["targets", "upstream_depth", "downstream_depth"],
       "properties": {
         "targets": {"type": "array", "items": {"$ref": "#/$defs/target"}},
+        "from": {"type": ["string", "null"], "minLength": 1},
+        "to": {"type": ["string", "null"], "minLength": 1},
+        "pr_target": {"type": ["string", "null"], "minLength": 1},
         "upstream_depth": {"type": "integer", "minimum": 0},
         "downstream_depth": {"type": "integer", "minimum": 0}
-      }
+      },
+      "oneOf": [
+        {
+          "required": ["targets", "upstream_depth", "downstream_depth"],
+          "not": {"required": ["from", "to", "pr_target"]}
+        },
+        {
+          "required": ["from", "to", "pr_target", "upstream_depth", "downstream_depth"]
+        }
+      ]
     },
     "source": {
       "type": "object",
@@ -230,7 +289,7 @@
       "required": ["schema", "kind", "head_commit", "fingerprint", "file_count"],
       "properties": {
         "schema": {"const": "code-structure-viz.source-view/v1"},
-        "kind": {"const": "working-tree"},
+        "kind": {"enum": ["working-tree", "commit", "frozen-working-tree"]},
         "head_commit": {
           "oneOf": [
             {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
@@ -239,6 +298,160 @@
         },
         "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "file_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after"],
+      "properties": {
+        "before": {"$ref": "#/$defs/source"},
+        "after": {"$ref": "#/$defs/source"}
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "resolved",
+        "before_kind",
+        "after_kind",
+        "start_head_anchor",
+        "selected_base_candidate",
+        "merge_base",
+        "resolution_method"
+      ],
+      "properties": {
+        "requested": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "to"],
+          "properties": {
+            "from": {"type": ["string", "null"], "minLength": 1},
+            "to": {"type": ["string", "null"], "minLength": 1}
+          }
+        },
+        "resolved": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["before", "after"],
+          "properties": {
+            "before": {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            "after": {
+              "oneOf": [
+                {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+                {"type": "null"}
+              ]
+            }
+          }
+        },
+        "before_kind": {"const": "commit"},
+        "after_kind": {"enum": ["commit", "frozen-working-tree"]},
+        "start_head_anchor": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+            {"type": "null"}
+          ]
+        },
+        "selected_base_candidate": {"type": ["string", "null"], "minLength": 1},
+        "merge_base": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+            {"type": "null"}
+          ]
+        },
+        "resolution_method": {"type": "string", "minLength": 1}
+      }
+    },
+    "semantic_side": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "domain", "schema", "digest", "head_commit", "file_count"],
+      "properties": {
+        "kind": {"enum": ["real", "canonical-empty-side", "analysis-failed"]},
+        "domain": {"const": "python"},
+        "schema": {"type": "string", "minLength": 1},
+        "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "head_commit": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+            {"type": "null"}
+          ]
+        },
+        "file_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "file_change_hunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "old_start",
+        "old_line_count",
+        "new_start",
+        "new_line_count",
+        "ordinal",
+        "hunk_id"
+      ],
+      "properties": {
+        "old_start": {"type": "integer", "minimum": 0},
+        "old_line_count": {"type": "integer", "minimum": 0},
+        "new_start": {"type": "integer", "minimum": 0},
+        "new_line_count": {"type": "integer", "minimum": 0},
+        "ordinal": {"type": "integer", "minimum": 0},
+        "hunk_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "file_change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "old_path", "new_path", "hunks"],
+      "properties": {
+        "status": {"enum": ["A", "M", "D", "R", "C", "T", "U", "?"]},
+        "old_path": {"type": ["string", "null"], "minLength": 1},
+        "new_path": {"type": ["string", "null"], "minLength": 1},
+        "hunks": {"type": "array", "items": {"$ref": "#/$defs/file_change_hunk"}}
+      }
+    },
+    "file_change_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "before", "after", "files"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.file-change-set/v1"},
+        "before": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+            {"type": "null"}
+          ]
+        },
+        "after": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+            {"type": "null"}
+          ]
+        },
+        "files": {"type": "array", "items": {"$ref": "#/$defs/file_change"}}
+      }
+    },
+    "changed_path_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "requested", "resolved", "actual", "source"],
+      "properties": {
+        "name": {"const": "max_changed_paths"},
+        "requested": {
+          "oneOf": [
+            {"type": "integer", "minimum": 1},
+            {"type": "null"}
+          ]
+        },
+        "resolved": {"type": "integer", "minimum": 1},
+        "actual": {"type": "integer", "minimum": 0},
+        "source": {"enum": ["builtin", "repository", "explicit", "cli"]}
       }
     },
     "resolved_python": {
@@ -421,6 +634,15 @@
         "frontier": {"type": "array", "items": {"$ref": "#/$defs/frontier"}}
       }
     },
+    "diff_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after"],
+      "properties": {
+        "before": {"$ref": "#/$defs/coverage"},
+        "after": {"$ref": "#/$defs/coverage"}
+      }
+    },
     "budget": {
       "type": "object",
       "additionalProperties": false,
@@ -528,14 +750,21 @@
         "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]},
         "payload_available": {"type": "boolean"},
         "entity_count": {"type": ["integer", "null"], "minimum": 0},
-        "coverage": {"$ref": "#/$defs/coverage"},
+        "coverage": {
+          "oneOf": [{"$ref": "#/$defs/coverage"}, {"$ref": "#/$defs/diff_coverage"}]
+        },
         "budget": {"$ref": "#/$defs/budget"},
         "artifact_paths": {
           "type": "array",
-          "maxItems": 2,
+          "maxItems": 3,
           "uniqueItems": true,
           "items": {
-            "enum": ["python.snapshot.semantic.json", "python.snapshot.puml"]
+            "enum": [
+              "python.snapshot.semantic.json",
+              "python.snapshot.puml",
+              "python.diff.semantic.json",
+              "python.diff.puml"
+            ]
           }
         },
         "diagnostics": {
@@ -603,9 +832,17 @@
         "sha256"
       ],
       "properties": {
-        "path": {"enum": ["python.snapshot.semantic.json", "python.snapshot.puml"]},
+        "path": {
+          "enum": [
+            "python.snapshot.semantic.json",
+            "python.snapshot.puml",
+            "python.diff.semantic.json",
+            "python.diff.puml",
+            "file-changes.json"
+          ]
+        },
         "domain": {"const": "python"},
-        "format": {"enum": ["semantic-json", "plantuml"]},
+        "format": {"enum": ["semantic-json", "plantuml", "file-change-set"]},
         "media_type": {
           "enum": ["application/json", "text/vnd.plantuml; charset=utf-8"]
         },
@@ -625,6 +862,27 @@
             "path": {"const": "python.snapshot.puml"},
             "format": {"const": "plantuml"},
             "media_type": {"const": "text/vnd.plantuml; charset=utf-8"}
+          }
+        },
+        {
+          "properties": {
+            "path": {"const": "python.diff.semantic.json"},
+            "format": {"const": "semantic-json"},
+            "media_type": {"const": "application/json"}
+          }
+        },
+        {
+          "properties": {
+            "path": {"const": "python.diff.puml"},
+            "format": {"const": "plantuml"},
+            "media_type": {"const": "text/vnd.plantuml; charset=utf-8"}
+          }
+        },
+        {
+          "properties": {
+            "path": {"const": "file-changes.json"},
+            "format": {"const": "file-change-set"},
+            "media_type": {"const": "application/json"}
           }
         }
       ]

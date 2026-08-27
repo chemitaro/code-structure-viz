@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from code_structure_viz.core.config import PythonConfig
@@ -19,6 +20,7 @@ from code_structure_viz.source.source_view import (
     SourceAcquisitionFailure,
     SourceFile,
     SourceFileKind,
+    SourceInventoryEntry,
     SourceView,
     SourceViewBuilder,
     _is_candidate,
@@ -35,12 +37,14 @@ class WorkingTreeFreezer:
         *,
         staging_root_descriptor: int | None = None,
         repository_descriptor: int | None = None,
+        cancelled: Callable[[], bool] | None = None,
     ) -> None:
         self._builder = SourceViewBuilder(
             repository,
             staging_root,
             staging_root_descriptor=staging_root_descriptor,
             repository_descriptor=repository_descriptor,
+            cancelled=cancelled,
         )
 
     def freeze(
@@ -49,7 +53,7 @@ class WorkingTreeFreezer:
         entries: tuple[EnumeratedPath, ...],
         config: PythonConfig,
     ) -> SourceView:
-        return self._builder.build(head_state, entries, config)
+        return self._builder.build(head_state, entries, config, include_inventory=True)
 
     def assert_unchanged(
         self,
@@ -67,11 +71,8 @@ def build_commit_source_view(
     config: PythonConfig,
 ) -> SourceView:
     """Build an immutable SourceView directly from local Git blobs."""
-    candidates = tuple(
-        item
-        for item in reader.enumerate_commit_tree(commit.object_id)
-        if _is_candidate(item.path, config)
-    )
+    tree = reader.enumerate_commit_tree(commit.object_id)
+    candidates = tuple(item for item in tree if _is_candidate(item.path, config))
     collision_groups = _collision_groups(candidates)
     collision_paths = {path for group in collision_groups for path in group}
     failures: list[SourceAcquisitionFailure] = [
@@ -83,6 +84,34 @@ def build_commit_source_view(
         for path in sorted(collision_paths, key=_path_key)
     ]
     files: list[SourceFile] = []
+    inventory: list[SourceInventoryEntry] = []
+    contents: dict[PurePosixPath, bytes] = {}
+    for item in tree:
+        if item.kind == "blob":
+            try:
+                content = reader.read_commit_blob(commit.object_id, item.path)
+            except GitReadError:
+                raise
+            contents[item.path] = content
+            inventory.append(
+                SourceInventoryEntry(
+                    item.path,
+                    item.path.as_posix(),
+                    "symlink" if item.mode == "120000" else "regular",
+                    len(content),
+                    hashlib.sha256(content).hexdigest(),
+                )
+            )
+        else:
+            inventory.append(
+                SourceInventoryEntry(
+                    item.path,
+                    item.path.as_posix(),
+                    item.kind,
+                    None,
+                    item.object_id,
+                )
+            )
     for item in candidates:
         if item.path in collision_paths:
             continue
@@ -97,13 +126,7 @@ def build_commit_source_view(
             continue
         if item.kind != "blob":
             continue
-        try:
-            content = reader.read_commit_blob(commit.object_id, item.path)
-        except (GitReadError, OSError):
-            failures.append(
-                SourceAcquisitionFailure(item.path, AcquisitionStage.READ, DiagnosticCode.PY_READ)
-            )
-            continue
+        content = contents[item.path]
         files.append(
             SourceFile(
                 path=item.path,
@@ -131,9 +154,8 @@ def build_commit_source_view(
         failures=ordered_failures,
         fingerprint=hashlib.sha256(encode_canonical_json(value)).hexdigest(),
         kind="commit",
-        collision_groups=tuple(
-            tuple(sorted(group, key=_path_key)) for group in collision_groups
-        ),
+        collision_groups=tuple(tuple(sorted(group, key=_path_key)) for group in collision_groups),
+        inventory=tuple(sorted(inventory, key=lambda item: item.path.as_posix().encode("utf-8"))),
     )
 
 

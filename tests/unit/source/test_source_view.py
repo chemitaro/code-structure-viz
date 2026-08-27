@@ -10,6 +10,7 @@ from code_structure_viz.source.git_repository import Commit, EnumeratedPath, Unb
 from code_structure_viz.source.source_view import (
     SourceDriftError,
     SourceFileKind,
+    SourceInterruptedError,
     SourceViewBuilder,
 )
 
@@ -365,3 +366,16 @@ def test_prepublication_probe_detects_head_drift(tmp_path: Path) -> None:
 
     with pytest.raises(SourceDriftError):
         builder.assert_unchanged(initial, Commit("6" * 40), (), config)
+
+
+def test_source_freeze_honors_cancellation_before_reading(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    builder = SourceViewBuilder(repo, tmp_path / "stage", cancelled=lambda: True)
+
+    with pytest.raises(SourceInterruptedError):
+        builder.build(
+            Unborn("refs/heads/main"),
+            (),
+            PythonConfig((".",), ("**/*.py",), ()),
+        )

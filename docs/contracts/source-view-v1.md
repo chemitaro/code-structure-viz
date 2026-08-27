@@ -21,3 +21,17 @@ run fatalとし、SourceView、fingerprint、Artifactを作らない。NFC/case-
 `CSV-SOURCE-004`、repository外・cycle・non-regular symlinkは `CSV-SOURCE-002` とし、
 該当pathからwinnerを選ばない。publication直前のHEADまたはfingerprint差は
 `CSV-SOURCE-001` のrun fatalである。
+
+## Diff acquisition
+
+diff の commit side は `GitRepositoryReader.enumerate_commit_tree` で tree を一度列挙し、
+`read_commit_blob` で各 blob を一度だけ読み取って SourceView を構成する。blob/object の欠落や
+read failure は canonical empty side に置き換えず fatal とする。working-tree side は run 開始時の
+tracked/cached/untracked/unmerged enumeration と同時に `SourceViewBuilder` が inventory を作り、
+repository 外の private staging へ freeze する。
+
+内部 inventory は path、raw path、kind、size、digest だけを持つ。これは working-tree の drift と
+`FileChangeSet` の A/M/D/T/U/? 判定に使う内部 value で、public SourceView JSON や manifest に source
+bytes、temporary path、Git stderr を追加しない。公開直前に HEAD、path enumeration、untracked、
+unmerged、inventory/fingerprint を再取得し、開始時と異なる場合は `CSV-SOURCE-001` として全 staging
+を破棄する。

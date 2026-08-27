@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import PurePosixPath
+from typing import Any
 
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
 
@@ -15,6 +17,8 @@ _HUNK = re.compile(
 )
 _STATUSES = frozenset({"A", "M", "D", "R", "C", "T", "U", "?"})
 _RENAME_STATUS = re.compile(r"[RC](?:[0-9]{1,3})?\Z", flags=re.ASCII)
+_MAX_UNIFIED_DIFF_BYTES = 16 * 1024 * 1024
+_MAX_UNIFIED_DIFF_LINE_BYTES = 128 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,27 +174,41 @@ def parse_unified_hunks(
     """Attach only line-range metadata parsed from a unified diff."""
     if not changes:
         return ()
+    if len(payload) > _MAX_UNIFIED_DIFF_BYTES:
+        raise ValueError("Git unified diff exceeds the bounded metadata input")
     by_pair = {(item.old_path, item.new_path): item for item in changes}
     by_path = {item.path: item for item in changes if item.path is not None}
     current: FileChange | None = None
     hunks: dict[FileChange, list[HunkMetadata]] = {item: [] for item in changes}
     old_path: PurePosixPath | None = None
     new_path: PurePosixPath | None = None
+    in_hunk = False
     for line in payload.splitlines():
-        if line.startswith(b"--- "):
+        if len(line) > _MAX_UNIFIED_DIFF_LINE_BYTES:
+            raise ValueError("Git unified diff line is too long")
+        if line.startswith(b"diff --git "):
+            current = None
+            old_path = None
+            new_path = None
+            in_hunk = False
+            continue
+        if not in_hunk and line.startswith(b"--- "):
             old_path = _patch_path(line[4:])
             continue
-        if line.startswith(b"+++ "):
+        if not in_hunk and line.startswith(b"+++ "):
             new_path = _patch_path(line[4:])
             current = by_pair.get((old_path, new_path))
             if current is None:
-                current = (
-                    by_path.get(new_path) if new_path is not None else None
-                ) or (by_path.get(old_path) if old_path is not None else None)
+                current = (by_path.get(new_path) if new_path is not None else None) or (
+                    by_path.get(old_path) if old_path is not None else None
+                )
             continue
         match = _HUNK.match(line)
-        if match is None or current is None:
+        if match is None:
             continue
+        if current is None:
+            raise ValueError("Git hunk has no matching changed path")
+        in_hunk = True
         old_start = int(match["old_start"])
         old_count = int(match["old_count"] or b"1")
         new_start = int(match["new_start"])
@@ -225,6 +243,116 @@ def build_file_change_set(
     return FileChangeSet(parse_unified_hunks(patch, changes), before=before, after=after)
 
 
+def attach_content_hunks(
+    changes: Iterable[FileChange],
+    *,
+    before_contents: Mapping[PurePosixPath, bytes],
+    after_contents: Mapping[PurePosixPath, bytes],
+    before: str | None = None,
+    after: str | None = None,
+) -> FileChangeSet:
+    """Create metadata-only hunks from already-frozen bytes without a Git patch."""
+    result: list[FileChange] = []
+    for change in changes:
+        left = before_contents.get(change.old_path, b"") if change.old_path is not None else b""
+        right = after_contents.get(change.new_path, b"") if change.new_path is not None else b""
+        hunks: list[HunkMetadata] = []
+        for old_start, old_count, new_start, new_count in _line_ranges(left, right):
+            hunks.append(
+                HunkMetadata(
+                    old_start,
+                    old_count,
+                    new_start,
+                    new_count,
+                    len(hunks),
+                    change.old_path,
+                    change.new_path,
+                    change.status,
+                )
+            )
+        result.append(FileChange(change.status, change.old_path, change.new_path, tuple(hunks)))
+    return FileChangeSet(tuple(sorted(result, key=_change_sort_key)), before=before, after=after)
+
+
+def build_working_tree_file_change_set(
+    before_inventory: Iterable[Any],
+    after_inventory: Iterable[Any],
+    *,
+    untracked_paths: Iterable[PurePosixPath] = (),
+    unmerged_paths: Iterable[PurePosixPath] = (),
+    before_contents: Mapping[PurePosixPath, bytes] | None = None,
+    after_contents: Mapping[PurePosixPath, bytes] | None = None,
+    before: str | None = None,
+    after: str | None = None,
+) -> FileChangeSet:
+    """Build a working-tree change inventory without invoking Git's conversion filters."""
+    before_map = {item.path: item for item in before_inventory}
+    after_map = {item.path: item for item in after_inventory}
+    untracked = set(untracked_paths)
+    unmerged = set(unmerged_paths)
+    changes: list[FileChange] = []
+    for path in sorted(
+        set(before_map) | set(after_map),
+        key=lambda item: item.as_posix().encode("utf-8"),
+    ):
+        left = before_map.get(path)
+        right = after_map.get(path)
+        if path in unmerged:
+            changes.append(FileChange("U", path, path))
+            continue
+        left_exists = left is not None and getattr(left, "kind", "missing") not in {
+            "missing",
+            "unavailable",
+        }
+        right_exists = right is not None and getattr(right, "kind", "missing") not in {
+            "missing",
+            "unavailable",
+        }
+        if not left_exists and not right_exists:
+            continue
+        if not left_exists:
+            changes.append(FileChange("?" if path in untracked else "A", None, path))
+            continue
+        if not right_exists:
+            changes.append(FileChange("D", path, None))
+            continue
+        if getattr(left, "kind", None) != getattr(right, "kind", None) or getattr(
+            left, "digest", None
+        ) != getattr(right, "digest", None):
+            changes.append(FileChange("M", path, path))
+    return attach_content_hunks(
+        changes,
+        before_contents=before_contents or {},
+        after_contents=after_contents or {},
+        before=before,
+        after=after,
+    )
+
+
+def _line_ranges(before: bytes, after: bytes) -> tuple[tuple[int, int, int, int], ...]:
+    left = before.splitlines()
+    right = after.splitlines()
+    ranges: list[tuple[int, int, int, int]] = []
+    for tag, old_start, old_end, new_start, new_end in SequenceMatcher(
+        a=left,
+        b=right,
+        autojunk=False,
+    ).get_opcodes():
+        if tag == "equal":
+            continue
+        old_count = old_end - old_start
+        new_count = new_end - new_start
+        ranges.append(
+            (
+                old_start if old_count == 0 else old_start + 1,
+                old_count,
+                new_start if new_count == 0 else new_start + 1,
+                new_count,
+            )
+        )
+    return tuple(ranges)
+
+
 def _decode_path(value: bytes) -> PurePosixPath:
     text = value.decode("utf-8", errors="strict")
     normalized_text = unicodedata.normalize("NFC", text)
@@ -257,6 +385,8 @@ def _validate_path(path: PurePosixPath) -> None:
 
 def _patch_path(value: bytes) -> PurePosixPath | None:
     token = value.split(b"\t", 1)[0]
+    if token.startswith(b'"'):
+        token = _decode_git_quoted_path(token)
     if token == b"/dev/null":
         return None
     if token.startswith(b"a/") or token.startswith(b"b/"):
@@ -264,7 +394,48 @@ def _patch_path(value: bytes) -> PurePosixPath | None:
     try:
         return _decode_path(token)
     except (UnicodeDecodeError, ValueError):
-        return None
+        raise ValueError("Git patch path is not a safe UTF-8 path") from None
+
+
+def _decode_git_quoted_path(value: bytes) -> bytes:
+    if len(value) < 2 or value[-1:] != b'"':
+        raise ValueError("Git patch path is not a closed quoted path")
+    encoded = value[1:-1]
+    decoded = bytearray()
+    index = 0
+    escapes = {
+        ord("a"): 0x07,
+        ord("b"): 0x08,
+        ord("t"): 0x09,
+        ord("n"): 0x0A,
+        ord("v"): 0x0B,
+        ord("f"): 0x0C,
+        ord("r"): 0x0D,
+    }
+    while index < len(encoded):
+        byte = encoded[index]
+        index += 1
+        if byte != ord("\\"):
+            decoded.append(byte)
+            continue
+        if index >= len(encoded):
+            raise ValueError("Git patch path has a dangling escape")
+        escaped = encoded[index]
+        index += 1
+        if escaped in escapes:
+            decoded.append(escapes[escaped])
+            continue
+        if escaped in {ord('"'), ord("\\")}:
+            decoded.append(escaped)
+            continue
+        if escaped not in b"01234567" or index + 1 >= len(encoded):
+            raise ValueError("Git patch path has an unsupported escape")
+        octal = bytes((escaped, encoded[index], encoded[index + 1]))
+        if any(character not in b"01234567" for character in octal):
+            raise ValueError("Git patch path has an invalid octal escape")
+        decoded.append(int(octal, 8))
+        index += 2
+    return bytes(decoded)
 
 
 def _change_sort_key(value: FileChange) -> bytes:
@@ -276,7 +447,9 @@ __all__ = [
     "FileChange",
     "FileChangeSet",
     "HunkMetadata",
+    "attach_content_hunks",
     "build_file_change_set",
+    "build_working_tree_file_change_set",
     "parse_name_status",
     "parse_unified_hunks",
 ]
