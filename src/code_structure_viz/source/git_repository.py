@@ -68,6 +68,10 @@ class GitReadError(RuntimeError):
         super().__init__(value.message)
 
 
+class _UnsupportedIgnoreCaseError(GitReadError):
+    """Raised when an effective true case-fold setting is observed."""
+
+
 class GitInterruptedError(GitReadError):
     """Raised when a Git child is terminated by the caller's cancellation signal."""
 
@@ -581,14 +585,13 @@ class GitRepositoryReader:
             observed_location,
             observed_git_dir,
         )
-        ignore_case = "true" if authority_before.core_ignore_case else "false"
         linked_worktree = authority_before.common_git_dir not in {
             None,
             observed_git_dir,
         }
         arguments: tuple[str, ...] = (
             "-c",
-            f"core.ignoreCase={ignore_case}",
+            "core.ignoreCase=false",
             "ls-files",
             "-z",
             "--others",
@@ -610,12 +613,15 @@ class GitRepositoryReader:
         if result.returncode != 0 or result.stderr:
             raise _path_protocol_fatal()
         untracked = _decode_identity_list(result.stdout)
-        authority_after = self._ignore_authority_profile(
-            observed_location,
-            observed_git_dir,
-        )
+        try:
+            authority_after = self._ignore_authority_profile(
+                observed_location,
+                observed_git_dir,
+            )
+        except _UnsupportedIgnoreCaseError as error:
+            raise _fatal(DiagnosticCode.SOURCE_DRIFT) from error
         if authority_before != authority_after:
-            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+            raise _fatal(DiagnosticCode.SOURCE_DRIFT)
         return UntrackedObservation(untracked, authority_before)
 
     def _ignore_authority_profile(
@@ -630,6 +636,8 @@ class GitRepositoryReader:
         ):
             raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
         core_ignore_case = self._ignore_case_config_value(location, git_dir)
+        if core_ignore_case:
+            raise _UnsupportedIgnoreCaseError(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE))
         common_git_dir, common_git_dir_identity = self._resolve_git_common_dir(
             location,
             git_dir,

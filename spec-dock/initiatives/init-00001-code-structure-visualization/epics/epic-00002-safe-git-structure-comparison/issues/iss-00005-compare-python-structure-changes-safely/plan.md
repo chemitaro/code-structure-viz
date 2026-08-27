@@ -53,8 +53,8 @@ production acceptance trace に P1 gap が見つかった。以下の remediatio
 | I02-PLAN-021 | clean baselineを使ったgitlink acceptanceと、autocrlf/eol/filter/index flag/core.filemode/profile driftのfail-closed回帰を追加 | `tests/helpers/diff.py`, `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_git_repository.py` | 完了 |
 | I02-PLAN-022 | `--exclude-standard` の ignore authority を `IgnoreAuthorityProfile` と `UntrackedObservation` に閉じ、外部 `core.excludesFile`/`include.*` と unsafe ignore file を初期観測で拒否。許可された `.gitignore`/`info/exclude` の bounded digest と start/final observation drift を内部 state に束ねる | `source/git_repository.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py` | 完了 |
 | I02-PLAN-023 | 外部 ignore による untracked omission、include、許可された ignore、ignore file drift を top-level/nested の production `diff` CLI で回帰し、no-publication・診断・親側 gitlink `M` の境界を検証 | `tests/acceptance/python/test_diff_cli.py`, `tests/security/test_python_static_boundary.py` | 完了 |
-| I02-PLAN-024 | `core.ignoreCase` を strict capture/profile digest と untracked command の明示 `-c` 値へ束ね、linked worktree の verified common Git directory と common `info/exclude` を ignore authority として観測 | `source/git_repository.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py` | 完了 |
-| I02-PLAN-025 | `core.ignoreCase` の omission/race、linked-worktree common `info/exclude` の stable/drift を clean top-level/nested production CLIで回帰し、command allowlist・redaction・no-publicationを固定 | `tests/acceptance/python/test_diff_cli.py`, `tests/security/test_python_static_boundary.py` | 完了 |
+| I02-PLAN-024 | `core.ignoreCase` を strict capture/profile digestへ束ね、effective `true` をunsupportedとして初期 `CSV-DIFF-003`、開始後の `false→true` を `CSV-SOURCE-001` で停止し、許可した untracked command に `-c core.ignoreCase=false` だけを明示する。linked worktree の verified common Git directory と common `info/exclude` を ignore authority として観測 | `source/git_repository.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py` | 完了 |
+| I02-PLAN-025 | `core.ignoreCase=true` の成功経路を持たない top-level/nested fatal、false baseline、観測中 race、linked-worktree common `info/exclude` の stable/drift を production CLIで回帰し、command allowlist・redaction・no-publicationを固定 | `tests/acceptance/python/test_diff_cli.py`, `tests/security/test_python_static_boundary.py` | 完了 |
 
 ## 3. 実装詳細
 
@@ -181,17 +181,20 @@ unavailable `stdout-result/v1`、selector 無指定の `run-summary/v1` を stde
   （`CSV-SOURCE-001`）をproduction CLIで検証し、unit/securityではname-only parser、bounded digest、unsafe file、
   ordering、observation reuse、forbidden helper absenceを固定した。
 - I02-PLAN-024 では、local/worktree `core.ignoreCase` を absent/strict boolean/duplicate・malformed の閉世界値
-  として取得し、capture済み値を `ls-files --others --exclude-standard` の command scopeへ明示的に渡す。linked
-  worktreeでは `rev-parse --path-format=absolute --git-common-dir` の単一絶対・non-symlink・containment・binding
-  identityを検証し、effective common Git directory の regular `info/exclude` をdigest化する。per-worktree
+  として取得し、effective `true` は物理filesystemのcase-fold semanticsを追加authorityなしに証明できないため
+  unsupportedとして初期 `CSV-DIFF-003` にする。許可する `false` だけを `ls-files --others --exclude-standard`
+  の command scopeへ `-c core.ignoreCase=false` として明示する。linked worktreeでは
+  `rev-parse --path-format=absolute --git-common-dir` の単一絶対・non-symlink・containment・binding identityを
+  検証し、effective common Git directory の regular `info/exclude` をdigest化する。per-worktree
   `info/exclude`をauthorityの代用にせず、common binding/exclude digestと`core_ignore_case`を
   `IgnoreAuthorityProfile`およびnested `GitlinkComparisonProfile`へ含める。初期不成立は`CSV-DIFF-003`、
-  公開直前のdriftは`CSV-SOURCE-001`、public schemaは不変とする。
-- I02-PLAN-025 では、case-folded ignore matchingを再現するtop-level/nestedのclean fixture、観測中の設定変化、
-  linked-worktree common `info/exclude` のstable/drift fixtureをproduction CLIで追加する。unit/securityでは
-  strict値 parser、明示 `-c` binding、common-dir path/identity containment、no absolute path/value/pattern leak、
-  `rev-parse`/config/ls-files以外のhelper禁止を固定する。Redへ戻す条件は、旧実装ではunsafe success、新実装では
-  `CSV-DIFF-003`または`CSV-SOURCE-001`・no-publicationとなるdiscriminating evidenceである。
+  開始後の `false→true` を含む公開直前のdriftは`CSV-SOURCE-001`、public schemaは不変とする。
+- I02-PLAN-025 では、`core.ignoreCase=true` の top-level/nested fatal fixture（case-distinct tracked/ignored
+  pathを含み、列挙を実行しないことを確認）、`false` baseline、観測中の設定変化、linked-worktree common
+  `info/exclude` のstable/drift fixtureをproduction CLIで追加する。unit/securityでは strict値 parser、
+  `core.ignoreCase=false` の明示binding、true時の `ls-files` 不在、common-dir path/identity containment、
+  no absolute path/value/pattern leak、`rev-parse`/config/ls-files以外のhelper禁止を固定する。Redへ戻す条件は、
+  true経路の成功・列挙、診断の取り違え、またはno-publication境界の破れである。
 
 ## 4. 受入れテストとコマンド
 

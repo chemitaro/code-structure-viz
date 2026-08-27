@@ -978,6 +978,30 @@ def test_ignore_case_config_prefers_worktree_value_when_present(tmp_path: Path) 
     assert any("--worktree" in command for command, _env in runner.calls)
 
 
+def test_ignore_case_true_is_rejected_before_untracked_command(tmp_path: Path) -> None:
+    location = tmp_path / "nested"
+    git_dir = tmp_path / "git"
+    location.mkdir()
+    git_dir.mkdir()
+    runner = ScriptedRunner(
+        [
+            _result(1),
+            _result(1),
+            _result(0, b"core.ignorecase\ntrue\0"),
+            _result(1),
+        ]
+    )
+
+    with pytest.raises(GitReadError) as caught:
+        GitRepositoryReader(location, runner=runner)._observe_untracked(
+            location=location,
+            git_dir=git_dir,
+        )
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+    assert all("ls-files" not in command for command, _env in runner.calls)
+
+
 def test_git_common_dir_resolution_requires_contained_worktree_binding(
     tmp_path: Path,
 ) -> None:

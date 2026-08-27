@@ -107,6 +107,10 @@ def test_wheel_installs_offline_and_cli_runs_outside_checkout_with_network_trapp
     source.parent.mkdir(parents=True)
     source.write_text("class Model:\n    pass\n", encoding="utf-8")
     subprocess.run(("git", "init", "--quiet", str(repository)), check=True)
+    subprocess.run(
+        ("git", "-C", str(repository), "config", "core.ignoreCase", "false"),
+        check=True,
+    )
     output = tmp_path / "outside-output"
     run = subprocess.run(
         (

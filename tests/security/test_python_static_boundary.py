@@ -267,7 +267,7 @@ def test_cli_never_executes_security_fixture_and_preserves_repository_and_git_al
         ("rev-parse", "--path-format=absolute", "--git-common-dir"),
         (
             "-c",
-            "core.ignoreCase=true",
+            "core.ignoreCase=false",
             "ls-files",
             "-z",
             "--others",
@@ -347,7 +347,7 @@ def test_cli_never_executes_security_fixture_and_preserves_repository_and_git_al
         ("rev-parse", "--path-format=absolute", "--git-common-dir"),
         (
             "-c",
-            "core.ignoreCase=true",
+            "core.ignoreCase=false",
             "ls-files",
             "-z",
             "--others",
@@ -428,7 +428,7 @@ def test_cli_never_executes_security_fixture_and_preserves_repository_and_git_al
         ("rev-parse", "--path-format=absolute", "--git-common-dir"),
         (
             "-c",
-            "core.ignoreCase=true",
+            "core.ignoreCase=false",
             "ls-files",
             "-z",
             "--others",

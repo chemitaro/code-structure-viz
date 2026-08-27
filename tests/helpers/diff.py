@@ -153,6 +153,12 @@ def create_clean_linked_gitlink_repository(
         check=True,
     )
     subprocess.run(
+        ("git", "--git-dir", str(common), "config", "core.ignoreCase", "false"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
         (
             "git",
             "--git-dir",
@@ -367,6 +373,14 @@ def _git(
         check=True,
         env=env,
     )
+    if arguments and arguments[0] == "init":
+        subprocess.run(
+            ("git", "-C", str(repository), "config", "core.ignoreCase", "false"),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=True,
+            env=env,
+        )
 
 
 def _git_bytes(

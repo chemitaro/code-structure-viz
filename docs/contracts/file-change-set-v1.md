@@ -43,9 +43,10 @@ untracked pathを外部ignoreで隠した成功結果、changed-path budgetの�
 公開しない。authority digestは内部stateだけに保持し、public FileChangeSetのshape/versionは変更しない。
 
 ignore matchingを決める `core.ignoreCase` は local/worktree scopeから strict boolean として captureする。
-未設定は `false` とし、capture値を `-c core.ignoreCase=true|false` として untracked 列挙へ明示的に渡す。
-値の重複・不正・scope解決不能は初期 `CSV-DIFF-003`、開始後のprofile driftは
-`CSV-SOURCE-001` とし、値・設定pathは FileChangeSetへ漏らさない。
+未設定は `false` とし、effective `true` は物理filesystemのcase-fold semanticsを独立に証明できないため
+unsupportedとして初期 `CSV-DIFF-003` とする。許可する `false` だけを `-c core.ignoreCase=false` として
+untracked 列挙へ明示的に渡す。値の重複・不正・scope解決不能は初期 `CSV-DIFF-003`、開始後の
+`false→true` を含むprofile driftは `CSV-SOURCE-001` とし、値・設定pathは FileChangeSetへ漏らさない。
 
 linked worktreeのignore authorityはper-worktree Git directoryに暗黙依存しない。
 `git rev-parse --path-format=absolute --git-common-dir` で検証した common Git directory（自身または

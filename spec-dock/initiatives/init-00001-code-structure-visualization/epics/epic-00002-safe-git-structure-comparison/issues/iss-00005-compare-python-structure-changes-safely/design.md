@@ -33,7 +33,7 @@ as-built 設計である。Issue の状態は SpecDock の完了処理前なの�
 | I02-DES-009 | I02-REQ-009 | `GitPathIdentity` が raw UTF-8 spelling と NFC canonical pathを併記し、canonical collision、duplicate inventory、skip-worktree欠落をfail-closedで処理する。 |
 | I02-DES-010 | I02-REQ-010 | `GitlinkWorktreeState` がmode `160000` pathごとにnested HEAD、tracked/staged dirty、untracked dirtyをread-only観測し、親側FileChangeSetへ一件の `M` として投影する。 |
 | I02-DES-011 | I02-REQ-011 | `BaseCandidateObservation` がimplicit base候補のordinal/origin/reference/object/merge-base/dispositionを保持し、`ComparisonEndpoints` がselected候補と配列の整合性を検証する。 |
-| I02-DES-012 | I02-REQ-009, I02-REQ-010 | `IgnoreAuthorityProfile` と `UntrackedObservation` が `--exclude-standard` の ignore authority を閉世界で束縛し、repository内の通常ファイル `.gitignore` と検証済み Git dir の `info/exclude` だけをbounded digest化する。`core.ignoreCase` は strict boolean として profile digest と untracked command の明示 `-c` 値へ束ね、linked worktree は verified common Git directory の `info/exclude` を authority とする。外部 `core.excludesFile`、`include.*`、非regular/symlink/上限超過、開始・終了driftはfail-closedとする。 |
+| I02-DES-012 | I02-REQ-009, I02-REQ-010 | `IgnoreAuthorityProfile` と `UntrackedObservation` が `--exclude-standard` の ignore authority を閉世界で束縛し、repository内の通常ファイル `.gitignore` と検証済み Git dir の `info/exclude` だけをbounded digest化する。`core.ignoreCase` は strict boolean として capture・profile digest化するが、effective `true` は物理filesystemのcase-fold semanticsを独立証明できないため unsupported とし、初期 `CSV-DIFF-003`、開始後の `false→true` は `CSV-SOURCE-001` で停止する。許可する untracked command は `-c core.ignoreCase=false` のみとし、linked worktree は verified common Git directory の `info/exclude` を authority とする。外部 `core.excludesFile`、`include.*`、非regular/symlink/上限超過、開始・終了driftはfail-closedとする。 |
 
 ## 2. 実装コンポーネント
 
@@ -157,9 +157,11 @@ untracked path順序、観測digestを束ね、開始時と公開直前に同じ
 `GitlinkComparisonProfile`へ含め、親側の一件 `M` 判定が未追跡集合の外部authorityに依存しないようにする。
 
 ignore matchingの追加authorityとして `core.ignoreCase` を無視しない。local/worktreeで値がない場合は
-`false`、ある場合は重複なく厳密にbooleanへ解釈できる値だけを許可し、capture済みの値を
-`ls-files --others --exclude-standard` の command scopeへ `-c core.ignoreCase=true|false` として明示する。
-値の重複・不正・scope解決不能は初期 `CSV-DIFF-003` とし、値と設定パスは公開しない。
+`false`、ある場合は重複なく厳密にbooleanへ解釈できる値だけを captureする。ただし物理filesystemの
+case-fold semanticsを独立に証明する新たなauthorityを導入しないため、effective `true` はunsupportedとし、
+初期 `CSV-DIFF-003` へ倒す。許可する `false` は `ls-files --others --exclude-standard` の command scopeへ
+`-c core.ignoreCase=false` として明示する。値の重複・不正・scope解決不能は初期 `CSV-DIFF-003` とし、値と
+設定パスは公開しない。開始後に `false` から `true` へ変化した場合は `CSV-SOURCE-001` とする。
 
 linked worktreeでは、`.git` pointer先のper-worktree Git directoryだけをauthorityにしない。検証済みの
 `git rev-parse --path-format=absolute --git-common-dir` から、単一UTF-8絶対path・non-symlink directoryで、

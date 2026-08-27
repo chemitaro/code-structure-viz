@@ -6,12 +6,20 @@ from pathlib import Path
 
 
 def git(repo: Path, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
+    result = subprocess.run(
         ("git", "-C", str(repo), *arguments),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         check=check,
     )
+    if check and arguments and arguments[0] == "init":
+        subprocess.run(
+            ("git", "-C", str(repo), "config", "core.ignoreCase", "false"),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=True,
+        )
+    return result
 
 
 def initialize_repository(repo: Path) -> None:
@@ -22,6 +30,7 @@ def initialize_repository(repo: Path) -> None:
         capture_output=True,
         check=True,
     )
+    git(repo, "config", "core.ignoreCase", "false")
 
 
 def commit_all(repo: Path, message: str = "fixture") -> str:

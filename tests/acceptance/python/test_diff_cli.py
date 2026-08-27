@@ -928,8 +928,9 @@ def test_allowed_ignore_file_mutation_between_observations_is_source_fatal(
     assert not output.exists()
 
 
-def test_top_level_core_ignore_case_is_explicitly_bound(
+def test_top_level_core_ignore_case_true_is_initial_fatal_without_ls_files(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repository, before, _after = create_two_commit_repository(
         tmp_path,
@@ -941,20 +942,53 @@ def test_top_level_core_ignore_case_is_explicitly_bound(
         check=True,
         capture_output=True,
     )
-    (repository / "casefold-secret").write_text("untracked\n", encoding="utf-8")
+    (repository / ".gitignore").write_text("hidden.py\n", encoding="utf-8")
+    (repository / "hidden.py").write_text("hidden\n", encoding="utf-8")
+    (repository / "HIDDEN.py").write_text("physical\n", encoding="utf-8")
+    calls = tmp_path / "git-calls"
+    proxy = _git_proxy(
+        tmp_path,
+        f"pathlib.Path({str(calls)!r}).open('a', encoding='utf-8').write(repr(sys.argv) + '\\n')",
+    )
+    monkeypatch.setenv("PATH", f"{proxy}{os.pathsep}{os.environ['PATH']}")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", before)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert str(repository).encode() not in result.stderr
+    assert b"hidden.py" not in result.stderr
+    assert b"HIDDEN.py" not in result.stderr
+    assert not output.exists()
+    calls_text = calls.read_text(encoding="utf-8") if calls.exists() else ""
+    assert not any("ls-files" in line and "--others" in line for line in calls_text.splitlines())
+
+
+def test_top_level_core_ignore_case_false_is_explicitly_bound(
+    tmp_path: Path,
+) -> None:
+    repository, before, _after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: int\n# after\n",
+    )
+    subprocess.run(
+        ("git", "-C", str(repository), "config", "core.ignoreCase", "false"),
+        check=True,
+        capture_output=True,
+    )
+    (repository / "visible.py").write_text("visible\n", encoding="utf-8")
 
     output = tmp_path / "output"
     result = run_diff_cli(repository, output, "--from", before)
 
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
-    assert {item["new_path"] for item in file_changes["files"]} == {
-        "casefold-secret",
-        "src/app.py",
-    }
+    assert "visible.py" in {item["new_path"] for item in file_changes["files"]}
 
 
-def test_top_level_core_ignore_case_change_during_observation_is_initial_fatal(
+def test_top_level_core_ignore_case_change_during_observation_is_source_fatal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -984,13 +1018,14 @@ def test_top_level_core_ignore_case_change_during_observation_is_initial_fatal(
     result = run_diff_cli(repository, output, "--from", after)
 
     assert result.returncode == 1
-    assert b"CSV-DIFF-003" in result.stderr
+    assert b"CSV-SOURCE-001" in result.stderr
     assert b"ignore-case-race" not in result.stderr
     assert not output.exists()
 
 
-def test_nested_core_ignore_case_is_explicitly_bound(
+def test_nested_core_ignore_case_true_is_initial_fatal_without_ls_files(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repository, parent_head, nested, _nested_head = create_clean_gitlink_repository(tmp_path)
     subprocess.run(
@@ -998,16 +1033,29 @@ def test_nested_core_ignore_case_is_explicitly_bound(
         check=True,
         capture_output=True,
     )
-    (nested / "nested-casefold-secret").write_text("untracked\n", encoding="utf-8")
+    (nested / ".gitignore").write_text("hidden.py\n", encoding="utf-8")
+    (nested / "hidden.py").write_text("hidden\n", encoding="utf-8")
+    (nested / "HIDDEN.py").write_text("physical\n", encoding="utf-8")
+    calls = tmp_path / "nested-git-calls"
+    proxy = _git_proxy(
+        tmp_path,
+        f"pathlib.Path({str(calls)!r}).open('a', encoding='utf-8').write(repr(sys.argv) + '\\n')",
+    )
+    monkeypatch.setenv("PATH", f"{proxy}{os.pathsep}{os.environ['PATH']}")
 
     output = tmp_path / "output"
     result = run_diff_cli(repository, output, "--from", parent_head)
 
-    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
-    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
-    assert file_changes["files"] == [
-        {"status": "M", "old_path": "src/component", "new_path": "src/component", "hunks": []}
-    ]
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert b"hidden.py" not in result.stderr
+    assert b"HIDDEN.py" not in result.stderr
+    assert not output.exists()
+    calls_text = calls.read_text(encoding="utf-8") if calls.exists() else ""
+    assert not any(
+        "ls-files" in line and "--others" in line and str(nested) in line
+        for line in calls_text.splitlines()
+    )
 
 
 def test_linked_worktree_uses_common_info_exclude_as_stable_authority(
@@ -1058,8 +1106,7 @@ def test_linked_worktree_common_info_exclude_drift_is_fatal_without_leak(
     result = run_diff_cli(repository, output, "--from", parent_head)
 
     assert result.returncode == 1
-    expected = b"CSV-DIFF-003" if phase == "initial" else b"CSV-SOURCE-001"
-    assert expected in result.stderr
+    assert b"CSV-SOURCE-001" in result.stderr
     assert str(common).encode() not in result.stderr
     assert marker.encode() not in result.stderr
     assert not output.exists()
@@ -1332,6 +1379,12 @@ def test_regular_to_gitlink_is_type_transition_with_unavailable_payload(
     source.mkdir()
     subprocess.run(
         ("git", "-C", str(source), "init", "--quiet", "--initial-branch=main"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ("git", "-C", str(source), "config", "core.ignoreCase", "false"),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         check=True,
