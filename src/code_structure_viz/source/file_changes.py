@@ -6,6 +6,7 @@ import unicodedata
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -19,6 +20,25 @@ _STATUSES = frozenset({"A", "M", "D", "R", "C", "T", "U", "?"})
 _RENAME_STATUS = re.compile(r"[RC](?:[0-9]{1,3})?\Z", flags=re.ASCII)
 _MAX_UNIFIED_DIFF_BYTES = 16 * 1024 * 1024
 _MAX_UNIFIED_DIFF_LINE_BYTES = 128 * 1024
+
+
+class ContentSideState(StrEnum):
+    ABSENT = "absent"
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True, slots=True)
+class ContentEvidence:
+    state: ContentSideState
+    content: bytes | None = None
+
+    def __post_init__(self) -> None:
+        if self.state is ContentSideState.AVAILABLE:
+            if not isinstance(self.content, bytes):
+                raise ValueError("available content evidence requires bytes")
+        elif self.content is not None:
+            raise ValueError("non-available content evidence cannot retain bytes")
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,30 +266,41 @@ def build_file_change_set(
 def attach_content_hunks(
     changes: Iterable[FileChange],
     *,
-    before_contents: Mapping[PurePosixPath, bytes],
-    after_contents: Mapping[PurePosixPath, bytes],
+    before_contents: Mapping[PurePosixPath, ContentEvidence],
+    after_contents: Mapping[PurePosixPath, ContentEvidence],
     before: str | None = None,
     after: str | None = None,
 ) -> FileChangeSet:
     """Create metadata-only hunks from already-frozen bytes without a Git patch."""
     result: list[FileChange] = []
     for change in changes:
-        left = before_contents.get(change.old_path, b"") if change.old_path is not None else b""
-        right = after_contents.get(change.new_path, b"") if change.new_path is not None else b""
+        left = _content_side(change.old_path, before_contents)
+        right = _content_side(change.new_path, after_contents)
         hunks: list[HunkMetadata] = []
-        for old_start, old_count, new_start, new_count in _line_ranges(left, right):
-            hunks.append(
-                HunkMetadata(
-                    old_start,
-                    old_count,
-                    new_start,
-                    new_count,
-                    len(hunks),
-                    change.old_path,
-                    change.new_path,
-                    change.status,
+        if (
+            change.status not in {"T", "U"}
+            and left.state is not ContentSideState.UNAVAILABLE
+            and right.state is not ContentSideState.UNAVAILABLE
+        ):
+            left_content = left.content if left.state is ContentSideState.AVAILABLE else b""
+            right_content = right.content if right.state is ContentSideState.AVAILABLE else b""
+            assert left_content is not None
+            assert right_content is not None
+            for old_start, old_count, new_start, new_count in _line_ranges(
+                left_content, right_content
+            ):
+                hunks.append(
+                    HunkMetadata(
+                        old_start,
+                        old_count,
+                        new_start,
+                        new_count,
+                        len(hunks),
+                        change.old_path,
+                        change.new_path,
+                        change.status,
+                    )
                 )
-            )
         result.append(FileChange(change.status, change.old_path, change.new_path, tuple(hunks)))
     return FileChangeSet(tuple(sorted(result, key=_change_sort_key)), before=before, after=after)
 
@@ -278,27 +309,27 @@ def build_working_tree_file_change_set(
     before_inventory: Iterable[Any],
     after_inventory: Iterable[Any],
     *,
-    untracked_paths: Iterable[PurePosixPath] = (),
-    unmerged_paths: Iterable[PurePosixPath] = (),
-    before_contents: Mapping[PurePosixPath, bytes] | None = None,
-    after_contents: Mapping[PurePosixPath, bytes] | None = None,
     before: str | None = None,
     after: str | None = None,
 ) -> FileChangeSet:
     """Build a working-tree change inventory without invoking Git's conversion filters."""
     before_map = {item.path: item for item in before_inventory}
     after_map = {item.path: item for item in after_inventory}
-    untracked = set(untracked_paths)
-    unmerged = set(unmerged_paths)
     changes: list[FileChange] = []
+    deleted: dict[PurePosixPath, Any] = {}
+    added: dict[PurePosixPath, Any] = {}
+    classified_same_paths: set[PurePosixPath] = set()
     for path in sorted(
         set(before_map) | set(after_map),
         key=lambda item: item.as_posix().encode("utf-8"),
     ):
         left = before_map.get(path)
         right = after_map.get(path)
-        if path in unmerged:
+        if any(
+            item is not None and bool(getattr(item, "unmerged", False)) for item in (left, right)
+        ):
             changes.append(FileChange("U", path, path))
+            classified_same_paths.add(path)
             continue
         # Inventory entries preserve path presence even when content acquisition failed.
         # Only an explicit ``missing`` entry (or no entry) is absent; treating
@@ -309,27 +340,97 @@ def build_working_tree_file_change_set(
         if not left_exists and not right_exists:
             continue
         if not left_exists:
-            changes.append(FileChange("?" if path in untracked else "A", None, path))
+            assert right is not None
+            added[path] = right
             continue
         if not right_exists:
-            changes.append(FileChange("D", path, None))
+            assert left is not None
+            deleted[path] = left
             continue
-        if getattr(left, "kind", None) != getattr(right, "kind", None) or getattr(
+        left_tracking = getattr(left, "tracking_state", "tracked")
+        right_tracking = getattr(right, "tracking_state", "tracked")
+        if left_tracking == "tracked" and right_tracking == "untracked":
+            changes.extend((FileChange("D", path, None), FileChange("?", None, path)))
+            classified_same_paths.add(path)
+            continue
+        left_kind = getattr(left, "kind", None)
+        right_kind = getattr(right, "kind", None)
+        if left_kind != right_kind:
+            status = (
+                "T"
+                if left_kind in {"regular", "symlink", "gitlink"}
+                and right_kind in {"regular", "symlink", "gitlink"}
+                else "M"
+            )
+            changes.append(FileChange(status, path, path))
+            classified_same_paths.add(path)
+            continue
+        if getattr(left, "git_mode", None) != getattr(right, "git_mode", None) or getattr(
             left, "digest", None
         ) != getattr(right, "digest", None):
             changes.append(FileChange("M", path, path))
-    return attach_content_hunks(
-        changes,
-        before_contents=before_contents or {},
-        after_contents=after_contents or {},
-        before=before,
-        after=after,
-    )
+            classified_same_paths.add(path)
+
+    sources_by_identity: dict[tuple[str, str], list[PurePosixPath]] = {}
+    additions_by_identity: dict[tuple[str, str], list[PurePosixPath]] = {}
+    for path, state in before_map.items():
+        if path in classified_same_paths:
+            continue
+        identity = _cross_path_identity(state)
+        if identity is not None:
+            sources_by_identity.setdefault(identity, []).append(path)
+    for path, state in added.items():
+        identity = _cross_path_identity(state)
+        if identity is not None:
+            additions_by_identity.setdefault(identity, []).append(path)
+
+    consumed_deleted: set[PurePosixPath] = set()
+    consumed_added: set[PurePosixPath] = set()
+    for new_path in sorted(added, key=lambda item: item.as_posix().encode("utf-8")):
+        identity = _cross_path_identity(added[new_path])
+        if identity is None:
+            continue
+        candidates = sorted(
+            sources_by_identity.get(identity, ()),
+            key=lambda item: item.as_posix().encode("utf-8"),
+        )
+        if len(candidates) != 1:
+            continue
+        old_path = candidates[0]
+        if old_path in deleted:
+            if len(additions_by_identity.get(identity, ())) != 1:
+                continue
+            changes.append(FileChange("R", old_path, new_path))
+            consumed_deleted.add(old_path)
+            consumed_added.add(new_path)
+            continue
+        retained = after_map.get(old_path)
+        if retained is None or _cross_path_identity(retained) != identity:
+            continue
+        changes.append(FileChange("C", old_path, new_path))
+        consumed_added.add(new_path)
+
+    for path in sorted(deleted, key=lambda item: item.as_posix().encode("utf-8")):
+        if path not in consumed_deleted:
+            changes.append(FileChange("D", path, None))
+    for path in sorted(added, key=lambda item: item.as_posix().encode("utf-8")):
+        if path not in consumed_added:
+            tracking_state = getattr(added[path], "tracking_state", "tracked")
+            changes.append(FileChange("?" if tracking_state == "untracked" else "A", None, path))
+    return FileChangeSet(tuple(sorted(changes, key=_change_sort_key)), before=before, after=after)
+
+
+def _cross_path_identity(value: Any) -> tuple[str, str] | None:
+    kind = getattr(value, "kind", None)
+    digest = getattr(value, "digest", None)
+    if kind not in {"regular", "symlink", "gitlink"} or not isinstance(digest, str):
+        return None
+    return kind, digest
 
 
 def _line_ranges(before: bytes, after: bytes) -> tuple[tuple[int, int, int, int], ...]:
-    left = before.splitlines()
-    right = after.splitlines()
+    left = before.splitlines(keepends=True)
+    right = after.splitlines(keepends=True)
     ranges: list[tuple[int, int, int, int]] = []
     for tag, old_start, old_end, new_start, new_end in SequenceMatcher(
         a=left,
@@ -349,6 +450,69 @@ def _line_ranges(before: bytes, after: bytes) -> tuple[tuple[int, int, int, int]
             )
         )
     return tuple(ranges)
+
+
+def content_evidence_from_inventory(
+    inventory: Iterable[Any],
+) -> dict[PurePosixPath, ContentEvidence]:
+    evidence: dict[PurePosixPath, ContentEvidence] = {}
+    for item in inventory:
+        availability = getattr(item, "availability", "unavailable")
+        content = getattr(item, "content", None)
+        digest = getattr(item, "digest", None)
+        if availability == "absent":
+            evidence[item.path] = ContentEvidence(ContentSideState.ABSENT)
+            continue
+        if (
+            availability == "available"
+            and isinstance(content, bytes)
+            and isinstance(digest, str)
+            and hashlib.sha256(content).hexdigest() == digest
+            and b"\0" not in content
+            and len(content) <= _MAX_UNIFIED_DIFF_BYTES
+            and all(
+                len(line) <= _MAX_UNIFIED_DIFF_LINE_BYTES
+                for line in content.splitlines(keepends=True)
+            )
+        ):
+            evidence[item.path] = ContentEvidence(ContentSideState.AVAILABLE, content)
+            continue
+        evidence[item.path] = ContentEvidence(ContentSideState.UNAVAILABLE)
+    return evidence
+
+
+def unavailable_content_paths(
+    changes: Iterable[FileChange],
+    *,
+    before_contents: Mapping[PurePosixPath, ContentEvidence],
+    after_contents: Mapping[PurePosixPath, ContentEvidence],
+) -> tuple[frozenset[PurePosixPath], frozenset[PurePosixPath]]:
+    before_paths: set[PurePosixPath] = set()
+    after_paths: set[PurePosixPath] = set()
+    for change in changes:
+        if change.status in {"T", "U"}:
+            continue
+        if (
+            change.old_path is not None
+            and _content_side(change.old_path, before_contents).state
+            is ContentSideState.UNAVAILABLE
+        ):
+            before_paths.add(change.old_path)
+        if (
+            change.new_path is not None
+            and _content_side(change.new_path, after_contents).state is ContentSideState.UNAVAILABLE
+        ):
+            after_paths.add(change.new_path)
+    return frozenset(before_paths), frozenset(after_paths)
+
+
+def _content_side(
+    path: PurePosixPath | None,
+    contents: Mapping[PurePosixPath, ContentEvidence],
+) -> ContentEvidence:
+    if path is None:
+        return ContentEvidence(ContentSideState.ABSENT)
+    return contents.get(path, ContentEvidence(ContentSideState.UNAVAILABLE))
 
 
 def _decode_path(value: bytes) -> PurePosixPath:
@@ -442,12 +606,16 @@ def _change_sort_key(value: FileChange) -> bytes:
 
 
 __all__ = [
+    "ContentEvidence",
+    "ContentSideState",
     "FileChange",
     "FileChangeSet",
     "HunkMetadata",
     "attach_content_hunks",
     "build_file_change_set",
     "build_working_tree_file_change_set",
+    "content_evidence_from_inventory",
     "parse_name_status",
     "parse_unified_hunks",
+    "unavailable_content_paths",
 ]

@@ -86,10 +86,14 @@ fetch、checkout、worktree/index/ref mutation は行わない。provenance に�
 5. working-tree 公開直前に HEAD、path enumeration、untracked、unmerged、source inventory/fingerprint を再取得して開始時と比較する。不一致は `CSV-SOURCE-001` の fatal とし、staging を公開しない。
 
 `SourceView` の公開 fingerprint は source schema、head、file descriptor、failures の canonical bytes
-から作る。working-tree の内部 `SourceInventoryEntry` は path、raw path、kind、size、digest だけを
-保持し、source body、absolute staging path、Git stderr を manifest/diagnostic に渡さない。inventory の
-`unavailable`/`other` は path が存在する証拠として扱い、untracked なら `?` の FileChange として
-changed-path budget に含める。取得不能な path を absent または canonical empty side へ変換しない。
+から作る。working-tree の内部 `SourceInventoryEntry` は path、raw path、kind、size、digest に加えて
+tracking state、Git mode/type、object identity、availability、unmerged state、検証済み content を持つ。
+追加 metadata は内部 state fingerprint と FileChangeSet 分類だけに使い、public SourceView/manifest、
+source body、absolute staging path、Git stderr へ渡さない。inventory の `unavailable`/`other` は path が
+存在する証拠として扱い、untracked なら `?` の FileChange として changed-path budget に含める。
+取得不能な path を absent または canonical empty side へ変換しない。commit side の blob/object 欠損・
+read failure は `GitReadError` をそのまま run fatal にし、working-tree の bounded content evidence の
+みが domain-local `payload_unavailable` へ縮退できる。
 
 ## 5. FileChangeSet
 
@@ -109,6 +113,15 @@ production diff lifecycle はこの raw patch helper を呼ばない。
 `hunk_id` は status/path/range/ordinal の canonical JSON の SHA-256 であり、patch body、context、
 source、comment、literal、secret、absolute path を保持しない。path は repository-relative NFC
 UTF-8 のみで、sort は UTF-8 bytes order とする。
+
+working-tree classifier は budget より前に次の順で canonical record を確定する。同一 path の tracked→
+untracked は `D` と `?`、mode-only は `M`、regular/symlink/gitlink 間は `T`、identity が一意な cross-
+path は `R`/`C` 一件とする。候補が複数、identity が欠ける、または source path が同一 path transition
+ですでに使用済みなら `A`/`D`/`?` へ安全に戻す。従って `FileChangeSet.count`、changed-path budget、
+manifest の actual は同じ canonical record tuple から計算される。hunk projection は budget admission
+後に行い、`ContentEvidence(absent|available|unavailable)` のうち available bytes と true absent だけ
+を SequenceMatcher に渡す。未知 bytes は empty side にしない。line terminator を保持した bounded range
+を生成し、unavailable は hunk を空にするが、status/path record と domain failure evidence は保持する。
 
 ## 6. Python semantic diff
 
@@ -130,7 +143,10 @@ import order だけの変更は seed にならない。
 working-tree に `U` が含まれる場合もこの行を適用する。`semantic_sides.before` は before source
 を通常どおり解析できれば `real`（失敗時だけ `analysis-failed`）、`semantic_sides.after` は
 `analysis-failed` とし、解析を行わない after source fingerprint を digest に使う。両 side を
-根拠なく `analysis-failed` に固定しない。
+根拠なく `analysis-failed` に固定しない。U 分岐では before selection を一度だけ実行し、その同じ
+selection の actual coverage/diagnostics と before side を domain outcome に渡す。after は解析せず、
+zero coverage の `analysis-failed` side として保持するため、safe manifest の side、coverage、diagnostic
+が一つの observation と矛盾しない。
 
 canonical empty side は sorted key の canonical UTF-8 JSON（domain、document kind、空 entities/
 members/relations）から毎回同じ digest を得る。endpoint/side 名や source body は含めず、standalone
@@ -145,7 +161,7 @@ one-to-one candidate の全条件を満たすときだけ `moved`、それ以外
 
 - changed-path default は 1,000。超過は domain 解析前の run fatal exit 1、diagnostic と run-summary のみ、output directory は作成しない。
 - Python entity default は 500。超過は domain `incomplete/payload_unavailable` exit 3、`file-changes.json` と safe `run-manifest.json` だけを公開する。
-- side acquisition/static analysis failure、unmerged path、unsafe path、schema/integrity failure は affected payload を推測せず unavailable とする。
+- side acquisition/static analysis failure、unmerged path、unsafe path、schema/integrity failure は affected payload を推測せず unavailable とする。working-tree の changed Python bytes が unavailable/binary/bounded-input violation の場合は affected payload を公開せず、metadata-only FileChangeSet と safe manifest を exit 3 で公開する。非 Python changed path は取得不能でも偽の hunk を出さない。commit blob/object の欠損・read failureは run fatal exit 1 とする。
 - `OutputTransaction` は staging、descriptor/hash check、collision check 後に no-replace atomic rename する。run fatal/usage/interrupt は staging を破棄する。
 
 `--stdout` は `manifest` または `python:semantic-json`/`python:plantuml` の一回だけ。available
@@ -168,6 +184,8 @@ diff fingerprint はそれぞれの正本入力から独立に計算する。
 | 観測領域 | 実装テスト |
 | --- | --- |
 | endpoint、working-tree、budget、CLI | `tests/acceptance/python/test_diff_cli.py`, `tests/acceptance/git/test_changed_path_budget.py` |
+| working-tree status authority、R/C/T、tracked transition、mode、drift、missing object | `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_file_changes.py`, `tests/unit/source/test_git_repository.py` |
+| all-path hunk evidence、non-Python、LF/CRLF、unavailable | `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_file_changes.py` |
 | domain presence、entity budget、stdout | `tests/acceptance/python/test_domain_presence_diff.py`, `test_diff_entity_budget.py`, `test_stdout_selector.py` |
 | semantic seed、impact、move | `tests/acceptance/python/test_semantic_seed.py`, `tests/integration/python/test_impact_union_graph.py`, `test_move_matching.py` |
 | Git/source safety、cancellation | `tests/unit/source/test_git_repository.py`, `test_source_view.py`, `tests/integration/source/test_git_repository.py`, `tests/security/test_git_read_only.py` |

@@ -7,7 +7,7 @@ import stat
 import unicodedata
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Final
@@ -15,7 +15,12 @@ from typing import Final
 from code_structure_viz.core.config import PythonConfig
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
-from code_structure_viz.source.git_repository import Commit, EnumeratedPath, HeadState
+from code_structure_viz.source.git_repository import (
+    Commit,
+    EnumeratedPath,
+    GitIndexEntry,
+    HeadState,
+)
 
 _SCHEMA: Final = "code-structure-viz.source-view/v1"
 _KIND: Final = "working-tree"
@@ -61,6 +66,12 @@ class SourceInventoryEntry:
     kind: str
     size_bytes: int | None
     digest: str | None
+    tracking_state: str = "tracked"
+    git_mode: str | None = None
+    object_id: str | None = None
+    availability: str = "available"
+    unmerged: bool = False
+    content: bytes | None = field(default=None, repr=False, compare=False)
 
     def descriptor_value(self) -> dict[str, object]:
         return {
@@ -69,6 +80,11 @@ class SourceInventoryEntry:
             "kind": self.kind,
             "size_bytes": self.size_bytes,
             "digest": self.digest,
+            "tracking_state": self.tracking_state,
+            "git_mode": self.git_mode,
+            "object_id": self.object_id,
+            "availability": self.availability,
+            "unmerged": self.unmerged,
         }
 
 
@@ -144,6 +160,39 @@ def _failure_key(value: SourceAcquisitionFailure) -> tuple[bytes, bytes, bytes]:
 
 def _inventory_key(value: SourceInventoryEntry) -> tuple[bytes, bytes]:
     return (value.raw_path.encode("utf-8"), _path_key(value.path))
+
+
+def with_content_unavailable_failures(
+    source: SourceView,
+    paths: frozenset[PurePosixPath],
+    config: PythonConfig,
+) -> SourceView:
+    candidate_paths = frozenset(path for path in paths if _is_candidate(path, config))
+    if not candidate_paths:
+        return source
+    files = tuple(item for item in source.files if item.path not in candidate_paths)
+    existing_paths = {item.path for item in source.failures}
+    failures = tuple(
+        sorted(
+            (
+                *source.failures,
+                *(
+                    SourceAcquisitionFailure(
+                        path,
+                        AcquisitionStage.READ,
+                        DiagnosticCode.PY_READ,
+                    )
+                    for path in candidate_paths - existing_paths
+                ),
+            ),
+            key=_failure_key,
+        )
+    )
+    updated = replace(source, files=files, failures=failures)
+    return replace(
+        updated,
+        fingerprint=hashlib.sha256(encode_canonical_json(updated.fingerprint_value())).hexdigest(),
+    )
 
 
 def _head_commit(state: HeadState) -> str | None:
@@ -364,6 +413,9 @@ class SourceViewBuilder:
         config: PythonConfig,
         *,
         include_inventory: bool = False,
+        untracked_paths: frozenset[PurePosixPath] = frozenset(),
+        unmerged_paths: frozenset[PurePosixPath] = frozenset(),
+        index_entries: tuple[GitIndexEntry, ...] = (),
     ) -> SourceView:
         self._prepare_staging()
         return self._collect(
@@ -372,6 +424,9 @@ class SourceViewBuilder:
             config,
             write_frozen=True,
             include_inventory=include_inventory,
+            untracked_paths=untracked_paths,
+            unmerged_paths=unmerged_paths,
+            index_entries=index_entries,
         )
 
     def assert_unchanged(
@@ -380,6 +435,10 @@ class SourceViewBuilder:
         head_state: HeadState,
         entries: tuple[EnumeratedPath, ...],
         config: PythonConfig,
+        *,
+        untracked_paths: frozenset[PurePosixPath] = frozenset(),
+        unmerged_paths: frozenset[PurePosixPath] = frozenset(),
+        index_entries: tuple[GitIndexEntry, ...] = (),
     ) -> None:
         try:
             current = self._collect(
@@ -388,6 +447,9 @@ class SourceViewBuilder:
                 config,
                 write_frozen=False,
                 include_inventory=True,
+                untracked_paths=untracked_paths,
+                unmerged_paths=unmerged_paths,
+                index_entries=index_entries,
             )
         except SourceViewBuildError as error:
             raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
@@ -453,9 +515,21 @@ class SourceViewBuilder:
         *,
         write_frozen: bool,
         include_inventory: bool = False,
+        untracked_paths: frozenset[PurePosixPath] = frozenset(),
+        unmerged_paths: frozenset[PurePosixPath] = frozenset(),
+        index_entries: tuple[GitIndexEntry, ...] = (),
     ) -> SourceView:
         self._checkpoint()
-        inventory_before = self._inventory(entries) if include_inventory else ()
+        inventory_before = (
+            self._inventory(
+                entries,
+                untracked_paths=untracked_paths,
+                unmerged_paths=unmerged_paths,
+                index_entries=index_entries,
+            )
+            if include_inventory
+            else ()
+        )
         candidates = tuple(entry for entry in entries if _is_candidate(entry.normalized, config))
         collision_groups = self._collision_groups(candidates)
         collision_paths = frozenset(path for group in collision_groups for path in group)
@@ -480,7 +554,16 @@ class SourceViewBuilder:
 
         ordered_files = tuple(sorted(files, key=lambda item: _path_key(item.path)))
         ordered_failures = tuple(sorted(failures, key=_failure_key))
-        inventory_after = self._inventory(entries) if include_inventory else inventory_before
+        inventory_after = (
+            self._inventory(
+                entries,
+                untracked_paths=untracked_paths,
+                unmerged_paths=unmerged_paths,
+                index_entries=index_entries,
+            )
+            if include_inventory
+            else inventory_before
+        )
         if include_inventory and inventory_after != inventory_before:
             raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT))
         value = {
@@ -503,14 +586,47 @@ class SourceViewBuilder:
             ),
         )
 
-    def _inventory(self, entries: tuple[EnumeratedPath, ...]) -> tuple[SourceInventoryEntry, ...]:
+    def _inventory(
+        self,
+        entries: tuple[EnumeratedPath, ...],
+        *,
+        untracked_paths: frozenset[PurePosixPath],
+        unmerged_paths: frozenset[PurePosixPath],
+        index_entries: tuple[GitIndexEntry, ...],
+    ) -> tuple[SourceInventoryEntry, ...]:
         values: list[SourceInventoryEntry] = []
+        index_by_path = {item.path: item for item in index_entries if item.stage == 0}
+        tracked_paths = {item.path for item in index_entries}
         for entry in entries:
             self._checkpoint()
             logical_path = entry.normalized
             physical_path = PurePosixPath(entry.raw_text)
+            index_entry = index_by_path.get(logical_path)
+            tracking_state = (
+                "tracked"
+                if logical_path in tracked_paths
+                else "untracked"
+                if logical_path in untracked_paths
+                else "tracked"
+            )
             parent_descriptor: int | None = None
             try:
+                if index_entry is not None and index_entry.mode == "160000":
+                    values.append(
+                        SourceInventoryEntry(
+                            logical_path,
+                            entry.raw_text,
+                            "gitlink",
+                            None,
+                            index_entry.object_id,
+                            tracking_state,
+                            index_entry.mode,
+                            index_entry.object_id,
+                            "unavailable",
+                            logical_path in unmerged_paths,
+                        )
+                    )
+                    continue
                 parent_descriptor = _open_parent_without_symlinks(
                     self.repository,
                     physical_path,
@@ -527,6 +643,11 @@ class SourceViewBuilder:
                             "symlink",
                             len(os.fsencode(target)),
                             hashlib.sha256(os.fsencode(target)).hexdigest(),
+                            tracking_state,
+                            "120000",
+                            index_entry.object_id if index_entry is not None else None,
+                            "unavailable",
+                            logical_path in unmerged_paths,
                         )
                     )
                     continue
@@ -538,6 +659,11 @@ class SourceViewBuilder:
                             "other",
                             before.st_size,
                             None,
+                            tracking_state,
+                            None,
+                            index_entry.object_id if index_entry is not None else None,
+                            "unavailable",
+                            logical_path in unmerged_paths,
                         )
                     )
                     continue
@@ -561,13 +687,30 @@ class SourceViewBuilder:
                         "regular",
                         len(content),
                         hashlib.sha256(content).hexdigest(),
+                        tracking_state,
+                        "100755" if before.st_mode & 0o111 else "100644",
+                        index_entry.object_id if index_entry is not None else None,
+                        "available",
+                        logical_path in unmerged_paths,
+                        content,
                     )
                 )
             except _ConcurrentMutationError as error:
                 raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
             except FileNotFoundError:
                 values.append(
-                    SourceInventoryEntry(logical_path, entry.raw_text, "missing", None, None)
+                    SourceInventoryEntry(
+                        logical_path,
+                        entry.raw_text,
+                        "missing",
+                        None,
+                        None,
+                        tracking_state,
+                        index_entry.mode if index_entry is not None else None,
+                        index_entry.object_id if index_entry is not None else None,
+                        "absent",
+                        logical_path in unmerged_paths,
+                    )
                 )
             except (_UnsafeSymlinkError, OSError):
                 values.append(
@@ -577,6 +720,11 @@ class SourceViewBuilder:
                         "unavailable",
                         None,
                         None,
+                        tracking_state,
+                        None,
+                        index_entry.object_id if index_entry is not None else None,
+                        "unavailable",
+                        logical_path in unmerged_paths,
                     )
                 )
             finally:

@@ -197,12 +197,23 @@ class ComparisonEndpointResolver:
         explicit_candidates: list[str] = []
         if pr_target is not None:
             explicit_candidates.append(validate_endpoint_text(pr_target))
-        for candidate in (
-            self.comparison.target_ref,
-            self.comparison.upstream_ref,
-        ):
-            if candidate is not None and candidate not in explicit_candidates:
-                explicit_candidates.append(validate_endpoint_text(candidate))
+        target_ref = self.comparison.target_ref
+        if target_ref is not None and target_ref not in explicit_candidates:
+            explicit_candidates.append(validate_endpoint_text(target_ref))
+        upstream_ref = self.comparison.upstream_ref
+        if upstream_ref is not None:
+            namespace = validate_endpoint_text(upstream_ref)
+            try:
+                upstream_candidates = self.reader.enumerate_ref_names(namespace)
+            except GitReadError as error:
+                raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT)) from error
+            if not upstream_candidates:
+                raise EndpointResolutionError(diagnostic(DiagnosticCode.DIFF_ENDPOINT))
+            explicit_candidates.extend(
+                candidate
+                for candidate in upstream_candidates
+                if candidate not in explicit_candidates
+            )
 
         candidates = [*explicit_candidates, "refs/remotes/origin/HEAD"]
         candidates.extend(f"refs/heads/{name}" for name in ("main", "develop", "master"))

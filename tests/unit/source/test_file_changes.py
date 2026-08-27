@@ -5,36 +5,56 @@ from pathlib import PurePosixPath
 import pytest
 
 from code_structure_viz.source.file_changes import (
+    ContentSideState,
     FileChange,
+    attach_content_hunks,
     build_working_tree_file_change_set,
+    content_evidence_from_inventory,
     parse_name_status,
     parse_unified_hunks,
 )
 from code_structure_viz.source.source_view import SourceInventoryEntry
 
 
-def _inventory(path: str, digest: str) -> SourceInventoryEntry:
-    return SourceInventoryEntry(PurePosixPath(path), path, "regular", 1, digest)
+def _inventory(
+    path: str,
+    digest: str,
+    *,
+    tracking_state: str = "tracked",
+    unmerged: bool = False,
+) -> SourceInventoryEntry:
+    return SourceInventoryEntry(
+        PurePosixPath(path),
+        path,
+        "regular",
+        1,
+        digest,
+        tracking_state,
+        unmerged=unmerged,
+    )
 
 
 def _unavailable_inventory(path: str) -> SourceInventoryEntry:
-    return SourceInventoryEntry(PurePosixPath(path), path, "unavailable", None, None)
+    return SourceInventoryEntry(
+        PurePosixPath(path),
+        path,
+        "unavailable",
+        None,
+        None,
+        "untracked",
+        availability="unavailable",
+    )
 
 
 def test_working_tree_change_set_counts_untracked_and_unmerged_paths() -> None:
     before = (_inventory("src/changed.py", "a"),)
     after = (
         _inventory("src/changed.py", "b"),
-        _inventory("src/new.txt", "c"),
-        _inventory("src/conflict.py", "d"),
+        _inventory("src/new.txt", "c", tracking_state="untracked"),
+        _inventory("src/conflict.py", "d", unmerged=True),
     )
 
-    result = build_working_tree_file_change_set(
-        before,
-        after,
-        untracked_paths=(PurePosixPath("src/new.txt"),),
-        unmerged_paths=(PurePosixPath("src/conflict.py"),),
-    )
+    result = build_working_tree_file_change_set(before, after)
 
     assert [(item.status, item.path) for item in result] == [
         ("M", PurePosixPath("src/changed.py")),
@@ -44,15 +64,52 @@ def test_working_tree_change_set_counts_untracked_and_unmerged_paths() -> None:
 
 
 def test_working_tree_change_set_counts_unreadable_untracked_path() -> None:
-    result = build_working_tree_file_change_set(
-        (),
-        (_unavailable_inventory("src/unreadable.py"),),
-        untracked_paths=(PurePosixPath("src/unreadable.py"),),
-    )
+    result = build_working_tree_file_change_set((), (_unavailable_inventory("src/unreadable.py"),))
 
     assert [(item.status, item.path) for item in result] == [
         ("?", PurePosixPath("src/unreadable.py"))
     ]
+
+
+def test_same_path_tracking_transition_cannot_be_reused_as_copy_source() -> None:
+    before = (_inventory("src/app.py", "same"),)
+    after = (
+        _inventory("src/app.py", "same", tracking_state="untracked"),
+        _inventory("src/order.py", "same"),
+    )
+
+    result = build_working_tree_file_change_set(before, after)
+
+    assert [(item.status, item.old_path, item.new_path) for item in result] == [
+        ("D", PurePosixPath("src/app.py"), None),
+        ("?", None, PurePosixPath("src/app.py")),
+        ("A", None, PurePosixPath("src/order.py")),
+    ]
+
+
+def test_digest_mismatch_is_unavailable_and_cannot_create_fake_hunks() -> None:
+    path = PurePosixPath("src/app.py")
+    inventory = (
+        SourceInventoryEntry(
+            path,
+            path.as_posix(),
+            "regular",
+            7,
+            "0" * 64,
+            availability="available",
+            content=b"secret\n",
+        ),
+    )
+
+    evidence = content_evidence_from_inventory(inventory)
+    result = attach_content_hunks(
+        (FileChange("M", path, path),),
+        before_contents={},
+        after_contents=evidence,
+    )
+
+    assert evidence[path].state is ContentSideState.UNAVAILABLE
+    assert result.changes[0].hunks == ()
 
 
 def test_unified_hunk_parser_rejects_unbounded_metadata() -> None:

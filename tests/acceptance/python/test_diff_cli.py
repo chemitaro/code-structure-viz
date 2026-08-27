@@ -2,11 +2,34 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import stat
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from tests.helpers.diff import create_two_commit_repository, run_diff_cli
+from tests.helpers.diff import (
+    create_two_commit_repository,
+    create_two_commit_repository_from_files,
+    run_diff_cli,
+)
+
+
+def _git_proxy(tmp_path: Path, behavior: str) -> Path:
+    real_git = shutil.which("git")
+    assert real_git is not None
+    shim = tmp_path / "bin" / "git"
+    shim.parent.mkdir(exist_ok=True)
+    shim.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        f"{behavior}\n"
+        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
+    return shim.parent
 
 
 def test_explicit_commit_endpoints_publish_python_semantic_diff(tmp_path: Path) -> None:
@@ -85,6 +108,58 @@ def test_to_working_tree_without_from_uses_start_head_implicit_base(
     assert comparison["resolution_method"] == "implicit-base-from-start-head-anchor"
 
 
+def test_configured_upstream_namespace_expands_to_deterministic_candidate(
+    tmp_path: Path,
+) -> None:
+    repository, before, _after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(repository),
+            "update-ref",
+            "refs/remotes/upstream/main",
+            before,
+        ),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    config = tmp_path / "config.toml"
+    config.write_text(
+        """schema = "code-structure-viz.config/v1"
+[python]
+source_roots = ["src"]
+include = ["**/*.py"]
+exclude = []
+[traversal]
+upstream_depth = 1
+downstream_depth = 1
+[limits]
+max_entities = 500
+[comparison]
+upstream_ref = "refs/remotes/upstream"
+""",
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--config", str(config))
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["comparison"]["selected_base_candidate"] == ("refs/remotes/upstream/main")
+    assert manifest["comparison"]["merge_base"] == before
+    assert manifest["config"]["resolved"]["comparison"] == {
+        "target_ref": None,
+        "upstream_ref": "refs/remotes/upstream",
+    }
+
+
 def test_untracked_paths_are_counted_before_python_analysis(tmp_path: Path) -> None:
     repository, before, _after = create_two_commit_repository(
         tmp_path,
@@ -107,6 +182,325 @@ def test_untracked_paths_are_counted_before_python_analysis(tmp_path: Path) -> N
     assert result.returncode == 1
     assert b"CSV-DIFF-002" in result.stderr
     assert not output.exists()
+
+
+def test_tracked_to_untracked_uses_canonical_records_for_budget_and_manifest(
+    tmp_path: Path,
+) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    subprocess.run(
+        ("git", "-C", str(repository), "rm", "--cached", "--", "src/app.py"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+
+    rejected = run_diff_cli(
+        repository,
+        tmp_path / "rejected",
+        "--from",
+        after,
+        "--max-changed-paths",
+        "1",
+    )
+
+    assert rejected.returncode == 1
+    assert b"CSV-DIFF-002" in rejected.stderr
+    assert not (tmp_path / "rejected").exists()
+
+    output = tmp_path / "accepted"
+    accepted = run_diff_cli(
+        repository,
+        output,
+        "--from",
+        after,
+        "--max-changed-paths",
+        "2",
+    )
+
+    assert accepted.returncode == 0, accepted.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [
+        ("D", "src/app.py", None),
+        ("?", None, "src/app.py"),
+    ]
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["changed_path_budget"] == {
+        "name": "max_changed_paths",
+        "requested": 2,
+        "resolved": 2,
+        "actual": 2,
+        "source": "cli",
+    }
+
+
+def test_default_budget_rejects_1002_tracked_to_untracked_records_and_override_admits(
+    tmp_path: Path,
+) -> None:
+    before_files = {
+        "src/app.py": "class Order:\n    amount: int\n",
+        **{f"docs/file-{index:04d}.txt": f"value-{index}\n" for index in range(500)},
+    }
+    after_files = {**before_files, "src/app.py": "class Order:\n    amount: str\n"}
+    repository, _before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files=before_files,
+        after_files=after_files,
+    )
+    subprocess.run(
+        ("git", "-C", str(repository), "rm", "--cached", "-r", "--", "."),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+
+    rejected = run_diff_cli(repository, tmp_path / "rejected", "--from", after)
+
+    assert rejected.returncode == 1
+    assert b"CSV-DIFF-002" in rejected.stderr
+    assert not (tmp_path / "rejected").exists()
+
+    output = tmp_path / "accepted"
+    accepted = run_diff_cli(
+        repository,
+        output,
+        "--from",
+        after,
+        "--max-changed-paths",
+        "1002",
+    )
+
+    assert accepted.returncode == 0, accepted.stderr.decode("utf-8", errors="replace")
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["changed_path_budget"] == {
+        "name": "max_changed_paths",
+        "requested": 1002,
+        "resolved": 1002,
+        "actual": 1002,
+        "source": "cli",
+    }
+    assert len(manifest["file_change_set"]["files"]) == 1002
+
+
+def test_mode_only_working_tree_change_is_one_metadata_record(tmp_path: Path) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    os.chmod(repository / "src" / "app.py", 0o755)
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert file_changes["files"] == [
+        {
+            "status": "M",
+            "old_path": "src/app.py",
+            "new_path": "src/app.py",
+            "hunks": [],
+        }
+    ]
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["changed_path_budget"]["actual"] == 1
+
+
+def test_regular_to_symlink_working_tree_change_is_type_transition(tmp_path: Path) -> None:
+    repository, _before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files={
+            "src/app.py": "class Order:\n    amount: int\n",
+            "src/target.txt": "class Order:\n    amount: str\n",
+        },
+        after_files={
+            "src/app.py": "class Order:\n    amount: str\n",
+            "src/target.txt": "class Order:\n    amount: str\n",
+        },
+    )
+    source = repository / "src" / "app.py"
+    source.unlink()
+    source.symlink_to("target.txt")
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("T", "src/app.py", "src/app.py")]
+    assert file_changes["files"][0]["hunks"] == []
+
+
+def test_unique_working_tree_rename_is_one_canonical_record(tmp_path: Path) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(repository),
+            "mv",
+            "--",
+            "src/app.py",
+            "src/order.py",
+        ),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("R", "src/app.py", "src/order.py")]
+    assert (
+        json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))[
+            "changed_path_budget"
+        ]["actual"]
+        == 1
+    )
+
+
+def test_unique_working_tree_copy_is_one_canonical_record(tmp_path: Path) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    shutil.copyfile(repository / "src" / "app.py", repository / "src" / "order.py")
+    subprocess.run(
+        ("git", "-C", str(repository), "add", "--", "src/order.py"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("C", "src/app.py", "src/order.py")]
+    assert (
+        json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))[
+            "changed_path_budget"
+        ]["actual"]
+        == 1
+    )
+
+
+def test_ambiguous_working_tree_copy_falls_back_to_add(tmp_path: Path) -> None:
+    source = "class Order:\n    amount: str\n"
+    repository, _before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files={
+            "src/app.py": "class Order:\n    amount: int\n",
+            "src/duplicate.py": source,
+        },
+        after_files={
+            "src/app.py": source,
+            "src/duplicate.py": source,
+        },
+    )
+    shutil.copyfile(repository / "src" / "app.py", repository / "src" / "order.py")
+    subprocess.run(
+        ("git", "-C", str(repository), "add", "--", "src/order.py"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("A", None, "src/order.py")]
+
+
+def test_regular_to_gitlink_is_type_transition_with_unavailable_payload(
+    tmp_path: Path,
+) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    source = repository / "src" / "app.py"
+    source.unlink()
+    source.mkdir()
+    subprocess.run(
+        ("git", "-C", str(source), "init", "--quiet", "--initial-branch=main"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    (source / "README").write_text("nested\n", encoding="utf-8")
+    subprocess.run(
+        ("git", "-C", str(source), "add", "--", "README"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(source),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--quiet",
+            "--message=nested",
+        ),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ("git", "-C", str(repository), "add", "--", "src/app.py"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 3, result.stderr.decode("utf-8", errors="replace")
+    assert {path.name for path in output.iterdir()} == {
+        "file-changes.json",
+        "run-manifest.json",
+    }
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("T", "src/app.py", "src/app.py")]
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["domains"][0]["incomplete_kind"] == "payload_unavailable"
+    assert manifest["changed_path_budget"]["actual"] == 1
 
 
 def test_unreadable_untracked_python_path_is_counted_before_analysis(tmp_path: Path) -> None:
@@ -135,6 +529,40 @@ def test_unreadable_untracked_python_path_is_counted_before_analysis(tmp_path: P
     assert not (tmp_path / "output").exists()
 
 
+def test_unreadable_python_content_publishes_only_safe_metadata(tmp_path: Path) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    unreadable = repository / "src" / "unreadable.py"
+    unreadable.write_text("class Hidden:\n    pass\n", encoding="utf-8")
+    os.chmod(unreadable, 0)
+    output = tmp_path / "output"
+    try:
+        result = run_diff_cli(repository, output, "--from", after)
+    finally:
+        os.chmod(unreadable, 0o600)
+
+    assert result.returncode == 3, result.stderr.decode("utf-8", errors="replace")
+    assert {path.name for path in output.iterdir()} == {
+        "file-changes.json",
+        "run-manifest.json",
+    }
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert file_changes["files"] == [
+        {
+            "status": "?",
+            "old_path": None,
+            "new_path": "src/unreadable.py",
+            "hunks": [],
+        }
+    ]
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["domains"][0]["incomplete_kind"] == "payload_unavailable"
+    assert manifest["domains"][0]["payload_available"] is False
+
+
 def test_non_ascii_git_path_keeps_content_hunk_metadata(tmp_path: Path) -> None:
     repository, before, after = create_two_commit_repository(
         tmp_path,
@@ -151,6 +579,195 @@ def test_non_ascii_git_path_keeps_content_hunk_metadata(tmp_path: Path) -> None:
     assert value["files"][0]["old_path"] == "src/café.py"
     assert value["files"][0]["new_path"] == "src/café.py"
     assert value["files"][0]["hunks"]
+
+
+def test_non_python_change_uses_repository_wide_hunk_evidence(tmp_path: Path) -> None:
+    repository, before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files={
+            "src/app.py": "class Order:\n    amount: int\n",
+            "README.txt": "before\n",
+        },
+        after_files={
+            "src/app.py": "class Order:\n    amount: int\n",
+            "README.txt": "after\n",
+        },
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", before, "--to", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    readme = next(item for item in file_changes["files"] if item["new_path"] == "README.txt")
+    assert readme["status"] == "M"
+    assert len(readme["hunks"]) == 1
+    hunk = readme["hunks"][0]
+    assert {key: hunk[key] for key in hunk if key != "hunk_id"} == {
+        "old_start": 1,
+        "old_line_count": 1,
+        "new_start": 1,
+        "new_line_count": 1,
+        "ordinal": 0,
+    }
+    assert len(hunk["hunk_id"]) == 64
+
+
+@pytest.mark.parametrize(
+    ("before_text", "after_text"),
+    (("same\n", "same"), ("same\n", "same\r\n")),
+)
+def test_line_terminator_only_change_has_deterministic_hunk(
+    tmp_path: Path,
+    before_text: str,
+    after_text: str,
+) -> None:
+    repository, before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files={
+            "src/app.py": "class Order:\n    amount: int\n",
+            "README.txt": before_text,
+        },
+        after_files={
+            "src/app.py": "class Order:\n    amount: int\n",
+            "README.txt": after_text,
+        },
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", before, "--to", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    readme = next(item for item in file_changes["files"] if item["new_path"] == "README.txt")
+    assert [
+        (
+            item["old_start"],
+            item["old_line_count"],
+            item["new_start"],
+            item["new_line_count"],
+            item["ordinal"],
+        )
+        for item in readme["hunks"]
+    ] == [(1, 1, 1, 1, 0)]
+
+
+def test_unavailable_non_python_content_does_not_publish_fake_hunk(tmp_path: Path) -> None:
+    repository, _before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files={
+            "src/app.py": "class Order:\n    amount: int\n",
+            "README.txt": "before\n",
+        },
+        after_files={
+            "src/app.py": "class Order:\n    amount: str\n",
+            "README.txt": "after\n",
+        },
+    )
+    unreadable = repository / "README.txt"
+    os.chmod(unreadable, 0)
+    output = tmp_path / "output"
+    try:
+        result = run_diff_cli(repository, output, "--from", after)
+    finally:
+        os.chmod(unreadable, 0o600)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    readme = next(item for item in file_changes["files"] if item["new_path"] == "README.txt")
+    assert readme == {
+        "status": "M",
+        "old_path": "README.txt",
+        "new_path": "README.txt",
+        "hunks": [],
+    }
+
+
+def test_unavailable_changed_python_hunk_evidence_is_payload_unavailable(
+    tmp_path: Path,
+) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    (repository / "src" / "app.py").write_bytes(
+        b"class Order:\n    amount: str\n#" + (b"x" * (128 * 1024)) + b"\n"
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 3, result.stderr.decode("utf-8", errors="replace")
+    assert {path.name for path in output.iterdir()} == {
+        "file-changes.json",
+        "run-manifest.json",
+    }
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert file_changes["files"] == [
+        {
+            "status": "M",
+            "old_path": "src/app.py",
+            "new_path": "src/app.py",
+            "hunks": [],
+        }
+    ]
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["semantic_sides"]["after"]["kind"] == "analysis-failed"
+    assert manifest["domains"][0]["incomplete_kind"] == "payload_unavailable"
+
+
+def test_missing_commit_blob_is_run_fatal_without_publication(tmp_path: Path) -> None:
+    repository, before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    object_id = subprocess.check_output(
+        ("git", "-C", str(repository), "rev-parse", f"{before}:src/app.py"),
+        text=True,
+    ).strip()
+    (repository / ".git" / "objects" / object_id[:2] / object_id[2:]).unlink()
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", before, "--to", after)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-001" in result.stderr
+    assert not output.exists()
+
+
+def test_working_tree_drift_aborts_staged_diff_before_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, _before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    counter = tmp_path / "ls-files-count"
+    source = repository / "src" / "app.py"
+    proxy = _git_proxy(
+        tmp_path,
+        "if sys.argv[-5:] == "
+        "['ls-files', '-z', '--cached', '--others', '--exclude-standard']:\n"
+        f"    counter = pathlib.Path({str(counter)!r})\n"
+        "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "    counter.write_text(str(count))\n"
+        "    if count == 2:\n"
+        f"        pathlib.Path({str(source)!r}).write_text("
+        "'class Mutated:\\n    pass\\n')",
+    )
+    monkeypatch.setenv("PATH", f"{proxy}{os.pathsep}{os.environ['PATH']}")
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 1
+    assert b"CSV-SOURCE-001" in result.stderr
+    assert not output.exists()
+    assert list(tmp_path.glob(".code-structure-viz-staging-*")) == []
 
 
 def test_from_working_tree_is_usage_error_before_publication(tmp_path: Path) -> None:

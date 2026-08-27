@@ -8,6 +8,7 @@ import pytest
 from code_structure_viz.source.git_repository import (
     CommandResult,
     Commit,
+    GitIndexEntry,
     GitReadError,
     GitRepositoryReader,
     SubprocessRunner,
@@ -293,3 +294,125 @@ def test_non_utf8_git_path_is_fatal_without_synthetic_path(tmp_path: Path) -> No
     assert value.code.value == "CSV-SOURCE-003"
     assert (value.domain, value.path, value.symbol, value.line) == (None, None, None, None)
     assert b"bad" not in str(caught.value).encode("utf-8")
+
+
+def test_commit_blob_is_read_by_captured_object_identity(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    object_id = "a" * 40
+    runner = ScriptedRunner([_result(0, b"content\n")])
+
+    content = GitRepositoryReader(repo, runner=runner).read_blob_object(object_id)
+
+    assert content == b"content\n"
+    assert runner.calls[0][0][5:] == ("cat-file", "blob", object_id)
+
+
+def test_index_inventory_preserves_mode_object_stage_and_deterministic_path_order(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    first_object = "a" * 40
+    second_object = "b" * 40
+    runner = ScriptedRunner(
+        [
+            _result(
+                0,
+                b"100755 "
+                + second_object.encode("ascii")
+                + b" 2\tsrc/z.py\0"
+                + b"100644 "
+                + first_object.encode("ascii")
+                + b" 0\tsrc/a.py\0",
+            )
+        ]
+    )
+
+    entries = GitRepositoryReader(repo, runner=runner).enumerate_index_entries()
+
+    assert entries == (
+        GitIndexEntry(PurePosixPath("src/a.py"), first_object, "100644", 0),
+        GitIndexEntry(PurePosixPath("src/z.py"), second_object, "100755", 2),
+    )
+    assert runner.calls[0][0][5:] == ("ls-files", "--stage", "-z", "--cached", "--")
+
+
+@pytest.mark.parametrize(
+    ("payload", "diagnostic_code"),
+    (
+        (b"10064x " + (b"a" * 40) + b" 0\tsrc/app.py\0", "CSV-INTERNAL-001"),
+        (b"100644 bad-object 0\tsrc/app.py\0", "CSV-INTERNAL-001"),
+        (b"100644 " + (b"a" * 40) + b" 4\tsrc/app.py\0", "CSV-INTERNAL-001"),
+        (
+            b"100644 " + (b"a" * 40) + b" 0\tsrc/bad-\xff.py\0",
+            "CSV-SOURCE-003",
+        ),
+    ),
+)
+def test_index_inventory_rejects_malformed_protocol(
+    tmp_path: Path,
+    payload: bytes,
+    diagnostic_code: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    with pytest.raises(GitReadError) as caught:
+        GitRepositoryReader(
+            repo,
+            runner=ScriptedRunner([_result(0, payload)]),
+        ).enumerate_index_entries()
+
+    assert caught.value.diagnostic.code.value == diagnostic_code
+
+
+def test_ref_namespace_expands_to_sorted_deduplicated_child_refs(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runner = ScriptedRunner(
+        [
+            _result(
+                0,
+                b"refs/remotes/upstream/z\n"
+                b"refs/remotes/upstream/main\n"
+                b"refs/remotes/upstream/main\n",
+            )
+        ]
+    )
+
+    refs = GitRepositoryReader(repo, runner=runner).enumerate_ref_names("refs/remotes/upstream")
+
+    assert refs == (
+        "refs/remotes/upstream/main",
+        "refs/remotes/upstream/z",
+    )
+    assert runner.calls[0][0][5:] == (
+        "for-each-ref",
+        "--format=%(refname)",
+        "refs/remotes/upstream/",
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"refs/remotes/other/main\n",
+        b"refs/remotes/upstream/main",
+        b"refs/remotes/upstream/bad-\xff\n",
+    ),
+)
+def test_ref_namespace_rejects_malformed_or_out_of_namespace_protocol(
+    tmp_path: Path,
+    payload: bytes,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    with pytest.raises(GitReadError) as caught:
+        GitRepositoryReader(
+            repo,
+            runner=ScriptedRunner([_result(0, payload)]),
+        ).enumerate_ref_names("refs/remotes/upstream")
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-001"

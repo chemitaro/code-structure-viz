@@ -181,6 +181,14 @@ class EnumeratedPath:
     normalized: PurePosixPath
 
 
+@dataclass(frozen=True, slots=True)
+class GitIndexEntry:
+    path: PurePosixPath
+    object_id: str
+    mode: str
+    stage: int
+
+
 class UnrepresentableGitPathFatal(GitReadError):
     pass
 
@@ -362,6 +370,43 @@ class GitRepositoryReader:
             raise _path_protocol_fatal()
         return _decode_path_list(result.stdout)
 
+    def enumerate_index_entries(self) -> tuple[GitIndexEntry, ...]:
+        result = self._git("ls-files", "--stage", "-z", "--cached", "--")
+        if result.returncode != 0:
+            raise _path_protocol_fatal()
+        fields = result.stdout.split(b"\0")
+        if fields and fields[-1] == b"":
+            fields.pop()
+        values: list[GitIndexEntry] = []
+        for field in fields:
+            try:
+                metadata, raw_path = field.split(b"\t", 1)
+                mode_raw, object_raw, stage_raw = metadata.split(b" ", 2)
+                if (
+                    len(mode_raw) != 6
+                    or any(character not in b"01234567" for character in mode_raw)
+                    or len(object_raw) not in {40, 64}
+                    or any(character not in b"0123456789abcdefABCDEF" for character in object_raw)
+                    or stage_raw not in {b"0", b"1", b"2", b"3"}
+                ):
+                    raise ValueError
+                values.append(
+                    GitIndexEntry(
+                        path=_decode_git_path(raw_path),
+                        object_id=object_raw.decode("ascii").lower(),
+                        mode=mode_raw.decode("ascii"),
+                        stage=int(stage_raw),
+                    )
+                )
+            except (UnicodeDecodeError, ValueError) as error:
+                raise _path_protocol_fatal() from error
+        return tuple(
+            sorted(
+                values,
+                key=lambda item: (item.path.as_posix().encode("utf-8"), item.stage),
+            )
+        )
+
     def enumerate_unmerged_paths(self) -> tuple[PurePosixPath, ...]:
         result = self._git("ls-files", "-u", "-z", "--")
         if result.returncode != 0:
@@ -417,6 +462,37 @@ class GitRepositoryReader:
             return None
         return min(values).decode("ascii").lower()
 
+    def enumerate_ref_names(self, namespace: str) -> tuple[str, ...]:
+        if (
+            not namespace.startswith("refs/")
+            or namespace.endswith("/")
+            or namespace.startswith("-")
+            or any(character in namespace for character in "\x00\r\n\t")
+        ):
+            raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
+        prefix = f"{namespace}/"
+        result = self._git("for-each-ref", "--format=%(refname)", prefix)
+        if result.returncode != 0:
+            raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
+        if not result.stdout:
+            return ()
+        if not result.stdout.endswith(b"\n"):
+            raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
+        values: list[str] = []
+        for raw in result.stdout.splitlines():
+            try:
+                value = raw.decode("utf-8", errors="strict")
+            except UnicodeDecodeError as error:
+                raise _fatal(DiagnosticCode.DIFF_ENDPOINT) from error
+            if (
+                not value.startswith(prefix)
+                or value.startswith("-")
+                or any(character in value for character in "\x00\r\n\t")
+            ):
+                raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
+            values.append(value)
+        return tuple(sorted(set(values), key=lambda item: item.encode("utf-8")))
+
     def enumerate_commit_tree(self, commit: str) -> tuple[CommitTreeEntry, ...]:
         result = self._git("ls-tree", "-r", "-z", "--long", "--full-tree", commit)
         if result.returncode != 0:
@@ -454,6 +530,16 @@ class GitRepositoryReader:
         if not _is_safe_relative_git_path(path.as_posix()):
             raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
         result = self._git("cat-file", "blob", f"{commit}:{path.as_posix()}")
+        if result.returncode != 0:
+            raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
+        return result.stdout
+
+    def read_blob_object(self, object_id: str) -> bytes:
+        if len(object_id) not in {40, 64} or any(
+            character not in "0123456789abcdef" for character in object_id
+        ):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        result = self._git("cat-file", "blob", object_id)
         if result.returncode != 0:
             raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
         return result.stdout

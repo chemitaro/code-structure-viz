@@ -11,7 +11,7 @@ from code_structure_viz.source.git_repository import (
     Commit,
     CommitTreeEntry,
     EnumeratedPath,
-    GitReadError,
+    GitIndexEntry,
     GitRepositoryReader,
     HeadState,
 )
@@ -52,8 +52,20 @@ class WorkingTreeFreezer:
         head_state: HeadState,
         entries: tuple[EnumeratedPath, ...],
         config: PythonConfig,
+        *,
+        untracked_paths: frozenset[PurePosixPath] = frozenset(),
+        unmerged_paths: frozenset[PurePosixPath] = frozenset(),
+        index_entries: tuple[GitIndexEntry, ...] = (),
     ) -> SourceView:
-        return self._builder.build(head_state, entries, config, include_inventory=True)
+        return self._builder.build(
+            head_state,
+            entries,
+            config,
+            include_inventory=True,
+            untracked_paths=untracked_paths,
+            unmerged_paths=unmerged_paths,
+            index_entries=index_entries,
+        )
 
     def assert_unchanged(
         self,
@@ -61,8 +73,20 @@ class WorkingTreeFreezer:
         head_state: HeadState,
         entries: tuple[EnumeratedPath, ...],
         config: PythonConfig,
+        *,
+        untracked_paths: frozenset[PurePosixPath] = frozenset(),
+        unmerged_paths: frozenset[PurePosixPath] = frozenset(),
+        index_entries: tuple[GitIndexEntry, ...] = (),
     ) -> None:
-        self._builder.assert_unchanged(initial, head_state, entries, config)
+        self._builder.assert_unchanged(
+            initial,
+            head_state,
+            entries,
+            config,
+            untracked_paths=untracked_paths,
+            unmerged_paths=unmerged_paths,
+            index_entries=index_entries,
+        )
 
 
 def build_commit_source_view(
@@ -88,10 +112,7 @@ def build_commit_source_view(
     contents: dict[PurePosixPath, bytes] = {}
     for item in tree:
         if item.kind == "blob":
-            try:
-                content = reader.read_commit_blob(commit.object_id, item.path)
-            except GitReadError:
-                raise
+            content = reader.read_blob_object(item.object_id)
             contents[item.path] = content
             inventory.append(
                 SourceInventoryEntry(
@@ -100,6 +121,12 @@ def build_commit_source_view(
                     "symlink" if item.mode == "120000" else "regular",
                     len(content),
                     hashlib.sha256(content).hexdigest(),
+                    "tracked",
+                    item.mode,
+                    item.object_id,
+                    ("unavailable" if item.mode == "120000" else "available"),
+                    False,
+                    None if item.mode == "120000" else content,
                 )
             )
         else:
@@ -107,9 +134,13 @@ def build_commit_source_view(
                 SourceInventoryEntry(
                     item.path,
                     item.path.as_posix(),
-                    item.kind,
+                    "gitlink" if item.mode == "160000" else item.kind,
                     None,
                     item.object_id,
+                    "tracked",
+                    item.mode,
+                    item.object_id,
+                    "unavailable",
                 )
             )
     for item in candidates:

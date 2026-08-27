@@ -82,3 +82,41 @@ def test_default_entity_budget_rejects_501_changed_entities(tmp_path: Path) -> N
         "actual": 501,
         "source": "builtin",
     }
+
+
+def test_valid_entity_budget_override_publishes_all_501_changed_entities(
+    tmp_path: Path,
+) -> None:
+    repository, before, after = create_two_commit_repository(
+        tmp_path,
+        before_text=_many_changed_classes("int"),
+        after_text=_many_changed_classes("str"),
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(
+        repository,
+        output,
+        "--from",
+        before,
+        "--to",
+        after,
+        "--max-entities",
+        "600",
+    )
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert {path.name for path in output.iterdir()} == {
+        "file-changes.json",
+        "python.diff.puml",
+        "python.diff.semantic.json",
+        "run-manifest.json",
+    }
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["domains"][0]["budget"] == {
+        "name": "max_entities",
+        "requested": 600,
+        "resolved": 600,
+        "actual": 501,
+        "source": "cli",
+    }

@@ -75,6 +75,18 @@ FileChangeSetはA/M/D/R/C/T/U/?とold/new line-range metadata、content-independ
 
 `--stdout SELECTOR`を高々1回のclosed selectorとして検証し、available exact bytes、unavailable result、selectorなしsummary、stderr diagnostics、exit 2 no-publicationを提供する。
 
+## 2026-08-27 のレビュー対応決定
+
+Red/Blue レビューで確認した境界を、実装と受入れの共通 authority として次のように固定する。
+
+- working-tree の内部 inventory は、repository-relative path と canonical digest に加えて、tracking state、Git mode/type、object identity、content availability、unmerged 状態を保持する。これは public SourceView/manifest の新規フィールドではなく、開始時 state fingerprint と FileChangeSet 分類の内部証拠である。
+- 同一 path の tracked→untracked は `D` と `?` の二つの canonical record とし、actual changed-path count も二件とする。mode-only は `M`、regular/symlink/gitlink 間の type transition は `T` とする。cross-path は identity が一意なら rename/copy をそれぞれ `R`/`C` 一件へまとめ、候補が曖昧なら安全な `D`/`A`/`?` へ戻し、source path を再利用しない。
+- hunk の content evidence は `absent`、`available`、`unavailable` を区別する。取得できない、digest が一致しない、binary/上限超過の bytes を `b\"\"` として扱わず、available bytes のみから行範囲を計算する。affected Python path は `payload_unavailable`・exit 3・safe file-change/manifest のみ、非 Python path は偽の hunk を出さない。commit blob/object の欠損または read failure は run fatal・exit 1・公開なしとする。
+- unmerged (`U`) は before side を一度だけ実際に解析し、その同じ observation の semantic side、coverage、diagnostic から safe manifest を構成する。after は未解析 `analysis-failed` として記録し、synthetic zero coverage で before の実測結果を上書きしない。
+- `[comparison].upstream_ref` は既存 config contract どおり参照名前空間として deterministic に子 ref へ展開する。explicit target、展開した候補、built-in 候補の順序と merge-base は provenance に記録し、fetch/checkout/ref mutation は行わない。
+
+上記は既存 `file-change-set/v1`、`source-view/v1`、`run-manifest/v1` の public schema version を変更しない。レビュー対応の acceptance は production CLI/application 経路で status、budget、hunk、U coverage、missing-object、drift、valid override、schema/publication を検証する。
+
 ### CLI examples
 
 ```bash

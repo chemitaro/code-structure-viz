@@ -21,6 +21,11 @@ package_sequence_key: "ISSUE-02"
 `CLI → endpoint → immutable source → Python semantic diff → Artifact/publication` の順に接続する。
 各 step は同じ branch 上で小さなテストを先に追加し、最後に全体回帰を行う。
 
+初回実装後の Strict Final Quality Gate で、working-tree path-state、content hunk、U coverage、
+production acceptance trace に P1 gap が見つかった。以下の remediation step はその gap を Red→Green
+で閉じるために追加し、既存 public schema version は維持した。旧 step の「完了」は初回 slice の
+実装結果を指し、下記 step はその後の品質ゲート対応である。
+
 ## 2. Step 台帳
 
 | Step | 内容 | 対象 | 状態 |
@@ -33,6 +38,10 @@ package_sequence_key: "ISSUE-02"
 | I02-PLAN-006 | schema、contract docs、redaction、determinism、Git immutability、package regression | `schemas/**`, `docs/contracts/**`, tests | 完了 |
 | I02-PLAN-007 | bounded unified hunk helper と Git quoted path validation | `source/file_changes.py`, `source/git_repository.py` | 完了 |
 | I02-PLAN-008 | `--stdout` closed grammar、exact bytes、unavailable result、stderr routing | `cli/parser.py`, `cli/main.py`, `artifacts/streams.py`, acceptance tests | 完了 |
+| I02-PLAN-009 | immutable path-state authority、canonical working-tree status、R/C/T、tracked transition、mode、U | `source/source_view.py`, `source/git_repository.py`, `source/file_changes.py`, `application/diff.py` | 完了 |
+| I02-PLAN-010 | all-changed-path bounded content evidence、availability typing、terminator-preserving ranges、no fake hunk | `source/file_changes.py`, `source/freezer.py`, `application/diff.py` | 完了 |
+| I02-PLAN-011 | U branch の side/coverage/diagnostic を一回の observation から構成 | `application/diff.py`, `tests/acceptance/python/test_domain_presence_diff.py` | 完了 |
+| I02-PLAN-012 | AC-003/007/008/009/010 の production-route regression、drift/missing-object/publication/schema evidence | `tests/acceptance/python/test_diff_cli.py`, `tests/acceptance/python/test_diff_entity_budget.py`, `tests/unit/source/**` | 完了 |
 
 ## 3. 実装詳細
 
@@ -88,6 +97,25 @@ canonical JSON の key sort と UTF-8 byte order、schema additionalProperties=f
 同一入力再実行、Git HEAD/index/ref/worktree 不変、秘密/absolute path/raw hunk 非漏えいを検証する。
 `--stdout` selector は source acquisition 前に閉じた文法を検証し、available Artifact の exact bytes、
 unavailable `stdout-result/v1`、selector 無指定の `run-summary/v1` を stderr diagnostic と分離して出す。
+
+### I02-PLAN-009〜012 — Strict Final Quality Gate remediation
+
+- I02-PLAN-009 では、開始時の path enumeration、index stage/mode/object、tracked/untracked、unmerged、
+  frozen inventory を同じ内部 authority として保持し、budget 前に `U`、same-path transition、unique
+  `R`/`C`、`A`/`D`/`?`、`T`、mode-only `M` を deterministic に分類した。tracked→untracked は `D+?` の二件、
+  unique R/C は一件として count と manifest を同じ tuple から作る。
+- I02-PLAN-010 では、changed path の全 domain を inventory から `absent`/`available`/`unavailable` に
+  分け、admission 後にだけ content evidence を range へ投影した。digest、NUL、payload/line bound を
+  検証し、unknown bytes を empty side にせず、LF/CRLF を含む terminator-preserving range とした。影響
+  Python は safe metadata と `payload_unavailable`、非 Python は fake hunk なし、commit object 欠損は fatal
+  とした。
+- I02-PLAN-011 では、U path の before selection を一度だけ行い、同じ actual coverage/diagnostic と
+  semantic side を safe manifest へ渡した。after は未解析 `analysis-failed` と fingerprint のみを記録し、
+  synthetic coverage による上書きを除去した。
+- I02-PLAN-012 では、実際の `diff` CLI 経路で tracked→untracked budget、R/C/T/mode、non-Python hunk、
+  LF/CRLF、unavailable、missing commit object、working-tree drift、valid entity override、U coverage を
+  検証した。unit protocol tests と schema/security suite を合わせ、publication file set と no-publication
+  boundary を確認した。
 
 ## 4. 受入れテストとコマンド
 

@@ -55,12 +55,15 @@ from code_structure_viz.source.file_changes import (
     FileChangeSet,
     attach_content_hunks,
     build_working_tree_file_change_set,
+    content_evidence_from_inventory,
     parse_name_status,
+    unavailable_content_paths,
 )
 from code_structure_viz.source.freezer import WorkingTreeFreezer, build_commit_source_view
 from code_structure_viz.source.git_repository import (
     Commit,
     EnumeratedPath,
+    GitIndexEntry,
     GitInterruptedError,
     GitReadError,
     GitRepositoryReader,
@@ -71,6 +74,7 @@ from code_structure_viz.source.source_view import (
     SourceInterruptedError,
     SourceView,
     SourceViewBuildError,
+    with_content_unavailable_failures,
 )
 
 _DIFF_ARTIFACT_FORMATS = {"semantic-json": "semantic-json", "plantuml": "plantuml"}
@@ -91,7 +95,9 @@ class DiffApplication:
     def run(self, request: DiffCliRequest) -> RunOutcome:
         transaction: OutputTransaction | None = None
         working_freezer: WorkingTreeFreezer | None = None
+        working_source_authority: SourceView | None = None
         working_entries: tuple[EnumeratedPath, ...] = ()
+        index_entries: tuple[GitIndexEntry, ...] = ()
         untracked_paths: tuple[PurePosixPath, ...] = ()
         unmerged_paths: tuple[PurePosixPath, ...] = ()
         semantic_result: SemanticDiffResult | None = None
@@ -107,6 +113,7 @@ class DiffApplication:
             working_tree_requested = request.to_ref in {None, "working-tree"}
             if working_tree_requested:
                 working_entries = reader.enumerate_path_entries()
+                index_entries = reader.enumerate_index_entries()
                 untracked_paths = reader.enumerate_untracked_paths()
                 unmerged_paths = reader.enumerate_unmerged_paths()
             self._checkpoint()
@@ -138,17 +145,21 @@ class DiffApplication:
                     repository_descriptor=transaction.repository_descriptor,
                     cancelled=self._cancelled,
                 )
-                after_source = working_freezer.freeze(start_head, working_entries, config.python)
+                after_source = working_freezer.freeze(
+                    start_head,
+                    working_entries,
+                    config.python,
+                    untracked_paths=frozenset(untracked_paths),
+                    unmerged_paths=frozenset(unmerged_paths),
+                    index_entries=index_entries,
+                )
+                working_source_authority = after_source
             before_source = build_commit_source_view(reader, Commit(before_id), config.python)
             if endpoints.after.kind is EndpointKind.WORKING_TREE:
                 assert working_freezer is not None
                 file_changes = build_working_tree_file_change_set(
                     before_source.inventory,
                     after_source.inventory,
-                    untracked_paths=untracked_paths,
-                    unmerged_paths=unmerged_paths,
-                    before_contents=_source_contents(before_source),
-                    after_contents=_source_contents(after_source),
                     before=before_id,
                     after=None,
                 )
@@ -164,13 +175,7 @@ class DiffApplication:
                     changed_paths = parse_name_status(reader.diff_name_status(before_id, after_id))
                 except ValueError as error:
                     raise GitReadError(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE)) from error
-                file_changes = attach_content_hunks(
-                    changed_paths,
-                    before_contents=_source_contents(before_source),
-                    after_contents=_source_contents(after_source),
-                    before=before_id,
-                    after=after_id,
-                )
+                file_changes = FileChangeSet(changed_paths, before=before_id, after=after_id)
             changed_path_budget = ChangedPathBudgetGate().admit(
                 actual=file_changes.count,
                 requested=request.max_changed_paths_override,
@@ -183,6 +188,30 @@ class DiffApplication:
             )
             if not changed_path_budget.admitted:
                 return RunOutcome.fatal((diagnostic(DiagnosticCode.DIFF_CHANGED_PATH_BUDGET),))
+            before_content = content_evidence_from_inventory(before_source.inventory)
+            after_content = content_evidence_from_inventory(after_source.inventory)
+            unavailable_before, unavailable_after = unavailable_content_paths(
+                file_changes,
+                before_contents=before_content,
+                after_contents=after_content,
+            )
+            before_source = with_content_unavailable_failures(
+                before_source,
+                unavailable_before,
+                config.python,
+            )
+            after_source = with_content_unavailable_failures(
+                after_source,
+                unavailable_after,
+                config.python,
+            )
+            file_changes = attach_content_hunks(
+                file_changes,
+                before_contents=before_content,
+                after_contents=after_content,
+                before=file_changes.before,
+                after=file_changes.after,
+            )
             has_unmerged = any(item.status == "U" for item in file_changes)
             self._checkpoint()
             semantic_sides: dict[str, object]
@@ -279,16 +308,25 @@ class DiffApplication:
             if endpoints.after.kind is EndpointKind.WORKING_TREE:
                 current_head = reader.resolve_head_state()
                 current_entries = reader.enumerate_path_entries()
+                current_index_entries = reader.enumerate_index_entries()
                 current_untracked = reader.enumerate_untracked_paths()
                 current_unmerged = reader.enumerate_unmerged_paths()
-                if current_untracked != untracked_paths or current_unmerged != unmerged_paths:
+                if (
+                    current_index_entries != index_entries
+                    or current_untracked != untracked_paths
+                    or current_unmerged != unmerged_paths
+                ):
                     raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT))
                 assert working_freezer is not None
+                assert working_source_authority is not None
                 working_freezer.assert_unchanged(
-                    after_source,
+                    working_source_authority,
                     current_head,
                     current_entries,
                     config.python,
+                    untracked_paths=frozenset(current_untracked),
+                    unmerged_paths=frozenset(current_unmerged),
+                    index_entries=current_index_entries,
                 )
             self._artifacts_bound(transaction.read_staged_artifacts())
             transaction.commit(self._cancelled)
@@ -490,7 +528,3 @@ def _diff_coverage(
 
 def _file_change_content(file_changes: FileChangeSet) -> bytes:
     return encode_canonical_json(file_changes.to_json_value())
-
-
-def _source_contents(source: SourceView) -> dict[PurePosixPath, bytes]:
-    return {item.path: item.content for item in source.files}
