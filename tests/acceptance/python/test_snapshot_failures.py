@@ -719,7 +719,7 @@ def test_nfc_path_collision_is_payload_unavailable_with_one_group_diagnostic(
     initialize_repository(repository)
     proxy, _real_git = _git_proxy(
         tmp_path,
-        "if sys.argv[-5:] == ['ls-files', '-z', '--cached', '--others', '--exclude-standard']:\n"
+        "if sys.argv[-4:] == ['ls-files', '-z', '--cached', '--']:\n"
         "    os.write(1, 'src/café.py\\0src/cafe\\u0301.py\\0'.encode('utf-8'))\n"
         "    raise SystemExit(0)",
     )
@@ -752,7 +752,7 @@ def test_source_drift_aborts_staged_payload_and_manifest_before_publication(
     mutated_source = repository / "src" / "domain" / "base.py"
     proxy, _real_git = _git_proxy(
         tmp_path,
-        "if sys.argv[-5:] == ['ls-files', '-z', '--cached', '--others', '--exclude-standard']:\n"
+        "if sys.argv[-4:] == ['ls-files', '-z', '--cached', '--']:\n"
         f"    counter = pathlib.Path({str(counter)!r})\n"
         "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
         "    counter.write_text(str(count))\n"
@@ -784,7 +784,7 @@ def test_sigint_during_final_probe_interrupts_before_directory_rename(tmp_path: 
     ready = tmp_path / "ready"
     proxy, _real_git = _git_proxy(
         tmp_path,
-        "if sys.argv[-5:] == ['ls-files', '-z', '--cached', '--others', '--exclude-standard']:\n"
+        "if sys.argv[-4:] == ['ls-files', '-z', '--cached', '--']:\n"
         f"    counter = pathlib.Path({str(counter)!r})\n"
         "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
         "    counter.write_text(str(count))\n"

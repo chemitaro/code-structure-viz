@@ -33,3 +33,11 @@ mode `160000` のgitlinkはnested sourceへ展開せず、親側の同一path一
  dirtyの観測には、Gitの変換・属性・index flagを閉世界で検証した内部profileが必要であり、profileが成立しない
 場合はraw bytesを比較して成功扱いせず、初期観測を`CSV-DIFF-003`、公開直前のstate driftを`CSV-SOURCE-001`
 としてrun fatalにする。profileやnested content digestはこのpublic schemaへ追加しない。
+
+untracked path集合を決める `--exclude-standard` の ignore authority も内部で閉じる。local/worktree の
+`core.excludesFile`、`include.*`、`includeIf.*` は値を解決せずキー存在だけで unsupported とし、初期観測を
+`CSV-DIFF-003`へ倒す。許可された authority は検証済み working tree 内の regular `.gitignore` と検証済み
+Git dir の regular `info/exclude` に限り、内容と安全な署名をbounded digest化する。開始時と公開直前の
+`UntrackedObservation`（digestとdeterministic path集合）が一致しない場合は`CSV-SOURCE-001`とし、実在する
+untracked pathを外部ignoreで隠した成功結果、changed-path budgetの過小count、nested gitlinkのclean縮退を
+公開しない。authority digestは内部stateだけに保持し、public FileChangeSetのshape/versionは変更しない。

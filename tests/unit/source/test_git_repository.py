@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
@@ -14,13 +15,18 @@ from code_structure_viz.source.git_repository import (
     GitPathIdentityCollisionFatal,
     GitReadError,
     GitRepositoryReader,
+    IgnoreAuthorityProfile,
     SubprocessRunner,
     Unborn,
     UnrepresentableGitPathFatal,
+    UntrackedObservation,
     _attribute_is_raw_safe,
     _git_blob_digest,
     _GitlinkTreeEntry,
+    _ignore_authority_file_digest,
+    _ignore_authority_gitignore_digest,
     _parse_git_bool,
+    _parse_git_config_name_only,
     _parse_git_config_records,
     _raw_modes_equal,
     parse_check_attr_z,
@@ -281,24 +287,43 @@ def test_enumerate_paths_strictly_decodes_nul_delimited_utf8_and_normalizes_nfc(
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    runner = ScriptedRunner([_result(0, "src/cafe\u0301.py\0README\0".encode())])
+    (repo / ".git").mkdir()
+    runner = ScriptedRunner(
+        [
+            _result(1),
+            _result(1),
+            _result(0),
+            _result(1),
+            _result(1),
+            _result(0, "src/cafe\u0301.py\0README\0".encode()),
+        ]
+    )
 
     paths = GitRepositoryReader(repo, runner=runner).enumerate_paths()
 
     assert paths == (PurePosixPath("src/caf\u00e9.py"), PurePosixPath("README"))
-    assert runner.calls[0][0][5:] == (
+    assert runner.calls[-1][0][-4:] == (
         "ls-files",
         "-z",
         "--cached",
-        "--others",
-        "--exclude-standard",
+        "--",
     )
 
 
 def test_non_utf8_git_path_is_fatal_without_synthetic_path(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    runner = ScriptedRunner([_result(0, b"good.py\0bad-\xff.py\0")])
+    (repo / ".git").mkdir()
+    runner = ScriptedRunner(
+        [
+            _result(1),
+            _result(1),
+            _result(0),
+            _result(1),
+            _result(1),
+            _result(0, b"good.py\0bad-\xff.py\0"),
+        ]
+    )
 
     with pytest.raises(UnrepresentableGitPathFatal) as caught:
         GitRepositoryReader(repo, runner=runner).enumerate_paths()
@@ -440,6 +465,105 @@ def test_git_bool_parser_rejects_malformed_or_enum_values(value: str) -> None:
 def test_git_config_null_parser_rejects_malformed_records(payload: bytes) -> None:
     with pytest.raises(ValueError):
         _parse_git_config_records(payload)
+
+
+def test_git_config_name_only_parser_is_strict_and_value_free() -> None:
+    assert _parse_git_config_name_only(b"core.excludesfile\0include.path\0") == (
+        "core.excludesfile",
+        "include.path",
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"core.excludesfile",
+        b"core.excludesfile\0\0",
+        b"core.excludesfile\n\0",
+        b"core.excludesfile\xff\0",
+        b"unknown.key\0",
+        b"x" * (64 * 1024 + 1),
+    ),
+)
+def test_git_config_name_only_parser_rejects_malformed_or_oversized_output(
+    payload: bytes,
+) -> None:
+    with pytest.raises(ValueError):
+        _parse_git_config_name_only(payload)
+
+
+@pytest.mark.parametrize("key", ("core.excludesfile", "include.path"))
+def test_ignore_authority_rejects_local_key_without_reading_its_value(
+    tmp_path: Path,
+    key: str,
+) -> None:
+    location = tmp_path / "repo"
+    git_dir = location / ".git"
+    git_dir.mkdir(parents=True)
+    runner = ScriptedRunner([_result(0, f"{key}\0".encode()), _result(1)])
+
+    with pytest.raises(GitReadError) as caught:
+        GitRepositoryReader(location, runner=runner)._ignore_authority_profile(
+            location,
+            git_dir,
+        )
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+    assert all("ls-files" not in call[0] for call in runner.calls)
+
+
+def test_ignore_authority_file_digest_is_bounded_and_deterministic(tmp_path: Path) -> None:
+    path = tmp_path / ".gitignore"
+    path.write_bytes(b"ignored\n")
+
+    first = _ignore_authority_file_digest(path)
+    second = _ignore_authority_file_digest(path)
+
+    assert first == second
+    assert first is not None
+    path.write_bytes(b"changed\n")
+    assert _ignore_authority_file_digest(path) != first
+
+
+@pytest.mark.parametrize("layout", ("symlink", "directory", "fifo", "oversized"))
+def test_ignore_authority_file_digest_rejects_unsafe_files(
+    tmp_path: Path,
+    layout: str,
+) -> None:
+    path = tmp_path / ".gitignore"
+    if layout == "symlink":
+        target = tmp_path / "target"
+        target.write_text("ignored\n", encoding="utf-8")
+        path.symlink_to(target)
+    elif layout == "directory":
+        path.mkdir()
+    elif layout == "fifo":
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("FIFO is unavailable on this platform")
+        os.mkfifo(path)
+    else:
+        path.write_bytes(b"x" * (64 * 1024 + 1))
+
+    with pytest.raises(OSError):
+        _ignore_authority_file_digest(path)
+
+
+def test_gitignore_authority_walk_digest_is_deterministic_and_tracks_nested_files(
+    tmp_path: Path,
+) -> None:
+    location = tmp_path / "repo"
+    git_dir = location / ".git"
+    (location / "docs").mkdir(parents=True)
+    git_dir.mkdir()
+    (location / ".gitignore").write_text("root\n", encoding="utf-8")
+    (location / "docs" / ".gitignore").write_text("docs\n", encoding="utf-8")
+
+    first = _ignore_authority_gitignore_digest(location, git_dir)
+    second = _ignore_authority_gitignore_digest(location, git_dir)
+
+    assert first == second
+    (location / "docs" / ".gitignore").write_text("changed\n", encoding="utf-8")
+    assert _ignore_authority_gitignore_digest(location, git_dir) != first
 
 
 def test_gitlink_config_profile_accepts_explicit_safe_values(tmp_path: Path) -> None:
@@ -708,10 +832,31 @@ def test_gitlink_profile_digest_is_deterministic_and_detects_drift() -> None:
     same = GitlinkComparisonProfile("config", "attributes", "flags", True, False)
     changed = GitlinkComparisonProfile("changed", "attributes", "flags", True, False)
     changed_mode = GitlinkComparisonProfile("config", "attributes", "flags", True, True)
+    changed_ignore = GitlinkComparisonProfile(
+        "config", "attributes", "flags", True, False, "ignore-changed"
+    )
 
     assert first.digest == same.digest
     assert first.digest != changed.digest
     assert first.digest != changed_mode.digest
+    assert first.digest != changed_ignore.digest
+
+
+def test_untracked_observation_orders_paths_and_binds_authority_profile() -> None:
+    profile = IgnoreAuthorityProfile("config", "gitignore", "exclude")
+    first = GitPathIdentity("z.txt", PurePosixPath("z.txt"))
+    second = GitPathIdentity("a.txt", PurePosixPath("a.txt"))
+
+    observation = UntrackedObservation((first, second), profile)
+    same = UntrackedObservation((second, first), profile)
+    changed = UntrackedObservation(
+        (second, first), IgnoreAuthorityProfile("changed", "gitignore", "exclude")
+    )
+
+    assert observation.paths == (second, first)
+    assert observation.digest == same.digest
+    assert observation.digest != changed.digest
+    assert observation.authority_digest == profile.digest
 
 
 def test_gitlink_profile_commands_are_bounded_metadata_only(tmp_path: Path) -> None:
@@ -733,6 +878,66 @@ def test_gitlink_profile_commands_are_bounded_metadata_only(tmp_path: Path) -> N
     assert all("--path" not in command for command in commands)
     assert all("--no-includes" in command for command in commands[:2])
     assert "check-attr" in commands[2]
+
+
+def test_untracked_observation_commands_exclude_forbidden_git_helpers(tmp_path: Path) -> None:
+    location = tmp_path / "nested"
+    git_dir = tmp_path / "git"
+    location.mkdir()
+    git_dir.mkdir()
+    runner = ScriptedRunner(
+        [
+            _result(1),
+            _result(1),
+            _result(0, b"z.txt\0a.txt\0"),
+            _result(1),
+            _result(1),
+        ]
+    )
+
+    observation = GitRepositoryReader(location, runner=runner)._observe_untracked(
+        location=location,
+        git_dir=git_dir,
+    )
+
+    assert [item.raw_text for item in observation.paths] == ["a.txt", "z.txt"]
+    commands = [call[0] for call in runner.calls]
+    assert all("status" not in command for command in commands)
+    assert all("diff" not in command for command in commands)
+    assert all("hash-object" not in command for command in commands)
+    assert all("--path" not in command for command in commands)
+    assert all("--no-includes" in command for command in commands[:2] + commands[3:])
+    assert "ls-files" in commands[2]
+
+
+def test_path_enumeration_reuses_untracked_observation_without_second_others_query(
+    tmp_path: Path,
+) -> None:
+    location = tmp_path / "repo"
+    git_dir = location / ".git"
+    git_dir.mkdir(parents=True)
+    runner = ScriptedRunner(
+        [
+            _result(1),
+            _result(1),
+            _result(0, b"untracked.py\0"),
+            _result(1),
+            _result(1),
+            _result(0, b"tracked.py\0"),
+        ]
+    )
+    reader = GitRepositoryReader(location, runner=runner)
+
+    entries = reader.enumerate_path_entries()
+    untracked = reader.enumerate_untracked_entries()
+
+    assert [item.normalized.as_posix() for item in entries] == [
+        "tracked.py",
+        "untracked.py",
+    ]
+    assert [item.raw_text for item in untracked] == ["untracked.py"]
+    others_commands = [call[0] for call in runner.calls if "--others" in call[0]]
+    assert len(others_commands) == 1
 
 
 def test_commit_tree_rejects_distinct_raw_spellings_with_one_nfc_identity(

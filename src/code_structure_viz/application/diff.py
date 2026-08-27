@@ -71,6 +71,7 @@ from code_structure_viz.source.git_repository import (
     GitReadError,
     GitRepositoryReader,
     HeadState,
+    UntrackedObservation,
 )
 from code_structure_viz.source.source_view import (
     SourceDriftError,
@@ -102,6 +103,7 @@ class DiffApplication:
         working_entries: tuple[EnumeratedPath, ...] = ()
         index_entries: tuple[GitIndexEntry, ...] = ()
         untracked_entries: tuple[GitPathIdentity, ...] = ()
+        initial_untracked_observation: UntrackedObservation | None = None
         unmerged_entries: tuple[GitPathIdentity, ...] = ()
         gitlink_states: tuple[GitlinkWorktreeState, ...] = ()
         semantic_result: SemanticDiffResult | None = None
@@ -119,6 +121,9 @@ class DiffApplication:
                 working_entries = reader.enumerate_path_entries()
                 index_entries = reader.enumerate_index_entries()
                 untracked_entries = reader.enumerate_untracked_entries()
+                initial_untracked_observation = reader.last_untracked_observation
+                if initial_untracked_observation is None:
+                    raise GitReadError(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE))
                 unmerged_entries = reader.enumerate_unmerged_entries()
                 gitlink_states = reader.enumerate_gitlink_states(index_entries)
             self._checkpoint()
@@ -321,6 +326,7 @@ class DiffApplication:
                     current_entries = reader.enumerate_path_entries()
                     current_index_entries = reader.enumerate_index_entries()
                     current_untracked = reader.enumerate_untracked_entries()
+                    current_untracked_observation = reader.last_untracked_observation
                     current_unmerged = reader.enumerate_unmerged_entries()
                     current_gitlink_states = reader.enumerate_gitlink_states(current_index_entries)
                 except GitInterruptedError:
@@ -330,6 +336,7 @@ class DiffApplication:
                 if (
                     current_index_entries != index_entries
                     or current_untracked != untracked_entries
+                    or current_untracked_observation != initial_untracked_observation
                     or current_unmerged != unmerged_entries
                     or current_gitlink_states != gitlink_states
                 ):

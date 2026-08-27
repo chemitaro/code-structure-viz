@@ -51,6 +51,8 @@ production acceptance trace に P1 gap が見つかった。以下の remediatio
 | I02-PLAN-019 | P1境界（raw transition、missing/uninitialized/external gitlink、nested helper sentinel、final unreadable）をproduction CLIで回帰 | `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_git_repository.py`, `tests/unit/source/test_file_changes.py`, `tests/unit/source/test_source_view.py` | 完了 |
 | I02-PLAN-020 | Gitの変換・属性・index flagを閉世界profileで検証し、raw worktree比較を安全な条件だけに限定。profile/tracked digestを内部stateへ束ねる | `source/git_repository.py`, `source/source_view.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py`, `tests/acceptance/python/test_diff_cli.py` | 完了 |
 | I02-PLAN-021 | clean baselineを使ったgitlink acceptanceと、autocrlf/eol/filter/index flag/core.filemode/profile driftのfail-closed回帰を追加 | `tests/helpers/diff.py`, `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_git_repository.py` | 完了 |
+| I02-PLAN-022 | `--exclude-standard` の ignore authority を `IgnoreAuthorityProfile` と `UntrackedObservation` に閉じ、外部 `core.excludesFile`/`include.*` と unsafe ignore file を初期観測で拒否。許可された `.gitignore`/`info/exclude` の bounded digest と start/final observation drift を内部 state に束ねる | `source/git_repository.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py` | 完了 |
+| I02-PLAN-023 | 外部 ignore による untracked omission、include、許可された ignore、ignore file drift を top-level/nested の production `diff` CLI で回帰し、no-publication・診断・親側 gitlink `M` の境界を検証 | `tests/acceptance/python/test_diff_cli.py`, `tests/security/test_python_static_boundary.py` | 完了 |
 
 ## 3. 実装詳細
 
@@ -164,6 +166,18 @@ unavailable `stdout-result/v1`、selector 無指定の `run-summary/v1` を stde
   CLIでtracked/untracked dirty、core.filemode=false、autocrlf true/input、`.gitattributes` eol、
   skip-worktree/assume-unchanged、profile driftを回帰し、許可された差分は親側一件`M`、unsafe profileは
   `CSV-DIFF-003`・exit 1・公開なしであることを確認した。
+- I02-PLAN-022 では、`git config --no-includes --name-only` の値を取得しない bounded queryで
+  local/worktree `core.excludesFile` と `include.*`/`includeIf.*` のキー存在を検出し、外部 authorityを
+  解決・openせず `CSV-DIFF-003` へ倒した。`IgnoreAuthorityProfile` は repository working tree の全階層にある
+  regular `.gitignore` と検証済み Git dir の regular `info/exclude` だけを descriptor-based に読み、stat/content
+  digestを作る。symlink、非regular、上限超過、profileの開始中変化は拒否し、`UntrackedObservation` を
+  deterministic path orderとauthority digestへ束ねた。top-levelのpath inventoryはこの observationを再利用し、
+  nested `GitlinkComparisonProfile`もignore digestを含む。公開JSON/manifest shapeは変更しない。
+- I02-PLAN-023 では、clean top-level/nested fixtureで外部 `core.excludesFile` が実在untracked pathを隠す場合、
+  `--max-changed-paths 1` の過小countや親側clean誤判定を許さず `CSV-DIFF-003`・exit 1・no-publicationとした。
+  include/includeIf、通常の `.gitignore`/`info/exclude` の ignored behavior、allowed ignore fileの初期/最終変化
+  （`CSV-SOURCE-001`）をproduction CLIで検証し、unit/securityではname-only parser、bounded digest、unsafe file、
+  ordering、observation reuse、forbidden helper absenceを固定した。
 
 ## 4. 受入れテストとコマンド
 
@@ -199,8 +213,8 @@ git diff --check
 | I02-REQ-006 | I02-DES-006 | I02-PLAN-006 | `test_git_read_only.py`, `test_file_change_hunk_redaction.py`, snapshot regression |
 | I02-REQ-007 | I02-DES-007 | I02-PLAN-007 | `test_file_changes.py`, `test_diff_cli.py` |
 | I02-REQ-008 | I02-DES-008 | I02-PLAN-008 | `test_stdout_selector.py`, `test_diff_fail_closed.py` |
-| I02-REQ-009 | I02-DES-009 | I02-PLAN-013 | `test_diff_cli.py`, `test_git_repository.py`, `test_source_view.py`, `test_file_changes.py` |
-| I02-REQ-010 | I02-DES-010 | I02-PLAN-014, 018〜021 | `test_diff_cli.py`, `test_git_repository.py`, `test_file_changes.py` |
+| I02-REQ-009 | I02-DES-009, I02-DES-012 | I02-PLAN-013, 017, 022, 023 | `test_diff_cli.py`, `test_git_repository.py`, `test_source_view.py`, `test_file_changes.py` |
+| I02-REQ-010 | I02-DES-010, I02-DES-012 | I02-PLAN-014, 018〜023 | `test_diff_cli.py`, `test_git_repository.py`, `test_file_changes.py` |
 | I02-REQ-011 | I02-DES-011 | I02-PLAN-015 | `test_diff_cli.py`, `test_json_schemas.py` |
 
 P1 remediation は I02-REQ-009 → I02-DES-009 → I02-PLAN-017、I02-REQ-010 → I02-DES-010 →

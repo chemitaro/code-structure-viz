@@ -18,7 +18,7 @@ package_sequence_key: "ISSUE-02"
 
 この文書は実装開始前の案ではなく、Issue 5 の実装コードと公開契約を対応付ける
 as-built 設計である。Issue の状態は SpecDock の完了処理前なので `draft` を維持するが、
-下記の path、symbol、データ形状、検証方法は 2026-08-27 時点の実装に一致する。
+下記の path、symbol、データ形状、検証方法は 2026-08-28 時点の実装に一致する。
 
 | ID | 要件 | 採用した設計 |
 | --- | --- | --- |
@@ -33,6 +33,7 @@ as-built 設計である。Issue の状態は SpecDock の完了処理前なの�
 | I02-DES-009 | I02-REQ-009 | `GitPathIdentity` が raw UTF-8 spelling と NFC canonical pathを併記し、canonical collision、duplicate inventory、skip-worktree欠落をfail-closedで処理する。 |
 | I02-DES-010 | I02-REQ-010 | `GitlinkWorktreeState` がmode `160000` pathごとにnested HEAD、tracked/staged dirty、untracked dirtyをread-only観測し、親側FileChangeSetへ一件の `M` として投影する。 |
 | I02-DES-011 | I02-REQ-011 | `BaseCandidateObservation` がimplicit base候補のordinal/origin/reference/object/merge-base/dispositionを保持し、`ComparisonEndpoints` がselected候補と配列の整合性を検証する。 |
+| I02-DES-012 | I02-REQ-009, I02-REQ-010 | `IgnoreAuthorityProfile` と `UntrackedObservation` が `--exclude-standard` の ignore authority を閉世界で束縛し、repository内の通常ファイル `.gitignore` と検証済み Git dir の `info/exclude` だけをbounded digest化する。外部 `core.excludesFile`、`include.*`、非regular/symlink/上限超過、開始・終了driftはfail-closedとする。 |
 
 ## 2. 実装コンポーネント
 
@@ -142,6 +143,18 @@ profileがclosed-world条件を満たさない場合はraw bytesを読まず、�
 許可された場合も`core.filemode=false`で無視するのはregular fileの`100644`/`100755`差だけとし、
 file typeの変更やsymlinkのtarget変更はdirtyとする。profile digest、tracked raw-content digest、
 untracked path集合は公開しない内部state fingerprintへ含め、公開直前の変化は`CSV-SOURCE-001`へ変換する。
+
+`--exclude-standard` が参照する未追跡集合の authority も同じ run の内部証拠として閉じる。
+`IgnoreAuthorityProfile` は `git config --no-includes --name-only` で local/worktree の
+`core.excludesFile` と `include.*`/`includeIf.*` のキー存在を値を解決せず検査し、キーが一つでも存在する場合は
+初期 `CSV-DIFF-003` とする。固定環境で無効化した system/global source以外に許可するのは、検証済み
+repository working tree 内の通常ファイル `.gitignore`（全階層をboundedに走査）と、検証済み Git dir 直下の
+通常ファイル `info/exclude` だけである。各ファイルはsymlink・非regular・上限超過・読取中のstat変化を拒否し、
+内容と安全な署名をcanonical digestへまとめる。`UntrackedObservation` はこのprofile、deterministicな
+untracked path順序、観測digestを束ね、開始時と公開直前に同じ観測を繰り返す。許可されたignore fileの
+追加・削除・変更やprofile不一致は `CSV-SOURCE-001`、初期のunsupported authorityは `CSV-DIFF-003` とし、
+いずれも外部パス・設定値・ignore patternを公開しない。nested gitlinkではignore digestを
+`GitlinkComparisonProfile`へ含め、親側の一件 `M` 判定が未追跡集合の外部authorityに依存しないようにする。
 
 ### 4.2 implicit candidate provenance
 

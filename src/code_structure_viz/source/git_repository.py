@@ -35,7 +35,12 @@ _FIXED_ENV: Final[dict[str, str]] = {
 }
 _MAX_GITLINK_METADATA_BYTES: Final[int] = 64 * 1024
 _MAX_GITLINK_FILE_BYTES: Final[int] = 64 * 1024 * 1024
+_MAX_IGNORE_AUTHORITY_DIRECTORIES: Final[int] = 65536
+_MAX_IGNORE_AUTHORITY_FILES: Final[int] = 8192
 _GITLINK_PROFILE_SCHEMA: Final = "code-structure-viz.gitlink-comparison-profile/v1"
+_IGNORE_PROFILE_SCHEMA: Final = "code-structure-viz.ignore-authority-profile/v1"
+_UNTRACKED_OBSERVATION_SCHEMA: Final = "code-structure-viz.untracked-observation/v1"
+_IGNORE_CONFIG_PATTERN: Final = r"^(core\.excludesfile|include.*)$"
 _GITLINK_CONFIG_PATTERN: Final = (
     r"^(core\.(autocrlf|attributesfile|eol|filemode|symlinks)|"
     r"filter\..*|diff\..*|include.*)$"
@@ -295,6 +300,65 @@ class GitlinkWorktreeState:
 
 
 @dataclass(frozen=True, slots=True)
+class IgnoreAuthorityProfile:
+    """Closed-world evidence for the ignore sources used by Git enumeration."""
+
+    config_keys_digest: str
+    gitignore_digest: str | None
+    info_exclude_digest: str | None
+    allowed: bool = True
+
+    @property
+    def digest(self) -> str:
+        value = {
+            "schema": _IGNORE_PROFILE_SCHEMA,
+            "config_keys_digest": self.config_keys_digest,
+            "gitignore_digest": self.gitignore_digest,
+            "info_exclude_digest": self.info_exclude_digest,
+            "allowed": self.allowed,
+        }
+        return hashlib.sha256(encode_canonical_json(value)).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class UntrackedObservation:
+    """The deterministic untracked result bound to one ignore authority profile."""
+
+    paths: tuple[GitPathIdentity, ...]
+    authority: IgnoreAuthorityProfile
+
+    def __post_init__(self) -> None:
+        ordered = tuple(
+            sorted(
+                self.paths,
+                key=lambda item: (
+                    item.canonical_path.as_posix().encode("utf-8"),
+                    item.raw_text.encode("utf-8"),
+                ),
+            )
+        )
+        if ordered != self.paths:
+            object.__setattr__(self, "paths", ordered)
+
+    @property
+    def authority_digest(self) -> str:
+        return self.authority.digest
+
+    @property
+    def digest(self) -> str:
+        value = {
+            "schema": _UNTRACKED_OBSERVATION_SCHEMA,
+            "authority_digest": self.authority_digest,
+            "paths": [item.raw_text for item in self.paths],
+        }
+        return hashlib.sha256(encode_canonical_json(value)).hexdigest()
+
+    @property
+    def observation_digest(self) -> str:
+        return self.digest
+
+
+@dataclass(frozen=True, slots=True)
 class GitlinkComparisonProfile:
     """Closed-world evidence needed before raw nested worktree comparison."""
 
@@ -303,6 +367,7 @@ class GitlinkComparisonProfile:
     index_flags_digest: str
     raw_comparison_allowed: bool
     core_filemode: bool = True
+    ignore_digest: str = ""
 
     @property
     def digest(self) -> str:
@@ -313,6 +378,7 @@ class GitlinkComparisonProfile:
             "index_flags_digest": self.index_flags_digest,
             "raw_comparison_allowed": self.raw_comparison_allowed,
             "core_filemode": self.core_filemode,
+            "ignore_digest": self.ignore_digest,
         }
         return hashlib.sha256(encode_canonical_json(value)).hexdigest()
 
@@ -369,6 +435,8 @@ class GitRepositoryReader:
         self._runner = runner or SubprocessRunner(cancelled=self._cancelled)
         self._environment = _safe_environment()
         self._validated_identity: tuple[int, int] | None = None
+        self._pending_untracked_observation: UntrackedObservation | None = None
+        self._last_untracked_observation: UntrackedObservation | None = None
 
     def _git(self, *arguments: str) -> CommandResult:
         if self._cancelled():
@@ -453,6 +521,10 @@ class GitRepositoryReader:
             return False
         return (current.st_dev, current.st_ino) == identity
 
+    @property
+    def last_untracked_observation(self) -> UntrackedObservation | None:
+        return self._last_untracked_observation
+
     def resolve_head_state(self) -> HeadState:
         resolved = self._git("rev-parse", "--verify", "HEAD^{commit}")
         if resolved.returncode == 0:
@@ -488,8 +560,141 @@ class GitRepositoryReader:
             raise _fatal(DiagnosticCode.REPO_HEAD)
         return Unborn(branch_ref)
 
+    def _observe_untracked(
+        self,
+        *,
+        location: Path | None = None,
+        git_dir: Path | None = None,
+    ) -> UntrackedObservation:
+        nested = location is not None
+        observed_location = self.repository if location is None else location
+        observed_git_dir = git_dir
+        if observed_git_dir is None:
+            observed_git_dir = self._repository_git_dir()
+        authority_before = self._ignore_authority_profile(
+            observed_location,
+            observed_git_dir,
+        )
+        arguments = ("ls-files", "-z", "--others", "--exclude-standard", "--")
+        result = (
+            self._git(*arguments)
+            if not nested
+            else self._git_at(observed_location, *arguments, git_dir=observed_git_dir)
+        )
+        if result.returncode != 0 or result.stderr:
+            raise _path_protocol_fatal()
+        untracked = _decode_identity_list(result.stdout)
+        authority_after = self._ignore_authority_profile(
+            observed_location,
+            observed_git_dir,
+        )
+        if authority_before != authority_after:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return UntrackedObservation(untracked, authority_before)
+
+    def _ignore_authority_profile(
+        self,
+        location: Path,
+        git_dir: Path,
+    ) -> IgnoreAuthorityProfile:
+        config_records = self._ignore_config_records(location, git_dir)
+        if any(
+            key == "core.excludesfile" or key.startswith("include")
+            for _scope, key in config_records
+        ):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        try:
+            info = git_dir / "info"
+            if has_symlink_component(info):
+                raise OSError("Git info directory is unsafe")
+            try:
+                info_stat = info.lstat()
+            except FileNotFoundError:
+                info_stat = None
+            if info_stat is not None and (
+                stat.S_ISLNK(info_stat.st_mode) or not stat.S_ISDIR(info_stat.st_mode)
+            ):
+                raise OSError("Git info directory is unsafe")
+            gitignore_digest = _ignore_authority_gitignore_digest(location, git_dir)
+            info_exclude_digest = _ignore_authority_file_digest(info / "exclude")
+        except OSError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        return IgnoreAuthorityProfile(
+            config_keys_digest=_ignore_config_digest(config_records),
+            gitignore_digest=gitignore_digest,
+            info_exclude_digest=info_exclude_digest,
+        )
+
+    def _ignore_config_records(
+        self,
+        location: Path,
+        git_dir: Path,
+    ) -> tuple[tuple[str, str], ...]:
+        records: list[tuple[str, str]] = []
+        try:
+            worktree_config_present = _is_regular_file(git_dir / "config.worktree")
+        except OSError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        for scope in ("local", "worktree"):
+            arguments = (
+                "config",
+                "--null",
+                "--no-includes",
+                "--name-only",
+                f"--{scope}",
+                "--get-regexp",
+                _IGNORE_CONFIG_PATTERN,
+            )
+            result = (
+                self._git(*arguments)
+                if location == self.repository
+                else self._git_at(location, *arguments, git_dir=git_dir)
+            )
+            if result.returncode not in {0, 1} or result.stderr:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+            if result.returncode == 0 or result.stdout:
+                try:
+                    keys = _parse_git_config_name_only(result.stdout)
+                except ValueError as error:
+                    raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+                if scope == "local" or worktree_config_present:
+                    records.extend((scope, key) for key in keys)
+        return tuple(sorted(records))
+
+    def _repository_git_dir(self) -> Path:
+        metadata = self.repository / ".git"
+        try:
+            metadata_stat = metadata.lstat()
+        except OSError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        if stat.S_ISLNK(metadata_stat.st_mode):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        if stat.S_ISDIR(metadata_stat.st_mode):
+            git_dir = metadata
+        elif stat.S_ISREG(metadata_stat.st_mode):
+            pointer = self._read_gitlink_pointer(metadata)
+            pointer_path = Path(pointer)
+            git_dir = pointer_path if pointer_path.is_absolute() else metadata.parent / pointer_path
+        else:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        try:
+            resolved = git_dir.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        if has_symlink_component(git_dir) or has_symlink_component(resolved):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        if not resolved.is_dir():
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return resolved
+
     def enumerate_path_entries(self) -> tuple[EnumeratedPath, ...]:
-        result = self._git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+        observation = self._observe_untracked()
+        self._pending_untracked_observation = observation
+        self._last_untracked_observation = observation
+        # Reuse the already profiled untracked observation.  A second
+        # ``--others --exclude-standard`` query would reintroduce an ambient
+        # ignore authority between the profile and the inventory we freeze.
+        result = self._git("ls-files", "-z", "--cached", "--")
         if result.returncode != 0:
             raise _path_protocol_fatal()
         raw_entries = result.stdout.split(b"\0")
@@ -497,6 +702,11 @@ class GitRepositoryReader:
             raw_entries.pop()
         if any(not entry for entry in raw_entries):
             raise _path_protocol_fatal()
+        raw_entries.extend(
+            item.raw_text.encode("utf-8")
+            for item in observation.paths
+            if item.raw_text.encode("utf-8") not in raw_entries
+        )
 
         entries: list[EnumeratedPath] = []
         seen_raw: set[bytes] = set()
@@ -512,14 +722,17 @@ class GitRepositoryReader:
             normalized = unicodedata.normalize("NFC", decoded)
             if not _is_safe_relative_git_path(normalized):
                 raise _path_protocol_fatal()
-            entries.append(EnumeratedPath(decoded, PurePosixPath(normalized)))
+            identity = GitPathIdentity(decoded, PurePosixPath(normalized))
+            entries.append(EnumeratedPath(identity.raw_text, identity.canonical_path))
         return tuple(entries)
 
     def enumerate_untracked_entries(self) -> tuple[GitPathIdentity, ...]:
-        result = self._git("ls-files", "-z", "--others", "--exclude-standard", "--")
-        if result.returncode != 0:
-            raise _path_protocol_fatal()
-        return _decode_identity_list(result.stdout)
+        observation = self._pending_untracked_observation
+        if observation is None:
+            observation = self._observe_untracked()
+        self._pending_untracked_observation = None
+        self._last_untracked_observation = observation
+        return observation.paths
 
     def enumerate_untracked_paths(self) -> tuple[PurePosixPath, ...]:
         return tuple(item.canonical_path for item in self.enumerate_untracked_entries())
@@ -720,24 +933,18 @@ class GitRepositoryReader:
             head_tree = self._enumerate_gitlink_tree(nested, git_dir, current_head)
             nested_index = self._enumerate_gitlink_index(nested, git_dir)
             staged_dirty = self._gitlink_index_differs_from_head(head_tree, nested_index)
-            untracked = self._git_at(
-                nested,
-                "ls-files",
-                "-z",
-                "--others",
-                "--exclude-standard",
-                "--",
+            untracked_observation = self._observe_untracked(
+                location=nested,
                 git_dir=git_dir,
             )
-            if untracked.returncode != 0:
-                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
-            untracked_entries = _decode_identity_list(untracked.stdout)
+            untracked_entries = untracked_observation.paths
             profile = self._gitlink_comparison_profile(
                 nested,
                 git_dir,
                 head_tree,
                 nested_index,
                 untracked_entries,
+                ignore_profile=untracked_observation.authority,
             )
             tracked_dirty, tracked_worktree_digest = self._gitlink_worktree_differs(
                 nested,
@@ -778,7 +985,11 @@ class GitRepositoryReader:
         tree: tuple[_GitlinkTreeEntry, ...],
         index: tuple[GitIndexEntry, ...],
         untracked: tuple[GitPathIdentity, ...],
+        *,
+        ignore_profile: IgnoreAuthorityProfile | None = None,
     ) -> GitlinkComparisonProfile:
+        if ignore_profile is None:
+            ignore_profile = IgnoreAuthorityProfile("", None, None)
         config_records, config_allowed, core_filemode, core_symlinks = self._gitlink_config_profile(
             location,
             git_dir,
@@ -797,7 +1008,7 @@ class GitRepositoryReader:
         index_flags_digest = _gitlink_index_flags_digest(index)
         config_digest = _gitlink_config_digest(config_records)
         attributes_digest = _gitlink_attributes_digest(attributes_records, identities)
-        raw_comparison_allowed = config_allowed and attributes_allowed
+        raw_comparison_allowed = config_allowed and attributes_allowed and ignore_profile.allowed
         if any(item.stage != 0 for item in index):
             raw_comparison_allowed = False
         if any(item.skip_worktree or item.assume_unchanged for item in index):
@@ -820,6 +1031,7 @@ class GitRepositoryReader:
             index_flags_digest=index_flags_digest,
             raw_comparison_allowed=raw_comparison_allowed,
             core_filemode=bool(core_filemode),
+            ignore_digest=ignore_profile.digest,
         )
         if not profile.raw_comparison_allowed:
             raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
@@ -1449,6 +1661,30 @@ def _parse_git_config_records(payload: bytes) -> tuple[tuple[str, str], ...]:
     return tuple(values)
 
 
+def _parse_git_config_name_only(payload: bytes) -> tuple[str, ...]:
+    """Parse ``git config --null --name-only`` without accepting lossy keys."""
+    if len(payload) > _MAX_GITLINK_METADATA_BYTES:
+        raise ValueError("Git config key output exceeds the bounded profile limit")
+    if not payload:
+        return ()
+    if not payload.endswith(b"\0"):
+        raise ValueError("Git config key output is not NUL terminated")
+    values: list[str] = []
+    for raw_key in payload[:-1].split(b"\0"):
+        if not raw_key:
+            raise ValueError("Git config key is missing")
+        try:
+            key = raw_key.decode("ascii", errors="strict").lower()
+        except UnicodeDecodeError as error:
+            raise ValueError("Git config key is not ASCII") from error
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in key):
+            raise ValueError("Git config key contains a control character")
+        if key != "core.excludesfile" and not key.startswith("include"):
+            raise ValueError("Git config key is outside the ignore authority query")
+        values.append(key)
+    return tuple(values)
+
+
 def _parse_git_bool(value: str) -> bool | None:
     normalized = value.strip().lower()
     if normalized in {"true", "yes", "on", "1"}:
@@ -1526,6 +1762,106 @@ def _is_regular_file(path: Path) -> bool:
     return True
 
 
+def _ignore_authority_file_digest(path: Path) -> str | None:
+    """Read one allowed ignore file with a bounded, race-checked descriptor."""
+    if has_symlink_component(path):
+        raise OSError("ignore authority path is unsafe")
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise OSError("ignore authority path is not a regular file")
+    descriptor = os.open(path, _read_file_flags())
+    try:
+        opened = os.fstat(descriptor)
+        if _stat_signature(before) != _stat_signature(opened):
+            raise OSError("ignore authority path changed before read")
+        payload = _read_bounded_file(descriptor, _MAX_GITLINK_METADATA_BYTES)
+        after_open = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        after = path.lstat()
+    except OSError as error:
+        raise OSError("ignore authority path disappeared after read") from error
+    if _stat_signature(before) != _stat_signature(after) or _stat_signature(
+        opened
+    ) != _stat_signature(after_open):
+        raise OSError("ignore authority path changed during read")
+    value = {
+        "present": True,
+        "signature": _stat_signature(after),
+        "content_digest": hashlib.sha256(payload).hexdigest(),
+    }
+    return hashlib.sha256(encode_canonical_json(value)).hexdigest()
+
+
+def _ignore_authority_gitignore_digest(location: Path, git_dir: Path) -> str:
+    """Digest all working-tree ``.gitignore`` files within safe repository bounds."""
+    directories = [location]
+    records: list[tuple[str, str]] = []
+    visited_directories = 0
+    while directories:
+        directory = directories.pop()
+        visited_directories += 1
+        if visited_directories > _MAX_IGNORE_AUTHORITY_DIRECTORIES:
+            raise OSError("ignore authority walk exceeded its directory bound")
+        if directory != location and _is_relative_to(directory, git_dir):
+            continue
+        if directory != location and _directory_has_git_metadata(directory):
+            continue
+        try:
+            with os.scandir(directory) as scanner:
+                entries = sorted(
+                    scanner,
+                    key=lambda entry: os.fsencode(entry.name),
+                )
+        except (OSError, UnicodeEncodeError) as error:
+            raise OSError("ignore authority walk is unsafe") from error
+        for entry in entries:
+            try:
+                name = entry.name
+                name.encode("utf-8", errors="strict")
+                path = Path(entry.path)
+                if name == ".git":
+                    continue
+                if name == ".gitignore":
+                    digest = _ignore_authority_file_digest(path)
+                    if digest is None:
+                        raise OSError("ignore authority file disappeared")
+                    if len(records) >= _MAX_IGNORE_AUTHORITY_FILES:
+                        raise OSError("ignore authority walk exceeded its file bound")
+                    relative = path.relative_to(location).as_posix()
+                    records.append((relative, digest))
+                    continue
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    directories.append(path)
+            except (OSError, UnicodeEncodeError) as error:
+                raise OSError("ignore authority walk is unsafe") from error
+    ordered = sorted(records, key=lambda item: item[0].encode("utf-8"))
+    return hashlib.sha256(
+        encode_canonical_json(
+            {
+                "schema": "code-structure-viz.gitignore-observation/v1",
+                "files": [{"path": relative, "digest": digest} for relative, digest in ordered],
+            }
+        )
+    ).hexdigest()
+
+
+def _directory_has_git_metadata(directory: Path) -> bool:
+    try:
+        (directory / ".git").lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise OSError("nested Git metadata cannot be inspected") from error
+    return True
+
+
 def _validate_gitlink_attributes_files(
     location: Path,
     identities: Iterable[GitPathIdentity],
@@ -1577,6 +1913,17 @@ def _gitlink_config_digest(records: Iterable[tuple[str, str, str]]) -> str:
                     {"scope": scope, "key": key, "value": value}
                     for scope, key, value in sorted(records)
                 ],
+            }
+        )
+    ).hexdigest()
+
+
+def _ignore_config_digest(records: Iterable[tuple[str, str]]) -> str:
+    return hashlib.sha256(
+        encode_canonical_json(
+            {
+                "schema": "code-structure-viz.ignore-config-observation/v1",
+                "records": [{"scope": scope, "key": key} for scope, key in sorted(records)],
             }
         )
     ).hexdigest()

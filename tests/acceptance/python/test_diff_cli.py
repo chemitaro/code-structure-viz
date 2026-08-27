@@ -752,6 +752,182 @@ def test_untracked_paths_are_counted_before_python_analysis(tmp_path: Path) -> N
     assert not output.exists()
 
 
+def test_top_level_external_excludes_file_is_fatal_without_leaking_its_value(
+    tmp_path: Path,
+) -> None:
+    repository, before, _after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: int\n# after\n",
+    )
+    external_ignore = tmp_path / "external-ignore"
+    external_ignore.write_text("*.secret-ignore-value\n", encoding="utf-8")
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(repository),
+            "config",
+            "core.excludesFile",
+            str(external_ignore),
+        ),
+        check=True,
+        capture_output=True,
+    )
+    hidden = repository / "hidden.secret-ignore-value"
+    hidden.write_text("not ignored by the observer\n", encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(
+        repository,
+        output,
+        "--from",
+        before,
+        "--max-changed-paths",
+        "1",
+    )
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert str(external_ignore).encode() not in result.stderr
+    assert b"secret-ignore-value" not in result.stderr
+    assert not output.exists()
+
+
+def test_nested_external_excludes_file_is_fatal_even_when_gitlink_is_clean(
+    tmp_path: Path,
+) -> None:
+    repository, parent_head, nested, _nested_head = create_clean_gitlink_repository(tmp_path)
+    external_ignore = tmp_path / "nested-external-ignore"
+    external_ignore.write_text("nested-secret-ignore-value\n", encoding="utf-8")
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(nested),
+            "config",
+            "core.excludesFile",
+            str(external_ignore),
+        ),
+        check=True,
+        capture_output=True,
+    )
+    (nested / "nested-secret-ignore-value").write_text("hidden\n", encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert str(external_ignore).encode() not in result.stderr
+    assert b"nested-secret-ignore-value" not in result.stderr
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("config_key", ("include.path", "includeIf.gitdir:external.path"))
+def test_local_include_authority_is_fatal_without_resolving_include_value(
+    tmp_path: Path,
+    config_key: str,
+) -> None:
+    repository, before, _after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: int\n# after\n",
+    )
+    include_value = tmp_path / "include-secret-value"
+    include_value.write_text("[core]\nexcludesFile = hidden\n", encoding="utf-8")
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(repository),
+            "config",
+            config_key,
+            str(include_value),
+        ),
+        check=True,
+        capture_output=True,
+    )
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", before)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert str(include_value).encode() not in result.stderr
+    assert b"include-secret-value" not in result.stderr
+    assert not output.exists()
+
+
+def test_regular_gitignore_and_info_exclude_remain_the_only_allowed_ignore_sources(
+    tmp_path: Path,
+) -> None:
+    repository, _before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files={
+            ".gitignore": "top-level-ignored\n",
+            "docs/.gitignore": "nested-level-ignored\n",
+            "src/app.py": "class Order:\n    amount: int\n",
+        },
+        after_files={
+            ".gitignore": "top-level-ignored\n",
+            "docs/.gitignore": "nested-level-ignored\n",
+            "src/app.py": "class Order:\n    amount: int\n# after\n",
+        },
+    )
+    (repository / "top-level-ignored").write_text("ignored\n", encoding="utf-8")
+    (repository / "docs" / "nested-level-ignored").write_text("ignored\n", encoding="utf-8")
+    info_exclude = repository / ".git" / "info" / "exclude"
+    with info_exclude.open("a", encoding="utf-8") as stream:
+        stream.write("info-excluded\n")
+    (repository / "info-excluded").write_text("ignored\n", encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert file_changes["files"] == []
+
+
+def test_allowed_ignore_file_mutation_between_observations_is_source_fatal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, _before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files={
+            ".gitignore": "",
+            "src/app.py": "class Order:\n    amount: int\n",
+        },
+        after_files={
+            ".gitignore": "",
+            "src/app.py": "class Order:\n    amount: int\n# after\n",
+        },
+    )
+    counter = tmp_path / "untracked-observation-count"
+    ignored = repository / ".gitignore"
+    proxy = _git_proxy(
+        tmp_path,
+        "if sys.argv[-5:] == "
+        "['ls-files', '-z', '--others', '--exclude-standard', '--']:\n"
+        f"    counter = pathlib.Path({str(counter)!r})\n"
+        "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "    counter.write_text(str(count))\n"
+        "    if count == 2:\n"
+        f"        with pathlib.Path({str(ignored)!r}).open('a', encoding='utf-8') as stream:\n"
+        "            stream.write('late-ignore-pattern\\n')",
+    )
+    monkeypatch.setenv("PATH", f"{proxy}{os.pathsep}{os.environ['PATH']}")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", after)
+
+    assert result.returncode == 1
+    assert b"CSV-SOURCE-001" in result.stderr
+    assert not output.exists()
+
+
 def test_tracked_to_untracked_uses_canonical_records_for_budget_and_manifest(
     tmp_path: Path,
 ) -> None:
@@ -1318,8 +1494,8 @@ def test_working_tree_drift_aborts_staged_diff_before_publication(
     source = repository / "src" / "app.py"
     proxy = _git_proxy(
         tmp_path,
-        "if sys.argv[-5:] == "
-        "['ls-files', '-z', '--cached', '--others', '--exclude-standard']:\n"
+        "if sys.argv[-4:] == "
+        "['ls-files', '-z', '--cached', '--']:\n"
         f"    counter = pathlib.Path({str(counter)!r})\n"
         "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
         "    counter.write_text(str(count))\n"

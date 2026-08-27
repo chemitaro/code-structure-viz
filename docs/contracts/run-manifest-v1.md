@@ -103,3 +103,14 @@ skip-worktree/assume-unchanged、未対応mode、symlink semanticsを含むprofi
 `CSV-DIFF-003`とする。許可されたprofileでも`core.filemode=false`が無視できるのはregular `100644`/`100755`
 差だけであり、type/symlink差はdirtyである。profile digestとtracked raw-content digestは内部fingerprintだけに
 使い、公開直前のprofile/state不一致は`CSV-SOURCE-001`としてmanifestを公開しない。
+
+`--exclude-standard` による untracked 集合も、ambient な ignore authority のまま扱わない。
+内部 `IgnoreAuthorityProfile` は `git config --no-includes --name-only` で local/worktree の
+`core.excludesFile`、`include.*`、`includeIf.*` のキー存在を検査し、値を解決せず、存在時は初期
+`CSV-DIFF-003`とする。system/global sourceは固定環境で無効にし、許可するのは検証済み repository
+working tree 内の regular `.gitignore`（全階層をboundedに走査）と検証済み Git dir 直下の regular
+`info/exclude` だけである。各ファイルの安全な署名と内容digestを `UntrackedObservation` に束ね、
+開始・公開直前の authority/path observation を比較する。許可されたignore fileの変更、追加、削除、
+symlink/non-regular/上限超過、観測中のprofile変化は `CSV-SOURCE-001`（初期は`CSV-DIFF-003`）として
+manifestを公開しない。外部パス、設定値、ignore patternは出力せず、nested gitlinkではこのignore digestを
+`GitlinkComparisonProfile`へ含める。public manifest shape/versionは変更しない。

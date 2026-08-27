@@ -67,6 +67,15 @@ baseline fixture、autocrlf/eol/filter/index flag/core.filemodeのproduction回�
 local/upstream/GitHub SHAの一致とFinal Quality Gateの判定は、Reportとは独立した同一SHAの外部検証receiptで
 のみ確定する。
 
+続く継続レビューでは P1-040（local/worktree `core.excludesFile` 等が `--exclude-standard` の untracked
+集合を隠す）と P1-041（その clean production CLI 回帰不足）が確定した。Red/Blue分析では、tracked raw比較を
+閉じても untracked authority が ambient のまま残る共通根因として整理した。`IgnoreAuthorityProfile` と
+`UntrackedObservation` を追加し、`core.excludesFile`/`include.*`/`includeIf.*` のキー存在を値を解決せず
+初期 `CSV-DIFF-003` へ倒し、repository内のregular `.gitignore` と検証済み Git dir の `info/exclude` だけを
+bounded digest化した。開始・公開直前のauthority/path observation driftは `CSV-SOURCE-001` とし、nested
+gitlink profileにもignore digestを束ねた。clean top-level/nested fixture、include、allowed ignore、ignore file
+driftをproduction CLIとunit/securityで回帰し、外部パス・設定値・patternを出力しないことを確認した。
+
 ## Remediation evidence
 
 前回の Final Quality Gate review（campaign `iss-00005-implementation-final-quality-r1`）で検出された
@@ -101,6 +110,13 @@ P1 は次のように修正した。
   attributes、skip-worktree/assume-unchanged、未対応mode、symlink semanticsを含むprofileは比較を許可せず、
   初期`CSV-DIFF-003`で停止する。許可profileでは`core.filemode=false`のregular exec-bit差だけを無視し、
   profile digestとtracked raw-content digestを内部stateへ含めた。
+- `--exclude-standard` の untracked authority を内部 `IgnoreAuthorityProfile` へ閉じ、local/worktree
+  `core.excludesFile`、`include.*`、`includeIf.*` の存在を値を読まずに拒否した。repository working tree 全階層の
+  regular `.gitignore` と検証済み Git dir の regular `info/exclude` を descriptor-based に bounded digest化し、
+  `UntrackedObservation` の deterministic path集合と開始/最終digestを比較した。初期unsupported authorityは
+  `CSV-DIFF-003`、許可fileの変更や再観測不一致は `CSV-SOURCE-001` とし、nested gitlink profileへignore digestを
+  含めた。production CLIで外部ignoreによるtop-level budget過小count、nested clean縮退、include、allowed ignore、
+  driftを回帰した（P1-040/041）。
 - gitlink acceptanceは親OIDとnested HEAD/tree/indexが一致するclean baselineを別fixtureで作り、親側が既に
   dirtyなためにobserver誤判定を隠さないようにした。tracked/untracked dirty、autocrlf true/input、
   `.gitattributes` eol、skip-worktree/assume-unchanged、core.filemode=false、profile driftをproduction CLIで
@@ -158,10 +174,10 @@ composability）は review-response に記録し、今回の acceptance gate で
 
 今回のP1修正を含む作業木での独立再検証receiptは次のとおりである。
 
-- Gitlink source unit: **97 passed**
-- Python diff acceptance: **56 passed**
-- read-only security: **1 passed**
-- full suite: **546 passed, 1 skipped**
+- Gitlink source unit: **115 passed**
+- Python diff acceptance: **62 passed**
+- read-only security/static boundary: **4 passed**
+- full suite: **570 passed, 1 skipped**
 - `uv run ruff format --check .`: **成功**
 - `uv run ruff check .`: **成功**
 - `uv run mypy src tests`: **成功**
