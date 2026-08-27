@@ -114,6 +114,35 @@ def test_commit_source_view_rejects_non_blob_python_candidate() -> None:
     assert view.failures[0].diagnostic_code.value == "CSV-PY-001"
 
 
+def test_commit_source_view_preserves_raw_git_path_spelling_in_inventory() -> None:
+    raw_path = "src/cafe\u0301.py"
+    canonical_path = PurePosixPath("src/café.py")
+
+    class Reader:
+        def enumerate_commit_tree(self, _commit: str) -> tuple[CommitTreeEntry, ...]:
+            return (
+                CommitTreeEntry(
+                    canonical_path,
+                    "a" * 40,
+                    "100644",
+                    "blob",
+                    raw_path,
+                ),
+            )
+
+        def read_blob_object(self, _object_id: str) -> bytes:
+            return b"class Value:\n    pass\n"
+
+    view = build_commit_source_view(
+        cast(GitRepositoryReader, Reader()),
+        Commit("b" * 40),
+        PythonConfig(("src",), ("**/*.py",), ()),
+    )
+
+    assert view.inventory[0].path == canonical_path
+    assert view.inventory[0].raw_path == raw_path
+
+
 def test_descriptor_anchored_source_read_survives_repository_path_swap(tmp_path: Path) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()
@@ -260,17 +289,19 @@ def test_single_physical_spelling_is_read_without_replacing_it_with_logical_iden
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "physical.py").write_bytes(b"class Physical:\n    pass\n")
+    raw_path = "cafe\u0301.py"
+    canonical_path = PurePosixPath("café.py")
+    (repo / raw_path).write_bytes(b"class Physical:\n    pass\n")
 
     view = SourceViewBuilder(repo, tmp_path / "stage").build(
         Commit("3" * 40),
-        (EnumeratedPath("physical.py", PurePosixPath("logical.py")),),
+        (EnumeratedPath(raw_path, canonical_path),),
         PythonConfig((".",), ("**/*.py",), ()),
     )
 
-    assert tuple(item.path for item in view.files) == (PurePosixPath("logical.py"),)
+    assert tuple(item.path for item in view.files) == (canonical_path,)
     assert view.files[0].content == b"class Physical:\n    pass\n"
-    assert (tmp_path / "stage/source/logical.py").read_bytes() == view.files[0].content
+    assert (tmp_path / "stage/source" / canonical_path).read_bytes() == view.files[0].content
 
 
 def test_parent_symlink_component_is_rejected_without_reading_outside_repository(

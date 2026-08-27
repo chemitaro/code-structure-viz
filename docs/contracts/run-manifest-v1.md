@@ -88,3 +88,10 @@ skip-worktree、gitlink nested stateを保持する。これらの内部証拠�
 mode `160000` のgitlinkはnested HEAD・tracked/staged dirty・untracked dirtyを親側の一件の `M` に
 集約し、nested stateの読取不能または公開直前の変化はrun fatalとする。異なるraw spellingが同一NFC
 canonical pathへ収束する場合は `CSV-DIFF-003` のrun fatalとしてどちらかをwinnerにしない。
+
+gitlink の nested state は initialized、解決済み HEAD、検証済み binding をすべて持つ観測だけを有効とする。
+欠落した worktree、未初期化または外部へ逃げる `.git` pointer、unsafe な component、未読 HEAD は clean や
+uninitialized の値へ縮退させず、開始時は `CSV-DIFF-003`、公開直前は `CSV-SOURCE-001` として公開を停止する。
+nested 観測は固定環境で明示した git directory/work treeへ束縛し、`rev-parse`、`ls-tree`、`ls-files` と raw
+worktree bytes の read-only 検証だけを行う。`git diff`、`git status`、external diff、textconv、clean/process
+filter、hook、任意 helper は実行しない。nested bytes、stderr、binding identity は manifestへ出力しない。

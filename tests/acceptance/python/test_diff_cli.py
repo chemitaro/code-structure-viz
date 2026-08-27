@@ -12,6 +12,7 @@ import pytest
 from tests.helpers.diff import (
     create_gitlink_repository,
     create_raw_path_collision_repository,
+    create_raw_path_transition_repository,
     create_two_commit_repository,
     create_two_commit_repository_from_files,
     run_diff_cli,
@@ -442,6 +443,150 @@ def test_gitlink_state_drift_before_publication_is_fatal(
     assert b"CSV-SOURCE-001" in result.stderr
     assert not output.exists()
     assert list(tmp_path.glob(".code-structure-viz-staging-*")) == []
+
+
+def test_gitlink_state_unreadable_during_final_observation_is_source_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, parent_head, nested, _nested_head = create_gitlink_repository(tmp_path)
+    counter = tmp_path / "gitlink-head-count"
+    removed = nested.with_name("component-removed")
+    proxy = _git_proxy(
+        tmp_path,
+        "if sys.argv[1:3] == ['-C', "
+        f"{str(nested)!r}] and sys.argv[-3:] == ['rev-parse', '--verify', 'HEAD^{{commit}}']:\n"
+        f"    counter = pathlib.Path({str(counter)!r})\n"
+        "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "    counter.write_text(str(count))\n"
+        "    if count == 2:\n"
+        f"        pathlib.Path({str(nested)!r}).rename({str(removed)!r})",
+    )
+    monkeypatch.setenv("PATH", f"{proxy}{os.pathsep}{os.environ['PATH']}")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 1
+    assert b"CSV-SOURCE-001" in result.stderr
+    assert not output.exists()
+    assert list(tmp_path.glob(".code-structure-viz-staging-*")) == []
+
+
+@pytest.mark.parametrize("layout", ("missing", "uninitialized", "external-pointer"))
+def test_invalid_gitlink_materialization_is_run_fatal_without_publication(
+    tmp_path: Path,
+    layout: str,
+) -> None:
+    repository, parent_head, nested, _nested_head = create_gitlink_repository(tmp_path)
+    if layout == "missing":
+        shutil.rmtree(nested)
+    elif layout == "uninitialized":
+        shutil.rmtree(nested / ".git")
+    else:
+        shutil.rmtree(nested / ".git")
+        (nested / ".git").write_text(
+            "gitdir: /tmp/code-structure-viz-external-gitdir\n", encoding="utf-8"
+        )
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert not output.exists()
+    assert b"/tmp/code-structure-viz-external-gitdir" not in result.stderr
+
+
+def test_nested_gitlink_observer_never_runs_textconv_or_clean_process_filter(
+    tmp_path: Path,
+) -> None:
+    repository, parent_head, nested, _nested_head = create_gitlink_repository(tmp_path)
+    sentinel = tmp_path / "nested-helper-ran"
+    helper = tmp_path / "helper.py"
+    helper.write_text(
+        f"from pathlib import Path\nPath({str(sentinel)!r}).write_text('ran', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(nested),
+            "config",
+            "diff.sentinel.textconv",
+            f"{os.environ.get('PYTHON', 'python3')} {helper}",
+        ),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(nested),
+            "config",
+            "filter.sentinel.clean",
+            f"{os.environ.get('PYTHON', 'python3')} {helper}",
+        ),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(nested),
+            "config",
+            "filter.sentinel.process",
+            f"{os.environ.get('PYTHON', 'python3')} {helper}",
+        ),
+        check=True,
+        capture_output=True,
+    )
+    (nested / ".gitattributes").write_text(
+        "README diff=sentinel filter=sentinel\n", encoding="utf-8"
+    )
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert not sentinel.exists()
+
+
+def test_materialized_gitlink_gitfile_pointer_within_superproject_git_is_supported(
+    tmp_path: Path,
+) -> None:
+    repository, parent_head, nested, _nested_head = create_gitlink_repository(tmp_path)
+    nested_git_dir = repository / ".git" / "modules" / "src" / "component"
+    nested_git_dir.parent.mkdir(parents=True)
+    shutil.move(str(nested / ".git"), str(nested_git_dir))
+    (nested / ".git").write_text("gitdir: ../../.git/modules/src/component\n", encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("M", "src/component", "src/component")]
+
+
+def test_working_tree_raw_path_transition_is_run_fatal_without_publication(
+    tmp_path: Path,
+) -> None:
+    repository, before = create_raw_path_transition_repository(tmp_path)
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", before)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert not output.exists()
+    assert b"cafe" not in result.stderr
 
 
 def test_non_python_nfc_nfd_collision_is_run_fatal_without_publication(tmp_path: Path) -> None:

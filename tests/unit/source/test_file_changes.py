@@ -89,6 +89,37 @@ def test_working_tree_change_set_rejects_duplicate_canonical_inventory_paths() -
         )
 
 
+def test_working_tree_change_set_rejects_cross_side_raw_spelling_transition() -> None:
+    canonical = "src/café.py"
+
+    with pytest.raises(DuplicateCanonicalPathError):
+        build_working_tree_file_change_set(
+            (_inventory(canonical, "a"),),
+            (
+                SourceInventoryEntry(
+                    PurePosixPath(canonical),
+                    "src/cafe\u0301.py",
+                    "regular",
+                    1,
+                    "a",
+                ),
+            ),
+        )
+
+
+def test_working_tree_change_set_accepts_same_raw_spelling_across_sides() -> None:
+    canonical = PurePosixPath("src/café.py")
+    raw = "src/cafe\u0301.py"
+    before = (SourceInventoryEntry(canonical, raw, "regular", 1, "a"),)
+    after = (SourceInventoryEntry(canonical, raw, "regular", 1, "b"),)
+
+    result = build_working_tree_file_change_set(before, after)
+
+    assert [(item.status, item.old_path, item.new_path) for item in result] == [
+        ("M", canonical, canonical)
+    ]
+
+
 def test_content_evidence_rejects_duplicate_canonical_inventory_paths() -> None:
     canonical = PurePosixPath("src/café.py")
     duplicate = SourceInventoryEntry(

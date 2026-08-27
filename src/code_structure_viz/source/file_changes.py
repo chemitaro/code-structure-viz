@@ -11,6 +11,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
+from code_structure_viz.source.git_repository import GitPathIdentity
 
 _HUNK = re.compile(
     rb"^@@ -(?P<old_start>[0-9]+)(?:,(?P<old_count>[0-9]+))? "
@@ -317,8 +318,11 @@ def build_working_tree_file_change_set(
     after: str | None = None,
 ) -> FileChangeSet:
     """Build a working-tree change inventory without invoking Git's conversion filters."""
-    before_map = _inventory_map(before_inventory)
-    after_map = _inventory_map(after_inventory)
+    before_items = tuple(before_inventory)
+    after_items = tuple(after_inventory)
+    validate_cross_side_path_identities(before_items, after_items)
+    before_map = _inventory_map(before_items)
+    after_map = _inventory_map(after_items)
     changes: list[FileChange] = []
     deleted: dict[PurePosixPath, Any] = {}
     added: dict[PurePosixPath, Any] = {}
@@ -430,6 +434,30 @@ def build_working_tree_file_change_set(
             tracking_state = getattr(added[path], "tracking_state", "tracked")
             changes.append(FileChange("?" if tracking_state == "untracked" else "A", None, path))
     return FileChangeSet(tuple(sorted(changes, key=_change_sort_key)), before=before, after=after)
+
+
+def validate_cross_side_path_identities(
+    before_inventory: Iterable[Any],
+    after_inventory: Iterable[Any],
+) -> None:
+    """Reject a raw Git spelling transition that collapses to one NFC path."""
+    canonical_to_raw: dict[PurePosixPath, str] = {}
+    for item in (*tuple(before_inventory), *tuple(after_inventory)):
+        path = getattr(item, "path", None)
+        raw_path = getattr(item, "raw_path", None)
+        if not isinstance(path, PurePosixPath) or not isinstance(raw_path, str):
+            raise DuplicateCanonicalPathError("inventory path identity is invalid")
+        try:
+            identity = GitPathIdentity(raw_path, path)
+        except ValueError as error:
+            raise DuplicateCanonicalPathError("inventory path identity is invalid") from error
+        previous = canonical_to_raw.get(identity.canonical_path)
+        if previous is None:
+            canonical_to_raw[identity.canonical_path] = identity.raw_text
+        elif previous != identity.raw_text:
+            raise DuplicateCanonicalPathError(
+                "inventory raw spellings collide after NFC canonicalization"
+            )
 
 
 def _cross_path_identity(value: Any) -> tuple[str, str] | None:
@@ -672,4 +700,5 @@ __all__ = [
     "parse_name_status",
     "parse_unified_hunks",
     "unavailable_content_paths",
+    "validate_cross_side_path_identities",
 ]

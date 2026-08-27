@@ -58,6 +58,7 @@ from code_structure_viz.source.file_changes import (
     content_evidence_from_inventory,
     parse_name_status,
     unavailable_content_paths,
+    validate_cross_side_path_identities,
 )
 from code_structure_viz.source.freezer import WorkingTreeFreezer, build_commit_source_view
 from code_structure_viz.source.git_repository import (
@@ -164,6 +165,7 @@ class DiffApplication:
             before_source = build_commit_source_view(reader, Commit(before_id), config.python)
             if endpoints.after.kind is EndpointKind.WORKING_TREE:
                 assert working_freezer is not None
+                validate_cross_side_path_identities(before_source.inventory, after_source.inventory)
                 file_changes = build_working_tree_file_change_set(
                     before_source.inventory,
                     after_source.inventory,
@@ -178,6 +180,7 @@ class DiffApplication:
                     endpoints.after.commit,
                     config.python,
                 )
+                validate_cross_side_path_identities(before_source.inventory, after_source.inventory)
                 try:
                     changed_paths = parse_name_status(reader.diff_name_status(before_id, after_id))
                 except ValueError as error:
@@ -318,7 +321,12 @@ class DiffApplication:
                 current_index_entries = reader.enumerate_index_entries()
                 current_untracked = reader.enumerate_untracked_entries()
                 current_unmerged = reader.enumerate_unmerged_entries()
-                current_gitlink_states = reader.enumerate_gitlink_states(current_index_entries)
+                try:
+                    current_gitlink_states = reader.enumerate_gitlink_states(current_index_entries)
+                except GitInterruptedError:
+                    raise
+                except GitReadError as error:
+                    raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
                 if (
                     current_index_entries != index_entries
                     or current_untracked != untracked_entries

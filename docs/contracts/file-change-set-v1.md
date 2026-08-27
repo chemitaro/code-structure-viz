@@ -23,3 +23,8 @@ working-tree patch を取得しない。互換用 `parse_unified_hunks` helper �
 
 `before`/`after` は comparison endpoint の commit digest（working-tree 側は null）であり、path や
 source content の公開を意味しない。
+
+Git reader が保持する raw UTF-8 path spelling と NFC canonical path は内部 identity として一緒に検証する。
+同一 source または cross-side で異なる raw spelling が同じ canonical pathへ収束する場合、mapやbudgetの
+前に `CSV-DIFF-003` の run fatal とし、どちらか一方を採用した FileChangeSetを公開しない。同一 raw spelling
+の再観測は許可するが、raw spelling自体はこの public schemaへ追加しない。

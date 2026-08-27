@@ -46,6 +46,9 @@ production acceptance trace に P1 gap が見つかった。以下の remediatio
 | I02-PLAN-014 | mode `160000` gitlink の nested HEAD/tracked/staged/untracked state、親側一件 `M`、公開直前 drift | `source/git_repository.py`, `source/source_view.py`, `source/file_changes.py`, `application/diff.py`, `tests/acceptance/python/test_diff_cli.py` | 完了 |
 | I02-PLAN-015 | implicit base候補の評価順・origin・resolved object・merge-base・dispositionをmanifestへ記録 | `source/endpoints.py`, `schemas/run-manifest-v1.schema.json`, `tests/acceptance/python/test_diff_cli.py`, `tests/contracts/test_json_schemas.py` | 完了 |
 | I02-PLAN-016 | Strictレビューの履歴SHAと現行検証を混同しないReport/証跡運用へ同期 | `report.md`, `docs/contracts/run-manifest-v1.md`, Strict review workbench | 完了 |
+| I02-PLAN-017 | cross-side raw Git path identityをcanonical map/budget前に検証し、NFC/NFD transitionをfail-closed | `source/git_repository.py`, `source/freezer.py`, `source/source_view.py`, `source/file_changes.py`, `application/diff.py`, `tests/unit/source/test_file_changes.py`, `tests/acceptance/python/test_diff_cli.py` | 完了 |
+| I02-PLAN-018 | gitlinkをcomplete-only・validated binding・helper-free read-only observerへ再構成し、初期/最終診断を分離 | `source/git_repository.py`, `source/source_view.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py`, `tests/acceptance/python/test_diff_cli.py` | 完了 |
+| I02-PLAN-019 | P1境界（raw transition、missing/uninitialized/external gitlink、nested helper sentinel、final unreadable）をproduction CLIで回帰 | `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_git_repository.py`, `tests/unit/source/test_file_changes.py`, `tests/unit/source/test_source_view.py` | 完了 |
 
 ## 3. 実装詳細
 
@@ -134,6 +137,20 @@ unavailable `stdout-result/v1`、selector 無指定の `run-summary/v1` を stde
 - I02-PLAN-016 では、過去のStrictレビューで検証したSHAを「現行SHA」と記載せず、Reportを履歴receiptとして
   明示する。現行のlocal/upstream/GitHub SHA、テスト結果、Strict pass判定は同一SHAを束ねた外部検証証跡で
   確認し、Report内の古い数値を現行証拠として再利用しない。
+- I02-PLAN-017 では、commit tree と working-tree/index の raw UTF-8 spelling を `GitPathIdentity` のまま
+  保持し、両側を一つの canonical-to-raw検証へ通してから map、status分類、changed-path budgetを行うように
+  した。同一 raw spelling の再観測は許可し、異なる raw spelling が同じ NFC pathへ収束する場合は
+  `CSV-DIFF-003`・exit 1・公開なしとした。`SourceInventoryEntry` は内部 raw pathを保持するが public schemaは
+  据え置いた。
+- I02-PLAN-018 では、`GitlinkWorktreeState` を initialized/current_head/binding identity必須のcomplete-only
+  value objectへ変更した。nested `.git` directoryまたは bounded gitdir pointerを安全な rootへ解決し、
+  `rev-parse`、`ls-tree`、`ls-files` と descriptor-based raw file hashだけで HEAD/index/worktree/untrackedを
+  観測する。nested `diff`/`status` と textconv、external diff、clean/process filter、helperは呼ばない。
+  初期の読取不能は `CSV-DIFF-003`、公開直前の読取不能は `CSV-SOURCE-001` として stagingを公開しない。
+- I02-PLAN-019 では、missing/uninitialized/external-pointer gitlink、final observation unreadable、
+  nested textconv/clean/process helper sentinel、cross-side NFC/NFD transitionを実際の `diff` CLI 経路で
+  検証し、全て no-publication または安全な親側一件 `M` を確認した。unit では identity invariant、complete-only
+  state、同一 raw spelling許可も固定した。
 
 ## 4. 受入れテストとコマンド
 
@@ -172,6 +189,9 @@ git diff --check
 | I02-REQ-009 | I02-DES-009 | I02-PLAN-013 | `test_diff_cli.py`, `test_git_repository.py`, `test_source_view.py`, `test_file_changes.py` |
 | I02-REQ-010 | I02-DES-010 | I02-PLAN-014 | `test_diff_cli.py`, `test_git_repository.py`, `test_file_changes.py` |
 | I02-REQ-011 | I02-DES-011 | I02-PLAN-015 | `test_diff_cli.py`, `test_json_schemas.py` |
+
+P1 remediation は I02-REQ-009 → I02-DES-009 → I02-PLAN-017、I02-REQ-010 → I02-DES-010 →
+I02-PLAN-018/019 の経路で trace し、public schema versionは変更しない。
 
 Downstream Issue は `docs/contracts/source-view-v1.md`、`docs/contracts/file-change-set-v1.md`、
 `docs/contracts/python-semantic-v1.md`、`docs/contracts/run-manifest-v1.md`、`docs/contracts/stdout-v1.md`

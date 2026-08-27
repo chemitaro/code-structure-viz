@@ -82,6 +82,7 @@ class SourceInventoryEntry:
     untracked_content_dirty: bool = False
 
     def __post_init__(self) -> None:
+        GitPathIdentity(self.raw_path, self.path)
         if self.index_object_id is None and self.object_id is not None:
             object.__setattr__(self, "index_object_id", self.object_id)
 

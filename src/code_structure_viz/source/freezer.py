@@ -134,7 +134,7 @@ def build_commit_source_view(
             inventory.append(
                 SourceInventoryEntry(
                     item.path,
-                    item.path.as_posix(),
+                    item.raw_text or item.path.as_posix(),
                     "symlink" if item.mode == "120000" else "regular",
                     len(content),
                     hashlib.sha256(content).hexdigest(),
@@ -150,7 +150,7 @@ def build_commit_source_view(
             inventory.append(
                 SourceInventoryEntry(
                     item.path,
-                    item.path.as_posix(),
+                    item.raw_text or item.path.as_posix(),
                     "gitlink" if item.mode == "160000" else item.kind,
                     None,
                     item.object_id,

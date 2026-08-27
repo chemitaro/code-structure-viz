@@ -107,16 +107,29 @@ GitのNUL-delimited path bytesは各sourceで `GitPathIdentity(raw_text, canonic
 内部 sort/mapの前に両方を保持する。複数sourceまたは同一sourceで異なるraw spellingが同じcanonical pathへ
 収束した場合、canonical keyの上書きやwinner選択をせず `CSV-DIFF-003` でrun fatalにする。
 
+working-tree と commit の cross-side 比較では、両側の inventory を canonical map または changed-path
+budget に渡す前に一つの identity 集合として検証する。同じ raw spelling の再観測は許可するが、片側だけの
+NFD/NFC 変更を含む異なる raw spelling は `GitPathIdentityCollisionFatal` に変換し、`DiffApplication` が
+`CSV-DIFF-003`・exit 1・Artifact なしで停止する。raw spelling は内部照合だけに使い、public SourceView、
+manifest、diagnostic、file-change payloadへ新しい raw field を追加しない。
+
 index stage 0のmode/objectは `git ls-files --stage -z --cached`、skip-worktree flagは
 `git ls-files -t -z --cached`からraw identityごとに照合する。skip-worktree pathが作業木に欠落した場合の
 inventoryは `materialization_state: "sparse-unavailable"`、`availability: "unavailable"` とし、通常の削除
 `D`やGit blobの再構築へ変換しない。skip flagのない欠落tracked pathだけを `absent`/`D` とする。
 
-mode `160000` はsuperprojectのgitlinkとしてsource fileへ展開しない。`GitlinkWorktreeState` は安全な
-nested repositoryに対してHEAD、working/staged tracked diff、untracked pathの有無だけをread-onlyで観測する。
-HEADがindex objectと異なる、tracked/staged dirty、またはuntracked dirtyなら、親側の同じpathを一件の `M`
-としてFileChangeSetへ渡す。nestedの内容、秘密、stderrは公開しない。nested stateの欠落、symlink、protocol
-異常、または公開直前の変化は `CSV-DIFF-003`/`CSV-SOURCE-001` のfatalとする。
+mode `160000` はsuperprojectのgitlinkとしてsource fileへ展開しない。`GitlinkWorktreeState` は「初期化済み・
+HEAD取得済み・binding検証済み」の完全な観測だけを表し、未初期化、欠落、外部/unsafe gitdir pointer、未読
+HEADを clean/uninitialized の成功値へ縮退させない。初期観測でその状態になった場合は `CSV-DIFF-003`、
+公開直前の再観測でなった場合は `CSV-SOURCE-001` とし、いずれも staging を公開しない。
+
+nested binding は nested path と `.git` の各 component に symlink がなく、`.git` directory または bounded
+`gitdir: ` pointer が nested directory か superproject の検証済み `.git` 配下に解決することを確認する。
+観測中は `rev-parse`、`ls-tree`、`ls-files` の read-only metadata allowlistだけを、固定環境・明示した
+`--git-dir`/`--work-tree` bindingで実行する。`git diff`、`git status`、external diff、textconv、clean/process
+filter、hook、任意 helperは実行しない。HEAD tree、index metadata、untracked path、通常ファイルの raw bytes
+hashを比較し、HEADがindex objectと異なる、tracked/staged dirty、またはuntracked dirtyなら、親側の同じpathを
+一件の `M` としてFileChangeSetへ渡す。nestedの内容、秘密、stderr、binding identityは公開しない。
 
 ### 4.2 implicit candidate provenance
 

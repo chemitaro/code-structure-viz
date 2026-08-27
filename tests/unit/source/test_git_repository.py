@@ -9,6 +9,7 @@ from code_structure_viz.source.git_repository import (
     CommandResult,
     Commit,
     GitIndexEntry,
+    GitPathIdentity,
     GitPathIdentityCollisionFatal,
     GitReadError,
     GitRepositoryReader,
@@ -410,6 +411,50 @@ def test_commit_tree_rejects_distinct_raw_spellings_with_one_nfc_identity(
 
     with pytest.raises(GitPathIdentityCollisionFatal) as caught:
         GitRepositoryReader(repo, runner=runner).enumerate_commit_tree(object_id)
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+
+
+@pytest.mark.parametrize(
+    ("raw", "canonical"),
+    (
+        ("src/other.py", PurePosixPath("src/app.py")),
+        ("src/cafe\u0301.py", PurePosixPath("src/cafe\u0301.py")),
+    ),
+)
+def test_git_path_identity_rejects_invalid_raw_canonical_pair(
+    raw: str,
+    canonical: PurePosixPath,
+) -> None:
+    with pytest.raises(ValueError):
+        GitPathIdentity(raw, canonical)
+
+
+@pytest.mark.parametrize("layout", ("missing", "uninitialized", "external-pointer"))
+def test_gitlink_state_requires_a_safe_initialized_nested_repository(
+    tmp_path: Path,
+    layout: str,
+) -> None:
+    repo = tmp_path / "repo"
+    nested = repo / "vendor" / "component"
+    nested.parent.mkdir(parents=True)
+    repo.mkdir(exist_ok=True)
+    nested.mkdir()
+    if layout == "uninitialized":
+        (nested / "README").write_text("not a repository\n", encoding="utf-8")
+    elif layout == "external-pointer":
+        (nested / ".git").write_text("gitdir: /tmp/not-the-superproject\n", encoding="utf-8")
+
+    entry = GitIndexEntry(
+        PurePosixPath("vendor/component"),
+        "a" * 40,
+        "160000",
+        0,
+    )
+    reader = GitRepositoryReader(repo, runner=ScriptedRunner([]))
+
+    with pytest.raises(GitReadError) as caught:
+        reader.enumerate_gitlink_states((entry,))
 
     assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
 

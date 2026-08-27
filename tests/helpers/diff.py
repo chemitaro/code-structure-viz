@@ -176,6 +176,45 @@ def create_raw_path_collision_repository(tmp_path: Path) -> tuple[Path, str, str
     return repository, before, after.decode("ascii")
 
 
+def create_raw_path_transition_repository(tmp_path: Path) -> tuple[Path, str]:
+    """Create a synthetic NFD before commit and an NFC-spelled working-tree index."""
+    repository = tmp_path / "repo"
+    (repository / "src").mkdir(parents=True)
+    _git(repository, "init", "--quiet", "--initial-branch=main")
+    nfc_path = repository / "src" / "café.py"
+    nfc_path.write_text("class Value:\n    pass\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "--quiet", "--message=before", env=_commit_env())
+    content_blob = _git_bytes(
+        repository,
+        "hash-object",
+        "-w",
+        "--stdin",
+        input_bytes=b"class Value:\n    pass\n",
+    )
+    nfd_path = "cafe\u0301.py".encode("utf-8")
+    src_tree = _git_bytes(
+        repository,
+        "mktree",
+        "-z",
+        input_bytes=b"100644 blob " + content_blob + b"\t" + nfd_path + b"\0",
+    )
+    root_tree = _git_bytes(
+        repository,
+        "mktree",
+        "-z",
+        input_bytes=b"040000 tree " + src_tree + b"\tsrc\0",
+    )
+    before = _git_bytes(
+        repository,
+        "commit-tree",
+        root_tree.decode("ascii"),
+        input_bytes=b"synthetic NFD before\n",
+        env=_commit_env(),
+    ).decode("ascii")
+    return repository, before
+
+
 def run_diff_cli(
     repository: Path,
     output: Path,

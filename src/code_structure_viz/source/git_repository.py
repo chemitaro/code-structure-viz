@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import selectors
@@ -30,6 +31,8 @@ _FIXED_ENV: Final[dict[str, str]] = {
     "GIT_NO_LAZY_FETCH": "1",
     "GIT_NO_REPLACE_OBJECTS": "1",
 }
+_MAX_GITLINK_METADATA_BYTES: Final[int] = 64 * 1024
+_MAX_GITLINK_FILE_BYTES: Final[int] = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,9 +187,13 @@ class GitPathIdentity:
             self.raw_text.encode("utf-8", errors="strict")
         except UnicodeEncodeError as error:
             raise ValueError("Git path is not valid UTF-8") from error
+        if not _is_safe_relative_git_path(self.raw_text):
+            raise ValueError("Git path is not safe")
         canonical = self.canonical_path.as_posix()
-        if unicodedata.normalize("NFC", canonical) != canonical or not _is_safe_relative_git_path(
-            canonical
+        if (
+            unicodedata.normalize("NFC", self.raw_text) != canonical
+            or unicodedata.normalize("NFC", canonical) != canonical
+            or not _is_safe_relative_git_path(canonical)
         ):
             raise ValueError("Git path identity is not canonical")
 
@@ -253,6 +260,11 @@ class GitlinkWorktreeState:
     initialized: bool
     tracked_content_dirty: bool
     untracked_content_dirty: bool
+    binding_identity: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.initialized or self.current_head is None or not self.binding_identity:
+            raise ValueError("gitlink observations must be initialized and complete")
 
     @property
     def dirty(self) -> bool:
@@ -264,7 +276,15 @@ class GitlinkWorktreeState:
 
     @property
     def materialization_state(self) -> str:
-        return "present" if self.initialized else "gitlink-uninitialized"
+        return "present"
+
+
+@dataclass(frozen=True, slots=True)
+class _GitlinkTreeEntry:
+    identity: GitPathIdentity
+    object_id: str
+    mode: str
+    kind: str
 
 
 class UnrepresentableGitPathFatal(GitReadError):
@@ -597,7 +617,7 @@ class GitRepositoryReader:
         self,
         index_entries: tuple[GitIndexEntry, ...],
     ) -> tuple[GitlinkWorktreeState, ...]:
-        """Observe each materialized gitlink without reading nested source files."""
+        """Observe each materialized gitlink without invoking Git conversion helpers."""
         states: list[GitlinkWorktreeState] = []
         for entry in index_entries:
             if entry.stage != 0 or entry.mode != "160000":
@@ -608,18 +628,6 @@ class GitRepositoryReader:
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
             try:
                 nested_stat = nested.lstat()
-            except FileNotFoundError:
-                states.append(
-                    GitlinkWorktreeState(
-                        identity,
-                        entry.object_id,
-                        None,
-                        False,
-                        False,
-                        False,
-                    )
-                )
-                continue
             except OSError as error:
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
             if not stat.S_ISDIR(nested_stat.st_mode):
@@ -627,31 +635,32 @@ class GitRepositoryReader:
             git_metadata = nested / ".git"
             try:
                 metadata_stat = git_metadata.lstat()
-            except FileNotFoundError:
-                states.append(
-                    GitlinkWorktreeState(
-                        identity,
-                        entry.object_id,
-                        None,
-                        False,
-                        False,
-                        False,
-                    )
-                )
-                continue
             except OSError as error:
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
             if stat.S_ISLNK(metadata_stat.st_mode):
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
-            git_dir = self._git_at(nested, "rev-parse", "--git-dir")
-            if git_dir.returncode != 0 or not _single_line_bytes(git_dir.stdout):
-                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
-            head = self._git_at(nested, "rev-parse", "--verify", "HEAD^{commit}")
+            git_dir = self._validate_gitlink_binding(nested, git_metadata, metadata_stat)
+            self._validate_gitlink_metadata(git_dir)
+            binding_identity = self._binding_identity(git_dir)
+            head = self._git_at(
+                nested,
+                "rev-parse",
+                "--verify",
+                "HEAD^{commit}",
+                git_dir=git_dir,
+            )
             if head.returncode != 0 or _OBJECT_ID.fullmatch(head.stdout) is None:
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
             current_head = head.stdout[:-1].decode("ascii").lower()
-            tracked_dirty = self._gitlink_diff_dirty(nested, cached=False)
-            staged_dirty = self._gitlink_diff_dirty(nested, cached=True)
+            object_format = self._gitlink_object_format(nested, git_dir)
+            head_tree = self._enumerate_gitlink_tree(nested, git_dir, current_head)
+            nested_index = self._enumerate_gitlink_index(nested, git_dir)
+            staged_dirty = self._gitlink_index_differs_from_head(head_tree, nested_index)
+            tracked_dirty = self._gitlink_worktree_differs(
+                nested,
+                nested_index,
+                object_format,
+            )
             untracked = self._git_at(
                 nested,
                 "ls-files",
@@ -659,10 +668,13 @@ class GitRepositoryReader:
                 "--others",
                 "--exclude-standard",
                 "--",
+                git_dir=git_dir,
             )
             if untracked.returncode != 0:
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
             _decode_identity_list(untracked.stdout)
+            if self._binding_identity(git_dir) != binding_identity:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
             states.append(
                 GitlinkWorktreeState(
                     identity,
@@ -671,6 +683,7 @@ class GitRepositoryReader:
                     True,
                     tracked_dirty or staged_dirty,
                     bool(untracked.stdout.rstrip(b"\0")),
+                    binding_identity,
                 )
             )
         return tuple(
@@ -683,38 +696,275 @@ class GitRepositoryReader:
             )
         )
 
-    def _git_at(self, location: Path, *arguments: str) -> CommandResult:
+    def _git_at(
+        self,
+        location: Path,
+        *arguments: str,
+        git_dir: Path | None = None,
+    ) -> CommandResult:
         if self._cancelled():
             raise GitInterruptedError(diagnostic(DiagnosticCode.INTERRUPTED))
+        command: tuple[str, ...] = ("git", "-C", str(location))
+        if git_dir is not None:
+            command += ("--git-dir", str(git_dir), "--work-tree", str(location))
         result = self._runner.run(
-            (
-                "git",
-                "-C",
-                str(location),
-                "-c",
-                "core.fsmonitor=false",
-                *arguments,
-            ),
+            (*command, "-c", "core.fsmonitor=false", *arguments),
             self._environment,
         )
         if self._cancelled():
             raise GitInterruptedError(diagnostic(DiagnosticCode.INTERRUPTED))
         return result
 
-    def _gitlink_diff_dirty(self, location: Path, *, cached: bool) -> bool:
-        arguments: tuple[str, ...]
-        if cached:
-            arguments = ("diff", "--cached", "--quiet", "--exit-code", "--")
+    def _validate_gitlink_binding(
+        self,
+        nested: Path,
+        git_metadata: Path,
+        metadata_stat: os.stat_result,
+    ) -> Path:
+        if stat.S_ISDIR(metadata_stat.st_mode):
+            git_dir = git_metadata
+        elif stat.S_ISREG(metadata_stat.st_mode):
+            pointer = self._read_gitlink_pointer(git_metadata)
+            pointer_path = Path(pointer)
+            git_dir = pointer_path if pointer_path.is_absolute() else nested / pointer_path
         else:
-            arguments = ("diff", "--quiet", "--exit-code", "--")
-        result = self._git_at(location, *arguments)
-        if result.stdout:
             raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
-        if result.returncode == 0:
-            return False
-        if result.returncode == 1:
+
+        try:
+            resolved_nested = nested.resolve(strict=True)
+            resolved_git_dir = git_dir.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        if (
+            has_symlink_component(nested)
+            or has_symlink_component(git_metadata)
+            or has_symlink_component(git_dir)
+            or has_symlink_component(resolved_git_dir)
+            or not resolved_git_dir.is_dir()
+        ):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+
+        allowed_roots = [resolved_nested]
+        parent_git = self.repository / ".git"
+        try:
+            if parent_git.is_dir() and not has_symlink_component(parent_git):
+                allowed_roots.append(parent_git.resolve(strict=True))
+        except (OSError, RuntimeError) as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        if not any(_is_relative_to(resolved_git_dir, root) for root in allowed_roots):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return resolved_git_dir
+
+    @staticmethod
+    def _read_gitlink_pointer(metadata: Path) -> str:
+        try:
+            descriptor = os.open(metadata, _read_file_flags())
+            try:
+                payload = _read_bounded_file(descriptor, _MAX_GITLINK_METADATA_BYTES)
+            finally:
+                os.close(descriptor)
+        except OSError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        if not payload.endswith(b"\n") or payload.count(b"\n") != 1:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        value = payload[:-1]
+        if not value.startswith(b"gitdir: "):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        try:
+            pointer = value[len(b"gitdir: ") :].decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        if not pointer or any(
+            ord(character) < 0x20 or ord(character) == 0x7F for character in pointer
+        ):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return pointer
+
+    @staticmethod
+    def _validate_gitlink_metadata(git_dir: Path) -> None:
+        for name in ("HEAD",):
+            path = git_dir / name
+            try:
+                value = path.lstat()
+            except OSError as error:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+            if not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode):
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+
+    def _gitlink_object_format(self, location: Path, git_dir: Path) -> str:
+        result = self._git_at(
+            location,
+            "rev-parse",
+            "--show-object-format",
+            git_dir=git_dir,
+        )
+        if result.returncode != 0 or result.stdout not in {b"sha1\n", b"sha256\n"}:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return result.stdout[:-1].decode("ascii")
+
+    def _enumerate_gitlink_tree(
+        self,
+        location: Path,
+        git_dir: Path,
+        commit: str,
+    ) -> tuple[_GitlinkTreeEntry, ...]:
+        result = self._git_at(
+            location,
+            "ls-tree",
+            "-r",
+            "-z",
+            "--long",
+            "--full-tree",
+            commit,
+            git_dir=git_dir,
+        )
+        if result.returncode != 0:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        values: list[_GitlinkTreeEntry] = []
+        records = result.stdout.split(b"\0")
+        if records and records[-1] == b"":
+            records.pop()
+        for record in records:
+            try:
+                metadata, raw_path = record.split(b"\t", 1)
+                mode_raw, kind_raw, object_raw, _size_raw = metadata.split(b" ", 3)
+                identity = _decode_git_identity(raw_path)
+                object_id = object_raw.decode("ascii", errors="strict").lower()
+                mode = mode_raw.decode("ascii", errors="strict")
+                kind = kind_raw.decode("ascii", errors="strict")
+                if len(object_id) not in {40, 64} or any(
+                    character not in "0123456789abcdef" for character in object_id
+                ):
+                    raise ValueError
+                values.append(_GitlinkTreeEntry(identity, object_id, mode, kind))
+            except (UnicodeDecodeError, ValueError) as error:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        _validate_path_identity_injectivity(item.identity for item in values)
+        return tuple(
+            sorted(
+                values,
+                key=lambda item: (
+                    item.identity.canonical_path.as_posix().encode("utf-8"),
+                    item.identity.raw_text.encode("utf-8"),
+                ),
+            )
+        )
+
+    def _enumerate_gitlink_index(
+        self,
+        location: Path,
+        git_dir: Path,
+    ) -> tuple[GitIndexEntry, ...]:
+        result = self._git_at(
+            location,
+            "ls-files",
+            "--stage",
+            "-z",
+            "--cached",
+            "--",
+            git_dir=git_dir,
+        )
+        if result.returncode != 0:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        fields = result.stdout.split(b"\0")
+        if fields and fields[-1] == b"":
+            fields.pop()
+        values: list[GitIndexEntry] = []
+        seen: set[tuple[bytes, int]] = set()
+        for field in fields:
+            try:
+                metadata, raw_path = field.split(b"\t", 1)
+                mode_raw, object_raw, stage_raw = metadata.split(b" ", 2)
+                if (
+                    len(mode_raw) != 6
+                    or any(character not in b"01234567" for character in mode_raw)
+                    or len(object_raw) not in {40, 64}
+                    or any(character not in b"0123456789abcdefABCDEF" for character in object_raw)
+                    or stage_raw not in {b"0", b"1", b"2", b"3"}
+                ):
+                    raise ValueError
+                identity = _decode_git_identity(raw_path)
+                stage = int(stage_raw)
+                key = (raw_path, stage)
+                if key in seen:
+                    raise ValueError
+                seen.add(key)
+                values.append(
+                    GitIndexEntry(
+                        identity.canonical_path,
+                        object_raw.decode("ascii").lower(),
+                        mode_raw.decode("ascii"),
+                        stage,
+                        identity.raw_text,
+                    )
+                )
+            except (UnicodeDecodeError, ValueError) as error:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        _validate_path_identity_injectivity(item.identity for item in values)
+        return tuple(
+            sorted(
+                values,
+                key=lambda item: (
+                    item.identity.canonical_path.as_posix().encode("utf-8"),
+                    item.identity.raw_text.encode("utf-8") if item.raw_text else b"",
+                    item.stage,
+                ),
+            )
+        )
+
+    @staticmethod
+    def _gitlink_index_differs_from_head(
+        tree: tuple[_GitlinkTreeEntry, ...],
+        index: tuple[GitIndexEntry, ...],
+    ) -> bool:
+        if any(item.stage != 0 for item in index):
             return True
-        raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        tree_by_path = {item.identity.canonical_path: item for item in tree}
+        index_by_path = {item.path: item for item in index}
+        if set(tree_by_path) != set(index_by_path):
+            return True
+        for path, tree_entry in tree_by_path.items():
+            index_entry = index_by_path[path]
+            if (
+                tree_entry.object_id != index_entry.object_id
+                or tree_entry.mode != index_entry.mode
+                or tree_entry.identity.raw_text != index_entry.identity.raw_text
+            ):
+                return True
+        return False
+
+    def _gitlink_worktree_differs(
+        self,
+        nested: Path,
+        index: tuple[GitIndexEntry, ...],
+        object_format: str,
+    ) -> bool:
+        for entry in index:
+            if entry.stage != 0:
+                return True
+            if entry.mode == "160000":
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+            try:
+                mode, digest = _read_nested_worktree_entry(nested, entry.identity, object_format)
+            except OSError as error:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+            if mode is None:
+                return True
+            if mode != entry.mode or digest != entry.object_id:
+                return True
+        return False
+
+    @staticmethod
+    def _binding_identity(git_dir: Path) -> str:
+        if has_symlink_component(git_dir):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        try:
+            value = git_dir.stat(follow_symlinks=False)
+        except OSError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        if not stat.S_ISDIR(value.st_mode):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return f"{os.fspath(git_dir)}:{value.st_dev}:{value.st_ino}"
 
     def enumerate_paths(self) -> tuple[PurePosixPath, ...]:
         return tuple(entry.normalized for entry in self.enumerate_path_entries())
@@ -941,6 +1191,133 @@ def _single_line_bytes(value: bytes) -> bool:
         and value.count(b"\n") == 1
         and b"\0" not in value
     )
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _read_file_flags() -> int:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
+
+
+def _directory_flags() -> int:
+    flags = _read_file_flags()
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    return flags
+
+
+def _read_bounded_file(descriptor: int, limit: int) -> bytes:
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = os.read(descriptor, 1024 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > limit:
+            raise OSError("bounded Git metadata read exceeded")
+        chunks.append(chunk)
+
+
+def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns)
+
+
+def _read_nested_worktree_entry(
+    nested: Path,
+    identity: GitPathIdentity,
+    object_format: str,
+) -> tuple[str | None, str | None]:
+    """Read one nested tracked path without following repository-controlled links."""
+    components = PurePosixPath(identity.raw_text).parts
+    if not components:
+        raise OSError("empty nested path")
+    parent: int | None = None
+    try:
+        parent = os.open(nested, _directory_flags())
+        for component in components[:-1]:
+            try:
+                before = os.stat(component, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                return None, None
+            if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+                raise OSError("nested tracked path has unsafe parent")
+            child = os.open(component, _directory_flags(), dir_fd=parent)
+            try:
+                after = os.fstat(child)
+                if _stat_signature(before) != _stat_signature(after):
+                    raise OSError("nested tracked path changed during observation")
+            except BaseException:
+                os.close(child)
+                raise
+            os.close(parent)
+            parent = child
+
+        name = components[-1]
+        try:
+            value = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            return None, None
+        if stat.S_ISLNK(value.st_mode):
+            target = os.readlink(name, dir_fd=parent)
+            content = os.fsencode(target)
+            if len(content) > _MAX_GITLINK_FILE_BYTES:
+                raise OSError("nested symlink target is too large")
+            return "120000", _git_blob_digest(content, object_format)
+        if not stat.S_ISREG(value.st_mode):
+            return None, None
+        if value.st_size < 0 or value.st_size > _MAX_GITLINK_FILE_BYTES:
+            raise OSError("nested tracked file is too large")
+        descriptor = os.open(name, _read_file_flags(), dir_fd=parent)
+        try:
+            opened_before = os.fstat(descriptor)
+            if _stat_signature(value) != _stat_signature(opened_before):
+                raise OSError("nested tracked file changed before read")
+            digest = _git_blob_stream_digest(descriptor, opened_before.st_size, object_format)
+            opened_after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        final_value = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if _stat_signature(value) != _stat_signature(final_value) or _stat_signature(
+            opened_before
+        ) != _stat_signature(opened_after):
+            raise OSError("nested tracked file changed during read")
+        mode = "100755" if value.st_mode & 0o111 else "100644"
+        return mode, digest
+    finally:
+        if parent is not None:
+            os.close(parent)
+
+
+def _git_blob_digest(content: bytes, object_format: str) -> str:
+    digest = hashlib.new(object_format)
+    digest.update(f"blob {len(content)}\0".encode("ascii"))
+    digest.update(content)
+    return digest.hexdigest()
+
+
+def _git_blob_stream_digest(descriptor: int, size: int, object_format: str) -> str:
+    digest = hashlib.new(object_format)
+    digest.update(f"blob {size}\0".encode("ascii"))
+    remaining = size
+    while remaining:
+        chunk = os.read(descriptor, min(1024 * 1024, remaining))
+        if not chunk:
+            raise OSError("nested tracked file ended during read")
+        digest.update(chunk)
+        remaining -= len(chunk)
+    return digest.hexdigest()
 
 
 def _decode_path_list(payload: bytes) -> tuple[PurePosixPath, ...]:
