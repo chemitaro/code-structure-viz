@@ -188,7 +188,28 @@ class DiffApplication:
             semantic_sides: dict[str, object]
             if has_unmerged:
                 domain = self._unmerged_domain(request, config, before_source, after_source)
-                semantic_sides = _failed_side_values(before_source, after_source)
+                before_selection = self._analyze(before_source, config)
+                before_snapshot, before_failed, _before_coverage = self._selection_snapshot(
+                    before_selection
+                )
+                before_side = DomainPresenceResolver.side(
+                    before_snapshot,
+                    digest=before_source.fingerprint if before_failed else None,
+                    head_commit=before_source.head_commit,
+                    file_count=len(before_source.files),
+                    analysis_failed=before_failed,
+                )
+                after_side = DomainPresenceResolver.side(
+                    None,
+                    digest=after_source.fingerprint,
+                    head_commit=after_source.head_commit,
+                    file_count=len(after_source.files),
+                    analysis_failed=True,
+                )
+                semantic_sides = {
+                    "before": before_side.to_json_value(),
+                    "after": after_side.to_json_value(),
+                }
             else:
                 before_selection = self._analyze(before_source, config)
                 self._checkpoint()
@@ -202,12 +223,14 @@ class DiffApplication:
                 )
                 before_side = DomainPresenceResolver.side(
                     before_snapshot,
+                    digest=before_source.fingerprint if before_failed else None,
                     head_commit=before_source.head_commit,
                     file_count=len(before_source.files),
                     analysis_failed=before_failed,
                 )
                 after_side = DomainPresenceResolver.side(
                     after_snapshot,
+                    digest=after_source.fingerprint if after_failed else None,
                     head_commit=after_source.head_commit,
                     file_count=len(after_source.files),
                     analysis_failed=after_failed,
@@ -468,22 +491,3 @@ def _file_change_content(file_changes: FileChangeSet) -> bytes:
 
 def _source_contents(source: SourceView) -> dict[PurePosixPath, bytes]:
     return {item.path: item.content for item in source.files}
-
-
-def _failed_side_values(before: SourceView, after: SourceView) -> dict[str, object]:
-    return {
-        "before": DomainPresenceResolver.side(
-            None,
-            digest=before.fingerprint,
-            head_commit=before.head_commit,
-            file_count=len(before.files),
-            analysis_failed=True,
-        ).to_json_value(),
-        "after": DomainPresenceResolver.side(
-            None,
-            digest=after.fingerprint,
-            head_commit=after.head_commit,
-            file_count=len(after.files),
-            analysis_failed=True,
-        ).to_json_value(),
-    }

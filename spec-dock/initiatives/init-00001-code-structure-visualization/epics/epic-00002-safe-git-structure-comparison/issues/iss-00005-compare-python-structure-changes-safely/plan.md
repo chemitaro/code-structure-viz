@@ -42,7 +42,8 @@ package_sequence_key: "ISSUE-02"
 
 - explicit `from/to`、from-only、to-only、`head`、`working-tree`、implicit base の provenance
 - both-absent、before-only、after-only、analysis-failed の domain presence と公開 file set
-- changed-path default/override、entity default/override、unmerged path
+- changed-path default/override、entity default/override、unmerged path、unreadable untracked path
+- default の 1,001 changed paths と 501 changed entities、candidate non-blob/non-regular の fail-closed
 - class/member/decorator/entity seed、before/after relation union、曖昧な move
 - metadata-only hunk、quoted non-ASCII path、raw patch/body/secret の非漏えい
 - selector なし、available exact bytes、unavailable result、invalid/duplicate selector
@@ -76,7 +77,8 @@ requested endpoint と resolved side/provenance を分けて記録する。
 
 changed-path は domain analysis 前に default 1,000、entity は render 前に default 500 とする。
 前者の超過は run fatal/exit 1/公開なし、後者は domain `incomplete/payload_unavailable`/exit 3/
-file-change と safe manifest のみとする。Git object failure、unsafe path、analysis failure、
+file-change と safe manifest のみとする。payload unavailable の diff でも run-level file-change
+descriptor は公開する。Git object failure、unsafe path、analysis failure、
 unmerged は empty side に変換しない。transaction は usage/fatal/interrupt の staging を破棄し、
 domain incomplete のときだけ safe manifest を公開する。
 

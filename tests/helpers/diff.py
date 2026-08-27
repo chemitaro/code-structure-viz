@@ -52,6 +52,37 @@ def create_two_commit_repository_from_files(
     return repository, before, _head(repository)
 
 
+def create_unmerged_repository(tmp_path: Path) -> tuple[Path, str]:
+    """Create a repository whose current working tree has one real merge conflict."""
+    repository = tmp_path / "repo"
+    (repository / "src").mkdir(parents=True)
+    _git(repository, "init", "--quiet", "--initial-branch=main")
+    source = repository / "src/app.py"
+    source.write_text("class Order:\n    amount: int\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "--quiet", "--message=base", env=_commit_env())
+    base = _head(repository)
+
+    _git(repository, "switch", "--quiet", "--create", "side")
+    source.write_text("class Order:\n    amount: str\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "--quiet", "--message=side", env=_commit_env())
+
+    _git(repository, "switch", "--quiet", "main")
+    source.write_text("class Order:\n    amount: bytes\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "--quiet", "--message=main", env=_commit_env())
+    merge = subprocess.run(
+        ("git", "-C", str(repository), "merge", "--no-commit", "side"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+    if merge.returncode == 0:
+        raise AssertionError("fixture merge unexpectedly succeeded")
+    return repository, base
+
+
 def run_diff_cli(
     repository: Path,
     output: Path,

@@ -326,6 +326,80 @@ def test_schemas_accept_captured_complete_diff_json(tmp_path: Path) -> None:
     )
 
 
+def test_manifest_schema_accepts_incomplete_diff_descriptor_and_comparison_config(
+    tmp_path: Path,
+) -> None:
+    repository, before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files={
+            "src/app.py": ("class Order:\n    amount: int\n\nclass Customer:\n    name: str\n")
+        },
+        after_files={
+            "src/app.py": ("class Order:\n    amount: bytes\n\nclass Customer:\n    name: bytes\n")
+        },
+    )
+    config = tmp_path / "config.toml"
+    config.write_text(
+        """schema = \"code-structure-viz.config/v1\"
+[python]
+source_roots = [\"src\"]
+include = [\"**/*.py\"]
+exclude = []
+[traversal]
+upstream_depth = 1
+downstream_depth = 1
+[limits]
+max_entities = 500
+[comparison]
+target_ref = \"refs/heads/main\"
+upstream_ref = \"refs/remotes/origin\"
+""",
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(
+        repository,
+        output,
+        "--from",
+        before,
+        "--to",
+        after,
+        "--config",
+        str(config),
+        "--max-entities",
+        "1",
+    )
+
+    assert result.returncode == 3, result.stderr.decode("utf-8", errors="replace")
+    manifest = json.loads((output / "run-manifest.json").read_bytes())
+    _validator("run-manifest-v1.schema.json").validate(manifest)
+    assert [item["path"] for item in manifest["artifacts"]] == ["file-changes.json"]
+    assert manifest["config"]["resolved"]["comparison"] == {
+        "target_ref": "refs/heads/main",
+        "upstream_ref": "refs/remotes/origin",
+    }
+    assert manifest["domains"][0]["artifact_paths"] == []
+    with_diff_diagnostic = {
+        **manifest,
+        "diagnostics": [
+            {
+                "type": "diagnostic",
+                "schema": "code-structure-viz.diagnostic/v1",
+                "code": "CSV-DIFF-002",
+                "severity": "error",
+                "domain": None,
+                "path": None,
+                "symbol": None,
+                "line": None,
+                "recoverable": False,
+                "message": "Changed path count exceeds the resolved comparison limit.",
+            }
+        ],
+    }
+    _validator("run-manifest-v1.schema.json").validate(with_diff_diagnostic)
+
+
 def test_semantic_schema_rejects_member_and_relation_target_discriminant_mutations() -> None:
     validator = _validator("semantic-v1.schema.json")
     whole = json.loads(

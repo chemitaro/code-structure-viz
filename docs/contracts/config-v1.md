@@ -18,6 +18,21 @@ downstream_depth = 1
 max_entities = 500
 ```
 
+`diff` で暗黙の比較候補を設定する場合だけ、任意の `comparison` table を追加できる。
+両方とも省略可能で、指定された値は解決済み設定の `resolved.comparison` に同じ
+NFC 正規化済み文字列として記録される。
+
+```toml
+[comparison]
+target_ref = "refs/remotes/origin/main"
+upstream_ref = "refs/remotes/origin"
+```
+
+`target_ref` は比較対象ブランチ候補、`upstream_ref` は upstream の参照名前空間候補である。
+どちらも Git endpoint の解決候補にだけ使われ、解決できない場合は比較を安全に
+中止する。`resolved.comparison` を含む場合は `target_ref` と `upstream_ref` の両方を
+持ち、未指定側は `null` とする。
+
 解決順はbuilt-in、明示 `--config` またはrepository rootの
 `.code-structure-viz.toml` のどちらか一つ、最後にCLI depth/max-entitiesである。
 明示configとrepository configはmergeしない。environment/global config/profileは読まない。

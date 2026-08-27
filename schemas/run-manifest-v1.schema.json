@@ -158,6 +158,38 @@
         "command": {"properties": {"name": {"const": "diff"}}},
         "run": {
           "properties": {
+            "status": {"const": "incomplete"},
+            "exit_code": {"const": 3}
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {"const": "incomplete"},
+                "incomplete_kind": {"const": "payload_unavailable"},
+                "payload_available": {"const": false},
+                "artifact_paths": {"maxItems": 0}
+              }
+            }
+          ]
+        },
+        "artifacts": {
+          "minItems": 1,
+          "maxItems": 1,
+          "contains": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {"path": {"const": "file-changes.json"}}
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "command": {"properties": {"name": {"const": "diff"}}},
+        "run": {
+          "properties": {
             "status": {"const": "not_applicable"},
             "exit_code": {"const": 0}
           }
@@ -493,6 +525,15 @@
       "required": ["max_entities"],
       "properties": {"max_entities": {"type": "integer", "minimum": 1}}
     },
+    "resolved_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_ref", "upstream_ref"],
+      "properties": {
+        "target_ref": {"type": ["string", "null"], "minLength": 1},
+        "upstream_ref": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
     "resolved": {
       "type": "object",
       "additionalProperties": false,
@@ -500,7 +541,8 @@
       "properties": {
         "python": {"$ref": "#/$defs/resolved_python"},
         "traversal": {"$ref": "#/$defs/resolved_traversal"},
-        "limits": {"$ref": "#/$defs/resolved_limits"}
+        "limits": {"$ref": "#/$defs/resolved_limits"},
+        "comparison": {"$ref": "#/$defs/resolved_comparison"}
       }
     },
     "value_sources": {
@@ -717,6 +759,9 @@
             "CSV-PY-011",
             "CSV-PY-012",
             "CSV-PY-013",
+            "CSV-DIFF-001",
+            "CSV-DIFF-002",
+            "CSV-DIFF-003",
             "CSV-INTERNAL-001",
             "CSV-INTERRUPT-001"
           ]

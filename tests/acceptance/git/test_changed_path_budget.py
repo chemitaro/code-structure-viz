@@ -6,6 +6,7 @@ from pathlib import Path
 from tests.helpers.diff import (
     commit_current_changes,
     create_two_commit_repository,
+    create_two_commit_repository_from_files,
     run_diff_cli,
 )
 
@@ -83,3 +84,19 @@ def test_changed_path_budget_override_is_recorded_in_manifest(tmp_path: Path) ->
         "actual": 2,
         "source": "cli",
     }
+
+
+def test_default_changed_path_budget_rejects_1001_paths(tmp_path: Path) -> None:
+    before_files = {f"docs/file-{index:04d}.txt": "before\n" for index in range(1001)}
+    after_files = {path: "after\n" for path in before_files}
+    repository, before, after = create_two_commit_repository_from_files(
+        tmp_path,
+        before_files=before_files,
+        after_files=after_files,
+    )
+
+    result = run_diff_cli(repository, tmp_path / "output", "--from", before, "--to", after)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-002" in result.stderr
+    assert not (tmp_path / "output").exists()

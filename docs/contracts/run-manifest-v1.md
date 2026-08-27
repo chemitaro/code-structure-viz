@@ -46,7 +46,11 @@ diff Artifact descriptors は `file-changes.json`（`file-change-set`）、reque
 `python.diff.semantic.json`、`python.diff.puml` の順に並ぶ。domain `artifact_paths` には semantic
 JSON/PlantUML のみを記録し、file-change descriptor は run-level `artifacts` に残す。analysis
 failure、entity budget overrun、unmerged path は `incomplete_kind: "payload_unavailable"`、
-`payload_available: false` とし、affected semantic payload を列挙しない。changed-path overrun、
+`payload_available: false` とし、affected semantic payload を列挙しない。ただし diff の安全な
+changed-path evidence として `file-changes.json` descriptor は保持する。設定済み比較候補は
+`config.resolved.comparison` に `target_ref`/`upstream_ref`（未指定側は `null`）で記録し、
+`semantic_sides` の `analysis-failed` は解析していない source fingerprint を digest に使う。
+changed-path overrun、
 endpoint/object/drift/security failure は manifest を作らない run fatal である。
 
 `DiffManifestBuilder` の run fingerprint preimage は endpoint、sources、semantic side、file-change

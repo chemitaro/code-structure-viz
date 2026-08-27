@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -106,6 +107,32 @@ def test_untracked_paths_are_counted_before_python_analysis(tmp_path: Path) -> N
     assert result.returncode == 1
     assert b"CSV-DIFF-002" in result.stderr
     assert not output.exists()
+
+
+def test_unreadable_untracked_python_path_is_counted_before_analysis(tmp_path: Path) -> None:
+    repository, before, _after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    unreadable = repository / "src" / "unreadable.py"
+    unreadable.write_text("class Hidden:\n    pass\n", encoding="utf-8")
+    os.chmod(unreadable, 0)
+    try:
+        result = run_diff_cli(
+            repository,
+            tmp_path / "output",
+            "--from",
+            before,
+            "--max-changed-paths",
+            "1",
+        )
+    finally:
+        os.chmod(unreadable, 0o600)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-002" in result.stderr
+    assert not (tmp_path / "output").exists()
 
 
 def test_non_ascii_git_path_keeps_content_hunk_metadata(tmp_path: Path) -> None:

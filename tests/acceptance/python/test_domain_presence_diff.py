@@ -11,6 +11,7 @@ from code_structure_viz.semantic.diff import (
 )
 from tests.helpers.diff import (
     create_two_commit_repository_from_files,
+    create_unmerged_repository,
     run_diff_cli,
 )
 from tests.helpers.python_snapshot import snapshot_from_text
@@ -135,3 +136,24 @@ def test_cli_presence_matrix_publishes_only_safe_artifacts_for_each_case(
         if status == "incomplete":
             assert manifest["domains"][0]["incomplete_kind"] == "payload_unavailable"
             assert manifest["domains"][0]["payload_available"] is False
+            for side_name in ("before", "after"):
+                side = manifest["semantic_sides"][side_name]
+                assert len(side["digest"]) == 64
+                if side["kind"] == "analysis-failed":
+                    assert side["digest"] == manifest["sources"][side_name]["fingerprint"]
+
+
+def test_unmerged_working_tree_records_only_after_side_as_unanalyzed(tmp_path: Path) -> None:
+    repository, base = create_unmerged_repository(tmp_path)
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", base)
+
+    assert result.returncode == 3, result.stderr.decode("utf-8", errors="replace")
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["domains"][0]["incomplete_kind"] == "payload_unavailable"
+    assert manifest["semantic_sides"]["before"]["kind"] == "real"
+    assert manifest["semantic_sides"]["after"]["kind"] == "analysis-failed"
+    assert (
+        manifest["semantic_sides"]["after"]["digest"] == manifest["sources"]["after"]["fingerprint"]
+    )

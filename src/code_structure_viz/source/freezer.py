@@ -125,6 +125,13 @@ def build_commit_source_view(
             )
             continue
         if item.kind != "blob":
+            failures.append(
+                SourceAcquisitionFailure(
+                    item.path,
+                    AcquisitionStage.READ,
+                    DiagnosticCode.PY_READ,
+                )
+            )
             continue
         content = contents[item.path]
         files.append(

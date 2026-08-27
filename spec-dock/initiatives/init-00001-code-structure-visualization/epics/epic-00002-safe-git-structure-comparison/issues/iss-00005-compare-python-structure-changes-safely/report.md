@@ -31,6 +31,9 @@ P1 は次のように修正した。
 
 - working-tree の start state を HEAD、path、untracked、unmerged、inventory として先に捕捉し、
   frozen bytes、FileChangeSet、budget、final drift check を同一 run authority に統合した。
+- inventory の `unavailable`/`other` を存在 path として扱い、unreadable untracked `.py` も `?` として
+  changed-path budget へ含めた。candidate の non-regular/non-blob は `CSV-PY-001` の failed source
+  とし、absent/canonical-empty への誤変換をなくした。
 - untracked/unmerged を FileChangeSet と changed-path budget へ取り込み、unmerged は affected
   domain を `payload_unavailable` として推測しない。
 - Git 固定環境へ `GIT_NO_LAZY_FETCH=1`、`GIT_NO_REPLACE_OBJECTS=1` を追加し、working-tree の
@@ -45,7 +48,10 @@ P1 は次のように修正した。
   group を終了して exit 130 と staging cleanup を行う。
 - `file-change-set-v1` を追加し、semantic/manifest/diagnostic schemas と contract docs を diff shape
   へ更新した。requested endpoint、resolved endpoint、source、semantic side provenance を別 field
-  authority として記録し、canonical empty bytes は sorted canonical JSON にした。
+  authority として記録し、canonical empty bytes は sorted canonical JSON にした。payload unavailable
+  diff でも safe `file-changes.json` descriptor を保持し、configured comparison と diff diagnostic
+  codes を manifest schema へ追加した。U path は before の解析結果を保持し、未解析 after だけを
+  source fingerprint 付き `analysis-failed` として記録する。
 - Design/Plan を実装済み path/symbol と test file へ同期し、仮想の planned path を除去した。
 
 P2 の改善候補（relation/status のより豊かな PlantUML primitive、blob read batching、無関係 U path の
@@ -74,7 +80,7 @@ composability）は review-response に記録し、今回の acceptance gate で
 
 2026-08-27 に branch working tree で次を実行した。
 
-- `uv run pytest -q`: **411 passed, 1 skipped**
+- `uv run pytest -q`: **419 passed, 1 skipped**
 - `uv run ruff check .`: **成功**
 - `uv run mypy src tests`: **成功（98 source files）**
 - `uv build`: **成功**

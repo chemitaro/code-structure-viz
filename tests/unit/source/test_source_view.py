@@ -2,11 +2,19 @@ import os
 import unicodedata
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 import pytest
 
 from code_structure_viz.core.config import PythonConfig
-from code_structure_viz.source.git_repository import Commit, EnumeratedPath, Unborn
+from code_structure_viz.source.freezer import build_commit_source_view
+from code_structure_viz.source.git_repository import (
+    Commit,
+    CommitTreeEntry,
+    EnumeratedPath,
+    GitRepositoryReader,
+    Unborn,
+)
 from code_structure_viz.source.source_view import (
     SourceDriftError,
     SourceFileKind,
@@ -58,8 +66,10 @@ def test_build_freezes_only_in_scope_python_files_and_has_exact_fingerprint(
     assert source.size_bytes == 3
     assert source.sha256 == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     assert source.content == b"abc"
-    assert view.failures == ()
-    assert view.fingerprint == "3f35282e8940cdf7c783adc4880d7797eaf6d6b8d1bb78b49d5c9e237f09b531"
+    assert len(view.failures) == 1
+    assert view.failures[0].path == PurePosixPath("src/directory.py")
+    assert view.failures[0].diagnostic_code.value == "CSV-PY-001"
+    assert view.fingerprint == "47b91366ff6f1436643bf1cc62f7ac70b7c9cd671a1a980c1cd7ab29924eb8d9"
     assert (staging / "source/src/domain/order.py").read_bytes() == b"abc"
     assert staging.stat().st_mode & 0o777 == 0o700
 
@@ -75,6 +85,32 @@ def test_unborn_source_view_has_null_head_commit(tmp_path: Path) -> None:
     assert view.head_commit is None
     assert view.files == ()
     assert view.failures == ()
+
+
+def test_commit_source_view_rejects_non_blob_python_candidate() -> None:
+    class Reader:
+        def enumerate_commit_tree(self, _commit: str) -> tuple[CommitTreeEntry, ...]:
+            return (
+                CommitTreeEntry(
+                    PurePosixPath("src/component.py"),
+                    "a" * 40,
+                    "160000",
+                    "commit",
+                ),
+            )
+
+        def read_commit_blob(self, _commit: str, _path: PurePosixPath) -> bytes:
+            raise AssertionError("a non-blob candidate must not be read as a blob")
+
+    view = build_commit_source_view(
+        cast(GitRepositoryReader, Reader()),
+        Commit("b" * 40),
+        PythonConfig(("src",), ("**/*.py",), ()),
+    )
+
+    assert view.files == ()
+    assert view.failures[0].path == PurePosixPath("src/component.py")
+    assert view.failures[0].diagnostic_code.value == "CSV-PY-001"
 
 
 def test_descriptor_anchored_source_read_survives_repository_path_swap(tmp_path: Path) -> None:

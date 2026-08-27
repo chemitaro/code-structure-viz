@@ -80,14 +80,16 @@ fetch、checkout、worktree/index/ref mutation は行わない。provenance に�
 ## 4. source acquisition と cancellation
 
 1. run 開始に Git version、repository identity、HEAD、tracked/cached/untracked path、unmerged path を取得する。
-2. commit side は `ls-tree` を一度列挙し、blob bytes を一度だけ読み、`SourceView` を構築する。missing object/read failure は domain empty に変換せず fatal とする。
+2. commit side は `ls-tree` を一度列挙し、blob bytes を一度だけ読み、`SourceView` を構築する。missing object は domain empty に変換せず fatal とし、candidate `.py` の non-blob または working-tree の non-regular/read failure は `CSV-PY-001` の failed source として記録する。
 3. working-tree side は `WorkingTreeFreezer` が secure descriptor read と symlink/path/collision checks を行い、repository 外の staging へコピーする。source bytes と inventory を同じ run の証拠にする。
 4. 解析中・公開直前に cancellation checkpoint を置く。Git 子プロセスは process group として bounded stdout/stderr で監視し、cancel 時は terminate/kill して exit 130 を返す。
 5. working-tree 公開直前に HEAD、path enumeration、untracked、unmerged、source inventory/fingerprint を再取得して開始時と比較する。不一致は `CSV-SOURCE-001` の fatal とし、staging を公開しない。
 
 `SourceView` の公開 fingerprint は source schema、head、file descriptor、failures の canonical bytes
 から作る。working-tree の内部 `SourceInventoryEntry` は path、raw path、kind、size、digest だけを
-保持し、source body、absolute staging path、Git stderr を manifest/diagnostic に渡さない。
+保持し、source body、absolute staging path、Git stderr を manifest/diagnostic に渡さない。inventory の
+`unavailable`/`other` は path が存在する証拠として扱い、untracked なら `?` の FileChange として
+changed-path budget に含める。取得不能な path を absent または canonical empty side へ変換しない。
 
 ## 5. FileChangeSet
 
@@ -125,6 +127,11 @@ import order だけの変更は seed にならない。
 | absent | real | `complete` | internal canonical empty side と比較し全 added |
 | analysis failed を含む | 任意 | `incomplete/payload_unavailable` | affected semantic/PlantUML なし、safe manifest のみ |
 
+working-tree に `U` が含まれる場合もこの行を適用する。`semantic_sides.before` は before source
+を通常どおり解析できれば `real`（失敗時だけ `analysis-failed`）、`semantic_sides.after` は
+`analysis-failed` とし、解析を行わない after source fingerprint を digest に使う。両 side を
+根拠なく `analysis-failed` に固定しない。
+
 canonical empty side は sorted key の canonical UTF-8 JSON（domain、document kind、空 entities/
 members/relations）から毎回同じ digest を得る。endpoint/side 名や source body は含めず、standalone
 Artifact として公開しない。
@@ -151,6 +158,10 @@ absolute path/Git stderr/traceback を含めない。
 更新した schema は `schemas/file-change-set-v1.schema.json`、`semantic-v1.schema.json`、
 `run-manifest-v1.schema.json`、`diagnostic-v1.schema.json`。diff manifest は comparison、sources、
 semantic_sides、file_change_set、changed_path_budget、domain budget、Artifact descriptors を含む。
+diff が `payload_unavailable` の場合も run-level `file-changes.json` descriptor は保持し、domain の
+semantic/PlantUML artifact paths は空にする。設定済み comparison 候補は `config.resolved.comparison`
+へ `target_ref`/`upstream_ref`（未指定側は `null`）として記録し、manifest の diagnostic catalog は
+`CSV-DIFF-001`〜`003` を受理する。
 snapshot の既存 manifest/schema は同じ JSON serializer と契約を共有するが、snapshot fingerprint と
 diff fingerprint はそれぞれの正本入力から独立に計算する。
 

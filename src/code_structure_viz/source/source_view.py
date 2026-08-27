@@ -749,7 +749,9 @@ class SourceViewBuilder:
                 target_before = logical_before
                 resolved_target = None
             else:
-                return None
+                return SourceAcquisitionFailure(
+                    logical_path, AcquisitionStage.READ, DiagnosticCode.PY_READ
+                )
 
             fd = os.open(
                 target_name,

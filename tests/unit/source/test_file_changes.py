@@ -17,6 +17,10 @@ def _inventory(path: str, digest: str) -> SourceInventoryEntry:
     return SourceInventoryEntry(PurePosixPath(path), path, "regular", 1, digest)
 
 
+def _unavailable_inventory(path: str) -> SourceInventoryEntry:
+    return SourceInventoryEntry(PurePosixPath(path), path, "unavailable", None, None)
+
+
 def test_working_tree_change_set_counts_untracked_and_unmerged_paths() -> None:
     before = (_inventory("src/changed.py", "a"),)
     after = (
@@ -39,6 +43,18 @@ def test_working_tree_change_set_counts_untracked_and_unmerged_paths() -> None:
     ]
 
 
+def test_working_tree_change_set_counts_unreadable_untracked_path() -> None:
+    result = build_working_tree_file_change_set(
+        (),
+        (_unavailable_inventory("src/unreadable.py"),),
+        untracked_paths=(PurePosixPath("src/unreadable.py"),),
+    )
+
+    assert [(item.status, item.path) for item in result] == [
+        ("?", PurePosixPath("src/unreadable.py"))
+    ]
+
+
 def test_unified_hunk_parser_rejects_unbounded_metadata() -> None:
     change = FileChange("M", PurePosixPath("src/app.py"), PurePosixPath("src/app.py"))
 
@@ -47,6 +63,18 @@ def test_unified_hunk_parser_rejects_unbounded_metadata() -> None:
             (b"x" * (16 * 1024 * 1024 + 1)),
             (change,),
         )
+
+
+def test_name_status_parser_preserves_rename_copy_and_type_change() -> None:
+    payload = b"R087\0src/old.py\0src/new.py\0C100\0src/new.py\0src/copy.py\0T\0src/link.py\0"
+
+    result = parse_name_status(payload)
+
+    assert [(item.status, item.old_path, item.new_path) for item in result] == [
+        ("C", PurePosixPath("src/new.py"), PurePosixPath("src/copy.py")),
+        ("T", PurePosixPath("src/link.py"), PurePosixPath("src/link.py")),
+        ("R", PurePosixPath("src/old.py"), PurePosixPath("src/new.py")),
+    ]
 
 
 def test_unified_hunk_parser_decodes_git_quoted_utf8_paths() -> None:

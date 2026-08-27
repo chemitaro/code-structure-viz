@@ -300,14 +300,12 @@ def build_working_tree_file_change_set(
         if path in unmerged:
             changes.append(FileChange("U", path, path))
             continue
-        left_exists = left is not None and getattr(left, "kind", "missing") not in {
-            "missing",
-            "unavailable",
-        }
-        right_exists = right is not None and getattr(right, "kind", "missing") not in {
-            "missing",
-            "unavailable",
-        }
+        # Inventory entries preserve path presence even when content acquisition failed.
+        # Only an explicit ``missing`` entry (or no entry) is absent; treating
+        # ``unavailable`` as absent would drop an unreadable untracked path from
+        # the changed-path budget and make the final drift evidence incomplete.
+        left_exists = left is not None and getattr(left, "kind", "missing") != "missing"
+        right_exists = right is not None and getattr(right, "kind", "missing") != "missing"
         if not left_exists and not right_exists:
             continue
         if not left_exists:

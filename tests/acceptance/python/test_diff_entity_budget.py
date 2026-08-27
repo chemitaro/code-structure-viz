@@ -6,6 +6,10 @@ from pathlib import Path
 from tests.helpers.diff import create_two_commit_repository, run_diff_cli
 
 
+def _many_changed_classes(annotation: str) -> str:
+    return "\n".join(f"class Entity{index}:\n    value: {annotation}\n" for index in range(501))
+
+
 def test_entity_budget_hides_affected_payload_but_publishes_safe_manifest(
     tmp_path: Path,
 ) -> None:
@@ -53,3 +57,28 @@ def test_entity_budget_hides_affected_payload_but_publishes_safe_manifest(
     assert domain["budget"]["requested"] == 1
     assert domain["budget"]["resolved"] == 1
     assert domain["budget"]["actual"] > 1
+
+
+def test_default_entity_budget_rejects_501_changed_entities(tmp_path: Path) -> None:
+    repository, before, after = create_two_commit_repository(
+        tmp_path,
+        before_text=_many_changed_classes("int"),
+        after_text=_many_changed_classes("str"),
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", before, "--to", after)
+
+    assert result.returncode == 3, result.stderr.decode("utf-8", errors="replace")
+    assert {path.name for path in output.iterdir()} == {
+        "file-changes.json",
+        "run-manifest.json",
+    }
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["domains"][0]["budget"] == {
+        "name": "max_entities",
+        "requested": None,
+        "resolved": 500,
+        "actual": 501,
+        "source": "builtin",
+    }
