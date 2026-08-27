@@ -50,8 +50,9 @@ P1 は次のように修正した。
   へ更新した。requested endpoint、resolved endpoint、source、semantic side provenance を別 field
   authority として記録し、canonical empty bytes は sorted canonical JSON にした。payload unavailable
   diff でも safe `file-changes.json` descriptor を保持し、configured comparison と diff diagnostic
-  codes を manifest schema へ追加した。U path は before の解析結果を保持し、未解析 after だけを
-  source fingerprint 付き `analysis-failed` として記録する。
+  codes を manifest schema へ追加した。U path は before を一度だけ解析し、その同一結果から semantic
+  side・実測 coverage・parse diagnostics を構成する。未解析 after だけを source fingerprint 付き
+  `analysis-failed` として記録し、synthetic coverage が before の実測結果を上書きしない。
 - Design/Plan を実装済み path/symbol と test file へ同期し、仮想の planned path を除去した。
 
 P2 の改善候補（relation/status のより豊かな PlantUML primitive、blob read batching、無関係 U path の
@@ -81,6 +82,8 @@ composability）は review-response に記録し、今回の acceptance gate で
 2026-08-27 に branch working tree で次を実行した。
 
 - `uv run pytest -q`: **419 passed, 1 skipped**
+- U path の Red→Green acceptance: **2 failed, 5 passed** → **7 passed**
+- 関連 diff acceptance と schema focused suite: **22 passed** / **70 passed**
 - `uv run ruff check .`: **成功**
 - `uv run mypy src tests`: **成功（98 source files）**
 - `uv build`: **成功**

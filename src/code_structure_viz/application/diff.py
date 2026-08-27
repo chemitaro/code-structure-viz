@@ -187,29 +187,14 @@ class DiffApplication:
             self._checkpoint()
             semantic_sides: dict[str, object]
             if has_unmerged:
-                domain = self._unmerged_domain(request, config, before_source, after_source)
                 before_selection = self._analyze(before_source, config)
-                before_snapshot, before_failed, _before_coverage = self._selection_snapshot(
-                    before_selection
+                domain, semantic_sides = self._unmerged_domain(
+                    request,
+                    config,
+                    before_source,
+                    after_source,
+                    before_selection,
                 )
-                before_side = DomainPresenceResolver.side(
-                    before_snapshot,
-                    digest=before_source.fingerprint if before_failed else None,
-                    head_commit=before_source.head_commit,
-                    file_count=len(before_source.files),
-                    analysis_failed=before_failed,
-                )
-                after_side = DomainPresenceResolver.side(
-                    None,
-                    digest=after_source.fingerprint,
-                    head_commit=after_source.head_commit,
-                    file_count=len(after_source.files),
-                    analysis_failed=True,
-                )
-                semantic_sides = {
-                    "before": before_side.to_json_value(),
-                    "after": after_side.to_json_value(),
-                }
             else:
                 before_selection = self._analyze(before_source, config)
                 self._checkpoint()
@@ -433,14 +418,24 @@ class DiffApplication:
         config: ResolvedConfig,
         before_source: SourceView,
         after_source: SourceView,
-    ) -> DomainOutcome:
-        empty_coverage = PythonCoverage(
-            len(before_source.files),
-            0,
-            (),
-            (),
-            0,
-            (),
+        before_selection: PythonSelectionResult,
+    ) -> tuple[DomainOutcome, dict[str, object]]:
+        before_snapshot, before_failed, before_coverage = DiffApplication._selection_snapshot(
+            before_selection
+        )
+        before_side = DomainPresenceResolver.side(
+            before_snapshot,
+            digest=before_source.fingerprint if before_failed else None,
+            head_commit=before_source.head_commit,
+            file_count=len(before_source.files),
+            analysis_failed=before_failed,
+        )
+        after_side = DomainPresenceResolver.side(
+            None,
+            digest=after_source.fingerprint,
+            head_commit=after_source.head_commit,
+            file_count=len(after_source.files),
+            analysis_failed=True,
         )
         after_coverage = PythonCoverage(
             len(after_source.files),
@@ -457,12 +452,20 @@ class DiffApplication:
             None,
             config.value_sources.max_entities,
         )
-        return DomainOutcome.payload_unavailable(
-            diagnostics=(diagnostic(DiagnosticCode.DIFF_FILE_CHANGE),),
+        diagnostics = canonical_diagnostics(
+            (*before_selection.diagnostics, diagnostic(DiagnosticCode.DIFF_FILE_CHANGE))
+        )
+        domain = DomainOutcome.payload_unavailable(
+            diagnostics=diagnostics,
             entity_count=None,
-            coverage=_diff_coverage(empty_coverage, after_coverage),
+            coverage=_diff_coverage(before_coverage, after_coverage),
             budget=budget,
         )
+        semantic_sides: dict[str, object] = {
+            "before": before_side.to_json_value(),
+            "after": after_side.to_json_value(),
+        }
+        return domain, semantic_sides
 
     def _checkpoint(self) -> None:
         if self._cancelled():

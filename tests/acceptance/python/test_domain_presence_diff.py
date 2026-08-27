@@ -150,9 +150,85 @@ def test_unmerged_working_tree_records_only_after_side_as_unanalyzed(tmp_path: P
     result = run_diff_cli(repository, output, "--from", base)
 
     assert result.returncode == 3, result.stderr.decode("utf-8", errors="replace")
+    assert {path.name for path in output.iterdir()} == {
+        "file-changes.json",
+        "run-manifest.json",
+    }
     manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["domains"][0]["incomplete_kind"] == "payload_unavailable"
+    assert {item["status"] for item in manifest["file_change_set"]["files"]} == {"U"}
+    domain = manifest["domains"][0]
+    assert domain["incomplete_kind"] == "payload_unavailable"
+    assert domain["payload_available"] is False
+    assert domain["coverage"]["before"] == {
+        "candidate_files": 1,
+        "parsed_files": 1,
+        "failed_files": [],
+        "selected_modules": ["app"],
+        "selected_entities": 1,
+        "frontier": [],
+    }
+    assert domain["coverage"]["after"] == {
+        "candidate_files": 0,
+        "parsed_files": 0,
+        "failed_files": [],
+        "selected_modules": [],
+        "selected_entities": 0,
+        "frontier": [],
+    }
+    assert [item["code"] for item in domain["diagnostics"]] == ["CSV-DIFF-003"]
     assert manifest["semantic_sides"]["before"]["kind"] == "real"
+    assert manifest["semantic_sides"]["after"]["kind"] == "analysis-failed"
+    assert (
+        manifest["semantic_sides"]["after"]["digest"] == manifest["sources"]["after"]["fingerprint"]
+    )
+
+
+def test_unmerged_working_tree_preserves_failed_before_analysis_evidence(
+    tmp_path: Path,
+) -> None:
+    repository, base = create_unmerged_repository(
+        tmp_path,
+        base_text="class Order(:\n    amount: int\n",
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", base)
+
+    assert result.returncode == 3, result.stderr.decode("utf-8", errors="replace")
+    manifest = json.loads((output / "run-manifest.json").read_text(encoding="utf-8"))
+    domain = manifest["domains"][0]
+    assert domain["incomplete_kind"] == "payload_unavailable"
+    assert domain["payload_available"] is False
+    assert domain["coverage"]["before"] == {
+        "candidate_files": 1,
+        "parsed_files": 0,
+        "failed_files": [
+            {
+                "path": "src/app.py",
+                "stage": "parse",
+                "diagnostic_code": "CSV-PY-003",
+            }
+        ],
+        "selected_modules": [],
+        "selected_entities": 0,
+        "frontier": [
+            {
+                "direction": "failure",
+                "kind": "file",
+                "reference": "src/app.py",
+                "reason": "failed_source",
+            }
+        ],
+    }
+    assert [item["code"] for item in domain["diagnostics"]] == [
+        "CSV-DIFF-003",
+        "CSV-PY-003",
+    ]
+    assert manifest["semantic_sides"]["before"]["kind"] == "analysis-failed"
+    assert (
+        manifest["semantic_sides"]["before"]["digest"]
+        == manifest["sources"]["before"]["fingerprint"]
+    )
     assert manifest["semantic_sides"]["after"]["kind"] == "analysis-failed"
     assert (
         manifest["semantic_sides"]["after"]["digest"] == manifest["sources"]["after"]["fingerprint"]
