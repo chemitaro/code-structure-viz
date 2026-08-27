@@ -24,6 +24,21 @@ manifest、closed stdout selector を扱う。
 renderer modules として独立させた。`pyclassuml`、`tree-git-diff`、SQLAlchemy、Next.js、HTML/Tailscale、
 target repository の Git mutation、auto fetch/checkout は導入していない。
 
+## Strict review response
+
+初回 Final Quality Gate の対象 SHA `d31ce4f5f47b222474fa876242e30ef0b89d2dbe` は fail となり、
+P1 の root を Red/Blue の継続セッションで G1（path-state/status authority）、G2（全 changed path の
+content/hunk evidence）、G3（U side の coverage/diagnostic coherence）、G4（production acceptance trace）
+に整理した。人間判断が必要な境界は、既存契約に沿って H1=canonical Git event records、H2=unavailable
+content の fail-closed、H3=before の実測結果を保持する U outcome、H4=`upstream_ref` namespace 展開と
+して固定した。
+
+修正は同じ branch の Luna MAX coder lane で TDD の Red→Green として実施し、既知 P1 を検出する production
+CLI regression を追加した。commit object 欠損の扱いは正本契約との照合で一度修正し、最終的に run fatal
+（exit 1・公開なし）へ戻した。現行候補 commit は
+`7daf0372f101dd992335a379e1fee6686a92bf15` で、local HEAD、configured upstream、GitHub branch tip の
+三者が一致している。Final Quality Gate はこの SHA に対して再実行するまで未完了である。
+
 ## Remediation evidence
 
 前回の Final Quality Gate review（campaign `iss-00005-implementation-final-quality-r1`）で検出された
@@ -31,6 +46,14 @@ P1 は次のように修正した。
 
 - working-tree の start state を HEAD、path、untracked、unmerged、inventory として先に捕捉し、
   frozen bytes、FileChangeSet、budget、final drift check を同一 run authority に統合した。
+- inventory に tracking state、Git mode/type、object identity、availability、unmerged state を加え、
+  budget 前に canonical `U`、tracked→untracked `D+?`、unique `R`/`C`、`A`/`D`、`T`、mode-only `M` を
+  同一 path-state authority から分類するようにした。source path の再利用と rename の二重 count を防ぎ、
+  `FileChangeSet.count` と manifest actual を一致させた。
+- all changed path を対象に `absent`/`available`/`unavailable` の content evidence を作り、budget admission
+  後にだけ hunk を投影するようにした。unknown/binary/上限超過 bytes を empty side にせず、non-Python の
+  unavailable path は偽の hunk を出さず、LF/CRLF と最終改行差を deterministic range に保持する。affected
+  Python path は safe metadata と `payload_unavailable` のみを公開する。
 - inventory の `unavailable`/`other` を存在 path として扱い、unreadable untracked `.py` も `?` として
   changed-path budget へ含めた。candidate の non-regular/non-blob は `CSV-PY-001` の failed source
   とし、absent/canonical-empty への誤変換をなくした。
@@ -53,7 +76,8 @@ P1 は次のように修正した。
   codes を manifest schema へ追加した。U path は before を一度だけ解析し、その同一結果から semantic
   side・実測 coverage・parse diagnostics を構成する。未解析 after だけを source fingerprint 付き
   `analysis-failed` として記録し、synthetic coverage が before の実測結果を上書きしない。
-- Design/Plan を実装済み path/symbol と test file へ同期し、仮想の planned path を除去した。
+- Design/Plan/Requirement を実装済み path/symbol、H1/H2/H3/H4 境界、remediation step、test file へ同期し、
+  仮想の planned path を除去した。
 
 P2 の改善候補（relation/status のより豊かな PlantUML primitive、blob read batching、無関係 U path の
 domain-local attribution、Unicode path policy のさらなる共通化、unborn HEAD の explicit endpoint
@@ -79,21 +103,22 @@ composability）は review-response に記録し、今回の acceptance gate で
 
 ## Verification
 
-2026-08-27 に branch working tree で次を実行した。
+2026-08-27 に commit `7daf0372f101dd992335a379e1fee6686a92bf15` と同じ内容の branch working tree で次を実行した。
 
-- `uv run pytest -q`: **419 passed, 1 skipped**
+- `uv run pytest -q`: **450 passed, 1 skipped**
 - U path の Red→Green acceptance: **2 failed, 5 passed** → **7 passed**
-- 関連 diff acceptance と schema focused suite: **22 passed** / **70 passed**
+- related diff focused suite（endpoint/status/hunk/U/budget/schema/security を含む）: **170 passed, 1 skipped**
+- `uv run ruff format --check .`: **成功（107 files already formatted）**
 - `uv run ruff check .`: **成功**
 - `uv run mypy src tests`: **成功（98 source files）**
 - `uv build`: **成功**
 - `python3 ./spec-dock/scripts/spec-dock validate`: **成功（nodes=10）**
 - `git diff --check`: **成功**
 
-重点 suite は endpoint/presence/budget/stdout、semantic seed/impact/move、source/Git safety、hunk
-redaction、schema の実ファイルへ trace され、full suite に含まれる。生成した diff の semantic JSON、
-run manifest、file-change set は同梱 schema で検証し、working-tree run は publication 前に state と
-fingerprint drift を再確認する。
+重点 suite は endpoint/presence/budget/stdout、canonical status（R/C/T/D+?）、semantic seed/impact/move、
+source/Git safety、hunk redaction・non-Python・LF/CRLF・unavailable、schema の実ファイルへ trace され、
+full suite に含まれる。生成した diff の semantic JSON、run manifest、file-change set は同梱 schema で検証し、
+working-tree run は publication 前に index/path/untracked/unmerged state と fingerprint drift を再確認する。
 
 ## Residual Risks / Follow-ups
 
