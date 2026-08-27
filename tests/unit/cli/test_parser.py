@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from code_structure_viz.cli.main import main
-from code_structure_viz.cli.parser import CliUsageError, DomainFormatSelector, parse_cli
+from code_structure_viz.cli.parser import (
+    CliUsageError,
+    DomainFormatSelector,
+    parse_cli,
+    parse_diff_cli,
+)
 from code_structure_viz.source.targets import ModuleTarget
 
 
@@ -26,6 +31,65 @@ def test_snapshot_requires_python_domain_and_resolves_default_formats() -> None:
     assert request.output_dir == Path.cwd().parent / "output"
     assert request.formats == ("semantic-json", "plantuml")
     assert request.targets == ()
+
+
+def test_diff_resolves_closed_endpoint_and_output_format_grammar() -> None:
+    request = parse_diff_cli(
+        [
+            "diff",
+            "--repo",
+            ".",
+            "--output-dir",
+            "../output",
+            "--domain",
+            "python",
+            "--from",
+            "origin/main",
+            "--to",
+            "head",
+            "--max-changed-paths",
+            "42",
+            "--format",
+            "plantuml",
+            "--stdout",
+            "python:plantuml",
+        ]
+    )
+
+    assert request.from_ref == "origin/main"
+    assert request.to_ref == "head"
+    assert request.max_changed_paths_override == 42
+    assert request.formats == ("plantuml",)
+    assert request.stdout_selector == DomainFormatSelector(
+        domain="python", format="plantuml"
+    )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--from", "working-tree"],
+        ["--stdout", "python:semantic-json", "--stdout", "manifest"],
+        ["--max-changed-paths", "0"],
+        ["--format", "semantic-json", "--stdout", "python:plantuml"],
+    ],
+)
+def test_diff_rejects_invalid_endpoint_budget_or_selector_before_execution(
+    extra: list[str],
+) -> None:
+    with pytest.raises(CliUsageError):
+        parse_diff_cli(
+            [
+                "diff",
+                "--repo",
+                ".",
+                "--output-dir",
+                "../output",
+                "--domain",
+                "python",
+                *extra,
+            ]
+        )
 
 
 def test_snapshot_canonicalizes_repeatable_formats_and_targets() -> None:

@@ -58,3 +58,57 @@ class EntityBudgetGate:
             budget,
             (diagnostic(DiagnosticCode.PY_ENTITY_BUDGET, domain="python"),),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ChangedPathBudget:
+    """Run-level admission budget for metadata-only Git changed paths."""
+
+    name: str
+    requested: int | None
+    resolved: int
+    actual: int
+    source: ConfigSource
+
+    def __post_init__(self) -> None:
+        if self.name != "max_changed_paths":
+            raise ValueError("unknown changed-path budget")
+        if self.requested is not None and self.requested <= 0:
+            raise ValueError("requested changed-path budget must be positive")
+        if self.resolved <= 0 or self.actual < 0:
+            raise ValueError("changed-path budget values are invalid")
+
+    def to_json_value(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "requested": self.requested,
+            "resolved": self.resolved,
+            "actual": self.actual,
+            "source": self.source.value,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ChangedPathBudgetDecision:
+    admitted: bool
+    budget: ChangedPathBudget
+    diagnostics: tuple[Diagnostic, ...]
+
+
+class ChangedPathBudgetGate:
+    def admit(
+        self,
+        *,
+        actual: int,
+        requested: int | None,
+        resolved: int = 1000,
+        source: ConfigSource = ConfigSource.BUILTIN,
+    ) -> ChangedPathBudgetDecision:
+        budget = ChangedPathBudget("max_changed_paths", requested, resolved, actual, source)
+        if actual <= resolved:
+            return ChangedPathBudgetDecision(True, budget, ())
+        return ChangedPathBudgetDecision(
+            False,
+            budget,
+            (diagnostic(DiagnosticCode.DIFF_CHANGED_PATH_BUDGET),),
+        )

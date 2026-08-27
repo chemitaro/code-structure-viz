@@ -24,6 +24,10 @@ _DOMAIN_PATHS = {
     "semantic-json": "python.snapshot.semantic.json",
     "plantuml": "python.snapshot.puml",
 }
+_DIFF_DOMAIN_PATHS = {
+    "semantic-json": "python.diff.semantic.json",
+    "plantuml": "python.diff.puml",
+}
 
 
 def _selector_value(selector: StdoutSelector) -> str:
@@ -124,8 +128,11 @@ class StdoutEmitter:
             return _domain_unavailable(selector, domain.status, "domain_not_applicable")
         if domain.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE:
             return _domain_unavailable(selector, domain.status, "domain_payload_unavailable")
-        relative_path = _DOMAIN_PATHS[selector.format]
-        if relative_path not in domain.artifact_paths:
+        candidates = (_DIFF_DOMAIN_PATHS[selector.format], _DOMAIN_PATHS[selector.format])
+        relative_path = next(
+            (item for item in candidates if item in domain.artifact_paths), None
+        )
+        if relative_path is None:
             raise ValueError("selected domain artifact was not published")
         if published_artifacts is not None:
             return published_artifacts[relative_path]

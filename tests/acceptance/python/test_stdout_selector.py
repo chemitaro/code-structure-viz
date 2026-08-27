@@ -14,6 +14,7 @@ from tests.helpers.acceptance import (
     initialize_repository,
     run_cli,
 )
+from tests.helpers.diff import create_two_commit_repository, run_diff_cli
 
 
 class _RenameFunction:
@@ -280,3 +281,121 @@ def test_post_rename_signal_and_output_deletion_keep_bound_stdout_and_exit(
     assert exit_code == 0
     assert captured.out == expected
     assert captured.err == b""
+
+
+def test_diff_stdout_selector_copies_exact_semantic_artifact_bytes(tmp_path: Path) -> None:
+    repository, before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(
+        repository,
+        output,
+        "--from",
+        before,
+        "--to",
+        after,
+        "--stdout",
+        "python:semantic-json",
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == (output / "python.diff.semantic.json").read_bytes()
+    assert b"run_summary" not in result.stdout
+
+
+def test_diff_manifest_selector_copies_exact_manifest_bytes(tmp_path: Path) -> None:
+    repository, before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(
+        repository,
+        output,
+        "--from",
+        before,
+        "--to",
+        after,
+        "--stdout",
+        "manifest",
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == (output / "run-manifest.json").read_bytes()
+
+
+def test_diff_unavailable_domain_selector_returns_typed_result(tmp_path: Path) -> None:
+    repository, before, after = create_two_commit_repository(
+        tmp_path,
+        before_text=(
+            "class Order:\n"
+            "    def total(self, amount):\n"
+            "        return amount\n\n"
+            "class Customer:\n"
+            "    name: str\n"
+        ),
+        after_text=(
+            "class Order:\n"
+            "    def total(self, amount: int) -> int:\n"
+            "        return amount\n\n"
+            "class Customer:\n"
+            "    name: bytes\n"
+        ),
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(
+        repository,
+        output,
+        "--from",
+        before,
+        "--to",
+        after,
+        "--max-entities",
+        "1",
+        "--stdout",
+        "python:semantic-json",
+    )
+
+    assert result.returncode == 3
+    assert json.loads(result.stdout) == {
+        "type": "stdout_result",
+        "schema": "code-structure-viz.stdout-result/v1",
+        "selector": "python:semantic-json",
+        "availability": False,
+        "domain_status": "incomplete",
+        "stable_reason": "domain_payload_unavailable",
+        "artifact": None,
+    }
+
+
+def test_diff_selector_compatibility_is_rejected_before_publication(tmp_path: Path) -> None:
+    repository, before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Order:\n    amount: int\n",
+        after_text="class Order:\n    amount: str\n",
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(
+        repository,
+        output,
+        "--from",
+        before,
+        "--to",
+        after,
+        "--format",
+        "semantic-json",
+        "--stdout",
+        "python:plantuml",
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert not output.exists()

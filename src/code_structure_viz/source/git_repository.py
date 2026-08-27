@@ -69,6 +69,14 @@ type HeadState = Commit | Unborn
 
 
 @dataclass(frozen=True, slots=True)
+class CommitTreeEntry:
+    path: PurePosixPath
+    object_id: str
+    mode: str
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
 class EnumeratedPath:
     raw_text: str
     normalized: PurePosixPath
@@ -242,9 +250,116 @@ class GitRepositoryReader:
     def enumerate_paths(self) -> tuple[PurePosixPath, ...]:
         return tuple(entry.normalized for entry in self.enumerate_path_entries())
 
+    def resolve_commit(self, reference: str) -> Commit:
+        """Resolve a local Git reference to a commit without updating repository state."""
+        if (
+            not reference
+            or reference.startswith("-")
+            or any(character in reference for character in "\x00\r\n\t")
+        ):
+            raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
+        result = self._git(
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            f"{reference}^{{commit}}",
+        )
+        if result.returncode != 0 or _OBJECT_ID.fullmatch(result.stdout) is None:
+            raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
+        return Commit(result.stdout[:-1].decode("ascii").lower())
+
+    def resolve_merge_base(self, left: str, right: str) -> str | None:
+        result = self._git("merge-base", "--all", left, right)
+        if result.returncode != 0:
+            return None
+        values = [item for item in result.stdout.splitlines() if _OBJECT_ID.fullmatch(item + b"\n")]
+        if not values:
+            return None
+        return min(values).decode("ascii").lower()
+
+    def enumerate_commit_tree(self, commit: str) -> tuple[CommitTreeEntry, ...]:
+        result = self._git("ls-tree", "-r", "-z", "--long", "--full-tree", commit)
+        if result.returncode != 0:
+            raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
+        entries: list[CommitTreeEntry] = []
+        records = result.stdout.split(b"\0")
+        if records and records[-1] == b"":
+            records.pop()
+        for record in records:
+            try:
+                metadata, raw_path = record.split(b"\t", 1)
+                mode_raw, kind_raw, object_raw, _size_raw = metadata.split(b" ", 3)
+                path_text = raw_path.decode("utf-8", errors="strict")
+                normalized = unicodedata.normalize("NFC", path_text)
+                if not _is_safe_relative_git_path(normalized):
+                    raise ValueError
+                object_id = object_raw.decode("ascii", errors="strict").lower()
+                if len(object_id) not in {40, 64} or any(
+                    character not in "0123456789abcdef" for character in object_id
+                ):
+                    raise ValueError
+                entries.append(
+                    CommitTreeEntry(
+                        PurePosixPath(normalized),
+                        object_id,
+                        mode_raw.decode("ascii", errors="strict"),
+                        kind_raw.decode("ascii", errors="strict"),
+                    )
+                )
+            except (UnicodeDecodeError, ValueError) as error:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        return tuple(sorted(entries, key=lambda item: item.path.as_posix().encode("utf-8")))
+
+    def read_commit_blob(self, commit: str, path: PurePosixPath) -> bytes:
+        if not _is_safe_relative_git_path(path.as_posix()):
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        result = self._git("cat-file", "blob", f"{commit}:{path.as_posix()}")
+        if result.returncode != 0:
+            raise _fatal(DiagnosticCode.DIFF_ENDPOINT)
+        return result.stdout
+
+    def diff_name_status(self, before: str, after: str | None = None) -> bytes:
+        endpoints = (before,) if after is None else (before, after)
+        result = self._git(
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--find-renames=50%",
+            "--find-copies=50%",
+            "--name-status",
+            "-z",
+            "--format=",
+            *endpoints,
+            "--",
+        )
+        if result.returncode != 0:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return result.stdout
+
+    def diff_patch(self, before: str, after: str | None = None) -> bytes:
+        endpoints = (before,) if after is None else (before, after)
+        result = self._git(
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--find-renames=50%",
+            "--find-copies=50%",
+            "--unified=0",
+            "--format=",
+            *endpoints,
+            "--",
+        )
+        if result.returncode != 0:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return result.stdout
+
 
 def _is_safe_relative_git_path(value: str) -> bool:
     if not value or value.startswith("/") or "\\" in value or "\0" in value:
+        return False
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
         return False
     parts = value.split("/")
     return all(part not in {"", ".", ".."} for part in parts)

@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Final, cast
 
-from code_structure_viz.cli.parser import SnapshotCliRequest
+from code_structure_viz.cli.parser import DiffCliRequest, SnapshotCliRequest
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
 from code_structure_viz.core.path_safety import has_symlink_component
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
@@ -41,6 +41,14 @@ class LimitsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ComparisonConfig:
+    """Optional local Git comparison candidates used by ``diff``."""
+
+    target_ref: str | None = None
+    upstream_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ConfigValueSources:
     python_source_roots: ConfigSource
     python_include: ConfigSource
@@ -59,9 +67,10 @@ class ResolvedConfig:
     value_sources: ConfigValueSources
     source: ConfigSource
     sha256: str
+    comparison: ComparisonConfig = ComparisonConfig()
 
     def digest_value(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema": self.schema,
             "python": {
                 "source_roots": list(self.python.source_roots),
@@ -74,6 +83,12 @@ class ResolvedConfig:
             },
             "limits": {"max_entities": self.limits.max_entities},
         }
+        if self.comparison.target_ref is not None or self.comparison.upstream_ref is not None:
+            value["comparison"] = {
+                "target_ref": self.comparison.target_ref,
+                "upstream_ref": self.comparison.upstream_ref,
+            }
+        return value
 
 
 class ConfigResolutionError(Exception):
@@ -84,9 +99,11 @@ class ConfigResolutionError(Exception):
 
 _SCHEMA: Final = "code-structure-viz.config/v1"
 _TOP_LEVEL_KEYS: Final = frozenset({"schema", "python", "traversal", "limits"})
+_OPTIONAL_TOP_LEVEL_KEYS: Final = frozenset({"comparison"})
 _PYTHON_KEYS: Final = frozenset({"source_roots", "include", "exclude"})
 _TRAVERSAL_KEYS: Final = frozenset({"upstream_depth", "downstream_depth"})
 _LIMIT_KEYS: Final = frozenset({"max_entities"})
+_COMPARISON_KEYS: Final = frozenset({"target_ref", "upstream_ref"})
 _TOP_LEVEL_MISSING_KEYS: Final[dict[str, str]] = {
     "schema": "schema",
     "python": "python.source_roots",
@@ -180,8 +197,8 @@ def _closed_table(value: object, *, expected: frozenset[str]) -> dict[str, objec
 
 
 def _decode_config(data: object, *, source: ConfigSource, repo: Path) -> ResolvedConfig:
-    root = _closed_table(data, expected=_TOP_LEVEL_KEYS)
-    if set(root) != _TOP_LEVEL_KEYS:
+    root = _closed_table(data, expected=_TOP_LEVEL_KEYS | _OPTIONAL_TOP_LEVEL_KEYS)
+    if _TOP_LEVEL_KEYS - set(root):
         safe_key = min(
             (_TOP_LEVEL_MISSING_KEYS[item] for item in _TOP_LEVEL_KEYS - set(root)),
             key=lambda item: item.encode("utf-8"),
@@ -192,6 +209,32 @@ def _decode_config(data: object, *, source: ConfigSource, repo: Path) -> Resolve
     python = _closed_table(root["python"], expected=_PYTHON_KEYS)
     traversal = _closed_table(root["traversal"], expected=_TRAVERSAL_KEYS)
     limits = _closed_table(root["limits"], expected=_LIMIT_KEYS)
+    comparison = ComparisonConfig()
+    if "comparison" in root:
+        comparison_table = _closed_table(root["comparison"], expected=_COMPARISON_KEYS)
+        target_ref = comparison_table.get("target_ref")
+        upstream_ref = comparison_table.get("upstream_ref")
+        for key, raw in (
+            ("comparison.target_ref", target_ref),
+            ("comparison.upstream_ref", upstream_ref),
+        ):
+            if raw is None:
+                continue
+            normalized = _normalize_string(raw, key=key)
+            if (
+                not normalized
+                or normalized.startswith("-")
+                or any(character in normalized for character in "\x00\r\n\t")
+            ):
+                raise _error(DiagnosticCode.CONFIG_VALUE, key=key)
+            if key.endswith("target_ref"):
+                target_ref = normalized
+            else:
+                upstream_ref = normalized
+        comparison = ComparisonConfig(
+            target_ref=cast(str | None, target_ref),
+            upstream_ref=cast(str | None, upstream_ref),
+        )
     if set(python) != _PYTHON_KEYS:
         key = min(
             (f"python.{item}" for item in _PYTHON_KEYS - set(python)),
@@ -244,6 +287,7 @@ def _decode_config(data: object, *, source: ConfigSource, repo: Path) -> Resolve
         value_sources=value_sources,
         source=source,
         sha256="",
+        comparison=comparison,
     )
     return _with_digest(result)
 
@@ -293,7 +337,10 @@ def _load(path: Path, *, source: ConfigSource, repo: Path) -> ResolvedConfig:
     return _decode_config(parsed, source=source, repo=repo)
 
 
-def resolve_config(request: SnapshotCliRequest, repo: Path) -> ResolvedConfig:
+def resolve_config(
+    request: SnapshotCliRequest | DiffCliRequest,
+    repo: Path,
+) -> ResolvedConfig:
     """Resolve exactly one config source and then apply CLI overrides."""
     repository_path = repo / ".code-structure-viz.toml"
     if request.config_path is not None:

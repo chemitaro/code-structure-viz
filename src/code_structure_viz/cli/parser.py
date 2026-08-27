@@ -42,6 +42,23 @@ class SnapshotCliRequest:
     stdout_selector: StdoutSelector | None
 
 
+@dataclass(frozen=True, slots=True)
+class DiffCliRequest:
+    repo: Path
+    output_dir: Path
+    domain: Literal["python"]
+    config_path: Path | None
+    from_ref: str | None
+    to_ref: str | None
+    pr_target: str | None
+    upstream_depth_override: int | None
+    downstream_depth_override: int | None
+    max_changed_paths_override: int | None
+    max_entities_override: int | None
+    formats: tuple[OutputFormat, ...]
+    stdout_selector: StdoutSelector | None
+
+
 class CliUsageError(Exception):
     def __init__(self, value: Diagnostic) -> None:
         super().__init__(value.message)
@@ -315,5 +332,161 @@ def parse_cli(argv: Sequence[str]) -> SnapshotCliRequest:
         downstream_depth_override=downstream,
         formats=resolved_formats,
         max_entities_override=max_entities,
+        stdout_selector=stdout_selector,
+    )
+
+
+_DIFF_SINGLE_OPTIONS = frozenset(
+    {
+        "--repo",
+        "--output-dir",
+        "--domain",
+        "--config",
+        "--from",
+        "--to",
+        "--pr-target",
+        "--upstream-depth",
+        "--downstream-depth",
+        "--max-changed-paths",
+        "--max-entities",
+        "--stdout",
+    }
+)
+
+
+def _validate_diff_argv(argv: Sequence[str]) -> dict[str, list[tuple[int, int, str]]]:
+    if not argv or argv[0] != "diff":
+        raise _usage(DiagnosticCode.USAGE_GRAMMAR)
+    occurrences: dict[str, list[tuple[int, int, str]]] = {}
+    candidates: list[_UsageCandidate] = []
+    index = 1
+    while index < len(argv):
+        option = argv[index]
+        if option.startswith("--") and "=" in option:
+            candidates.append(_UsageCandidate(0, index, DiagnosticCode.USAGE_GRAMMAR))
+            index += 1
+            continue
+        if option not in _DIFF_SINGLE_OPTIONS and option != "--format":
+            candidates.append(_UsageCandidate(0, index, DiagnosticCode.USAGE_GRAMMAR))
+            index += 1
+            continue
+        if index + 1 >= len(argv) or argv[index + 1].startswith("--"):
+            candidates.append(
+                _UsageCandidate(
+                    3 if option == "--stdout" else 0,
+                    index,
+                    DiagnosticCode.USAGE_STDOUT_SYNTAX
+                    if option == "--stdout"
+                    else DiagnosticCode.USAGE_GRAMMAR,
+                    option if option == "--stdout" else None,
+                )
+            )
+            index += 1
+            continue
+        occurrences.setdefault(option, []).append((index, index + 1, argv[index + 1]))
+        index += 2
+
+    for option in _DIFF_SINGLE_OPTIONS:
+        values = occurrences.get(option, [])
+        for option_index, _value_index, _value in values[1:]:
+            candidates.append(
+                _UsageCandidate(1, option_index, DiagnosticCode.USAGE_DUPLICATE, option)
+            )
+    for option in ("--repo", "--output-dir", "--domain"):
+        if not occurrences.get(option):
+            candidates.append(_UsageCandidate(0, len(argv), DiagnosticCode.USAGE_GRAMMAR))
+    domain_values = occurrences.get("--domain", [])
+    if domain_values and domain_values[0][2] != "python":
+        candidates.append(_UsageCandidate(0, domain_values[0][1], DiagnosticCode.USAGE_GRAMMAR))
+    format_values = occurrences.get("--format", [])
+    seen_formats: set[str] = set()
+    for option_index, _value_index, value in format_values:
+        if value not in {"semantic-json", "plantuml"} or value in seen_formats:
+            candidates.append(_UsageCandidate(0, option_index, DiagnosticCode.USAGE_GRAMMAR))
+        seen_formats.add(value)
+    for option in ("--upstream-depth", "--downstream-depth"):
+        values = occurrences.get(option, [])
+        if values and _ASCII_DECIMAL.fullmatch(values[0][2]) is None:
+            candidates.append(_UsageCandidate(0, values[0][1], DiagnosticCode.USAGE_GRAMMAR))
+    for option in ("--max-changed-paths", "--max-entities"):
+        values = occurrences.get(option, [])
+        if values:
+            value = values[0][2]
+            if _ASCII_DECIMAL.fullmatch(value) is None or not value.strip("0"):
+                candidates.append(_UsageCandidate(0, values[0][1], DiagnosticCode.USAGE_GRAMMAR))
+    stdout_values = occurrences.get("--stdout", [])
+    if stdout_values:
+        option_index, _value_index, value = stdout_values[0]
+        try:
+            selector = _parse_stdout(value)
+        except CliUsageError:
+            candidates.append(_UsageCandidate(3, option_index, DiagnosticCode.USAGE_STDOUT_SYNTAX))
+        else:
+            resolved_formats = {item[2] for item in format_values} or {
+                "semantic-json",
+                "plantuml",
+            }
+            if isinstance(selector, DomainFormatSelector) and (
+                selector.domain != "python" or selector.format not in resolved_formats
+            ):
+                candidates.append(
+                    _UsageCandidate(4, option_index, DiagnosticCode.USAGE_STDOUT_COMPATIBILITY)
+                )
+    _candidate_error(candidates)
+    return occurrences
+
+
+def parse_diff_cli(argv: Sequence[str]) -> DiffCliRequest:
+    """Parse the closed Python ``diff`` command grammar."""
+    occurrences = _validate_diff_argv(argv)
+    values = {option: entries[0][2] for option, entries in occurrences.items()}
+    if values.get("--from") == "working-tree":
+        raise _usage(DiagnosticCode.USAGE_GRAMMAR)
+    formats_raw = [item[2] for item in occurrences.get("--format", [])]
+    resolved_formats: tuple[OutputFormat, ...]
+    if not formats_raw:
+        resolved_formats = ("semantic-json", "plantuml")
+    else:
+        resolved_formats = cast(
+            tuple[OutputFormat, ...],
+            tuple(value for value in ("semantic-json", "plantuml") if value in formats_raw),
+        )
+
+    def resolve_path(raw: str) -> Path:
+        path = Path(raw)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        return lexical_absolute(path)
+
+    stdout_selector = _parse_stdout(values["--stdout"]) if "--stdout" in values else None
+    return DiffCliRequest(
+        repo=resolve_path(values["--repo"]),
+        output_dir=resolve_path(values["--output-dir"]),
+        domain="python",
+        config_path=resolve_path(values["--config"]) if "--config" in values else None,
+        from_ref=values.get("--from"),
+        to_ref=values.get("--to"),
+        pr_target=values.get("--pr-target"),
+        upstream_depth_override=(
+            _parse_non_negative(values["--upstream-depth"])
+            if "--upstream-depth" in values
+            else None
+        ),
+        downstream_depth_override=(
+            _parse_non_negative(values["--downstream-depth"])
+            if "--downstream-depth" in values
+            else None
+        ),
+        max_changed_paths_override=(
+            _parse_positive(values["--max-changed-paths"])
+            if "--max-changed-paths" in values
+            else None
+        ),
+        max_entities_override=(
+            _parse_positive(values["--max-entities"])
+            if "--max-entities" in values
+            else None
+        ),
+        formats=resolved_formats,
         stdout_selector=stdout_selector,
     )

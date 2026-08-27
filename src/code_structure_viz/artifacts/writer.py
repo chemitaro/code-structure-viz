@@ -24,6 +24,9 @@ _FINAL_PATHS = frozenset(
     {
         "python.snapshot.semantic.json",
         "python.snapshot.puml",
+        "python.diff.semantic.json",
+        "python.diff.puml",
+        "file-changes.json",
         "run-manifest.json",
     }
 )
@@ -301,7 +304,7 @@ def _contains_private_paths(
         text = content.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         return False
-    if relative_path == "python.snapshot.puml":
+    if relative_path in {"python.snapshot.puml", "python.diff.puml"}:
         return any(_contains_private_path_token(text, path) for path in private_paths)
     try:
         value = json.loads(text)
@@ -324,6 +327,7 @@ def _valid_plantuml(content: bytes) -> bool:
         "@startuml",
         "@enduml",
         "title Python structure snapshot",
+        "title Python semantic diff",
         "left to right direction",
         "skinparam classAttributeIconSize 0",
         "hide empty members",
@@ -338,12 +342,31 @@ def _valid_plantuml(content: bytes) -> bool:
     }
     allowed_prefixes = (
         'note "不完全なsnapshot:',
+        'note "status: ',
+        'note "',
         'package "',
         '  note "classなし" as N_EMPTY_',
         '  class "',
         "    field ",
         "    property ",
         "    method ",
+        "    + ",
+        "    - ",
+        "    ~ ",
+        "    → ",
+        "    ? ",
+        "  class "+'"',
+        "  + ",
+        "  - ",
+        "  ~ ",
+        "  → ",
+        "  ? ",
+        "  note "+'"',
+        "  + added",
+        "  - removed",
+        "  ~ modified",
+        "  → moved",
+        "  ? unknown",
     )
     return all(
         line in allowed_exact
@@ -480,6 +503,21 @@ class OutputTransaction:
         self._descriptors[descriptor.path] = descriptor
         return descriptor
 
+    def stage_diff_payload(
+        self,
+        format_value: ArtifactFormat,
+        content: bytes,
+    ) -> ArtifactDescriptor:
+        if format_value not in {"semantic-json", "plantuml", "file-change-set"}:
+            raise _error(DiagnosticCode.INTERNAL_INVARIANT)
+        descriptor = ArtifactDescriptor.create_diff(format_value, content)
+        if descriptor.path in self._descriptors:
+            raise _error(DiagnosticCode.INTERNAL_INVARIANT)
+        self._validate_content(descriptor.path, content)
+        self._write(descriptor.path, content)
+        self._descriptors[descriptor.path] = descriptor
+        return descriptor
+
     def stage_manifest(self, content: bytes) -> None:
         if self._manifest_staged:
             raise _error(DiagnosticCode.INTERNAL_INVARIANT)
@@ -489,7 +527,7 @@ class OutputTransaction:
 
     @property
     def descriptors(self) -> tuple[ArtifactDescriptor, ...]:
-        rank = {"semantic-json": 0, "plantuml": 1}
+        rank = {"file-change-set": 0, "semantic-json": 1, "plantuml": 2}
         return tuple(
             sorted(
                 self._descriptors.values(),
@@ -612,7 +650,7 @@ class OutputTransaction:
             raise _error(DiagnosticCode.INTERNAL_INVARIANT)
         valid = (
             _valid_plantuml(content)
-            if relative_path == "python.snapshot.puml"
+            if relative_path in {"python.snapshot.puml", "python.diff.puml"}
             else _canonical_json_bytes(content)
         )
         if not valid:

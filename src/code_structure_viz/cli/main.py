@@ -2,14 +2,26 @@ from __future__ import annotations
 
 import signal
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
 from code_structure_viz import __version__
+from code_structure_viz.application.diff import DiffApplication
 from code_structure_viz.application.snapshot import SnapshotApplication
 from code_structure_viz.artifacts.streams import StderrEmitter, StdoutEmitter
-from code_structure_viz.cli.parser import CliUsageError, parse_cli
-from code_structure_viz.core.diagnostics import DiagnosticCode, diagnostic, encode_diagnostic_jsonl
+from code_structure_viz.cli.parser import (
+    CliUsageError,
+    DiffCliRequest,
+    SnapshotCliRequest,
+    parse_cli,
+    parse_diff_cli,
+)
+from code_structure_viz.core.diagnostics import (
+    DiagnosticCode,
+    diagnostic,
+    encode_diagnostic_jsonl,
+)
+from code_structure_viz.core.outcomes import RunOutcome
 
 _HELP = b"""usage: code-structure-viz snapshot \\
   --repo PATH --output-dir PATH --domain python [options]
@@ -32,6 +44,23 @@ def _write_stderr(value: bytes) -> None:
     sys.stderr.buffer.flush()
 
 
+def _run_application(
+    request: SnapshotCliRequest | DiffCliRequest,
+    *,
+    cancelled: Callable[[], bool],
+    artifacts_bound: Callable[[dict[str, bytes]], None],
+) -> RunOutcome:
+    if isinstance(request, DiffCliRequest):
+        return DiffApplication(
+            cancelled=cancelled,
+            artifacts_bound=artifacts_bound,
+        ).run(request)
+    return SnapshotApplication(
+        cancelled=cancelled,
+        artifacts_bound=artifacts_bound,
+    ).run(request)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = tuple(sys.argv[1:] if argv is None else argv)
     if arguments == ("--version",):
@@ -40,8 +69,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments == ("--help",):
         _write_stdout(_HELP)
         return 0
+    request: SnapshotCliRequest | DiffCliRequest
     try:
-        request = parse_cli(arguments)
+        if arguments and arguments[0] == "diff":
+            request = parse_diff_cli(arguments)
+        else:
+            request = parse_cli(arguments)
     except CliUsageError as exc:
         _write_stderr(encode_diagnostic_jsonl((exc.diagnostic,)))
         return 2
@@ -62,17 +95,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         try:
-            outcome = SnapshotApplication(
+            outcome = _run_application(
+                request,
                 cancelled=lambda: interrupted,
                 artifacts_bound=bind_artifacts,
-            ).run(request)
+            )
         except KeyboardInterrupt:
-            from code_structure_viz.core.outcomes import RunOutcome
-
             outcome = RunOutcome.interrupted((diagnostic(DiagnosticCode.INTERRUPTED),))
         except Exception:
-            from code_structure_viz.core.outcomes import RunOutcome
-
             outcome = RunOutcome.fatal((diagnostic(DiagnosticCode.INTERNAL_INVARIANT),))
 
         _write_stdout(

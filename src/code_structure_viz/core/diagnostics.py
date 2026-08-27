@@ -46,6 +46,9 @@ class DiagnosticCode(StrEnum):
     PY_TYPE_UNSUPPORTED = "CSV-PY-011"
     PY_CLASS_COLLISION = "CSV-PY-012"
     PY_FIELD_CONFLICT = "CSV-PY-013"
+    DIFF_ENDPOINT = "CSV-DIFF-001"
+    DIFF_CHANGED_PATH_BUDGET = "CSV-DIFF-002"
+    DIFF_FILE_CHANGE = "CSV-DIFF-003"
     INTERNAL_INVARIANT = "CSV-INTERNAL-001"
     INTERRUPTED = "CSV-INTERRUPT-001"
 
@@ -166,6 +169,15 @@ _SPECS: Final[dict[DiagnosticCode, _DiagnosticSpec]] = {
     DiagnosticCode.PY_FIELD_CONFLICT: _DiagnosticSpec(
         Severity.WARNING, True, "Conflicting field annotations were reduced to an unknown marker."
     ),
+    DiagnosticCode.DIFF_ENDPOINT: _DiagnosticSpec(
+        Severity.ERROR, False, "Comparison endpoint or implicit base could not be resolved safely."
+    ),
+    DiagnosticCode.DIFF_CHANGED_PATH_BUDGET: _DiagnosticSpec(
+        Severity.ERROR, False, "Changed path count exceeds the resolved comparison limit."
+    ),
+    DiagnosticCode.DIFF_FILE_CHANGE: _DiagnosticSpec(
+        Severity.ERROR, False, "Git changed-path metadata could not be read safely."
+    ),
     DiagnosticCode.INTERNAL_INVARIANT: _DiagnosticSpec(
         Severity.ERROR, False, "Internal snapshot contract invariant failed before publication."
     ),
@@ -200,6 +212,8 @@ _SAFE_CONFIG_KEYS: Final[frozenset[str]] = frozenset(
         "traversal.upstream_depth",
         "traversal.downstream_depth",
         "limits.max_entities",
+        "comparison.target_ref",
+        "comparison.upstream_ref",
     }
 )
 _RUN_CONTEXT_CODES: Final[frozenset[DiagnosticCode]] = frozenset(
@@ -221,6 +235,9 @@ _RUN_CONTEXT_CODES: Final[frozenset[DiagnosticCode]] = frozenset(
         DiagnosticCode.OUTPUT_INSIDE_REPO,
         DiagnosticCode.SOURCE_DRIFT,
         DiagnosticCode.SOURCE_NON_UTF8,
+        DiagnosticCode.DIFF_ENDPOINT,
+        DiagnosticCode.DIFF_CHANGED_PATH_BUDGET,
+        DiagnosticCode.DIFF_FILE_CHANGE,
         DiagnosticCode.INTERNAL_INVARIANT,
         DiagnosticCode.INTERRUPTED,
     }

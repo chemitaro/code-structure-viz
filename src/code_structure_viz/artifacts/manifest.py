@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -8,6 +9,7 @@ from code_structure_viz import __version__
 from code_structure_viz.adapters.python.model import PythonCoverage
 from code_structure_viz.adapters.python.semantic_json import coverage_value, target_value
 from code_structure_viz.cli.parser import (
+    DiffCliRequest,
     DomainFormatSelector,
     ManifestSelector,
     OutputFormat,
@@ -22,7 +24,7 @@ from code_structure_viz.semantic.canonical_json import encode_canonical_json
 from code_structure_viz.source.source_view import SourceView
 from code_structure_viz.source.targets import target_sort_key
 
-ArtifactFormat = Literal["semantic-json", "plantuml"]
+ArtifactFormat = Literal["semantic-json", "plantuml", "file-change-set"]
 
 _ARTIFACT_CONTRACT = {
     "semantic-json": (
@@ -32,6 +34,20 @@ _ARTIFACT_CONTRACT = {
     "plantuml": (
         "python.snapshot.puml",
         "text/vnd.plantuml; charset=utf-8",
+    ),
+}
+_DIFF_ARTIFACT_CONTRACT = {
+    "semantic-json": (
+        "python.diff.semantic.json",
+        "application/json",
+    ),
+    "plantuml": (
+        "python.diff.puml",
+        "text/vnd.plantuml; charset=utf-8",
+    ),
+    "file-change-set": (
+        "file-changes.json",
+        "application/json",
     ),
 }
 _FORMAT_RANK = {"semantic-json": 0, "plantuml": 1}
@@ -49,6 +65,18 @@ class ArtifactDescriptor:
     @classmethod
     def create(cls, format_value: ArtifactFormat, content: bytes) -> ArtifactDescriptor:
         path, media_type = _ARTIFACT_CONTRACT[format_value]
+        return cls(
+            path=path,
+            domain="python",
+            format=format_value,
+            media_type=media_type,
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )
+
+    @classmethod
+    def create_diff(cls, format_value: ArtifactFormat, content: bytes) -> ArtifactDescriptor:
+        path, media_type = _DIFF_ARTIFACT_CONTRACT[format_value]
         return cls(
             path=path,
             domain="python",
@@ -106,7 +134,7 @@ def _source_value(source_view: SourceView) -> dict[str, object]:
 
 
 def _config_value(config: ResolvedConfig) -> dict[str, object]:
-    return {
+    value: dict[str, object] = {
         "schema": config.schema,
         "source": config.source.value,
         "sha256": config.sha256,
@@ -131,6 +159,14 @@ def _config_value(config: ResolvedConfig) -> dict[str, object]:
             "max_entities": config.value_sources.max_entities.value,
         },
     }
+    if config.comparison.target_ref is not None or config.comparison.upstream_ref is not None:
+        resolved = value["resolved"]
+        assert isinstance(resolved, dict)
+        resolved["comparison"] = {
+            "target_ref": config.comparison.target_ref,
+            "upstream_ref": config.comparison.upstream_ref,
+        }
+    return value
 
 
 def _run_fingerprint(
@@ -240,3 +276,154 @@ class RunManifestBuilder:
 
 def artifact_format(value: OutputFormat) -> ArtifactFormat:
     return value
+
+
+class DiffManifestBuilder:
+    """Render the Python diff run manifest without changing snapshot schema."""
+
+    def render(
+        self,
+        *,
+        request: DiffCliRequest,
+        config: ResolvedConfig,
+        outcome: RunOutcome,
+        endpoints: object,
+        before_source: SourceView,
+        after_source: SourceView,
+        file_changes: object,
+        artifacts: tuple[ArtifactDescriptor, ...],
+        changed_path_budget: object | None = None,
+    ) -> bytes:
+        if len(outcome.domains) != 1 or outcome.manifest_relative_path != "run-manifest.json":
+            raise ValueError("diff manifest requires one Python domain")
+        domain = outcome.domains[0]
+        if isinstance(domain.coverage, PythonCoverage):
+            coverage: object | None = coverage_value(domain.coverage)
+        elif isinstance(domain.coverage, Mapping):
+            coverage = dict(domain.coverage)
+        else:
+            coverage = None
+        budget = domain.budget.to_json_value() if isinstance(domain.budget, EntityBudget) else None
+        endpoint_value = (
+            endpoints.provenance_value() if hasattr(endpoints, "provenance_value") else {}
+        )
+        file_change_value = (
+            file_changes.to_json_value() if hasattr(file_changes, "to_json_value") else None
+        )
+        if not isinstance(file_change_value, dict):
+            raise ValueError("diff manifest requires a file-change set")
+        ordered_artifacts = tuple(
+            sorted(
+                artifacts,
+                key=lambda item: (
+                    {"file-change-set": 0, "semantic-json": 1, "plantuml": 2}[item.format],
+                    item.path.encode("utf-8"),
+                ),
+            )
+        )
+        if any(item.format not in _DIFF_ARTIFACT_CONTRACT for item in ordered_artifacts):
+            raise ValueError("artifact descriptor violates the diff contract")
+        expected_domain_paths = tuple(
+            item.path for item in ordered_artifacts if item.format != "file-change-set"
+        )
+        if expected_domain_paths != domain.artifact_paths:
+            raise ValueError("domain artifact paths and diff descriptors do not match")
+        if not any(item.format == "file-change-set" for item in ordered_artifacts):
+            raise ValueError("diff manifest requires a file-change descriptor")
+        if any(
+            item.path != _DIFF_ARTIFACT_CONTRACT[item.format][0]
+            or item.media_type != _DIFF_ARTIFACT_CONTRACT[item.format][1]
+            for item in ordered_artifacts
+        ):
+            raise ValueError("artifact descriptor violates the diff contract")
+        domain_value: dict[str, object] = {
+            "domain": "python",
+            "status": domain.status.value,
+            "payload_available": domain.payload_available,
+            "entity_count": domain.entity_count,
+            "coverage": coverage,
+            "budget": budget,
+            "artifact_paths": list(domain.artifact_paths),
+            "diagnostics": [
+                item.to_json_value() for item in canonical_diagnostics(domain.diagnostics)
+            ],
+        }
+        if domain.status is DomainStatus.INCOMPLETE:
+            if domain.incomplete_kind is None:
+                raise ValueError("incomplete diff domain has no kind")
+            domain_value["incomplete_kind"] = domain.incomplete_kind.value
+        preimage = {
+            "schema": "code-structure-viz.run-fingerprint/v1",
+            "tool_version": __version__,
+            "adapter_version": "python-ast/1",
+            "config_sha256": config.sha256,
+            "command": "diff",
+            "formats": list(request.formats),
+            "stdout_selector": _selector_value(request.stdout_selector),
+            "endpoints": endpoint_value,
+            "sources": {
+                "before": _source_value(before_source),
+                "after": _source_value(after_source),
+            },
+            "file_change_set": file_change_value,
+            "changed_path_budget": (
+                changed_path_budget.to_json_value()
+                if hasattr(changed_path_budget, "to_json_value")
+                else None
+            ),
+            "run_status": outcome.status.value,
+        }
+        run_fingerprint = hashlib.sha256(encode_canonical_json(preimage)).hexdigest()
+        value = {
+            "type": "run_manifest",
+            "schema": "code-structure-viz.run-manifest/v1",
+            "tool": {"name": "code-structure-viz", "version": __version__},
+            "contracts": {
+                "config": "code-structure-viz.config/v1",
+                "diagnostic": "code-structure-viz.diagnostic/v1",
+                "source_view": "code-structure-viz.source-view/v1",
+                "semantic": "code-structure-viz.semantic/v1",
+                "manifest": "code-structure-viz.run-manifest/v1",
+                "run_summary": "code-structure-viz.run-summary/v1",
+                "stdout_result": "code-structure-viz.stdout-result/v1",
+                "plantuml": "code-structure-viz.plantuml/python/v1",
+                "file_change_set": "code-structure-viz.file-change-set/v1",
+            },
+            "adapters": [{"domain": "python", "name": "python-ast", "version": "1"}],
+            "command": {
+                "name": "diff",
+                "domain": request.domain,
+                "formats": list(request.formats),
+                "stdout_selector": _selector_value(request.stdout_selector),
+            },
+            "request": {
+                "from": request.from_ref,
+                "to": request.to_ref,
+                "pr_target": request.pr_target,
+                "upstream_depth": config.traversal.upstream_depth,
+                "downstream_depth": config.traversal.downstream_depth,
+            },
+            "comparison": endpoint_value,
+            "sources": {
+                "before": _source_value(before_source),
+                "after": _source_value(after_source),
+            },
+            "file_change_set": file_change_value,
+            "changed_path_budget": (
+                changed_path_budget.to_json_value()
+                if hasattr(changed_path_budget, "to_json_value")
+                else None
+            ),
+            "config": _config_value(config),
+            "run": {
+                "status": outcome.status.value,
+                "exit_code": outcome.exit_code,
+                "fingerprint": run_fingerprint,
+            },
+            "domains": [domain_value],
+            "artifacts": [item.to_json_value() for item in ordered_artifacts],
+            "diagnostics": [
+                item.to_json_value() for item in canonical_diagnostics(outcome.diagnostics)
+            ],
+        }
+        return encode_canonical_json(value)
