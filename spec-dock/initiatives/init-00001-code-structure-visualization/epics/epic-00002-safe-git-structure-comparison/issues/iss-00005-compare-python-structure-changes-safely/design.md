@@ -5,7 +5,7 @@ ID: "iss-00005"
 関連GitHub: ["#5"]
 package_sequence_key: "ISSUE-02"
 状態: "draft"
-最終更新: "2026-08-27"
+最終更新: "2026-08-28"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -113,8 +113,8 @@ NFD/NFC 変更を含む異なる raw spelling は `GitPathIdentityCollisionFatal
 `CSV-DIFF-003`・exit 1・Artifact なしで停止する。raw spelling は内部照合だけに使い、public SourceView、
 manifest、diagnostic、file-change payloadへ新しい raw field を追加しない。
 
-index stage 0のmode/objectは `git ls-files --stage -z --cached`、skip-worktree flagは
-`git ls-files -t -z --cached`からraw identityごとに照合する。skip-worktree pathが作業木に欠落した場合の
+index stage 0のmode/objectは `git ls-files --stage -z --cached`、skip-worktreeとassume-unchanged flagは
+`git ls-files -v -z --cached`からraw identityごとに照合する。skip-worktree pathが作業木に欠落した場合の
 inventoryは `materialization_state: "sparse-unavailable"`、`availability: "unavailable"` とし、通常の削除
 `D`やGit blobの再構築へ変換しない。skip flagのない欠落tracked pathだけを `absent`/`D` とする。
 
@@ -130,6 +130,18 @@ nested binding は nested path と `.git` の各 component に symlink がなく
 filter、hook、任意 helperは実行しない。HEAD tree、index metadata、untracked path、通常ファイルの raw bytes
 hashを比較し、HEADがindex objectと異なる、tracked/staged dirty、またはuntracked dirtyなら、親側の同じpathを
 一件の `M` としてFileChangeSetへ渡す。nestedの内容、秘密、stderr、binding identityは公開しない。
+
+通常ファイルのraw bytesをGitのworking-tree dirty判定の代替として使用する前に、内部の
+`GitlinkComparisonProfile`を構築する。profileはnested repositoryのlocal/worktree configを
+`git config --no-includes`、属性を`git check-attr -z --all`、index flagを`git ls-files -v`で取得し、
+`config_digest`、`attributes_digest`、`index_flags_digest`、`core.filemode`を含むcanonical digestを持つ。
+`GIT_ATTR_NOSYSTEM=1`を固定環境へ追加し、include、外部attributes、`core.autocrlf`/`core.eol`、
+`filter.*`/`diff.*`、`ident`、`working-tree-encoding`、未指定でないtext系属性、skip-worktree/
+assume-unchanged、未対応mode、`core.symlinks=false`下のsymlinkはraw比較を許可しない。
+profileがclosed-world条件を満たさない場合はraw bytesを読まず、初期観測を`CSV-DIFF-003`で停止する。
+許可された場合も`core.filemode=false`で無視するのはregular fileの`100644`/`100755`差だけとし、
+file typeの変更やsymlinkのtarget変更はdirtyとする。profile digest、tracked raw-content digest、
+untracked path集合は公開しない内部state fingerprintへ含め、公開直前の変化は`CSV-SOURCE-001`へ変換する。
 
 ### 4.2 implicit candidate provenance
 

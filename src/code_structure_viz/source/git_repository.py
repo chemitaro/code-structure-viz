@@ -15,6 +15,7 @@ from typing import BinaryIO, Final, Protocol, cast
 
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
 from code_structure_viz.core.path_safety import has_symlink_component
+from code_structure_viz.semantic.canonical_json import encode_canonical_json
 
 _OBJECT_ID: Final[re.Pattern[bytes]] = re.compile(rb"(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})\n")
 _GIT_VERSION_PREFIX: Final[re.Pattern[bytes]] = re.compile(rb"git version ([0-9]+)\.([0-9]+)")
@@ -24,6 +25,7 @@ _FIXED_ENV: Final[dict[str, str]] = {
     "GIT_OPTIONAL_LOCKS": "0",
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_ATTR_NOSYSTEM": "1",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_PAGER": "cat",
     "PAGER": "cat",
@@ -33,6 +35,14 @@ _FIXED_ENV: Final[dict[str, str]] = {
 }
 _MAX_GITLINK_METADATA_BYTES: Final[int] = 64 * 1024
 _MAX_GITLINK_FILE_BYTES: Final[int] = 64 * 1024 * 1024
+_GITLINK_PROFILE_SCHEMA: Final = "code-structure-viz.gitlink-comparison-profile/v1"
+_GITLINK_CONFIG_PATTERN: Final = (
+    r"^(core\.(autocrlf|attributesfile|eol|filemode|symlinks)|"
+    r"filter\..*|diff\..*|include.*)$"
+)
+_GITLINK_ATTRIBUTE_NAMES: Final[frozenset[str]] = frozenset(
+    {"text", "crlf", "eol", "ident", "working-tree-encoding", "filter"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +249,8 @@ class GitIndexEntry:
     stage: int
     raw_text: str | None = None
     skip_worktree: bool = False
+    assume_unchanged: bool = False
+    index_flag: str = "H"
 
     def __post_init__(self) -> None:
         if self.raw_text is None:
@@ -261,6 +273,9 @@ class GitlinkWorktreeState:
     tracked_content_dirty: bool
     untracked_content_dirty: bool
     binding_identity: str | None = None
+    comparison_profile_digest: str = ""
+    tracked_worktree_digest: str = ""
+    untracked_paths: tuple[GitPathIdentity, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.initialized or self.current_head is None or not self.binding_identity:
@@ -280,11 +295,41 @@ class GitlinkWorktreeState:
 
 
 @dataclass(frozen=True, slots=True)
+class GitlinkComparisonProfile:
+    """Closed-world evidence needed before raw nested worktree comparison."""
+
+    config_digest: str
+    attributes_digest: str
+    index_flags_digest: str
+    raw_comparison_allowed: bool
+    core_filemode: bool = True
+
+    @property
+    def digest(self) -> str:
+        value = {
+            "schema": _GITLINK_PROFILE_SCHEMA,
+            "config_digest": self.config_digest,
+            "attributes_digest": self.attributes_digest,
+            "index_flags_digest": self.index_flags_digest,
+            "raw_comparison_allowed": self.raw_comparison_allowed,
+            "core_filemode": self.core_filemode,
+        }
+        return hashlib.sha256(encode_canonical_json(value)).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
 class _GitlinkTreeEntry:
     identity: GitPathIdentity
     object_id: str
     mode: str
     kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class _GitIndexFlag:
+    marker: str
+    skip_worktree: bool
+    assume_unchanged: bool
 
 
 class UnrepresentableGitPathFatal(GitReadError):
@@ -533,7 +578,9 @@ class GitRepositoryReader:
                 item.mode,
                 item.stage,
                 item.raw_text,
-                flags[item.identity.raw_text],
+                flags[item.identity.raw_text].skip_worktree,
+                flags[item.identity.raw_text].assume_unchanged,
+                flags[item.identity.raw_text].marker,
             )
             for item in values
         ]
@@ -544,27 +591,44 @@ class GitRepositoryReader:
             )
         )
 
-    def _enumerate_index_flags(self, expected_counts: Mapping[str, int]) -> dict[str, bool]:
-        result = self._git("ls-files", "-t", "-z", "--cached", "--")
+    def _enumerate_index_flags(
+        self,
+        expected_counts: Mapping[str, int],
+        *,
+        location: Path | None = None,
+        git_dir: Path | None = None,
+    ) -> dict[str, _GitIndexFlag]:
+        arguments = ("ls-files", "-v", "-z", "--cached", "--")
+        result = (
+            self._git(*arguments)
+            if location is None
+            else self._git_at(location, *arguments, git_dir=git_dir)
+        )
         if result.returncode != 0:
             raise _path_protocol_fatal()
         fields = result.stdout.split(b"\0")
         if fields and fields[-1] == b"":
             fields.pop()
-        values: dict[str, bool] = {}
+        values: dict[str, _GitIndexFlag] = {}
         counts: dict[str, int] = {}
         identities: list[GitPathIdentity] = []
         for field in fields:
-            if len(field) < 3 or field[1:2] != b" " or field[:1] not in b"HSMRCK?":
+            if len(field) < 3 or field[1:2] != b" " or field[:1] not in b"HhSsMmRrCcKk?":
                 raise _path_protocol_fatal()
             identity = _decode_git_identity(field[2:])
             counts[identity.raw_text] = counts.get(identity.raw_text, 0) + 1
             if counts[identity.raw_text] > expected_counts.get(identity.raw_text, 0):
                 raise _path_protocol_fatal()
-            skip_worktree = field[:1] == b"S"
-            if identity.raw_text in values and values[identity.raw_text] != skip_worktree:
+            marker = field[:1].decode("ascii")
+            flag = _GitIndexFlag(
+                marker,
+                marker in {"S", "s"},
+                marker in {"h", "s"},
+            )
+            previous = values.get(identity.raw_text)
+            if previous is not None and previous != flag:
                 raise _path_protocol_fatal()
-            values[identity.raw_text] = skip_worktree
+            values[identity.raw_text] = flag
             identities.append(identity)
         _validate_path_identity_injectivity(identities)
         if counts != dict(expected_counts):
@@ -656,11 +720,6 @@ class GitRepositoryReader:
             head_tree = self._enumerate_gitlink_tree(nested, git_dir, current_head)
             nested_index = self._enumerate_gitlink_index(nested, git_dir)
             staged_dirty = self._gitlink_index_differs_from_head(head_tree, nested_index)
-            tracked_dirty = self._gitlink_worktree_differs(
-                nested,
-                nested_index,
-                object_format,
-            )
             untracked = self._git_at(
                 nested,
                 "ls-files",
@@ -672,18 +731,34 @@ class GitRepositoryReader:
             )
             if untracked.returncode != 0:
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
-            _decode_identity_list(untracked.stdout)
+            untracked_entries = _decode_identity_list(untracked.stdout)
+            profile = self._gitlink_comparison_profile(
+                nested,
+                git_dir,
+                head_tree,
+                nested_index,
+                untracked_entries,
+            )
+            tracked_dirty, tracked_worktree_digest = self._gitlink_worktree_differs(
+                nested,
+                nested_index,
+                object_format,
+                profile,
+            )
             if self._binding_identity(git_dir) != binding_identity:
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
             states.append(
                 GitlinkWorktreeState(
-                    identity,
-                    entry.object_id,
-                    current_head,
-                    True,
-                    tracked_dirty or staged_dirty,
-                    bool(untracked.stdout.rstrip(b"\0")),
-                    binding_identity,
+                    identity=identity,
+                    index_object_id=entry.object_id,
+                    current_head=current_head,
+                    initialized=True,
+                    tracked_content_dirty=tracked_dirty or staged_dirty,
+                    untracked_content_dirty=bool(untracked_entries),
+                    binding_identity=binding_identity,
+                    comparison_profile_digest=profile.digest,
+                    tracked_worktree_digest=tracked_worktree_digest,
+                    untracked_paths=untracked_entries,
                 )
             )
         return tuple(
@@ -695,6 +770,179 @@ class GitRepositoryReader:
                 ),
             )
         )
+
+    def _gitlink_comparison_profile(
+        self,
+        location: Path,
+        git_dir: Path,
+        tree: tuple[_GitlinkTreeEntry, ...],
+        index: tuple[GitIndexEntry, ...],
+        untracked: tuple[GitPathIdentity, ...],
+    ) -> GitlinkComparisonProfile:
+        config_records, config_allowed, core_filemode, core_symlinks = self._gitlink_config_profile(
+            location,
+            git_dir,
+        )
+        identities = _unique_gitlink_identities(
+            tuple(item.identity for item in tree)
+            + tuple(item.identity for item in index)
+            + untracked
+        )
+        attributes_records, attributes_allowed = self._gitlink_attributes_profile(
+            location,
+            git_dir,
+            identities,
+            config_records,
+        )
+        index_flags_digest = _gitlink_index_flags_digest(index)
+        config_digest = _gitlink_config_digest(config_records)
+        attributes_digest = _gitlink_attributes_digest(attributes_records, identities)
+        raw_comparison_allowed = config_allowed and attributes_allowed
+        if any(item.stage != 0 for item in index):
+            raw_comparison_allowed = False
+        if any(item.skip_worktree or item.assume_unchanged for item in index):
+            raw_comparison_allowed = False
+        if any(item.index_flag != "H" for item in index):
+            raw_comparison_allowed = False
+        supported_modes = {"100644", "100755", "120000"}
+        if any(item.mode not in supported_modes for item in tree) or any(
+            item.mode not in supported_modes for item in index
+        ):
+            raw_comparison_allowed = False
+        if not core_symlinks and (
+            any(item.mode == "120000" for item in tree)
+            or any(item.mode == "120000" for item in index)
+        ):
+            raw_comparison_allowed = False
+        profile = GitlinkComparisonProfile(
+            config_digest=config_digest,
+            attributes_digest=attributes_digest,
+            index_flags_digest=index_flags_digest,
+            raw_comparison_allowed=raw_comparison_allowed,
+            core_filemode=bool(core_filemode),
+        )
+        if not profile.raw_comparison_allowed:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        return profile
+
+    def _gitlink_config_profile(
+        self,
+        location: Path,
+        git_dir: Path,
+    ) -> tuple[tuple[tuple[str, str, str], ...], bool, bool, bool]:
+        records: list[tuple[str, str, str]] = []
+        try:
+            worktree_config_present = _is_regular_file(git_dir / "config.worktree")
+        except OSError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        for scope in ("local", "worktree"):
+            result = self._git_at(
+                location,
+                "config",
+                "--null",
+                "--no-includes",
+                f"--{scope}",
+                "--get-regexp",
+                _GITLINK_CONFIG_PATTERN,
+                git_dir=git_dir,
+            )
+            if result.returncode not in {0, 1} or result.stderr:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+            if result.returncode == 0:
+                try:
+                    parsed = _parse_git_config_records(result.stdout)
+                except ValueError as error:
+                    raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+                if scope == "local" or worktree_config_present:
+                    records.extend((scope, key, value) for key, value in parsed)
+
+        by_scope_key: dict[str, dict[str, list[str]]] = {"local": {}, "worktree": {}}
+        for scope, key, value in records:
+            by_scope_key.setdefault(scope, {}).setdefault(key, []).append(value)
+        by_key: dict[str, list[str]] = {}
+        for key in {key for _scope, key, _value in records}:
+            worktree_values = by_scope_key["worktree"].get(key, [])
+            by_key[key] = worktree_values or by_scope_key["local"].get(key, [])
+        allowed = True
+        core_filemode = True
+        core_symlinks = True
+        for key in ("core.autocrlf", "core.eol", "core.filemode", "core.symlinks"):
+            if any(len(by_scope_key[scope].get(key, [])) > 1 for scope in by_scope_key):
+                allowed = False
+        autocrlf = [
+            value
+            for scope in by_scope_key
+            for value in by_scope_key[scope].get("core.autocrlf", [])
+        ]
+        if autocrlf and any(_parse_git_bool(value) is not False for value in autocrlf):
+            allowed = False
+        if any(by_scope_key[scope].get("core.eol") for scope in by_scope_key):
+            allowed = False
+        filemode = by_key.get("core.filemode")
+        if filemode:
+            parsed_filemode = _parse_git_bool(filemode[0])
+            if parsed_filemode is None:
+                allowed = False
+            else:
+                core_filemode = parsed_filemode
+        symlinks = by_key.get("core.symlinks")
+        if symlinks:
+            parsed_symlinks = _parse_git_bool(symlinks[0])
+            if parsed_symlinks is None:
+                allowed = False
+            else:
+                core_symlinks = parsed_symlinks
+        if any(
+            key.startswith(("filter.", "diff.", "include")) or key == "core.attributesfile"
+            for _scope, key, _value in records
+        ):
+            allowed = False
+        return tuple(sorted(records)), allowed, core_filemode, core_symlinks
+
+    def _gitlink_attributes_profile(
+        self,
+        location: Path,
+        git_dir: Path,
+        identities: tuple[GitPathIdentity, ...],
+        config_records: tuple[tuple[str, str, str], ...],
+    ) -> tuple[tuple[tuple[str, str, str], ...], bool]:
+        try:
+            external_attributes = _gitlink_external_attributes_source(git_dir)
+        except OSError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        if external_attributes:
+            return (), False
+        if any(
+            key.startswith("include") or key == "core.attributesfile"
+            for _scope, key, _value in config_records
+        ):
+            return (), False
+        try:
+            _validate_gitlink_attributes_files(location, identities)
+        except OSError as error:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+        records: list[tuple[str, str, str]] = []
+        allowed = True
+        for identity in identities:
+            result = self._git_at(
+                location,
+                "check-attr",
+                "-z",
+                "--all",
+                "--",
+                identity.raw_text,
+                git_dir=git_dir,
+            )
+            if result.returncode != 0 or result.stderr:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+            try:
+                parsed = parse_check_attr_z(result.stdout, identity.raw_text)
+            except ValueError as error:
+                raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+            records.extend(parsed)
+            if any(not _attribute_is_raw_safe(attribute, value) for _, attribute, value in parsed):
+                allowed = False
+        return tuple(sorted(records)), allowed
 
     def _git_at(
         self,
@@ -901,6 +1149,31 @@ class GitRepositoryReader:
             except (UnicodeDecodeError, ValueError) as error:
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
         _validate_path_identity_injectivity(item.identity for item in values)
+        expected_flag_counts: dict[str, int] = {}
+        for item in values:
+            expected_flag_counts[item.identity.raw_text] = (
+                expected_flag_counts.get(item.identity.raw_text, 0) + 1
+            )
+        flags = self._enumerate_index_flags(
+            expected_flag_counts,
+            location=location,
+            git_dir=git_dir,
+        )
+        if set(flags) != set(expected_flag_counts):
+            raise _path_protocol_fatal()
+        values = [
+            GitIndexEntry(
+                item.path,
+                item.object_id,
+                item.mode,
+                item.stage,
+                item.raw_text,
+                flags[item.identity.raw_text].skip_worktree,
+                flags[item.identity.raw_text].assume_unchanged,
+                flags[item.identity.raw_text].marker,
+            )
+            for item in values
+        ]
         return tuple(
             sorted(
                 values,
@@ -938,21 +1211,48 @@ class GitRepositoryReader:
         nested: Path,
         index: tuple[GitIndexEntry, ...],
         object_format: str,
-    ) -> bool:
+        profile: GitlinkComparisonProfile,
+    ) -> tuple[bool, str]:
+        if not profile.raw_comparison_allowed:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        observations: list[dict[str, str | None]] = []
+        dirty = False
         for entry in index:
             if entry.stage != 0:
-                return True
+                dirty = True
+                continue
             if entry.mode == "160000":
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
             try:
                 mode, digest = _read_nested_worktree_entry(nested, entry.identity, object_format)
             except OSError as error:
                 raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE) from error
+            observations.append(
+                {
+                    "raw_path": entry.identity.raw_text,
+                    "index_mode": entry.mode,
+                    "index_object_id": entry.object_id,
+                    "worktree_mode": mode,
+                    "worktree_object_id": digest,
+                }
+            )
             if mode is None:
-                return True
-            if mode != entry.mode or digest != entry.object_id:
-                return True
-        return False
+                dirty = True
+                continue
+            if not _raw_modes_equal(entry.mode, mode, profile.core_filemode) or (
+                digest != entry.object_id
+            ):
+                dirty = True
+        ordered_observations = tuple(sorted(observations, key=_gitlink_observation_key))
+        tracked_digest = hashlib.sha256(
+            encode_canonical_json(
+                {
+                    "schema": "code-structure-viz.gitlink-worktree-content/v1",
+                    "entries": ordered_observations,
+                }
+            )
+        ).hexdigest()
+        return dirty, tracked_digest
 
     @staticmethod
     def _binding_identity(git_dir: Path) -> str:
@@ -1117,6 +1417,235 @@ class GitRepositoryReader:
         if result.returncode != 0:
             raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
         return result.stdout
+
+
+def _parse_git_config_records(payload: bytes) -> tuple[tuple[str, str], ...]:
+    """Parse ``git config --null --get-regexp`` without accepting lossy records."""
+    if len(payload) > _MAX_GITLINK_METADATA_BYTES:
+        raise ValueError("Git config output exceeds the bounded profile limit")
+    if not payload:
+        return ()
+    if not payload.endswith(b"\0"):
+        raise ValueError("Git config output is not NUL terminated")
+    values: list[tuple[str, str]] = []
+    for record in payload[:-1].split(b"\0"):
+        if record.count(b"\n") != 1:
+            raise ValueError("Git config record is not a key/value tuple")
+        raw_key, raw_value = record.split(b"\n", 1)
+        if not raw_key or b"\r" in raw_key or b"\0" in raw_key:
+            raise ValueError("Git config key is malformed")
+        if b"\r" in raw_value or b"\0" in raw_value:
+            raise ValueError("Git config value is malformed")
+        try:
+            key = raw_key.decode("ascii", errors="strict").lower()
+            value = raw_value.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise ValueError("Git config record is not valid text") from error
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in key):
+            raise ValueError("Git config key contains a control character")
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
+            raise ValueError("Git config value contains a control character")
+        values.append((key, value))
+    return tuple(values)
+
+
+def _parse_git_bool(value: str) -> bool | None:
+    normalized = value.strip().lower()
+    if normalized in {"true", "yes", "on", "1"}:
+        return True
+    if normalized in {"false", "no", "off", "0"}:
+        return False
+    return None
+
+
+def parse_check_attr_z(payload: bytes, expected_path: str) -> tuple[tuple[str, str, str], ...]:
+    """Strictly parse ``git check-attr -z --all`` path/attribute/value tuples."""
+    if len(payload) > _MAX_GITLINK_METADATA_BYTES:
+        raise ValueError("Git attributes output exceeds the bounded profile limit")
+    if not payload:
+        return ()
+    if not payload.endswith(b"\0"):
+        raise ValueError("Git attributes output is not NUL terminated")
+    fields = payload[:-1].split(b"\0")
+    if len(fields) % 3 != 0:
+        raise ValueError("Git attributes output is not a tuple stream")
+    values: list[tuple[str, str, str]] = []
+    for offset in range(0, len(fields), 3):
+        raw_path, raw_attribute, raw_value = fields[offset : offset + 3]
+        if not raw_path or not raw_attribute:
+            raise ValueError("Git attributes tuple is missing a field")
+        try:
+            path = raw_path.decode("utf-8", errors="strict")
+            attribute = raw_attribute.decode("ascii", errors="strict")
+            value = raw_value.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise ValueError("Git attributes tuple is not valid text") from error
+        if path != expected_path:
+            raise ValueError("Git attributes path does not match the requested identity")
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in attribute):
+            raise ValueError("Git attribute name contains a control character")
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
+            raise ValueError("Git attribute value contains a control character")
+        values.append((path, attribute, value))
+    return tuple(values)
+
+
+def _attribute_is_raw_safe(attribute: str, value: str) -> bool:
+    if attribute not in _GITLINK_ATTRIBUTE_NAMES:
+        return False
+    if attribute in {"text", "crlf", "ident", "filter"}:
+        return value in {"unset", "unspecified"}
+    return value == "unspecified"
+
+
+def _gitlink_external_attributes_source(git_dir: Path) -> bool:
+    info = git_dir / "info"
+    try:
+        info_stat = info.lstat()
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(info_stat.st_mode) or not stat.S_ISDIR(info_stat.st_mode):
+        raise OSError("nested Git attributes directory is unsafe")
+    path = info / "attributes"
+    try:
+        value = path.lstat()
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(value.st_mode) or not stat.S_ISREG(value.st_mode):
+        raise OSError("nested Git attributes source is unsafe")
+    return True
+
+
+def _is_regular_file(path: Path) -> bool:
+    try:
+        value = path.lstat()
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(value.st_mode) or not stat.S_ISREG(value.st_mode):
+        raise OSError("nested Git config source is unsafe")
+    return True
+
+
+def _validate_gitlink_attributes_files(
+    location: Path,
+    identities: Iterable[GitPathIdentity],
+) -> None:
+    candidates: set[Path] = {location / ".gitattributes"}
+    for identity in identities:
+        parts = PurePosixPath(identity.raw_text).parts
+        for depth in range(len(parts)):
+            candidates.add(location.joinpath(*parts[:depth], ".gitattributes"))
+    for path in sorted(candidates, key=lambda item: item.as_posix().encode("utf-8")):
+        if has_symlink_component(path):
+            raise OSError("nested .gitattributes path is unsafe")
+        try:
+            value = path.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(value.st_mode) or not stat.S_ISREG(value.st_mode):
+            raise OSError("nested .gitattributes source is unsafe")
+
+
+def _unique_gitlink_identities(
+    identities: Iterable[GitPathIdentity],
+) -> tuple[GitPathIdentity, ...]:
+    values: dict[str, GitPathIdentity] = {}
+    for identity in identities:
+        previous = values.get(identity.raw_text)
+        if previous is not None and previous != identity:
+            raise _fatal(DiagnosticCode.DIFF_FILE_CHANGE)
+        values[identity.raw_text] = identity
+    result = tuple(values.values())
+    _validate_path_identity_injectivity(result)
+    return tuple(
+        sorted(
+            result,
+            key=lambda item: (
+                item.canonical_path.as_posix().encode("utf-8"),
+                item.raw_text.encode("utf-8"),
+            ),
+        )
+    )
+
+
+def _gitlink_config_digest(records: Iterable[tuple[str, str, str]]) -> str:
+    return hashlib.sha256(
+        encode_canonical_json(
+            {
+                "schema": "code-structure-viz.gitlink-config-observation/v1",
+                "records": [
+                    {"scope": scope, "key": key, "value": value}
+                    for scope, key, value in sorted(records)
+                ],
+            }
+        )
+    ).hexdigest()
+
+
+def _gitlink_attributes_digest(
+    records: Iterable[tuple[str, str, str]],
+    identities: Iterable[GitPathIdentity],
+) -> str:
+    ordered_identities = tuple(
+        sorted(
+            identities,
+            key=lambda item: (
+                item.canonical_path.as_posix().encode("utf-8"),
+                item.raw_text.encode("utf-8"),
+            ),
+        )
+    )
+    return hashlib.sha256(
+        encode_canonical_json(
+            {
+                "schema": "code-structure-viz.gitlink-attributes-observation/v1",
+                "paths": [item.raw_text for item in ordered_identities],
+                "records": [
+                    {"path": path, "attribute": attribute, "value": value}
+                    for path, attribute, value in sorted(records)
+                ],
+            }
+        )
+    ).hexdigest()
+
+
+def _gitlink_observation_key(item: dict[str, str | None]) -> bytes:
+    return str(item["raw_path"]).encode("utf-8")
+
+
+def _gitlink_index_flags_digest(index: Iterable[GitIndexEntry]) -> str:
+    values = sorted(
+        (
+            {
+                "raw_path": item.identity.raw_text,
+                "stage": item.stage,
+                "mode": item.mode,
+                "object_id": item.object_id,
+                "skip_worktree": item.skip_worktree,
+                "assume_unchanged": item.assume_unchanged,
+                "index_flag": item.index_flag,
+            }
+            for item in index
+        ),
+        key=lambda item: (
+            str(item["raw_path"]).encode("utf-8"),
+            cast(int, item["stage"]),
+        ),
+    )
+    return hashlib.sha256(
+        encode_canonical_json(
+            {
+                "schema": "code-structure-viz.gitlink-index-flags/v1",
+                "entries": values,
+            }
+        )
+    ).hexdigest()
+
+
+def _raw_modes_equal(expected: str, observed: str, filemode: bool) -> bool:
+    if expected == observed:
+        return True
+    return not filemode and {expected, observed} <= {"100644", "100755"}
 
 
 def _is_safe_relative_git_path(value: str) -> bool:

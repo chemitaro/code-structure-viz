@@ -3,7 +3,7 @@
 ID: "iss-00005"
 タイトル: "Compare Python Structure Changes Safely"
 関連GitHub: ["#5"]
-最終更新: "2026-08-27"
+最終更新: "2026-08-28"
 依存: ["requirement.md", "design.md", "plan.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -23,6 +23,12 @@ manifest、closed stdout selector を扱う。
 既存 snapshot pipeline は維持し、diff は CodeStructureViz 所有の endpoint/source/diff/application/
 renderer modules として独立させた。`pyclassuml`、`tree-git-diff`、SQLAlchemy、Next.js、HTML/Tailscale、
 target repository の Git mutation、auto fetch/checkout は導入していない。
+
+gitlink の tracked worktree 判定は、raw bytesを無条件にGit statusの代替とせず、nested config、attributes、
+index flagsを閉世界で検証する内部 `GitlinkComparisonProfile` を通過した場合だけ行う。変換・filter・外部
+attributes・特殊index flagなどの意味を証明できない状態は初期観測をfatalとし、`core.filemode=false`の
+regular `100644`/`100755`差だけを例外的に無視する。profile/state digestは公開契約へ追加せず、source drift
+検知の内部証拠として扱う。
 
 ## Strict review response
 
@@ -46,6 +52,15 @@ canonical mapへの吸収、(3) nested gitlink観測でtextconv/clean/process he
 production acceptance trace不足が確定した。Blue側の分析で、(1)〜(3)は実装 remediation、(4)は依存する
 test remediationとし、要件・公開schema変更や人間判断は不要とした。実装可能なTDD handoffをLuna MAX coder
 へ渡し、今回の修正で4件すべてを閉じる方針とした。
+
+その後の継続 Final Quality Gate（reviewed SHA `f61b72646ac61ead0cddee6901cc545466dce38a`）では、P1-037
+（raw worktree blob/mode equalityをGit clean/dirty semanticsとして扱うこと）とP1-039（既にdirtyなfixtureを
+使ったためobserver誤判定を検出できないacceptance）が追加で確定した。Red/Blueの継続分析では両者を同じ
+根本原因（Git変換・属性・index flagを観測せずraw比較を許可する設計）から派生する実装remediationと、
+それに依存するtest remediationへ分けた。`GitlinkComparisonProfile`、profile/state fingerprint、clean
+baseline fixture、autocrlf/eol/filter/index flag/core.filemodeのproduction回帰を実装し、今回の候補では
+この2件を閉じる検証へ進めている。まだFinal Quality Gateの合格を意味するものではなく、push後の同一SHA
+に対する継続レビュー結果だけを最終判定とする。
 
 このReportに記載する `7daf0372f101dd992335a379e1fee6686a92bf15` および
 `202e8a8bf9cf1f9c3073f0864e7d0b340a688a46` は履歴receiptであり、現行SHAではない。後続commitを含む
@@ -81,7 +96,16 @@ P1 は次のように修正した。
   検証済みrootへ限定した。`rev-parse`、`ls-tree`、`ls-files` とdescriptor-based raw file hashだけで
   nested stateを観測し、`git diff`/`status`、external diff、textconv、clean/process filter、任意helperを
   実行しない。初期の未読取は `CSV-DIFF-003`、公開直前の未読取は `CSV-SOURCE-001` として公開を停止する。
-- 上記4 P1を実際の `diff` CLIで回帰する acceptance（cross-side transition、missing/uninitialized/external
+- raw worktree比較の前に、nested local/worktree config、`.gitattributes`の`check-attr -z --all`結果、
+  index identity flagを閉世界profileへ束ねた。include/外部attributes、autocrlf/eol、filter/diff、変換系
+  attributes、skip-worktree/assume-unchanged、未対応mode、symlink semanticsを含むprofileは比較を許可せず、
+  初期`CSV-DIFF-003`で停止する。許可profileでは`core.filemode=false`のregular exec-bit差だけを無視し、
+  profile digestとtracked raw-content digestを内部stateへ含めた。
+- gitlink acceptanceは親OIDとnested HEAD/tree/indexが一致するclean baselineを別fixtureで作り、親側が既に
+  dirtyなためにobserver誤判定を隠さないようにした。tracked/untracked dirty、autocrlf true/input、
+  `.gitattributes` eol、skip-worktree/assume-unchanged、core.filemode=false、profile driftをproduction CLIで
+  回帰し、unsafe profileは`CSV-DIFF-003`・exit 1・公開なし、clean baselineは変更なしを確認した。
+- 先行4 P1を実際の `diff` CLIで回帰する acceptance（cross-side transition、missing/uninitialized/external
   pointer、final unreadable、helper sentinel）と identity/complete-only unitを追加し、no-publication境界と
   親側gitlink一件 `M` を検証した。
 - unified hunk helper は payload/line bounded、file-header/hunk state 分離、quoted UTF-8 path
@@ -134,9 +158,10 @@ composability）は review-response に記録し、今回の acceptance gate で
 
 今回のP1修正を含む作業木での独立再検証receiptは次のとおりである。
 
-- focused source unit: **72 passed**
-- acceptance/contract/security: **57 passed**
-- full suite: **482 passed, 1 skipped**
+- Gitlink source unit: **97 passed**
+- Python diff acceptance: **56 passed**
+- read-only security: **1 passed**
+- full suite: **546 passed, 1 skipped**
 - `uv run ruff format --check .`: **成功**
 - `uv run ruff check .`: **成功**
 - `uv run mypy src tests`: **成功**
@@ -144,7 +169,7 @@ composability）は review-response に記録し、今回の acceptance gate で
 - `python3 ./spec-dock/scripts/spec-dock validate`: **成功**
 - `git diff --check`: **成功**
 
-このreceiptは今回のcandidate treeに対する主担当側の独立検証であり、レビューへ提出するcommitの厳密な
+このreceiptはprofile remediationを含むcandidate treeに対する主担当側の独立検証であり、レビューへ提出するcommitの厳密な
 local/upstream/GitHub SHA一致はpush後に改めて取得する。Final Quality Gateの判定も、同じreviewer conversation
 でそのpush済みSHAを対象に再実行した結果だけを採用する。
 

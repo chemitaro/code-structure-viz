@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tests.helpers.diff import (
+    create_clean_gitlink_repository,
     create_gitlink_repository,
     create_raw_path_collision_repository,
     create_raw_path_transition_repository,
@@ -391,6 +392,130 @@ def test_dirty_gitlink_contents_are_one_superproject_change(
     ] == [("M", "src/component", "src/component")]
 
 
+def test_clean_gitlink_has_no_superproject_change(tmp_path: Path) -> None:
+    repository, parent_head, _nested, _nested_head = create_clean_gitlink_repository(tmp_path)
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert file_changes["files"] == []
+
+
+@pytest.mark.parametrize("dirty_kind", ("tracked", "untracked"))
+def test_clean_gitlink_content_state_is_one_superproject_change(
+    tmp_path: Path,
+    dirty_kind: str,
+) -> None:
+    repository, parent_head, nested, _nested_head = create_clean_gitlink_repository(tmp_path)
+    if dirty_kind == "tracked":
+        (nested / "README").write_text("nested dirty\n", encoding="utf-8")
+    else:
+        (nested / "untracked.txt").write_text("nested untracked\n", encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert [
+        (item["status"], item["old_path"], item["new_path"]) for item in file_changes["files"]
+    ] == [("M", "src/component", "src/component")]
+
+
+def test_gitlink_core_filemode_false_ignores_regular_exec_bit(tmp_path: Path) -> None:
+    repository, parent_head, nested, _nested_head = create_clean_gitlink_repository(tmp_path)
+    subprocess.run(
+        ("git", "-C", str(nested), "config", "core.filemode", "false"),
+        check=True,
+        capture_output=True,
+    )
+    (nested / "README").chmod(0o755)
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    file_changes = json.loads((output / "file-changes.json").read_text(encoding="utf-8"))
+    assert file_changes["files"] == []
+
+
+@pytest.mark.parametrize(
+    "configuration",
+    (
+        ("config", "core.autocrlf", "true"),
+        ("config", "core.autocrlf", "input"),
+        ("attributes", ".gitattributes", "README eol=crlf\n"),
+    ),
+)
+def test_gitlink_unsafe_text_conversion_profile_is_fatal(
+    tmp_path: Path,
+    configuration: tuple[str, str, str],
+) -> None:
+    repository, parent_head, nested, _nested_head = create_clean_gitlink_repository(tmp_path)
+    kind, key_or_path, value = configuration
+    if kind == "config":
+        subprocess.run(
+            ("git", "-C", str(nested), "config", key_or_path, value),
+            check=True,
+            capture_output=True,
+        )
+    else:
+        (nested / key_or_path).write_text(value, encoding="utf-8")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("flag", ("--skip-worktree", "--assume-unchanged"))
+def test_gitlink_index_identity_flags_are_fatal(tmp_path: Path, flag: str) -> None:
+    repository, parent_head, nested, _nested_head = create_clean_gitlink_repository(tmp_path)
+    subprocess.run(
+        ("git", "-C", str(nested), "update-index", flag, "--", "README"),
+        check=True,
+        capture_output=True,
+    )
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
+    assert not output.exists()
+
+
+def test_gitlink_profile_drift_before_publication_is_source_fatal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, parent_head, nested, _nested_head = create_clean_gitlink_repository(tmp_path)
+    counter = tmp_path / "gitlink-head-count"
+    proxy = _git_proxy(
+        tmp_path,
+        "if sys.argv[1:3] == ['-C', "
+        f"{str(nested)!r}] and sys.argv[-3:] == ['rev-parse', '--verify', 'HEAD^{{commit}}']:\n"
+        f"    counter = pathlib.Path({str(counter)!r})\n"
+        "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "    counter.write_text(str(count))\n"
+        "    if count == 2:\n"
+        f"        subprocess.run(({'git'!r}, '-C', {str(nested)!r}, 'config', "
+        "'core.autocrlf', 'true'), stdin=subprocess.DEVNULL, capture_output=True, check=True)",
+    )
+    monkeypatch.setenv("PATH", f"{proxy}{os.pathsep}{os.environ['PATH']}")
+
+    output = tmp_path / "output"
+    result = run_diff_cli(repository, output, "--from", parent_head)
+
+    assert result.returncode == 1
+    assert b"CSV-SOURCE-001" in result.stderr
+    assert not output.exists()
+
+
 def test_gitlink_state_drift_before_publication_is_fatal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -552,8 +677,10 @@ def test_nested_gitlink_observer_never_runs_textconv_or_clean_process_filter(
     output = tmp_path / "output"
     result = run_diff_cli(repository, output, "--from", parent_head)
 
-    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert result.returncode == 1
+    assert b"CSV-DIFF-003" in result.stderr
     assert not sentinel.exists()
+    assert not output.exists()
 
 
 def test_materialized_gitlink_gitfile_pointer_within_superproject_git_is_supported(

@@ -5,7 +5,7 @@ ID: "iss-00005"
 関連GitHub: ["#5"]
 package_sequence_key: "ISSUE-02"
 状態: "draft"
-最終更新: "2026-08-27"
+最終更新: "2026-08-28"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -49,6 +49,8 @@ production acceptance trace に P1 gap が見つかった。以下の remediatio
 | I02-PLAN-017 | cross-side raw Git path identityをcanonical map/budget前に検証し、NFC/NFD transitionをfail-closed | `source/git_repository.py`, `source/freezer.py`, `source/source_view.py`, `source/file_changes.py`, `application/diff.py`, `tests/unit/source/test_file_changes.py`, `tests/acceptance/python/test_diff_cli.py` | 完了 |
 | I02-PLAN-018 | gitlinkをcomplete-only・validated binding・helper-free read-only observerへ再構成し、初期/最終診断を分離 | `source/git_repository.py`, `source/source_view.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py`, `tests/acceptance/python/test_diff_cli.py` | 完了 |
 | I02-PLAN-019 | P1境界（raw transition、missing/uninitialized/external gitlink、nested helper sentinel、final unreadable）をproduction CLIで回帰 | `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_git_repository.py`, `tests/unit/source/test_file_changes.py`, `tests/unit/source/test_source_view.py` | 完了 |
+| I02-PLAN-020 | Gitの変換・属性・index flagを閉世界profileで検証し、raw worktree比較を安全な条件だけに限定。profile/tracked digestを内部stateへ束ねる | `source/git_repository.py`, `source/source_view.py`, `application/diff.py`, `tests/unit/source/test_git_repository.py`, `tests/acceptance/python/test_diff_cli.py` | 完了 |
+| I02-PLAN-021 | clean baselineを使ったgitlink acceptanceと、autocrlf/eol/filter/index flag/core.filemode/profile driftのfail-closed回帰を追加 | `tests/helpers/diff.py`, `tests/acceptance/python/test_diff_cli.py`, `tests/unit/source/test_git_repository.py` | 完了 |
 
 ## 3. 実装詳細
 
@@ -151,6 +153,17 @@ unavailable `stdout-result/v1`、selector 無指定の `run-summary/v1` を stde
   nested textconv/clean/process helper sentinel、cross-side NFC/NFD transitionを実際の `diff` CLI 経路で
   検証し、全て no-publication または安全な親側一件 `M` を確認した。unit では identity invariant、complete-only
   state、同一 raw spelling許可も固定した。
+- I02-PLAN-020 では、nested repositoryのlocal/worktree config、`.gitattributes`、index identity flagを
+  `--no-includes`、`check-attr -z --all`、`ls-files -v`のmetadata観測だけでprofile化した。external
+  include/attributes、autocrlf/eol、filter/diff、変換系attribute、skip-worktree/assume-unchanged、未対応
+  modeをclosed-worldで拒否し、raw比較を許可するprofile digestを内部stateへ含めた。`core.filemode=false`
+  はregular `100644`/`100755`差だけを無視し、type/symlink差はdirtyとして扱う。profile不成立は初期
+  `CSV-DIFF-003`、公開直前のprofile/tracked digest driftは`CSV-SOURCE-001`へ変換し、public schemaは変更しない。
+- I02-PLAN-021 では、親OIDとnested HEAD/tree/indexが一致するclean gitlinkを基準fixtureとして分離し、
+  clean baselineが既に親側をdirtyにしているためにobserver誤判定を隠すことがないようにした。production
+  CLIでtracked/untracked dirty、core.filemode=false、autocrlf true/input、`.gitattributes` eol、
+  skip-worktree/assume-unchanged、profile driftを回帰し、許可された差分は親側一件`M`、unsafe profileは
+  `CSV-DIFF-003`・exit 1・公開なしであることを確認した。
 
 ## 4. 受入れテストとコマンド
 
@@ -187,11 +200,11 @@ git diff --check
 | I02-REQ-007 | I02-DES-007 | I02-PLAN-007 | `test_file_changes.py`, `test_diff_cli.py` |
 | I02-REQ-008 | I02-DES-008 | I02-PLAN-008 | `test_stdout_selector.py`, `test_diff_fail_closed.py` |
 | I02-REQ-009 | I02-DES-009 | I02-PLAN-013 | `test_diff_cli.py`, `test_git_repository.py`, `test_source_view.py`, `test_file_changes.py` |
-| I02-REQ-010 | I02-DES-010 | I02-PLAN-014 | `test_diff_cli.py`, `test_git_repository.py`, `test_file_changes.py` |
+| I02-REQ-010 | I02-DES-010 | I02-PLAN-014, 018〜021 | `test_diff_cli.py`, `test_git_repository.py`, `test_file_changes.py` |
 | I02-REQ-011 | I02-DES-011 | I02-PLAN-015 | `test_diff_cli.py`, `test_json_schemas.py` |
 
 P1 remediation は I02-REQ-009 → I02-DES-009 → I02-PLAN-017、I02-REQ-010 → I02-DES-010 →
-I02-PLAN-018/019 の経路で trace し、public schema versionは変更しない。
+I02-PLAN-018〜021 の経路で trace し、public schema versionは変更しない。
 
 Downstream Issue は `docs/contracts/source-view-v1.md`、`docs/contracts/file-change-set-v1.md`、
 `docs/contracts/python-semantic-v1.md`、`docs/contracts/run-manifest-v1.md`、`docs/contracts/stdout-v1.md`

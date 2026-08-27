@@ -80,6 +80,9 @@ class SourceInventoryEntry:
     worktree_dirty: bool = False
     tracked_content_dirty: bool = False
     untracked_content_dirty: bool = False
+    gitlink_profile_digest: str | None = None
+    gitlink_worktree_digest: str | None = None
+    gitlink_untracked_paths: tuple[GitPathIdentity, ...] = ()
 
     def __post_init__(self) -> None:
         GitPathIdentity(self.raw_path, self.path)
@@ -104,6 +107,9 @@ class SourceInventoryEntry:
             "worktree_dirty": self.worktree_dirty,
             "tracked_content_dirty": self.tracked_content_dirty,
             "untracked_content_dirty": self.untracked_content_dirty,
+            "gitlink_profile_digest": self.gitlink_profile_digest,
+            "gitlink_worktree_digest": self.gitlink_worktree_digest,
+            "gitlink_untracked_paths": [item.raw_text for item in self.gitlink_untracked_paths],
         }
 
 
@@ -739,6 +745,9 @@ class SourceViewBuilder:
                             gitlink_state.dirty,
                             gitlink_state.tracked_content_dirty,
                             gitlink_state.untracked_content_dirty,
+                            gitlink_state.comparison_profile_digest,
+                            gitlink_state.tracked_worktree_digest,
+                            gitlink_state.untracked_paths,
                         )
                     )
                     continue

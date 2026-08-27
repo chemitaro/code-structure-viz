@@ -110,6 +110,24 @@ def create_gitlink_repository(tmp_path: Path) -> tuple[Path, str, Path, str]:
     return repository, parent_head, nested, nested_head
 
 
+def create_clean_gitlink_repository(tmp_path: Path) -> tuple[Path, str, Path, str]:
+    """Create a clean parent/gitlink pair whose parent OID matches nested HEAD."""
+    repository = tmp_path / "repo"
+    nested = repository / "src" / "component"
+    (repository / "src").mkdir(parents=True)
+    nested.mkdir()
+    _git(repository, "init", "--quiet", "--initial-branch=main")
+    _git(nested, "init", "--quiet", "--initial-branch=main")
+    (nested / "README").write_text("nested clean\n", encoding="utf-8")
+    _git(nested, "add", ".")
+    _git(nested, "commit", "--quiet", "--message=before", env=_commit_env())
+    nested_head = _head(nested)
+    (repository / "src" / "app.py").write_text("class Order:\n    amount: int\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "--quiet", "--message=parent", env=_commit_env())
+    return repository, _head(repository), nested, nested_head
+
+
 def create_raw_path_collision_repository(tmp_path: Path) -> tuple[Path, str, str]:
     """Create a commit tree containing distinct NFC/NFD spellings of one path."""
     repository = tmp_path / "repo"

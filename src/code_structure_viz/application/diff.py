@@ -316,12 +316,12 @@ class DiffApplication:
             transaction.stage_manifest(manifest)
             self._checkpoint()
             if endpoints.after.kind is EndpointKind.WORKING_TREE:
-                current_head = reader.resolve_head_state()
-                current_entries = reader.enumerate_path_entries()
-                current_index_entries = reader.enumerate_index_entries()
-                current_untracked = reader.enumerate_untracked_entries()
-                current_unmerged = reader.enumerate_unmerged_entries()
                 try:
+                    current_head = reader.resolve_head_state()
+                    current_entries = reader.enumerate_path_entries()
+                    current_index_entries = reader.enumerate_index_entries()
+                    current_untracked = reader.enumerate_untracked_entries()
+                    current_unmerged = reader.enumerate_unmerged_entries()
                     current_gitlink_states = reader.enumerate_gitlink_states(current_index_entries)
                 except GitInterruptedError:
                     raise

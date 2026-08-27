@@ -95,3 +95,11 @@ uninitialized の値へ縮退させず、開始時は `CSV-DIFF-003`、公開直
 nested 観測は固定環境で明示した git directory/work treeへ束縛し、`rev-parse`、`ls-tree`、`ls-files` と raw
 worktree bytes の read-only 検証だけを行う。`git diff`、`git status`、external diff、textconv、clean/process
 filter、hook、任意 helper は実行しない。nested bytes、stderr、binding identity は manifestへ出力しない。
+
+raw worktree bytesを比較できるのは、内部のclosed-world `GitlinkComparisonProfile`が成立した場合だけである。
+profileは`--no-includes`で取得したlocal/worktree config、`check-attr -z --all`の属性結果、`ls-files -v`の
+index flagをcanonical digestへまとめる。external include/attributes、autocrlf/eol、filter/diff、変換系属性、
+skip-worktree/assume-unchanged、未対応mode、symlink semanticsを含むprofileは安全側へ倒して初期
+`CSV-DIFF-003`とする。許可されたprofileでも`core.filemode=false`が無視できるのはregular `100644`/`100755`
+差だけであり、type/symlink差はdirtyである。profile digestとtracked raw-content digestは内部fingerprintだけに
+使い、公開直前のprofile/state不一致は`CSV-SOURCE-001`としてmanifestを公開しない。

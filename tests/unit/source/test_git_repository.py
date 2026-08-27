@@ -9,6 +9,7 @@ from code_structure_viz.source.git_repository import (
     CommandResult,
     Commit,
     GitIndexEntry,
+    GitlinkComparisonProfile,
     GitPathIdentity,
     GitPathIdentityCollisionFatal,
     GitReadError,
@@ -16,6 +17,13 @@ from code_structure_viz.source.git_repository import (
     SubprocessRunner,
     Unborn,
     UnrepresentableGitPathFatal,
+    _attribute_is_raw_safe,
+    _git_blob_digest,
+    _GitlinkTreeEntry,
+    _parse_git_bool,
+    _parse_git_config_records,
+    _raw_modes_equal,
+    parse_check_attr_z,
 )
 
 
@@ -65,6 +73,7 @@ def test_resolve_head_state_accepts_full_sha1_and_uses_fixed_read_only_command(
             "GIT_OPTIONAL_LOCKS",
             "GIT_CONFIG_NOSYSTEM",
             "GIT_CONFIG_GLOBAL",
+            "GIT_ATTR_NOSYSTEM",
             "GIT_TERMINAL_PROMPT",
             "GIT_PAGER",
             "PAGER",
@@ -76,6 +85,7 @@ def test_resolve_head_state_accepts_full_sha1_and_uses_fixed_read_only_command(
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_ATTR_NOSYSTEM": "1",
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_PAGER": "cat",
         "PAGER": "cat",
@@ -116,6 +126,7 @@ def test_git_child_environment_drops_repository_config_object_and_trace_injectio
             "GIT_OPTIONAL_LOCKS",
             "GIT_CONFIG_NOSYSTEM",
             "GIT_CONFIG_GLOBAL",
+            "GIT_ATTR_NOSYSTEM",
             "GIT_TERMINAL_PROMPT",
             "GIT_PAGER",
             "PAGER",
@@ -361,7 +372,7 @@ def test_index_inventory_preserves_raw_spelling_and_skip_worktree_flag(
     assert entries[0].skip_worktree is True
     assert [call[0][5:] for call in runner.calls] == [
         ("ls-files", "--stage", "-z", "--cached", "--"),
-        ("ls-files", "-t", "-z", "--cached", "--"),
+        ("ls-files", "-v", "-z", "--cached", "--"),
     ]
 
 
@@ -391,6 +402,337 @@ def test_index_flag_protocol_rejects_malformed_or_duplicate_records(
         GitRepositoryReader(repo, runner=runner).enumerate_index_entries()
 
     assert caught.value.diagnostic.code.value == "CSV-INTERNAL-001"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        ("true", True),
+        ("YES", True),
+        ("on", True),
+        ("1", True),
+        ("false", False),
+        ("NO", False),
+        ("off", False),
+        ("0", False),
+    ),
+)
+def test_git_bool_parser_accepts_only_supported_boolean_spellings(
+    value: str,
+    expected: bool,
+) -> None:
+    assert _parse_git_bool(value) is expected
+
+
+@pytest.mark.parametrize("value", ("input", "maybe", "", "2"))
+def test_git_bool_parser_rejects_malformed_or_enum_values(value: str) -> None:
+    assert _parse_git_bool(value) is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"core.filemode\nfalse",
+        b"core.filemode\nfalse\0malformed-record\0",
+        b"core.filemode\nfalse\xff\0",
+    ),
+)
+def test_git_config_null_parser_rejects_malformed_records(payload: bytes) -> None:
+    with pytest.raises(ValueError):
+        _parse_git_config_records(payload)
+
+
+def test_gitlink_config_profile_accepts_explicit_safe_values(tmp_path: Path) -> None:
+    location = tmp_path / "nested"
+    git_dir = tmp_path / "git"
+    location.mkdir()
+    git_dir.mkdir()
+    runner = ScriptedRunner(
+        [
+            _result(0, b"core.autocrlf\nfalse\0core.filemode\nfalse\0"),
+            _result(1),
+        ]
+    )
+
+    profile = GitRepositoryReader(location, runner=runner)._gitlink_config_profile(
+        location,
+        git_dir,
+    )
+
+    assert profile[1:] == (True, False, True)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"core.autocrlf\ninput\0",
+        b"core.autocrlf\nmaybe\0",
+        b"core.eol\nlf\0",
+        b"core.filemode\nmaybe\0",
+        b"filter.sentinel\nclean helper\0",
+        b"include.path\n/tmp/outside\0",
+        b"core.filemode\nfalse\0core.filemode\ntrue\0",
+    ),
+)
+def test_gitlink_config_profile_rejects_unsafe_or_malformed_values(
+    tmp_path: Path,
+    payload: bytes,
+) -> None:
+    location = tmp_path / "nested"
+    git_dir = tmp_path / "git"
+    location.mkdir()
+    git_dir.mkdir()
+    runner = ScriptedRunner([_result(0, payload), _result(1)])
+
+    profile = GitRepositoryReader(location, runner=runner)._gitlink_config_profile(
+        location,
+        git_dir,
+    )
+
+    assert profile[1] is False
+
+
+def test_check_attr_null_parser_accepts_strict_known_tuples() -> None:
+    payload = b"README\0text\0unspecified\0README\0eol\0unspecified\0"
+
+    assert parse_check_attr_z(payload, "README") == (
+        ("README", "text", "unspecified"),
+        ("README", "eol", "unspecified"),
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"README\0text\0unspecified",
+        b"README\0text\0",
+        b"README\0text\0unspecified\0README\0",
+        b"\0text\0set\0",
+        b"README\0\0set\0",
+        b"other\0text\0set\0",
+        b"README\xff\0text\0set\0",
+        b"README\0text\xff\0set\0",
+    ),
+)
+def test_check_attr_null_parser_rejects_malformed_or_missing_tuples(
+    payload: bytes,
+) -> None:
+    with pytest.raises(ValueError):
+        parse_check_attr_z(payload, "README")
+
+
+def test_unknown_check_attr_is_not_raw_safe() -> None:
+    parsed = parse_check_attr_z(b"README\0unknown\0set\0", "README")
+
+    assert parsed == (("README", "unknown", "set"),)
+    assert _attribute_is_raw_safe(*parsed[0][1:]) is False
+
+
+def test_gitlink_external_attributes_source_is_unsafe_without_running_git(
+    tmp_path: Path,
+) -> None:
+    location = tmp_path / "nested"
+    git_dir = tmp_path / "git"
+    location.mkdir()
+    (git_dir / "info").mkdir(parents=True)
+    (git_dir / "info" / "attributes").write_text("README text\n", encoding="utf-8")
+    runner = ScriptedRunner([])
+    reader = GitRepositoryReader(location, runner=runner)
+    identity = GitPathIdentity("README", PurePosixPath("README"))
+
+    attributes = reader._gitlink_attributes_profile(location, git_dir, (identity,), ())
+
+    assert attributes == ((), False)
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value", "expected"),
+    (
+        ("text", "unset", True),
+        ("crlf", "unset", True),
+        ("ident", "unset", True),
+        ("filter", "unset", True),
+        ("text", "unspecified", True),
+        ("eol", "unspecified", True),
+        ("working-tree-encoding", "unspecified", True),
+        ("eol", "unset", False),
+        ("text", "set", False),
+        ("filter", "sentinel", False),
+        ("unknown", "unspecified", False),
+    ),
+)
+def test_gitlink_attribute_raw_safety_is_closed_world(
+    attribute: str,
+    value: str,
+    expected: bool,
+) -> None:
+    assert _attribute_is_raw_safe(attribute, value) is expected
+
+
+def test_gitlink_unsafe_profile_is_rejected_before_raw_reads(tmp_path: Path) -> None:
+    reader = GitRepositoryReader(tmp_path, runner=ScriptedRunner([]))
+    profile = GitlinkComparisonProfile("config", "attributes", "flags", False)
+
+    with pytest.raises(GitReadError) as caught:
+        reader._gitlink_worktree_differs(tmp_path, (), "sha1", profile)
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+
+
+@pytest.mark.parametrize(
+    "entry",
+    (
+        GitIndexEntry(PurePosixPath("README"), "a" * 40, "100644", 1),
+        GitIndexEntry(
+            PurePosixPath("README"),
+            "a" * 40,
+            "100644",
+            0,
+            skip_worktree=True,
+            index_flag="S",
+        ),
+        GitIndexEntry(
+            PurePosixPath("README"),
+            "a" * 40,
+            "100644",
+            0,
+            assume_unchanged=True,
+            index_flag="h",
+        ),
+    ),
+)
+def test_gitlink_profile_rejects_stage_and_index_identity_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    entry: GitIndexEntry,
+) -> None:
+    reader = GitRepositoryReader(tmp_path, runner=ScriptedRunner([]))
+    monkeypatch.setattr(
+        reader,
+        "_gitlink_config_profile",
+        lambda *_arguments: ((), True, True, True),
+    )
+    monkeypatch.setattr(
+        reader,
+        "_gitlink_attributes_profile",
+        lambda *_arguments: ((), True),
+    )
+
+    with pytest.raises(GitReadError) as caught:
+        reader._gitlink_comparison_profile(tmp_path, tmp_path, (), (entry,), ())
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+
+
+def test_gitlink_profile_rejects_other_index_markers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = GitPathIdentity("README", PurePosixPath("README"))
+    entry = GitIndexEntry(identity.path, "a" * 40, "100644", 0, identity.raw_text, index_flag="K")
+    reader = GitRepositoryReader(tmp_path, runner=ScriptedRunner([]))
+    monkeypatch.setattr(
+        reader,
+        "_gitlink_config_profile",
+        lambda *_arguments: ((), True, True, True),
+    )
+    monkeypatch.setattr(
+        reader,
+        "_gitlink_attributes_profile",
+        lambda *_arguments: ((), True),
+    )
+
+    with pytest.raises(GitReadError) as caught:
+        reader._gitlink_comparison_profile(tmp_path, tmp_path, (), (entry,), ())
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+
+
+def test_gitlink_profile_rejects_symlink_mode_when_core_symlinks_is_false(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = GitPathIdentity("README", PurePosixPath("README"))
+    entry = GitIndexEntry(identity.path, "a" * 40, "120000", 0, identity.raw_text)
+    tree = (_GitlinkTreeEntry(identity, "a" * 40, "120000", "blob"),)
+    reader = GitRepositoryReader(tmp_path, runner=ScriptedRunner([]))
+    monkeypatch.setattr(
+        reader,
+        "_gitlink_config_profile",
+        lambda *_arguments: ((), True, True, False),
+    )
+    monkeypatch.setattr(
+        reader,
+        "_gitlink_attributes_profile",
+        lambda *_arguments: ((), True),
+    )
+
+    with pytest.raises(GitReadError) as caught:
+        reader._gitlink_comparison_profile(tmp_path, tmp_path, tree, (entry,), ())
+
+    assert caught.value.diagnostic.code.value == "CSV-DIFF-003"
+
+
+def test_gitlink_filemode_false_ignores_only_regular_exec_bit_and_type_changes(
+    tmp_path: Path,
+) -> None:
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    path = nested / "README"
+    content = b"payload"
+    path.write_bytes(content)
+    path.chmod(0o755)
+    entry = GitIndexEntry(
+        PurePosixPath("README"),
+        _git_blob_digest(content, "sha1"),
+        "100644",
+        0,
+    )
+    profile = GitlinkComparisonProfile("config", "attributes", "flags", True, False)
+    reader = GitRepositoryReader(tmp_path, runner=ScriptedRunner([]))
+
+    dirty, _digest = reader._gitlink_worktree_differs(nested, (entry,), "sha1", profile)
+    assert dirty is False
+    assert _raw_modes_equal("100644", "100755", False) is True
+    assert _raw_modes_equal("100644", "120000", False) is False
+
+    path.unlink()
+    path.symlink_to("payload")
+    dirty, _digest = reader._gitlink_worktree_differs(nested, (entry,), "sha1", profile)
+    assert dirty is True
+
+
+def test_gitlink_profile_digest_is_deterministic_and_detects_drift() -> None:
+    first = GitlinkComparisonProfile("config", "attributes", "flags", True, False)
+    same = GitlinkComparisonProfile("config", "attributes", "flags", True, False)
+    changed = GitlinkComparisonProfile("changed", "attributes", "flags", True, False)
+    changed_mode = GitlinkComparisonProfile("config", "attributes", "flags", True, True)
+
+    assert first.digest == same.digest
+    assert first.digest != changed.digest
+    assert first.digest != changed_mode.digest
+
+
+def test_gitlink_profile_commands_are_bounded_metadata_only(tmp_path: Path) -> None:
+    location = tmp_path / "nested"
+    git_dir = tmp_path / "git"
+    location.mkdir()
+    git_dir.mkdir()
+    identity = GitPathIdentity("README", PurePosixPath("README"))
+    runner = ScriptedRunner([_result(1), _result(1), _result(0)])
+    reader = GitRepositoryReader(location, runner=runner)
+
+    reader._gitlink_config_profile(location, git_dir)
+    reader._gitlink_attributes_profile(location, git_dir, (identity,), ())
+
+    commands = [call[0] for call in runner.calls]
+    assert all("status" not in command for command in commands)
+    assert all("diff" not in command for command in commands)
+    assert all("hash-object" not in command for command in commands)
+    assert all("--path" not in command for command in commands)
+    assert all("--no-includes" in command for command in commands[:2])
+    assert "check-attr" in commands[2]
 
 
 def test_commit_tree_rejects_distinct_raw_spellings_with_one_nfc_identity(

@@ -28,3 +28,8 @@ Git reader が保持する raw UTF-8 path spelling と NFC canonical path は内
 同一 source または cross-side で異なる raw spelling が同じ canonical pathへ収束する場合、mapやbudgetの
 前に `CSV-DIFF-003` の run fatal とし、どちらか一方を採用した FileChangeSetを公開しない。同一 raw spelling
 の再観測は許可するが、raw spelling自体はこの public schemaへ追加しない。
+
+mode `160000` のgitlinkはnested sourceへ展開せず、親側の同一path一件へ集約する。tracked/staged/untracked
+ dirtyの観測には、Gitの変換・属性・index flagを閉世界で検証した内部profileが必要であり、profileが成立しない
+場合はraw bytesを比較して成功扱いせず、初期観測を`CSV-DIFF-003`、公開直前のstate driftを`CSV-SOURCE-001`
+としてrun fatalにする。profileやnested content digestはこのpublic schemaへ追加しない。
