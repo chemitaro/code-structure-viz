@@ -81,9 +81,16 @@ def create_unmerged_repository(
         stdin=subprocess.DEVNULL,
         capture_output=True,
         check=False,
+        env=_commit_env(),
     )
     if merge.returncode == 0:
         raise AssertionError("fixture merge unexpectedly succeeded")
+    unmerged = subprocess.check_output(
+        ("git", "-C", str(repository), "ls-files", "-u", "--"),
+        env=_commit_env(),
+    )
+    if not unmerged:
+        raise AssertionError("fixture merge failed without creating unmerged index entries")
     return repository, base
 
 
