@@ -127,10 +127,10 @@ application.diff / semantic.diff -X-> adapters.sqlalchemy in this Issue
 | `docs/contracts/stdout-v1.md` | existing contract | SQLAlchemy selector/summary/result matrixを追加する。 |
 | `tests/unit/cli/test_parser.py` | existing tests | SQLAlchemy domain/target/selector、SQLAlchemy diff rejection、usage priorityを追加する。 |
 | `tests/unit/core/test_budget.py` | existing tests | domain-specific budget diagnosticを追加する。 |
-| `tests/unit/core/test_diagnostics.py` | existing tests | SQLAlchemy code cardinality/context/orderを追加する。 |
+| `tests/unit/core/test_diagnostics.py` | existing tests | SQLAlchemy code cardinality/context/orderに加え、distinct occurrence symbolを持つ同一lineの`CSV-SA-009`が`canonical_diagnostics`で保持され、same symbolの再発見だけがdedupeされることを追加する。 |
 | `tests/unit/core/test_outcomes.py` | existing tests | required domainとimpossible cross-domain stateを追加する。 |
 | `tests/unit/artifacts/test_manifest.py` | existing tests | SQLAlchemy snapshot manifestとPython exact regressionを追加する。 |
-| `tests/unit/artifacts/test_writer.py` | existing tests | SQLAlchemy path/PlantUML redaction metadata/type_parameters/private path/invalid line/atomic publicationを追加する。 |
+| `tests/unit/artifacts/test_writer.py` | existing tests | SQLAlchemy path/PlantUML redaction metadata/type_parameters/component-safe dot escaping/private path/invalid line/atomic publicationを追加する。 |
 | `tests/unit/artifacts/test_streams.py` | existing tests | SQLAlchemy summary/exact/unavailableを追加する。 |
 | `tests/contracts/test_json_schemas.py` | existing tests | SQLAlchemy valid/invalid closed schema casesを追加する。 |
 | `tests/contracts/test_scope_exclusions.py` | existing tests | SQLAlchemy snapshotを許可し、SQLAlchemy package import、SQLAlchemy diff、Next、HTMLを引き続き拒否する。 |
@@ -145,33 +145,33 @@ application.diff / semantic.diff -X-> adapters.sqlalchemy in this Issue
 | `src/code_structure_viz/source/python_modules.py` | `PythonSourceStage`, `PythonSourceFailure`, `PythonSourceModule`, `PythonSourceCollision`, `PythonSourceIndex` | SourceViewの`.py` path→module mapping、source failure、module collisionをdiagnostic-free language valueとして一度定義する。 |
 | `src/code_structure_viz/adapters/python/snapshot_adapter.py` | `PythonSnapshotDomainAdapter` | existing Python module index/analyzer/selector/renderersを`SnapshotDomainAdapter`へ適合させ、public bytesを維持する。 |
 | `src/code_structure_viz/adapters/sqlalchemy/__init__.py` | package marker | first-party SQLAlchemy adapter package。 |
-| `src/code_structure_viz/adapters/sqlalchemy/model.py` | enums and immutable SQLAlchemy DTOs | table/row/relation/coverage/redaction identity、invariant、sort keyを所有する。 |
+| `src/code_structure_viz/adapters/sqlalchemy/model.py` | enums、immutable public DTOs、`SqlAlchemyInternalDeclarationSpan`、`SqlAlchemyRowEvidence`、`sqlalchemy_occurrence_diagnostic_symbol` | table/row/relation/coverage/redaction identity、public invariant、internal AST occurrence identity、collision-safe diagnostic symbol、sort keyを所有する。internal span/evidenceはserializeしない。 |
 | `src/code_structure_viz/adapters/sqlalchemy/analyzer.py` | `SqlAlchemySnapshotAnalyzer`, `SqlAlchemyAnalysisResult` | encoding/AST/import binding/base graph/table/row/relation extraction、applicability、failure isolationを所有する。 |
 | `src/code_structure_viz/adapters/sqlalchemy/selection.py` | `SqlAlchemySelectionResult`, `SqlAlchemyTargetSelector` | existing TargetSpecのresolution、seed union、depth traversal、frontier、selected snapshotを所有する。 |
 | `src/code_structure_viz/adapters/sqlalchemy/semantic_json.py` | `SqlAlchemySemanticJsonRenderer` | SQLAlchemy snapshot branchのcanonical JSON DTOだけを生成する。 |
-| `src/code_structure_viz/adapters/sqlalchemy/plantuml.py` | `SqlAlchemyPlantUmlRenderer`, `escape_plantuml_label` | closed ER vocabulary、safe escaping、deterministic table/row/edge renderingを所有する。 |
+| `src/code_structure_viz/adapters/sqlalchemy/plantuml.py` | `SqlAlchemyPlantUmlRenderer`, `escape_plantuml_label`, `_render_table_display` | closed ER vocabulary、injective component escaping、renderer-owned schema/table separator、deterministic table/row/edge renderingを所有する。 |
 | `src/code_structure_viz/adapters/sqlalchemy/snapshot_adapter.py` | `SqlAlchemySnapshotDomainAdapter` | source index→analysis→selection→SnapshotAnalysisとrenderer dispatchを接続する。 |
 | `docs/contracts/sqlalchemy-semantic-v1.md` | contract document | exact JSON fields、IDs、sort、redaction、coverageを記述する。 |
 | `docs/contracts/sqlalchemy-plantuml-v1.md` | contract document | exact title、alias、row/edge vocabulary、type_parameters、redaction metadata placement、injective escaping、legendを記述する。 |
 | `tests/helpers/sqlalchemy_snapshot.py` | fixture/golden invocation helpers | existing CLI/fixture_repo/golden helperを組み合わせ、SQLAlchemy-specific expected file setを定義する。 |
 | `tests/unit/sqlalchemy/__init__.py` | package marker | current unit-test package convention。 |
-| `tests/unit/sqlalchemy/test_model.py` | unit tests | ID/invariant/sort/non-lossy dedupe/lossy occurrence conflict/redaction DTO。 |
+| `tests/unit/sqlalchemy/test_model.py` | unit tests | ID/invariant/sort/non-lossy dedupe/full-span lossy occurrence key/occurrence diagnostic symbol/redaction DTO。 |
 | `tests/unit/sqlalchemy/test_analyzer.py` | unit tests | bindings/base/table/row/relation/applicability/failure。 |
 | `tests/unit/sqlalchemy/test_selection.py` | unit tests | path/module/class targetとdepth/frontier。 |
 | `tests/unit/sqlalchemy/test_semantic_json.py` | unit tests | exact DTO/bytes/order。 |
-| `tests/unit/sqlalchemy/test_plantuml.py` | unit tests | exact vocabulary/type_parameters/redaction metadata/injective escaping/no literal。 |
+| `tests/unit/sqlalchemy/test_plantuml.py` | unit tests | exact vocabulary/type_parameters/redaction metadata/underscore・quote・dot injective escaping/component split/no literal。 |
 | `tests/integration/sqlalchemy/__init__.py` | package marker | current integration-test package convention。 |
-| `tests/integration/sqlalchemy/test_er_semantics.py` | integration tests | cross-module base/import/Table/relationship/FK resolutionとlossy/non-lossy canonicalization。 |
+| `tests/integration/sqlalchemy/test_er_semantics.py` | integration tests | cross-module base/import/Table/relationship/FK resolution、lossy/non-lossy canonicalization、same-line sibling occurrence preservation。 |
 | `tests/acceptance/sqlalchemy/__init__.py` | package marker | current acceptance-test package convention。 |
 | `tests/acceptance/sqlalchemy/test_snapshot_cli.py` | acceptance | complete/default/format/manifest/paths。 |
 | `tests/acceptance/sqlalchemy/test_snapshot_targets.py` | acceptance | target union/depth/missing/ambiguous。 |
-| `tests/acceptance/sqlalchemy/test_snapshot_failures.py` | acceptance | not_applicable/partial_safe/payload_unavailable/table/lossy row collision。 |
+| `tests/acceptance/sqlalchemy/test_snapshot_failures.py` | acceptance | not_applicable/partial_safe/payload_unavailable/table/lossy row collision/same-line sibling collision。 |
 | `tests/acceptance/sqlalchemy/test_snapshot_determinism.py` | acceptance | rerun/order/enumeration stability。 |
 | `tests/acceptance/sqlalchemy/test_snapshot_budget.py` | acceptance | 500/501/override/invalid/diff-only options。 |
 | `tests/acceptance/sqlalchemy/test_stdout_selector.py` | acceptance | selector matrix and exact bytes。 |
-| `tests/security/test_sqlalchemy_static_boundary.py` | security | target import/DB/build/network trap、redaction rule/count cross-artifact equality、escape collision、path/source scans、Git state。 |
+| `tests/security/test_sqlalchemy_static_boundary.py` | security | target import/DB/build/network trap、redaction rule/count cross-artifact equality、underscore/quote/dot escape collision、component split collision、path/source scans、Git state。 |
 | `tests/contracts/test_sqlalchemy_goldens.py` | contract | all SQLAlchemy golden files/schema/digest。 |
-| `tests/fixtures/sqlalchemy_snapshot/` | source fixtures | source-only modern/classic/association/target/failure/lossy identity/redaction metadata/escape collision cases。 |
+| `tests/fixtures/sqlalchemy_snapshot/` | source fixtures | source-only modern/classic/association/target/failure/lossy identity/same-line sibling/redaction metadata/escape/component split collision cases。 |
 | `tests/golden/sqlalchemy_snapshot/` | expected artifacts | canonical JSON/PlantUML/manifest/stdout/stderr/exit/published-files。 |
 
 ### existing — verify only, do not modify unless a failing required test proves necessity
@@ -316,7 +316,7 @@ SqlAlchemyAnalysisResult
 4. `DeclarativeBase` subclassと`declarative_base()` assignmentをseedに、candidate class数を上限とするfixed-pointでdeclarative classを証明する。
 5. static table declaration/bindingを抽出し、exact `__table__` linkだけをmergeする。unrelated same identityはcollision groupへ分離する。
 6. safe tableごとにcolumn/constraint/index/FK/relationship/inheritance/association evidenceをdomain DTOへ変換する。raw expressionはpass中にredaction categoryへ置換する。
-7. row/relation ID groupをnon-lossyとlossy redacted-expression identityへ分類する。non-lossyはexact semantic payloadをcanonicalizeし、lossyは同一source occurrenceの再発見だけをdedupeしてdistinct occurrence groupを全除外し、diagnostic/frontierを追加する。
+7. row/relation ID groupをnon-lossyとlossy redacted-expression identityへ分類する。non-lossyはexact semantic payloadをcanonicalizeし、lossyはpublic line rangeではなくexact row-producing AST declarationのfull internal UTF-8 byte spanを含むoccurrence keyで同一declarationの再発見だけをdedupeする。distinct occurrence groupは全除外し、occurrence-specific diagnostic symbolを持つdiagnostic/frontierを追加する。
 8. applicability、safe subset、coverage、diagnosticsを`SqlAlchemyAnalysisResult`へ確定する。
 
 AST node、decoded source text、raw literal、raw expressionはanalysis local変数であり、`SqlAlchemySnapshot`、diagnostic、rendererへ保持しない。`PythonSourceIndex`はmodule/path acquisitionだけを共有し、Python adapterのprivate `_ParsedModule`/type rendererをSQLAlchemyへimportしない。SQLAlchemy analyzerは同じfrozen bytesをdomain-owned passとして一回parseするが、second SourceView、filesystem read、Git readは行わない。
@@ -378,6 +378,23 @@ aliasをcanonicalizeできる場合は`type.name`へcanonical dotted nameを記�
 - annotationはproven `Mapped[X]`を一度だけunwrapする。`typing.Optional[X]`、`X | None`はtarget/type `X`へ縮退するが、nullable boolは推測しない。direct quoted forward referenceはwhole stringがsafe dotted identifierの場合だけsymbolとして受理し、`"User | None"`等のstring expressionをparse/evalしない。relationship collectionはouter `builtins.list|set|tuple`または`typing.List|Set|Tuple`のsingle element typeだけを`many`とし、そのelementはsafe symbolまたはsafe quoted forward referenceを許す。それ以外のgeneric/unionは`unknown`。
 - relationshipはexplicit static `uselist`をcardinalityより優先し、`True -> many`、`False -> scalar`。未指定時だけ上記collection annotationを`many`、non-collection safe mapped-class annotationを`scalar`、その他を`unknown`とする。
 - `ast.literal_eval`、unparse、repr、source segment取得を使わない。
+
+### internal AST declaration span
+
+`SqlAlchemyInternalDeclarationSpan`はfrozen `SourceView` bytesをPython 3.12 `ast.parse`した結果のexact row-producing declaration nodeからだけ作るadapter-internal valueであり、public DTOではない。`CheckConstraint`と`Index`ではexpression argumentではなくouter construction `ast.Call`全体をdeclaration nodeとする。
+
+```text
+SqlAlchemyInternalDeclarationSpan
+  start_line: positive int                 # ast.lineno
+  start_utf8_byte_column: non-negative int # ast.col_offset, zero-based
+  end_line: int >= start_line              # ast.end_lineno
+  end_utf8_byte_column: non-negative int    # ast.end_col_offset, zero-based exclusive
+```
+
+- Python ASTの`col_offset`/`end_col_offset`をUnicode code point indexへ変換せず、そのsource lineに対するUTF-8 byte offsetとして保持する。source slice、token text、identifier spellingを取得しない。
+- same AST nodeを複数passで再発見した場合、pathと4 span値が同じなので同じinternal occurrenceとなる。同一物理行のsibling outer `Call`はstart/end byte columnの少なくとも一つが異なるため別occurrenceとなる。
+- supported direct declaration nodeで4 metadata fieldが欠落、bool、負値、逆転、またはsame-lineで`end_utf8_byte_column <= start_utf8_byte_column`ならparser/internal invariant failureとしてpublication前に停止する。target source内容に応じてspanを推測・補完しない。
+- `SqlAlchemySourceLocation`、semantic JSON、PlantUML、manifest、stdout/stderr diagnostic schemaへcolumn fieldを追加しない。public source rangeは従来どおりpath/start_line/end_lineだけである。internal spanはrow evidence canonicalizationとhashed diagnostic symbol生成後に破棄する。
 
 ### declarative/table extraction
 
@@ -446,6 +463,10 @@ RedactedExpressionCategory = absent | literal | callable | sql_expression |
                              computed | identity | unknown
 IndexTermKind = column | expression
 
+SqlAlchemyInternalDeclarationSpan          # adapter-internal, non-serialized
+SqlAlchemyRowEvidence                      # adapter-internal, non-serialized
+sqlalchemy_occurrence_diagnostic_symbol    # adapter-internal pure function
+
 SqlAlchemySourceLocation
 RedactedExpression
 SqlAlchemyTypeDescriptor
@@ -474,6 +495,16 @@ SqlAlchemySnapshot
 ### closed supporting DTOs
 
 ```text
+SqlAlchemyInternalDeclarationSpan
+  start_line: positive int
+  start_utf8_byte_column: non-negative int
+  end_line: int >= start_line
+  end_utf8_byte_column: non-negative int
+
+SqlAlchemyRowEvidence
+  row: SqlAlchemyRow
+  declaration_span: SqlAlchemyInternalDeclarationSpan
+
 SqlAlchemySourceLocation
   path: repository-relative str
   range: {start_line: positive int, end_line: int >= start_line}
@@ -509,6 +540,7 @@ invariant:
 - `SqlAlchemyIndexTerm(kind=column)`は`column_name`あり、`expression.present=false`。`kind=expression`は`column_name=null`、`expression.present=true`。
 - internal targetは`kind=table`、table `id`/`table_name`あり、`symbol=null`。external table targetは`id=null`かつ`table_name`あり。external mapped-class targetはtable fields null、`symbol`あり。unknown targetは`kind=unknown`、`id/schema_name/table_name/symbol`がすべてnull、`display_name="<unknown>"`。
 - source path、semantic identifier、safe symbolはstrict UTF-8/NFC、NUL/controlなし。safe structural stringはさらに`\`、leading `/`/`~`、Windows drive/UNC spelling、`..` path segment、`://`を拒否する。absolute path、AST node、source textをfieldへ保持しない。
+- `SqlAlchemyRowEvidence`はcanonicalization中だけ存在し、public rowの`source.range`とinternal declaration spanのline値が一致しなければinvariant failureである。`declaration_span`はpublic row/coverage/frontierへcopyせず、same-occurrence dedupe、conflict diagnostic生成、内部検証後に破棄する。
 
 ### snapshot/entity/row/relation DTO
 
@@ -620,6 +652,14 @@ row `identity_key`は次で固定する。
 
 relation preimageは`kind`、`source_id`、target identity value、`via_member_id`、`role`だけを持つ。foreign-key/relationship relationの`via_member_id`は対応row id、association relationはassociation_table marker row id、inheritanceはnull。`role`はrelationship/associationのattribute名、それ以外null。association relationの`source_id`はmarkerの`source_table.id`、targetはmarker ownerのsecondary tableである。
 
+row-level `CSV-SA-009`のoccurrence diagnostic symbolは次のpreimageをfield insertion orderどおりexisting `encode_canonical_json`でencodingし、final LFを含むbytesへSHA-256を適用して作る。
+
+```json
+{"schema":"code-structure-viz.sqlalchemy-occurrence-diagnostic-symbol/v1","owner_id":"sqlalchemy:table:0000000000000000000000000000000000000000000000000000000000000000","kind":"check","path":"models.py","span":{"start_line":42,"start_utf8_byte_column":12,"end_line":42,"end_utf8_byte_column":47}}
+```
+
+`sqlalchemy_occurrence_diagnostic_symbol(...)`のreturnはexact `sqlalchemy:occurrence:<64 lowercase hex>`である。preimageはclosed schema discriminator、hashed table owner ID、closed row kind、repository-relative NFC path、full internal spanだけを持つ。raw source、SQL expression、constraint/index/column/table identifier、literal、absolute pathを持たず、byte column decimalをsymbolへ直接埋め込まない。canonical JSON framingによりfield/length境界が曖昧にならず、同じoccurrenceは同じsymbol、same-line siblingを含む別spanは別preimage/symbolになる。
+
 ### exact ordering / dedupe / conflict
 
 ```text
@@ -674,9 +714,9 @@ mapping source: declarative_class, table
 
 table canonicalizationはexact same `Table` bindingを共有するdeclarative/Table sourceだけを`mapping_sources` unionへmergeし、別bindingのunrelated declarationが同一table IDへ到達した場合はpublic payloadが同じでも全groupを`CSV-SA-008` collisionとして除外する。row/relation canonicalizationは同一IDをfirst/last winnerで上書きしない。
 
-non-lossy identityでは、同一ID+同一semantic payload（`id`/`source`を除くcommon/kind-specific public fields）はsource locationが異なっても一件へ畳み、public `source`には`(path,start_line,end_line)`のUTF-8/数値sortで最小のcanonical representativeを置く。等価な追加locationはsemantic omissionではなくstatusをincompleteにしない。同一IDでsemantic payloadが異なる場合は全該当row/relation evidenceを除外し、各conflicting occurrenceへ`CSV-SA-009`を出す。
+non-lossy identityでは、同一ID+同一semantic payload（`id`/`source`を除くcommon/kind-specific public fields）はsource locationが異なっても一件へ畳み、public `source`には`(path,start_line,end_line)`のUTF-8/数値sortで最小のcanonical representativeを置く。等価な追加locationはsemantic omissionではなくstatusをincompleteにしない。同一IDでsemantic payloadが異なる場合は全該当row/relation evidenceを除外し、各conflicting `SqlAlchemyRowEvidence`へそのfull spanから作るoccurrence diagnostic symbolを`symbol`とする`CSV-SA-009`を出す。
 
-lossy identityはunnamed `check`と、expression termを一件以上含むunnamed `index`に限定する。`occurrence_key = (owner_id, kind, source.path, source.range.start_line, source.range.end_line)`とし、同一occurrence keyかつ同一public payloadの再発見だけを一件へ畳む。同一lossy ID groupをoccurrence keyでcollapseした後にdistinct occurrenceが2件以上残る場合、public payloadが同一でもsemantic equalityを証明できないため全row evidenceを除外し、各distinct occurrenceへrow IDを`symbol`とする`CSV-SA-009`をexactly一件出す。同一occurrence内でpayloadが競合した場合も全evidenceを除外する。除外rowからderived row/relationを生成しない。safe table/rowが残るrunは`partial_safe`、残らなければexisting payload-unavailable ruleへ従う。
+lossy identityはunnamed `check`と、expression termを一件以上含むunnamed `index`に限定する。internal `occurrence_key = (owner_id, kind, source.path, declaration_span.start_line, declaration_span.start_utf8_byte_column, declaration_span.end_line, declaration_span.end_utf8_byte_column)`とし、同一occurrence keyかつ同一public payloadのmulti-pass再発見だけを一件へ畳む。同一lossy row ID groupをoccurrence keyでcollapseした後にdistinct occurrenceが2件以上残る場合、public payloadが同一でもsemantic equalityを証明できないため全row evidenceを除外し、各distinct occurrenceへ`sqlalchemy_occurrence_diagnostic_symbol`を`symbol`、`source.path`を`path`、`declaration_span.start_line`を`line`とする`CSV-SA-009`をexactly一件出す。同一occurrence内でpayloadが競合した場合も全evidenceを除外する。existing frozen `Diagnostic` equalityではdistinct symbolsが異なるため`canonical_diagnostics`はsame-line sibling diagnosticsを保持し、同じoccurrenceの再発見だけをdedupeする。除外rowからderived row/relationを生成しない。safe table/rowが残るrunは`partial_safe`、残らなければexisting payload-unavailable ruleへ従う。
 
 `CSV-SA-010`はunresolved relation target専用で、既知target同士のpayload conflictまたはlossy identity conflictへ流用しない。
 
@@ -784,7 +824,7 @@ SqlAlchemyRedactionSummary
 | `CSV-SA-012` | `Requested SQLAlchemy target is ambiguous.` | error / false | domain + exact path xor symbol |
 | `CSV-SA-013` | `SQLAlchemy table count exceeds the resolved max-entities limit.` | error / false | domain only |
 
-messageへsource spelling、default/check/join body、URL、Git stderrをformatしない。`diagnostic()`は既存safe option/config keyの仕組みを維持し、SQLAlchemy codeに任意format parameterを追加しない。existing `canonical_diagnostics` sort/dedupeを再利用する。
+messageへsource spelling、default/check/join body、URL、Git stderrをformatしない。`diagnostic()`は既存safe option/config keyの仕組みを維持し、SQLAlchemy codeに任意format parameterを追加しない。existing `Diagnostic` field setとdiagnostic schemaを変更せず、existing `canonical_diagnostics` sort/dedupeを再利用する。row occurrenceの`CSV-SA-009`は`domain="sqlalchemy"`、public repository-relative `path`、hashed occurrence `symbol`、public `line=start_line`を持つ。同一code/path/line/messageでもsymbolが異なるdistinct siblingは保持され、同じsymbolのmulti-pass再発見だけがdedupeされることを`tests/unit/core/test_diagnostics.py`で固定する。
 
 ### failure classification
 
@@ -868,7 +908,7 @@ endlegend
 @enduml
 ```
 
-entity bodyはsemantic `members` orderで、各rowを次のexact single-line templateへ変換する。user-controlled structural valueは`escape_plantuml_label`後のsingle-line valueである。renderer-owned constantsの`<default>`、`<unnamed>`、`<unknown>`、`?`、`-`、`[redacted:<category>]`はescape対象ではなくclosed literalとして出す。table/target displayはprecomposed `display_name`をblind escapeせず、renderer-owned markerとescaped schema/table/symbol componentから組み立てる。null nameは`<unnamed>`、null boolは`?`、absent optional target/stringは`-`、present redacted descriptorは`[redacted:<category>]`とする。type parameter descriptorはcolumn lineの`type_parameters` fieldへ同じtoken ruleで出す。applicable zero-table snapshotはentity/edgeを0件とし、header、redaction metadataを含むlegend、`@enduml`だけを同じ順で出す。
+entity bodyはsemantic `members` orderで、各rowを次のexact single-line templateへ変換する。user-controlled structural valueは`escape_plantuml_label`後のsingle-line valueである。renderer-owned constantsの`<default>`、`<unnamed>`、`<unknown>`、`?`、`-`、`[redacted:<category>]`はescape対象ではなくclosed literalとして出す。table/target displayはprecomposed `display_name`をblind escapeせず、renderer-owned markerとescaped schema/table/symbol componentから組み立てる。`_render_table_display(schema_name, table_name)`はschemaがnullなら`escape_plantuml_label(table_name)`、schemaありなら`escape_plantuml_label(schema_name) + "." + escape_plantuml_label(table_name)`を返し、この中央のliteral `.`だけがrenderer-owned separatorである。null nameは`<unnamed>`、null boolは`?`、absent optional target/stringは`-`、present redacted descriptorは`[redacted:<category>]`とする。type parameter descriptorはcolumn lineの`type_parameters` fieldへ同じtoken ruleで出す。applicable zero-table snapshotはentity/edgeを0件とし、header、redaction metadataを含むlegend、`@enduml`だけを同じ順で出す。
 
 | row kind | exact body line template |
 | --- | --- |
@@ -888,9 +928,9 @@ list separatorは`,`一文字で追加空白なし。empty listはmodel invarian
 - row lineはkind prefix、safe name、closed type/category/bool/target/redaction markerだけ。raw SQL、default/check/join bodyを表示しない。
 - internal relationで両endpointがselectedの場合だけedgeを描く。external/unknown targetはtable row markerに留め、synthetic entityを作らない。
 - colorに意味を依存せず、line style、label、legendを必須にする。
-- `escape_plantuml_label`はNFC後、Unicode categoryがLetter/Numberのcode pointとASCII space、`.`、`-`、`/`、`$`だけをそのまま残す。user-controlled underscoreはpassthroughしない。その他の各code pointは`_U` + uppercase 4〜6桁hex scalar + `_`へ置換し、input `_`は必ず`_U005F_`になる（例: `" -> _U0022_`、`_U0022_ -> _U005F_U0022_U005F_`、`{ -> _U007B_`、LFはmodel invariantで到達不可）。input由来のunderscoreがrawで残らないため、escape token `_U0022_`はencoded quoteだけを表し、literal `_U0022_`と衝突しない。renderer-owned alias `T_<hex>`、row keywords、metadata keys、placeholderはこのfunctionへ渡さずsyntaxとして従来どおり出す。renderer以外がPlantUML textを組み立てない。
+- `escape_plantuml_label`はNFC後、Unicode categoryがLetter/Numberのcode pointとASCII space、`-`、`/`、`$`だけをそのまま残す。user-controlled underscoreとdotはpassthroughしない。その他の各code pointは`_U` + uppercase 4〜6桁hex scalar + `_`へ置換し、input `_`は必ず`_U005F_`、input `.`は必ず`_U002E_`になる（例: `" -> _U0022_`、`_U0022_ -> _U005F_U0022_U005F_`、`. -> _U002E_`、`_U002E_ -> _U005F_U002E_U005F_`、`{ -> _U007B_`、LFはmodel invariantで到達不可）。input由来のunderscoreがrawで残らないためescape token literalとencoded code pointが衝突せず、input由来のdotがrawで残らないためrenderer-owned separatorとcomponent contentが衝突しない。`(schema=a, table=b.c)`は`a.b_U002E_c`、`(schema=a.b, table=c)`は`a_U002E_b.c`となる。renderer-owned alias `T_<hex>`、row keywords、metadata keys、placeholder、schema/table separatorのliteral `.`はこのfunctionへ渡さずsyntaxとして従来どおり出す。renderer以外がPlantUML textを組み立てない。
 - redaction metadata lineは`legend right`の直後にexactly oneずつ、rule line、count lineの順で置く。rule lineはexact fixed string、count lineは`  redacted_values=(0|[1-9][0-9]*)`に一致し、leading zero、sign、space suffixを許さない。
-- writerのSQLAlchemy validatorはexact skeleton、上記metadataのpresence/uniqueness/order/rule/count grammar、各column lineの`type_parameters` field exactly once、allowed line prefix、alias hex、relation grammar、final LF、private path scanを検証する。Python validatorを共通のpermissive regexへ置換しない。
+- writerのSQLAlchemy validatorはexact skeleton、上記metadataのpresence/uniqueness/order/rule/count grammar、各column lineの`type_parameters` field exactly once、allowed line prefix、alias hex、relation grammar、escaped component token grammar、schema-qualified table display内のrenderer-owned separator位置、final LF、private path scanを検証する。raw user `.`/`_`/quoteをcomponentとして許さず、Python validatorを共通のpermissive regexへ置換しない。
 
 ## writer / streams / publication
 
@@ -932,8 +972,10 @@ list separatorは`,`一文字で追加空白なし。empty listはmodel invarian
 - `payload_unavailable`: no safe table + failure/unknown、explicit target miss。
 - `redaction`: secret-like default/server_default/check/join/URL sentinel。
 - `lossy_identity_conflict`: one safe table/column、same-category unnamed check 2件、same expression-term identity unnamed index 2件。partial_safe、`CSV-SA-009` 4件、check/index row 0件、member total 1件を固定する。同一occurrence rediscoveryとordinary non-lossy duplicateのcontrol caseも持つ。
+- `lossy_same_line_siblings`: same-category unnamed check outer calls 2件とsame ordered expression-term identityのunnamed index outer calls 2件を同一物理行へ置く。4 full internal spans/occurrence symbolsがdistinct、partial_safe/exit 3、`CSV-SA-009` exactly 4、check/index row 0、safe column/member total 1を固定し、public source/diagnostic schemaにbyte column fieldがないこともassertする。
 - `redaction_metadata`: `String(255)`と`Numeric(10, 2, asdecimal=True)`だけをredacted boundaryとし、JSON/PlantUML/manifestのrule/count 2、column `type_parameters` tokenを固定する。
 - `escape_collision`: user labels `"`と`_U0022_`をdistinct encoded labelsとして固定する。
+- `component_split_collision`: `(schema=a, table=b.c)`と`(schema=a.b, table=c)`を同じsnapshotに置き、displayがexact `a.b_U002E_c`と`a_U002E_b.c`でdistinct、raw input dotなし、renderer-owned separatorだけliteralであることを固定する。
 - `identity_order`: declaration/import/filesystem order variants。
 
 fixture sourceはSQLAlchemyをinstallせず、importした場合にsentinel side effectが起きる形でもCLIが成功することを確認する。
@@ -954,9 +996,9 @@ stdout selector固有bytesはacceptance testがpublished fileとのexact equalit
 
 ### test seam ownership
 
-- model/analyzer/selector/rendererはSourceView/AST/immutable DTOを直接unit testし、filesystem/DBをmock domain logicへ混ぜない。lossy identity testはstatus、diagnostic code/context/count、final row countまでassertする。
+- model/analyzer/selector/rendererはSourceView/AST/immutable DTOを直接unit testし、filesystem/DBをmock domain logicへ混ぜない。lossy identity testはfull AST span、same-occurrence key/symbol stability、same-line sibling key/symbol distinctness、status、diagnostic code/context/count、final row countまでassertする。
 - acceptanceはactual `python -m code_structure_viz`、temporary Git root、outside-repo output、stdout/stderr/exit/published file bytesを同時に観測する。redaction metadata testはJSON、PlantUML、manifestのrule/countをcross-readしてexact equalityをassertする。
-- securityはtarget import、`sqlite3.connect`/socket/network、application write sentinel、Git state、source/literal/path negative scanを行う。PlantUML collision-pair goldenで`_U0022_`と`_U005F_U0022_U005F_`のdistinctnessをassertする。productが必要とするGit subprocessはallowlistで別検証する。
+- securityはtarget import、`sqlite3.connect`/socket/network、application write sentinel、Git state、source/literal/path negative scanを行う。PlantUML collision-pair goldenで`_U0022_`と`_U005F_U0022_U005F_`、component-split goldenで`a.b_U002E_c`と`a_U002E_b.c`のdistinctnessをassertし、raw user dot/underscore/quoteがcomponentへ通らないことを確認する。productが必要とするGit subprocessはallowlistで別検証する。
 - packagingはwheelだけをoffline venvへinstallし、SQLAlchemy package不在でSQLAlchemy snapshotを実行する。
 - Python snapshot/diff exact goldens、all source/Git/security regressionをfull gateで再実行する。
 
