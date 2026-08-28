@@ -28,7 +28,12 @@ jobs:
           .
       - name: Verify minimum toolchain and full product gate
         run: |
-          docker run --rm --volume "${{ github.workspace }}:/workspace" code-structure-viz-minimum sh -euxc '
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp/code-structure-viz-home \
+            --volume "${{ github.workspace }}:/workspace" \
+            code-structure-viz-minimum sh -euxc '
+            mkdir -p "$HOME"
             test "$(git --version)" = "git version 2.39.5"
             uv sync --frozen --all-groups
             uv run ruff format --check .

@@ -112,6 +112,7 @@ def test_ci_keeps_specdock_validation_and_adds_all_product_gates() -> None:
     assert "continue-on-error" not in workflow
     assert "upload-artifact" not in workflow
     assert "release" not in workflow.lower()
+    assert '--user "$(id -u):$(id -g)"' in workflow
 
     assert (ROOT / "ci" / "latest-python.txt").read_bytes() == b"3.14\n"
     dockerfile = (ROOT / "ci" / "toolchains" / "git-2.39.5.Dockerfile").read_text(encoding="utf-8")
