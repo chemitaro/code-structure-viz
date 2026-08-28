@@ -5,7 +5,7 @@ ID: "iss-00006"
 関連GitHub: ["#6"]
 package_sequence_key: "ISSUE-03"
 状態: "draft"
-最終更新: "2026-08-28"
+最終更新: "2026-08-29"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -174,13 +174,16 @@ tests/packaging/test_distribution.py
 3. column/PK/unique/check/index/FK/relationship/inheritance/secondary association row/relation kinds。
 4. path/module/class target、multi-target union、up/down depth/frontier、missing/ambiguous target。
 5. safe abstract/base-only SQLAlchemy evidence、table 0のcomplete empty payloadと、safe Python-only repoのnot_applicableを別caseで固定する。
-6. safe table + parse/dynamic/row conflict/table collision partial_safe。
-7. safe tableなし + failed/dynamic evidence、explicit target miss payload_unavailable。
-8. 500/501 tables、valid 600 override、invalid zero/non-integer、snapshot diff-only option rejection。
-9. stdout no-selector/exact manifest/exact semantic/exact PlantUML/not_applicable/payload unavailable/fatal/interrupt/invalid duplicate。
-10. secret-like defaults、URL、check/join body、source comment、absolute temporary pathが全channelに存在しない。
-11. same-input rerunとdeclaration/import/enumeration order variants。
-12. SQLAlchemy未installのoffline wheel source。
+6. safe table + parse/dynamic/table collision partial_safeと、ordinary non-lossy exact duplicateが`complete`のままrow exactly 1件へcanonicalizeされるcontrol case。
+7. `lossy_expression_identity_conflict`: one safe table/column、same-category unnamed check 2件、same ordered expression-category termsのunnamed index 2件。expectedは`incomplete / partial_safe`、exit 3、payload + manifest、`CSV-SA-009` exactly 4件、final member count 1、check/index row count各0。同一AST occurrenceのmulti-pass rediscoveryは追加row/diagnostic 0。
+8. safe tableなし + failed/dynamic evidence、explicit target miss payload_unavailable。
+9. 500/501 tables、valid 600 override、invalid zero/non-integer、snapshot diff-only option rejection。
+10. stdout no-selector/exact manifest/exact semantic/exact PlantUML/not_applicable/payload unavailable/fatal/interrupt/invalid duplicate。
+11. `type_parameter_redaction`: other redacted boundaryなしで`String(255)`と`Numeric(10, 2, asdecimal=True)`を使い、各constructor count 1、run count 2、JSON/PlantUML/manifestのrule/count equality、column `type_parameters=[redacted:literal]` exactly once。
+12. `plantuml_escape_collision`: user label `" -> _U0022_`、literal user label `_U0022_ -> _U005F_U0022_U005F_`をgolden/securityでdistinctに固定する。
+13. secret-like defaults、URL、check/join body、source comment、absolute temporary pathが全channelに存在しない。
+14. same-input rerunとdeclaration/import/enumeration order variants。
+15. SQLAlchemy未installのoffline wheel source。
 
 fixture sourceは実行されるとsentinel file作成またはexceptionを起こすようにしてよいが、expected resultはsentinel未発火である。
 
@@ -315,7 +318,8 @@ src/code_structure_viz/adapters/python/module_index.py
 - table/schema identity、exact `__table__` merge、unrelated collision。
 - modern/classic/Table columns、constraint/index/FK/relationship/inheritance/association。
 - raw default/check/join/URL sentinelがmodel field/repr/diagnosticに存在しない。
-- ID preimage、closed enum、sort/dedupe/conflict invariant。
+- ID preimage、closed enum、sort、ordinary non-lossy dedupe、lossy unnamed check/index occurrence conflict invariant。
+- `lossy_expression_identity_conflict`のstatus/exit、`CSV-SA-009` 4件、member/check/index exact countとsame-occurrence rediscovery control。
 - parse/source failureによるapplicabilityとcoverage count。
 
 ### implementation
@@ -325,8 +329,9 @@ src/code_structure_viz/adapters/python/module_index.py
 3. SQLAlchemy model enums/dataclasses、ID factory、sort key、redaction DTO、coverage DTOを実装する。
 4. analyzerをDesignの8 passで実装する。direct static AST patternだけを認識し、`ast.literal_eval`/unparse/source segmentを使わない。
 5. source/index/parse failureを`CSV-SA-001`〜`005`へmapする。
-6. declarative/table/row/relation unknown/collisionを`CSV-SA-006`〜`010`へmapし、safe subsetを保持する。
-7. `SqlAlchemySnapshotDomainAdapter.analyze`はこのstepではwhole-mode analysis resultまで接続し、render/publicationは後stepへ残す。
+6. row canonicalizerをnon-lossyとlossyへ分ける。lossyはunnamed checkとexpression termを含むunnamed indexだけとし、same occurrence key + same payloadだけをdedupe、distinct occurrence groupはpayload一致でも全除外する。
+7. declarative/table/row/relation unknown/collisionを`CSV-SA-006`〜`010`へmapし、lossy conflictは各distinct occurrenceへ`CSV-SA-009` exactly oneを出してsafe subsetを保持する。
+8. `SqlAlchemySnapshotDomainAdapter.analyze`はこのstepではwhole-mode analysis resultまで接続し、render/publicationは後stepへ残す。
 
 ### focused gate
 
@@ -457,18 +462,21 @@ tests/contracts/test_json_schemas.py
 - each row-kind schema oneOfとcross-kind field rejection。
 - SQLAlchemy snapshot only; SQLAlchemy diff invalid。
 - exact PlantUML skeleton、table alias hex、row/edge/legend、external/unknown no synthetic node。
-- quote/backslash/control/injection-like identifier escaping。
+- every column lineの`type_parameters=<token|->` exactly once。`String(255)`とmulti-argument type constructorを各一件だけcountする。
+- `legend right`直後のexact rule/count metadata linesとJSON/manifest coverageとのequality。
+- quote/backslash/control/injection-like identifier escaping、および`"`/`_U0022_` collision pairのinjective output。
 - default/check/join/source/path sentinel absence。
 - existing Python semantic/diff goldens continue valid and exact。
 
 ### implementation
 
 1. semantic rendererはmodelのalready-sorted tupleをclosed DTOへ変換し、再解析/dedupeしない。
-2. PlantUML rendererはDesign skeletonとclosed line vocabularyだけを生成する。
-3. semantic schema rootをclosed Python existing branch + SQLAlchemy snapshot branchへ再構成する。Python branchのrequired/const/additionalPropertiesをcopyではなくexact testで保護する。
-4. diagnostic/manifest/summary/stdout schemaへSQLAlchemy closed variantsを追加する。
-5. SQLAlchemy semantic/PlantUML contract docsへfield、ID preimage、sort、escaping、redactionを記録する。
-6. goldensはactual renderer bytesからreviewして固定し、schemaをgoldenに合わせてpermissiveにしない。
+2. PlantUML rendererはDesign skeletonとclosed line vocabularyだけを生成し、column `type_parameters`、legend先頭のrule/count metadataを`SqlAlchemySnapshot.coverage.redaction`から出す。
+3. `escape_plantuml_label`のpassthroughからunderscoreを除き、input `_`を`_U005F_`へencodeする。renderer-owned syntaxはescape functionへ渡さない。
+4. semantic schema rootをclosed Python existing branch + SQLAlchemy snapshot branchへ再構成する。Python branchのrequired/const/additionalPropertiesをcopyではなくexact testで保護する。
+5. diagnostic/manifest/summary/stdout schemaへSQLAlchemy closed variantsを追加する。
+6. SQLAlchemy semantic/PlantUML contract docsへfield、ID preimage、sort、lossy dedupe、escaping、redaction metadata placementを記録する。
+7. goldensはactual renderer bytesからreviewして固定し、schemaをgoldenに合わせてpermissiveにしない。
 
 ### focused gate
 
@@ -522,8 +530,8 @@ tests/acceptance/sqlalchemy/test_stdout_selector.py
 
 - default both/one format complete paths/descriptors/SHA。
 - not_applicable/payload_unavailable manifest-only、partial_safe payload+manifest。
-- output path exists/inside repo/symlink/private path/invalid Puml/collision/interrupt/drift no-publication。
-- manifest adapter/domain/contracts/request/coverage/budget/artifact cross-check。
+- output path exists/inside repo/symlink/private path/invalid Puml/collision/interrupt/drift no-publication。SQLAlchemy Pumlはmetadata欠落/重複/順序違い/rule違い/non-canonical count/column `type_parameters`欠落をinvalidとする。
+- manifest adapter/domain/contracts/request/coverage/budget/artifact cross-check。semantic JSON、PlantUML、manifestはsame immutable redaction summaryを参照する。
 - SQLAlchemy summary、exact domain bytes、manifest bytes、unavailable result、usage stdout empty。
 - Python snapshot and diff exact full artifacts unchanged。
 
@@ -531,8 +539,8 @@ tests/acceptance/sqlalchemy/test_stdout_selector.py
 
 1. `SnapshotApplication.run`をDesign lifecycleへgeneric化し、SourceView/transactionを一回だけ作る。
 2. `ArtifactDescriptor.create_snapshot`と`OutputTransaction.stage_snapshot_payload`をclosed registryで実装する。
-3. writerへSQLAlchemy paths、private path scan、closed PlantUML validatorを追加する。existing descriptor/fsync/no-replace flowを変更しない。
-4. `RunManifestBuilder`をsnapshot adapter/coverage-awareにし、Python snapshot exact order/bytesを維持する。`DiffManifestBuilder`は必要なtype adjustment以外変更せず、golden bytesを維持する。
+3. writerへSQLAlchemy paths、private path scan、closed PlantUML validatorを追加する。validatorはlegend直後のexact rule/count lines、canonical nonnegative decimal、column `type_parameters` field、allowed escaped label grammarを検証し、existing descriptor/fsync/no-replace flowを変更しない。
+4. `RunManifestBuilder`をsnapshot adapter/coverage-awareにし、SQLAlchemy manifest coverageはrendererと同じimmutable redaction summaryをserializeする。Python snapshot exact order/bytesを維持する。`DiffManifestBuilder`は必要なtype adjustment以外変更せず、golden bytesを維持する。
 5. stream emitterは`DomainOutcome.domain`とartifact_pathsをcross-checkし、SQLAlchemy paths/resultを処理する。
 6. staged bytesをbindしてからcommitするexisting exact stdout mechanismを維持する。
 
@@ -608,6 +616,8 @@ src/code_structure_viz/adapters/python/plantuml.py
 - source fixture module import、fake SQLAlchemy package import、DB connect、socket/network、build/plugin sentinel未発火。
 - Git HEAD/ref/index/status/tracked/untracked bytes不変。
 - source/comment/default/server_default/check/join/URL/token/private absolute pathがJSON/Puml/manifest/stdout/stderr/logへない。
+- `String(255)`とother type parameter boundaryがconstructorごとに一件だけcountされ、JSON/Puml/manifestのrule/countがexact一致する。
+- PlantUML collision pairは`_U0022_`と`_U005F_U0022_U005F_`としてdistinctで、raw user quote/underscoreがlabelへ通らない。
 - `ast.Import` scanでproduct sourceに`sqlalchemy`/Alembic/DB driver dependencyなし。
 - CLI scopeはPython/SQLAlchemy snapshotとPython diffだけ。Next/HTML/all/SQLAlchemy diffなし。
 - wheel metadata Requires-Distなし、offline install/run、schemas/tests/spec-dock/private contentがwheelへ混入しない。
@@ -730,10 +740,10 @@ expected:
 | Test ID | owning path | observable behavior |
 | --- | --- | --- |
 | I03-AT-001 | `tests/acceptance/sqlalchemy/test_snapshot_cli.py` | modern/classic/Table/`__table__` complete CLI、paths、manifest、exit。 |
-| I03-AT-002 | `tests/integration/sqlalchemy/test_er_semantics.py` | row/relation kinds、cross-module resolution、identity/order/dedupe。 |
+| I03-AT-002 | `tests/integration/sqlalchemy/test_er_semantics.py` | row/relation kinds、cross-module resolution、identity/order、non-lossy dedupe、lossy check/index conflictのstatus/diagnostic/row count。 |
 | I03-AT-003 | `tests/acceptance/sqlalchemy/test_snapshot_targets.py` | path/module/class targets、union、depth/frontier、missing/ambiguous。 |
-| I03-AT-004 | `tests/acceptance/sqlalchemy/test_snapshot_failures.py` | complete-empty/not_applicable/partial_safe/payload_unavailable/collision matrix。 |
-| I03-AT-005 | `tests/security/test_sqlalchemy_static_boundary.py` | no execution/DB/Git mutation、redaction、all-channel negative scan。 |
+| I03-AT-004 | `tests/acceptance/sqlalchemy/test_snapshot_failures.py` | complete-empty/not_applicable/partial_safe/payload_unavailable/collision matrix。lossy conflict fixtureはpartial_safe/exit 3を固定する。 |
+| I03-AT-005 | `tests/security/test_sqlalchemy_static_boundary.py`, `tests/unit/sqlalchemy/test_plantuml.py`, `tests/unit/artifacts/test_writer.py` | no execution/DB/Git mutation、redaction count/rule cross-artifact equality、PlantUML metadata validation、escape collision、all-channel negative scan。 |
 | I03-AT-006 | `tests/acceptance/sqlalchemy/test_snapshot_determinism.py` | same input bytes/SHA、semantic order/ID stability。 |
 | I03-AT-007 | `tests/acceptance/sqlalchemy/test_snapshot_budget.py` | 500/501/override/invalid/diff-only options。 |
 | I03-AT-008 | `tests/acceptance/sqlalchemy/test_stdout_selector.py` | exact bytes、summary、unavailable、usage、stderr separation。 |
@@ -748,10 +758,10 @@ expected:
 | I03-REQ-002 | I03-DES-002, 006 | I03-PLAN-002, 004 | I03-AC-003, 007, 008 | I03-AT-003, 007, 008 |
 | I03-REQ-003 | I03-DES-003, 004 | I03-PLAN-003, 004 | I03-AC-001, 004 | I03-AT-001, 004 |
 | I03-REQ-004 | I03-DES-004, 005 | I03-PLAN-003, 005 | I03-AC-001, 002, 009 | I03-AT-001, 002, 009 |
-| I03-REQ-005 | I03-DES-004, 005, 006 | I03-PLAN-003, 004, 005 | I03-AC-002, 003 | I03-AT-002, 003 |
+| I03-REQ-005 | I03-DES-004, 005, 006 | I03-PLAN-003, 004, 005 | I03-AC-002, 003, 004 | I03-AT-002, 003, 004 |
 | I03-REQ-006 | I03-DES-007, 009 | I03-PLAN-003, 005, 006, 007 | I03-AC-005 | I03-AT-005 |
 | I03-REQ-007 | I03-DES-008, 009 | I03-PLAN-002, 004, 006 | I03-AC-004, 007, 008 | I03-AT-004, 007, 008 |
-| I03-REQ-008 | I03-DES-003, 004, 007, 010 | I03-PLAN-003, 004, 007 | I03-AC-005, 006, 010 | I03-AT-005, 006, 010 |
+| I03-REQ-008 | I03-DES-003, 004, 007, 009, 010 | I03-PLAN-003, 004, 005, 006, 007 | I03-AC-005, 006, 010 | I03-AT-005, 006, 010 |
 | I03-REQ-009 | I03-DES-001, 002, 009, 011 | I03-PLAN-002, 005, 006, 008 | I03-AC-008, 009 | I03-AT-008, 009 |
 | I03-REQ-010 | I03-DES-010, 012 | I03-PLAN-001, 007, 008 | I03-AC-010 | I03-AT-010 |
 

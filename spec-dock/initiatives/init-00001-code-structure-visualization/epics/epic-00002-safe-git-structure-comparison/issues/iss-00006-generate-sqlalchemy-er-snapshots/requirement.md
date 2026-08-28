@@ -5,7 +5,7 @@ ID: "iss-00006"
 関連GitHub: ["#6"]
 package_sequence_key: "ISSUE-03"
 状態: "draft"
-最終更新: "2026-08-28"
+最終更新: "2026-08-29"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -88,8 +88,8 @@ SQLAlchemy temporal diff、ghost row、before/after matching は後続 `iss-0000
 | I03-REQ-002 | CLI/config compatibility | 既存 snapshot grammar、target grammar、format、stdout、config precedence、positive entity overrideを再利用し、SQLAlchemy snapshotに必要なdomain acceptanceだけをadditiveに拡張する。 |
 | I03-REQ-003 | source/applicability | 既存 immutable SourceViewの`.py` bytesだけを解析する。domain evidence不在を証明できる場合だけ`not_applicable`とし、失敗やdynamic evidenceをabsenceへ変換しない。 |
 | I03-REQ-004 | table identity | table entityはstatic schema名またはnullとstatic table名で同定し、module、path、mapped class名をidentityへ混ぜない。無関係な宣言が同一identityへ収束した場合はwinnerを選ばない。 |
-| I03-REQ-005 | row/relation semantics | column、primary key、unique、check、index、foreign key、relationship、inheritance、association tableをtyped row/relationとして区別し、FKとrelationshipを同一kindへ畳み込まない。 |
-| I03-REQ-006 | redaction/output | default、server_default、computed、check/join expression等の値・本文を保持せず、presence/category/redacted markerとcountだけをJSON、PlantUML、manifest coverageへ出す。 |
+| I03-REQ-005 | row/relation semantics | column、primary key、unique、check、index、foreign key、relationship、inheritance、association tableをtyped row/relationとして区別し、FKとrelationshipを同一kindへ畳み込まない。redaction categoryだけでidentityを作るunnamed check/unnamed expression indexはdistinct source occurrenceをequivalent duplicateとみなさない。 |
+| I03-REQ-006 | redaction/output | default、server_default、computed、check/join expression等の値・本文を保持せず、presence/category/redacted markerとcountだけをJSON、PlantUML、manifest coverageへ出す。type constructor parametersはconstructorごとに一件と数え、JSON、PlantUML、manifestが同一rule/countを公開する。 |
 | I03-REQ-007 | status/publication/budget | local failure、safe subset不在、explicit target failure、table collision、entity overrun、run fatal、usage、interruptを区別し、statusに対応するpayload/manifest/exit matrixを満たす。 |
 | I03-REQ-008 | safety/determinism/bounded analysis | import/DB/Git mutationを行わず、解析をfrozen source、有限AST、有限class graph、requested traversal depth、table budget内に閉じる。同じ入力ではID、order、diagnostic、bytes、SHA-256が決定的になる。 |
 | I03-REQ-009 | stdout/schema/public compatibility | SQLAlchemy selector、summary、unavailable result、schema、manifest、writerをclosed unionとして拡張し、同じPython入力に対する既存public bytes/path/statusを変えない。 |
@@ -223,15 +223,18 @@ SQLAlchemy semantic JSONはcommon envelopeの`entities`、`members`、`relations
 - foreign keyとrelationshipは別row、別relation kindである。relationshipからforeign keyを推測せず、foreign keyからrelationshipを合成しない。
 - classがmapped parentを継承してもown table identityを持たない場合、single-table/mixin/abstractを推測せず、そのclass固有rowをparentへ自動mergeしない。static `__abstract__ = true` はbase evidenceとして利用できるがtable entityにはしない。
 - row IDはowner table ID、row kind、kind別stable structural keyから `sqlalchemy:row:<sha256>` を作る。relation IDもkind、source、target、via row、roleのcanonical tupleから作る。source path、line、declaration order、raw literal、expression bodyをIDへ含めない。
-- semantic keyとpayloadが同一のduplicate row/relationは一つへcanonicalizeする。同じsemantic keyでpayloadが競合する場合はwinnerを選ばず、該当row/relationを除外してincomplete diagnosticを出す。
+- non-lossy structural identityを持つrow/relationでは、同一IDかつ`id`/`source`を除くpublic semantic payloadが同一のevidenceを一つへcanonicalizeできる。payloadが異なる場合はwinnerを選ばず、全該当evidenceを除外して各source occurrenceへ`CSV-SA-009`を出す。
+- redactionによりmany-to-oneとなるlossy structural identity、すなわちunnamed `check`と、少なくとも一つのexpression termを含むunnamed `index`では、同一owner/kind/source `(path,start_line,end_line)`からの同じdeclarationの再発見だけをdedupeできる。異なるsource occurrenceが同じlossy IDへ収束した場合はpublic payloadが同一でも全該当rowを除外し、各occurrenceへ`CSV-SA-009`を出してdomainを`incomplete`にする。ordinary named row、column-termだけのunnamed index、その他non-lossy identityのexact semantic dedupeは維持する。
 - entity、row、relation、mapping source、coverage、diagnosticはDesignのUTF-8 byte sort tupleで決定的に並べる。source declaration orderだけの変更はIDとsemantic array orderを変えない。provenance rangeは実sourceに追従するためArtifact SHA自体は変わり得る。
 
 ### redaction
 
 - `default`、`server_default`、`onupdate`、`server_onupdate`、`Computed`、`Identity`、check expression、relationship join/order/foreign_keys、arbitrary SQL expressionはraw AST text、literal、reprをmodelへ入れない。
 - default-like valueは `{present, category, redacted}` だけを持つ。categoryは `absent|literal|callable|sql_expression|computed|identity|unknown` に閉じ、presentな値は常に`redacted: true`とする。
+- type constructorにargument/keywordが一つ以上ある場合、constructor全体を一つの`type.parameters` redacted boundaryとする。`String(255)`は1件、`Numeric(10, 2, asdecimal=True)`も1件であり、argument、keyword、nested literal/node数を重複計上しない。
 - structural identifierとして必要なtable/schema/column/constraint/index/relationship/back_populates/FK target名だけを、safe static stringとして出力できる。connection URL、password、token、SQL/check/default bodyはstructural identifierとして扱わない。
-- coverageは `rule_version: code-structure-viz.sqlalchemy-redaction/v1` とrun内の`redacted_values` countを持つ。JSON、PlantUML、manifest domain coverageで同じcountを参照する。
+- coverageは `rule_version: code-structure-viz.sqlalchemy-redaction/v1` とrun内の`redacted_values` countを持つ。semantic JSON coverage、SQLAlchemy PlantUML metadata、manifest domain coverageは同じsummaryのrule/countを公開し、不一致を成功として公開しない。
+- SQLAlchemy PlantUMLは`legend right`直後にrenderer-owned line `  rule_version=code-structure-viz.sqlalchemy-redaction/v1`、続けて`  redacted_values=<0またはleading zeroなしのpositive ASCII decimal>`をexactly once出す。table 0件でも省略しない。
 - initial releaseに`--include-literals`、debug source dump、raw AST outputを設けない。
 
 ## Artifact / schema / publication contract
@@ -248,7 +251,8 @@ SQLAlchemy semantic JSONはcommon envelopeの`entities`、`members`、`relations
 | run fatal / usage / interrupt | final output directoryとfinal manifestを含むArtifact 0件、exit 1/2/130 |
 
 - semantic JSONは `type: semantic_snapshot`、`schema: code-structure-viz.semantic/v1`、`domain: sqlalchemy`、`document_kind: snapshot`を持ち、media typeは`application/json`である。SQLAlchemy diff documentはschemaへ追加しない。
-- SQLAlchemy PlantUML contractは `code-structure-viz.plantuml/sqlalchemy/v1`、exact titleは `SQLAlchemy ER snapshot`、media typeは`text/vnd.plantuml; charset=utf-8`とする。
+- SQLAlchemy PlantUML contractは `code-structure-viz.plantuml/sqlalchemy/v1`、exact titleは `SQLAlchemy ER snapshot`、media typeは`text/vnd.plantuml; charset=utf-8`とする。column lineは`type=<type.name|->`の直後に`type_parameters=<redacted token|->`をexactly once持つ。
+- user-controlled PlantUML label escapingはinjectiveでなければならない。input underscoreはすべて`_U005F_`へencodeし、renderer-owned alias、keyword、metadata key、placeholderのunderscoreだけをliteral syntaxとして残す。したがってinput quote `"`のencoded label `_U0022_`と、literal input `_U0022_`のencoded label `_U005F_U0022_U005F_`は衝突しない。
 - run manifestはadapter `{domain: sqlalchemy, name: sqlalchemy-ast, version: "1"}`、SQLAlchemy PlantUML contract、command/request/source/config/run/domain/artifact descriptorを持つ。
 - semantic JSON、manifest、summary、stdout resultはexisting canonical JSON encoderのUTF-8/no BOM/no extra space/final LFを用いる。PlantUMLもUTF-8/final LF/no double final LFとする。
 - JSON Schemaはtest/build-time gateであり、runtimeはschema fileや`jsonschema`をloadしない。
@@ -317,15 +321,21 @@ SQLAlchemy semantic JSONはcommon envelopeの`entities`、`members`、`relations
 | ID | 観測可能な完了条件 | acceptance evidence |
 | --- | --- | --- |
 | I03-AC-001 | modern/classic declarative class、module-level Table、exact `__table__` bindingをoffline CLIでtable snapshotへ変換する。 | I03-AT-001 |
-| I03-AC-002 | column、PK/unique/check/index/FK/relationship/inheritance/associationをclosed row/relation kindで出力し、identity/order/dedupe contractを満たす。 | I03-AT-002 |
+| I03-AC-002 | column、PK/unique/check/index/FK/relationship/inheritance/associationをclosed row/relation kindで出力し、identity/order/dedupe contractを満たす。lossy unnamed check/indexはdistinct occurrenceを等価dedupeせず、ordinary non-lossy exact duplicateだけをcanonicalizeする。 | I03-AT-002 |
 | I03-AC-003 | path/module/class target、target union、upstream/downstream depth、frontier、explicit missing/ambiguous targetをcontractどおり処理する。 | I03-AT-003 |
-| I03-AC-004 | no evidenceはnot_applicable、safeなabstract base等のapplicable zero-tableはcomplete empty payload、isolated failureはpartial_safe、safe subsetなし/absence証明不能/collisionはpayload_unavailableとし、published file setとexitを一致させる。 | I03-AT-004 |
-| I03-AC-005 | DB/import/build/plugin execution trapが発火せず、default/URL/token/check/join/source/absolute pathが全output channelへ存在しない。redaction count/ruleが一致する。 | I03-AT-005 |
+| I03-AC-004 | no evidenceはnot_applicable、safeなabstract base等のapplicable zero-tableはcomplete empty payload、isolated failureはpartial_safe、safe subsetなし/absence証明不能/collisionはpayload_unavailableとし、published file setとexitを一致させる。lossy identity conflictはsafe tableを残せる場合`partial_safe`とする。 | I03-AT-004 |
+| I03-AC-005 | DB/import/build/plugin execution trapが発火せず、default/URL/token/check/join/source/absolute pathが全output channelへ存在しない。type parameterをconstructorごとに一件だけ数え、redaction rule/countをJSON、PlantUML、manifestで一致させ、PlantUML label escape collisionを生じさせない。 | I03-AT-005 |
 | I03-AC-006 | declaration order、import alias、filesystem enumeration orderを変えてもsemantic ID/array orderが安定し、same-input rerunの全Artifact bytes/SHA-256が一致する。 | I03-AT-006 |
 | I03-AC-007 | default 501 selected tablesはpayload_unavailable/exit 3/payloadなし/manifest countあり、valid 600 overrideは成功し、invalid overrideとdiff-only optionはexit 2/Artifactなしとなる。 | I03-AT-007 |
 | I03-AC-008 | stdout selectorのvalid/invalid/duplicate/domain/format、available exact bytes、not_applicable/payload_unavailable/fatal/interrupt result、selectorなしsummaryをtable-drivenに満たす。 | I03-AT-008 |
 | I03-AC-009 | semantic/manifest/diagnostic/summary/stdout schemaがSQLAlchemy snapshotをclosed unionとして受理し、既存Python goldensとdiff contractsをbyte-for-byte維持する。 | I03-AT-009 |
 | I03-AC-010 | full unit/integration/acceptance/security/package suite、ruff、mypy、offline build、SpecDock validate、minimum/latest/macOS CIがruntime dependency 0件で成功する。 | I03-AT-010 |
+
+次のacceptance fixtureはexact outcomeを固定する。
+
+- `lossy_expression_identity_conflict`: one safe tableとone safe columnに、同じredaction categoryへ縮退するdistinct unnamed checkを2件、同じordered expression-category termsへ縮退するdistinct unnamed indexを2件置く。expectedはdomain `incomplete / partial_safe`、exit 3、safe payload + manifest、`CSV-SA-009` exactly 4件、final `members`はsafe column exactly 1件で`check`/`index` rowは各0件である。同じAST declarationを複数passで再発見したevidenceは追加row/diagnosticを生まない。separate non-lossy exact duplicate caseは`complete`のままrow exactly 1件へcanonicalizeする。
+- `type_parameter_redaction`: other redacted boundaryを持たないtableで`String(255)`と`Numeric(10, 2, asdecimal=True)`を使い、各constructorの`type.parameters`をexactly 1件、run totalを`redacted_values=2`とする。semantic JSON、PlantUMLの`rule_version`/`redacted_values` metadata、manifest domain coverageがexactly同じrule/countを持ち、各column lineが`type_parameters=[redacted:literal]`を一度だけ持つ。
+- `plantuml_escape_collision`: user label `"`は`_U0022_`、user label `_U0022_`は`_U005F_U0022_U005F_`となり、golden bytes上でdistinctである。raw user underscore/quoteはlabelへ通さず、renderer-owned syntaxは変更しない。
 
 - `I03-AC-001`〜`I03-AC-010` がすべて成立し、Requirement→Design→Plan→acceptance→test traceにgapがない場合だけ実装ready/completeと判定する。
 - Issue 7へ渡すのはimmutable SQLAlchemy snapshot model、public semantic JSON/PlantUML/manifest contract、stable IDs、coverage/diagnosticsである。diff implementationは渡さない。

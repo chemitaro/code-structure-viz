@@ -5,7 +5,7 @@ ID: "iss-00006"
 関連GitHub: ["#6"]
 package_sequence_key: "ISSUE-03"
 状態: "draft"
-最終更新: "2026-08-28"
+最終更新: "2026-08-29"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -130,7 +130,7 @@ application.diff / semantic.diff -X-> adapters.sqlalchemy in this Issue
 | `tests/unit/core/test_diagnostics.py` | existing tests | SQLAlchemy code cardinality/context/orderを追加する。 |
 | `tests/unit/core/test_outcomes.py` | existing tests | required domainとimpossible cross-domain stateを追加する。 |
 | `tests/unit/artifacts/test_manifest.py` | existing tests | SQLAlchemy snapshot manifestとPython exact regressionを追加する。 |
-| `tests/unit/artifacts/test_writer.py` | existing tests | SQLAlchemy path/PlantUML/private path/invalid line/atomic publicationを追加する。 |
+| `tests/unit/artifacts/test_writer.py` | existing tests | SQLAlchemy path/PlantUML redaction metadata/type_parameters/private path/invalid line/atomic publicationを追加する。 |
 | `tests/unit/artifacts/test_streams.py` | existing tests | SQLAlchemy summary/exact/unavailableを追加する。 |
 | `tests/contracts/test_json_schemas.py` | existing tests | SQLAlchemy valid/invalid closed schema casesを追加する。 |
 | `tests/contracts/test_scope_exclusions.py` | existing tests | SQLAlchemy snapshotを許可し、SQLAlchemy package import、SQLAlchemy diff、Next、HTMLを引き続き拒否する。 |
@@ -152,26 +152,26 @@ application.diff / semantic.diff -X-> adapters.sqlalchemy in this Issue
 | `src/code_structure_viz/adapters/sqlalchemy/plantuml.py` | `SqlAlchemyPlantUmlRenderer`, `escape_plantuml_label` | closed ER vocabulary、safe escaping、deterministic table/row/edge renderingを所有する。 |
 | `src/code_structure_viz/adapters/sqlalchemy/snapshot_adapter.py` | `SqlAlchemySnapshotDomainAdapter` | source index→analysis→selection→SnapshotAnalysisとrenderer dispatchを接続する。 |
 | `docs/contracts/sqlalchemy-semantic-v1.md` | contract document | exact JSON fields、IDs、sort、redaction、coverageを記述する。 |
-| `docs/contracts/sqlalchemy-plantuml-v1.md` | contract document | exact title、alias、row/edge vocabulary、escaping、legendを記述する。 |
+| `docs/contracts/sqlalchemy-plantuml-v1.md` | contract document | exact title、alias、row/edge vocabulary、type_parameters、redaction metadata placement、injective escaping、legendを記述する。 |
 | `tests/helpers/sqlalchemy_snapshot.py` | fixture/golden invocation helpers | existing CLI/fixture_repo/golden helperを組み合わせ、SQLAlchemy-specific expected file setを定義する。 |
 | `tests/unit/sqlalchemy/__init__.py` | package marker | current unit-test package convention。 |
-| `tests/unit/sqlalchemy/test_model.py` | unit tests | ID/invariant/sort/dedupe/redaction DTO。 |
+| `tests/unit/sqlalchemy/test_model.py` | unit tests | ID/invariant/sort/non-lossy dedupe/lossy occurrence conflict/redaction DTO。 |
 | `tests/unit/sqlalchemy/test_analyzer.py` | unit tests | bindings/base/table/row/relation/applicability/failure。 |
 | `tests/unit/sqlalchemy/test_selection.py` | unit tests | path/module/class targetとdepth/frontier。 |
 | `tests/unit/sqlalchemy/test_semantic_json.py` | unit tests | exact DTO/bytes/order。 |
-| `tests/unit/sqlalchemy/test_plantuml.py` | unit tests | exact vocabulary/escaping/no literal。 |
+| `tests/unit/sqlalchemy/test_plantuml.py` | unit tests | exact vocabulary/type_parameters/redaction metadata/injective escaping/no literal。 |
 | `tests/integration/sqlalchemy/__init__.py` | package marker | current integration-test package convention。 |
-| `tests/integration/sqlalchemy/test_er_semantics.py` | integration tests | cross-module base/import/Table/relationship/FK resolution。 |
+| `tests/integration/sqlalchemy/test_er_semantics.py` | integration tests | cross-module base/import/Table/relationship/FK resolutionとlossy/non-lossy canonicalization。 |
 | `tests/acceptance/sqlalchemy/__init__.py` | package marker | current acceptance-test package convention。 |
 | `tests/acceptance/sqlalchemy/test_snapshot_cli.py` | acceptance | complete/default/format/manifest/paths。 |
 | `tests/acceptance/sqlalchemy/test_snapshot_targets.py` | acceptance | target union/depth/missing/ambiguous。 |
-| `tests/acceptance/sqlalchemy/test_snapshot_failures.py` | acceptance | not_applicable/partial_safe/payload_unavailable/collision。 |
+| `tests/acceptance/sqlalchemy/test_snapshot_failures.py` | acceptance | not_applicable/partial_safe/payload_unavailable/table/lossy row collision。 |
 | `tests/acceptance/sqlalchemy/test_snapshot_determinism.py` | acceptance | rerun/order/enumeration stability。 |
 | `tests/acceptance/sqlalchemy/test_snapshot_budget.py` | acceptance | 500/501/override/invalid/diff-only options。 |
 | `tests/acceptance/sqlalchemy/test_stdout_selector.py` | acceptance | selector matrix and exact bytes。 |
-| `tests/security/test_sqlalchemy_static_boundary.py` | security | target import/DB/build/network trap、redaction/path/source scans、Git state。 |
+| `tests/security/test_sqlalchemy_static_boundary.py` | security | target import/DB/build/network trap、redaction rule/count cross-artifact equality、escape collision、path/source scans、Git state。 |
 | `tests/contracts/test_sqlalchemy_goldens.py` | contract | all SQLAlchemy golden files/schema/digest。 |
-| `tests/fixtures/sqlalchemy_snapshot/` | source fixtures | source-only modern/classic/association/target/failure/redaction cases。 |
+| `tests/fixtures/sqlalchemy_snapshot/` | source fixtures | source-only modern/classic/association/target/failure/lossy identity/redaction metadata/escape collision cases。 |
 | `tests/golden/sqlalchemy_snapshot/` | expected artifacts | canonical JSON/PlantUML/manifest/stdout/stderr/exit/published-files。 |
 
 ### existing — verify only, do not modify unless a failing required test proves necessity
@@ -316,7 +316,7 @@ SqlAlchemyAnalysisResult
 4. `DeclarativeBase` subclassと`declarative_base()` assignmentをseedに、candidate class数を上限とするfixed-pointでdeclarative classを証明する。
 5. static table declaration/bindingを抽出し、exact `__table__` linkだけをmergeする。unrelated same identityはcollision groupへ分離する。
 6. safe tableごとにcolumn/constraint/index/FK/relationship/inheritance/association evidenceをdomain DTOへ変換する。raw expressionはpass中にredaction categoryへ置換する。
-7. row/relation semantic keyでcanonicalizeし、conflictを除外してdiagnostic/frontierを追加する。
+7. row/relation ID groupをnon-lossyとlossy redacted-expression identityへ分類する。non-lossyはexact semantic payloadをcanonicalizeし、lossyは同一source occurrenceの再発見だけをdedupeしてdistinct occurrence groupを全除外し、diagnostic/frontierを追加する。
 8. applicability、safe subset、coverage、diagnosticsを`SqlAlchemyAnalysisResult`へ確定する。
 
 AST node、decoded source text、raw literal、raw expressionはanalysis local変数であり、`SqlAlchemySnapshot`、diagnostic、rendererへ保持しない。`PythonSourceIndex`はmodule/path acquisitionだけを共有し、Python adapterのprivate `_ParsedModule`/type rendererをSQLAlchemyへimportしない。SQLAlchemy analyzerは同じfrozen bytesをdomain-owned passとして一回parseするが、second SourceView、filesystem read、Git readは行わない。
@@ -607,12 +607,14 @@ row `identity_key`は次で固定する。
 | `column` | `{"name": <column name>}` |
 | named `primary_key` / `unique` / `check` / `index` / `foreign_key` | `{"name": <declared name>}` |
 | unnamed `primary_key` / `unique` | `{"columns": [ordered column names]}` |
-| unnamed `check` | `{"expression_category": <redacted category>}`。同一tableに別source occurrenceが同じIDへ収束した場合はconflictで全該当rowを除外する。 |
-| unnamed `index` | `{"unique": bool|null, "terms": [closed term identity values]}` |
+| unnamed `check` | `{"expression_category": <redacted category>}`。redaction categoryはlossyなのでdistinct source occurrenceをequivalent duplicateとみなさない。 |
+| unnamed `index` | `{"unique": bool|null, "terms": [closed term identity values]}`。expression termを一件以上含む場合はlossy、column termだけならnon-lossyとする。 |
 | unnamed `foreign_key` | `{"local_columns": [...], "target": <target identity value>, "target_columns": [...]}` |
 | `relationship` | `{"name": <attribute name>}` |
 | `inheritance` | `{"target": <target identity value>}` |
 | `association_table` | `{"source_table": <target identity value>, "relationship_member_id": <relationship row id>}`。owner table idがsecondary identityを与える。 |
+
+`closed term identity value`はcolumn termなら`{"kind":"column","column_name":<name>}`、expression termなら`{"kind":"expression","expression_category":<redacted category>}`とする。expression termはraw expressionを区別できないmany-to-one valueであるため、そのtermを一件以上含むunnamed index identity全体をlossyとする。
 
 `target identity value`は`resolution`、`id`、`schema_name`、`table_name`、`symbol`だけをこの順で持ち、`display_name`を含めない。named rowはnameをstable identityとし、columns/target/cardinality等の変更を将来diffで`modified`にできる。unnamed rowはsafe structural keyが変わればremove/addになる。
 
@@ -670,7 +672,13 @@ target resolution: internal, external, unknown
 mapping source: declarative_class, table
 ```
 
-table canonicalizationはexact same `Table` bindingを共有するdeclarative/Table sourceだけを`mapping_sources` unionへmergeし、別bindingのunrelated declarationが同一table IDへ到達した場合はpublic payloadが同じでも全groupを`CSV-SA-008` collisionとして除外する。row/relation canonicalizationは同一IDをfirst/last winnerで上書きしない。同一ID+同一semantic payload（`id`/`source`を除くcommon/kind-specific public fields）はsource locationが異なっても一件へ畳み、public `source`には`(path,start_line,end_line)`のUTF-8/数値sortで最小のcanonical representativeを置く。等価な追加locationはsemantic omissionではなくstatusをincompleteにしない。同一IDでsemantic payloadが異なる場合だけ全該当row/relation evidenceを除外し、各conflicting occurrenceへ`CSV-SA-009`を出す。`CSV-SA-010`はunresolved relation target専用で、既知target同士のpayload conflictへ流用しない。
+table canonicalizationはexact same `Table` bindingを共有するdeclarative/Table sourceだけを`mapping_sources` unionへmergeし、別bindingのunrelated declarationが同一table IDへ到達した場合はpublic payloadが同じでも全groupを`CSV-SA-008` collisionとして除外する。row/relation canonicalizationは同一IDをfirst/last winnerで上書きしない。
+
+non-lossy identityでは、同一ID+同一semantic payload（`id`/`source`を除くcommon/kind-specific public fields）はsource locationが異なっても一件へ畳み、public `source`には`(path,start_line,end_line)`のUTF-8/数値sortで最小のcanonical representativeを置く。等価な追加locationはsemantic omissionではなくstatusをincompleteにしない。同一IDでsemantic payloadが異なる場合は全該当row/relation evidenceを除外し、各conflicting occurrenceへ`CSV-SA-009`を出す。
+
+lossy identityはunnamed `check`と、expression termを一件以上含むunnamed `index`に限定する。`occurrence_key = (owner_id, kind, source.path, source.range.start_line, source.range.end_line)`とし、同一occurrence keyかつ同一public payloadの再発見だけを一件へ畳む。同一lossy ID groupをoccurrence keyでcollapseした後にdistinct occurrenceが2件以上残る場合、public payloadが同一でもsemantic equalityを証明できないため全row evidenceを除外し、各distinct occurrenceへrow IDを`symbol`とする`CSV-SA-009`をexactly一件出す。同一occurrence内でpayloadが競合した場合も全evidenceを除外する。除外rowからderived row/relationを生成しない。safe table/rowが残るrunは`partial_safe`、残らなければexisting payload-unavailable ruleへ従う。
+
+`CSV-SA-010`はunresolved relation target専用で、既知target同士のpayload conflictまたはlossy identity conflictへ流用しない。
 
 ### redaction accounting
 
@@ -689,10 +697,10 @@ redaction categoryはAST node typeとproven construction symbolだけで次の�
 `unknown` descriptorまたはunknown target/typeがselected payloadに残る場合、payload自体は安全でもstatusは`partial_safe`であり、対応diagnostic/frontierを必須とする。row identity/ownerを安全に作れないunsupported declarationはrowを公開せず、unknown_declarationsとdiagnostic/frontierだけを残す。
 
 - `RedactedExpression.present=true`一件につき`redacted_values`を1増やす。expression内のliteral/node数は数えず、source bodyを走査してcountしない。
-- type constructorにargument/keywordが一つ以上あれば`type.parameters`をpresentにし1件と数える。zero-argument symbolはabsent。
+- type constructorにargument/keywordが一つ以上あればconstructor全体を一つの`type.parameters` descriptorとしてpresentにし、exactly 1件と数える。`String(255)`は1件、`Numeric(10, 2, asdecimal=True)`も1件であり、argument/keyword/nested nodeごとに加算しない。zero-argument symbolはabsent。all supplied value nodesがdirect literalならcategoryは`literal`、それ以外は上記closed precedenceで`sql_expression|unknown`へ縮退する。
 - check、default、server_default、column `onupdate`/`server_onupdate`、computed、identity、index expression term、FK `ondelete`/`onupdate`、relationship `primaryjoin`/`secondaryjoin`/`order_by`/`foreign_keys`をそれぞれ独立したboundaryとして数える。
 - static table/column/constraint/index名、safe relationship target、`back_populates`はowned semantic identifierでありredaction countへ含めない。ただしPlantUML escapingを必須とする。
-- coverageの`redacted_values`はfinal selected payloadに存在するdescriptorだけの合計である。unknown/conflictとしてpayloadから除外したraw expressionは保持せず、countではなくdiagnostic/frontierで欠落を示す。
+- coverageの`redacted_values`はfinal selected payloadに存在するdescriptorだけの合計である。unknown/conflictとしてpayloadから除外したraw expressionは保持せず、countではなくdiagnostic/frontierで欠落を示す。`SqlAlchemySnapshot.coverage.redaction`をsemantic JSON、PlantUML renderer、manifest `coverage_value`の唯一のsummary authorityとし、各renderer/builderで再集計しない。
 
 ## target selection / graph
 
@@ -822,7 +830,7 @@ diagnostics
 - Python adapter metadataはexisting exact values、SQLAlchemyは`sqlalchemy-ast/1`。
 - snapshot run fingerprint preimageのfield orderはexisting Python bytesを維持して`schema`、`tool_version`、`adapter_version`、`source_fingerprint`、`config_sha256`、`command`、`request`とする。`adapter_version`は`python-ast/1`または`sqlalchemy-ast/1`、`command`内のdomainがselected domainを与える。新しいtop-level fieldをPython preimageへ挿入せず、raw payload bytesも入れない。
 - `contracts.plantuml`はselected domainのcontractで、Python diff manifestはexisting builderを通る。
-- domain coverageはadapterのclosed `coverage_value`だけを受ける。
+- domain coverageはadapterのclosed `coverage_value`だけを受ける。SQLAlchemy semantic renderer、PlantUML renderer、manifest builderは同じimmutable `SqlAlchemyRedactionSummary`を受け、rule/countを別々に再計算しない。
 
 ### schema strategy
 
@@ -849,6 +857,8 @@ T_<source> ..> T_<target> : relationship <safe row name>
 T_<child> --|> T_<parent> : inheritance
 T_<source> -- T_<secondary> : association <safe row name>
 legend right
+  rule_version=code-structure-viz.sqlalchemy-redaction/v1
+  redacted_values=<canonical nonnegative ASCII decimal>
   --> foreign_key
   ..> relationship
   --|> inheritance
@@ -858,11 +868,11 @@ endlegend
 @enduml
 ```
 
-entity bodyはsemantic `members` orderで、各rowを次のexact single-line templateへ変換する。user-controlled structural valueは`escape_plantuml_label`後のsingle-line valueである。renderer-owned constantsの`<default>`、`<unnamed>`、`<unknown>`、`?`、`-`、`[redacted:<category>]`はescape対象ではなくclosed literalとして出す。table/target displayはprecomposed `display_name`をblind escapeせず、renderer-owned markerとescaped schema/table/symbol componentから組み立てる。null nameは`<unnamed>`、null boolは`?`、absent optional target/stringは`-`、present redacted descriptorは`[redacted:<category>]`とする。applicable zero-table snapshotはentity/edgeを0件とし、header、legend、`@enduml`だけを同じ順で出す。
+entity bodyはsemantic `members` orderで、各rowを次のexact single-line templateへ変換する。user-controlled structural valueは`escape_plantuml_label`後のsingle-line valueである。renderer-owned constantsの`<default>`、`<unnamed>`、`<unknown>`、`?`、`-`、`[redacted:<category>]`はescape対象ではなくclosed literalとして出す。table/target displayはprecomposed `display_name`をblind escapeせず、renderer-owned markerとescaped schema/table/symbol componentから組み立てる。null nameは`<unnamed>`、null boolは`?`、absent optional target/stringは`-`、present redacted descriptorは`[redacted:<category>]`とする。type parameter descriptorはcolumn lineの`type_parameters` fieldへ同じtoken ruleで出す。applicable zero-table snapshotはentity/edgeを0件とし、header、redaction metadataを含むlegend、`@enduml`だけを同じ順で出す。
 
 | row kind | exact body line template |
 | --- | --- |
-| `column` | `  column <name> : <type.category> type=<type.name|-> nullable=<true|false|?> primary_key=<true|false|?> unique=<true|false|?> index=<true|false|?> default=<token|-> server_default=<token|-> onupdate=<token|-> server_onupdate=<token|-> computed=<token|-> identity=<token|->` |
+| `column` | `  column <name> : <type.category> type=<type.name|-> type_parameters=<token|-> nullable=<true|false|?> primary_key=<true|false|?> unique=<true|false|?> index=<true|false|?> default=<token|-> server_default=<token|-> onupdate=<token|-> server_onupdate=<token|-> computed=<token|-> identity=<token|->` |
 | `primary_key` | `  primary_key <name|<unnamed>> columns=<comma-separated columns>` |
 | `unique` | `  unique <name|<unnamed>> columns=<comma-separated columns>` |
 | `check` | `  check <name|<unnamed>> expression=<redacted token>` |
@@ -878,8 +888,9 @@ list separatorは`,`一文字で追加空白なし。empty listはmodel invarian
 - row lineはkind prefix、safe name、closed type/category/bool/target/redaction markerだけ。raw SQL、default/check/join bodyを表示しない。
 - internal relationで両endpointがselectedの場合だけedgeを描く。external/unknown targetはtable row markerに留め、synthetic entityを作らない。
 - colorに意味を依存せず、line style、label、legendを必須にする。
-- `escape_plantuml_label`はNFC後、Unicode categoryがLetter/Numberのcode pointとASCII space、`.`、`_`、`-`、`/`、`$`だけをそのまま残す。それ以外の各code pointは`_U` + uppercase 4〜6桁hex scalar + `_`へ置換する（例: `" -> _U0022_`、`{ -> _U007B_`、LFはmodel invariantで到達不可）。これによりraw quote/backslash/brace/pipe/colon/markup/control/newlineをPlantUMLへ渡さない。renderer以外がPlantUML textを組み立てない。
-- writerのSQLAlchemy validatorはexact skeleton、allowed line prefix、alias hex、relation grammar、final LF、private path scanを検証する。Python validatorを共通のpermissive regexへ置換しない。
+- `escape_plantuml_label`はNFC後、Unicode categoryがLetter/Numberのcode pointとASCII space、`.`、`-`、`/`、`$`だけをそのまま残す。user-controlled underscoreはpassthroughしない。その他の各code pointは`_U` + uppercase 4〜6桁hex scalar + `_`へ置換し、input `_`は必ず`_U005F_`になる（例: `" -> _U0022_`、`_U0022_ -> _U005F_U0022_U005F_`、`{ -> _U007B_`、LFはmodel invariantで到達不可）。input由来のunderscoreがrawで残らないため、escape token `_U0022_`はencoded quoteだけを表し、literal `_U0022_`と衝突しない。renderer-owned alias `T_<hex>`、row keywords、metadata keys、placeholderはこのfunctionへ渡さずsyntaxとして従来どおり出す。renderer以外がPlantUML textを組み立てない。
+- redaction metadata lineは`legend right`の直後にexactly oneずつ、rule line、count lineの順で置く。rule lineはexact fixed string、count lineは`  redacted_values=(0|[1-9][0-9]*)`に一致し、leading zero、sign、space suffixを許さない。
+- writerのSQLAlchemy validatorはexact skeleton、上記metadataのpresence/uniqueness/order/rule/count grammar、各column lineの`type_parameters` field exactly once、allowed line prefix、alias hex、relation grammar、final LF、private path scanを検証する。Python validatorを共通のpermissive regexへ置換しない。
 
 ## writer / streams / publication
 
@@ -920,6 +931,9 @@ list separatorは`,`一文字で追加空白なし。empty listはmodel invarian
 - `partial_safe`: safe table + broken/dynamic/collision declaration。
 - `payload_unavailable`: no safe table + failure/unknown、explicit target miss。
 - `redaction`: secret-like default/server_default/check/join/URL sentinel。
+- `lossy_identity_conflict`: one safe table/column、same-category unnamed check 2件、same expression-term identity unnamed index 2件。partial_safe、`CSV-SA-009` 4件、check/index row 0件、member total 1件を固定する。同一occurrence rediscoveryとordinary non-lossy duplicateのcontrol caseも持つ。
+- `redaction_metadata`: `String(255)`と`Numeric(10, 2, asdecimal=True)`だけをredacted boundaryとし、JSON/PlantUML/manifestのrule/count 2、column `type_parameters` tokenを固定する。
+- `escape_collision`: user labels `"`と`_U0022_`をdistinct encoded labelsとして固定する。
 - `identity_order`: declaration/import/filesystem order variants。
 
 fixture sourceはSQLAlchemyをinstallせず、importした場合にsentinel side effectが起きる形でもCLIが成功することを確認する。
@@ -940,9 +954,9 @@ stdout selector固有bytesはacceptance testがpublished fileとのexact equalit
 
 ### test seam ownership
 
-- model/analyzer/selector/rendererはSourceView/AST/immutable DTOを直接unit testし、filesystem/DBをmock domain logicへ混ぜない。
-- acceptanceはactual `python -m code_structure_viz`、temporary Git root、outside-repo output、stdout/stderr/exit/published file bytesを同時に観測する。
-- securityはtarget import、`sqlite3.connect`/socket/network、application write sentinel、Git state、source/literal/path negative scanを行う。productが必要とするGit subprocessはallowlistで別検証する。
+- model/analyzer/selector/rendererはSourceView/AST/immutable DTOを直接unit testし、filesystem/DBをmock domain logicへ混ぜない。lossy identity testはstatus、diagnostic code/context/count、final row countまでassertする。
+- acceptanceはactual `python -m code_structure_viz`、temporary Git root、outside-repo output、stdout/stderr/exit/published file bytesを同時に観測する。redaction metadata testはJSON、PlantUML、manifestのrule/countをcross-readしてexact equalityをassertする。
+- securityはtarget import、`sqlite3.connect`/socket/network、application write sentinel、Git state、source/literal/path negative scanを行う。PlantUML collision-pair goldenで`_U0022_`と`_U005F_U0022_U005F_`のdistinctnessをassertする。productが必要とするGit subprocessはallowlistで別検証する。
 - packagingはwheelだけをoffline venvへinstallし、SQLAlchemy package不在でSQLAlchemy snapshotを実行する。
 - Python snapshot/diff exact goldens、all source/Git/security regressionをfull gateで再実行する。
 
