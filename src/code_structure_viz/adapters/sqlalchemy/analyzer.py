@@ -100,6 +100,7 @@ class _ParsedModule:
     repository_bindings: dict[str, str | None] = field(default_factory=dict)
     repository_ambiguous_bindings: dict[str, frozenset[str]] = field(default_factory=dict)
     repository_modules: frozenset[str] = frozenset()
+    repository_module_origins: frozenset[str] = frozenset()
     repository_star_imports: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
@@ -487,8 +488,10 @@ class SqlAlchemySnapshotAnalyzer:
 
     def _index_bindings(self, modules: list[_ParsedModule]) -> None:
         repository_modules = frozenset(module.module for module in modules)
+        repository_module_origins = _preview_repository_module_origins(modules, repository_modules)
         for module in modules:
             module.repository_modules = repository_modules
+            module.repository_module_origins = repository_module_origins
         for module in modules:
             for statement in module.tree.body:
                 _bind_module_statement(module, statement)
@@ -2231,6 +2234,27 @@ def _module_import_precedes(
     )
 
 
+def _module_import_from_precedes(
+    module: _ParsedModule,
+    value: ast.expr,
+    origin: str,
+    statement: ast.AST,
+) -> bool:
+    if origin not in module.repository_module_origins or not isinstance(value, ast.Name):
+        return False
+    symbol = f"{module.module}.{value.id}"
+    if module.bindings.get(value.id) != origin or value.id in module.ambiguous_bindings:
+        return False
+    if origin not in module.imported_module_alias_candidates.get(symbol, ()):
+        return False
+    import_position = module.import_alias_definite_positions.get(symbol)
+    statement_position = (
+        getattr(statement, "lineno", -1),
+        getattr(statement, "col_offset", -1),
+    )
+    return import_position is not None and import_position < statement_position
+
+
 def _invalidate_attribute_target(
     module: _ParsedModule,
     target: ast.expr,
@@ -2427,7 +2451,11 @@ def _proven_sqlalchemy_module_assignment(
     if origin is None:
         return None
     if not _external_sqlalchemy_module_origin(module, origin) and not (
-        origin in module.repository_modules and _module_import_precedes(module, origin, statement)
+        origin in module.repository_modules
+        and (
+            _module_import_precedes(module, origin, statement)
+            or _module_import_from_precedes(module, value, origin, statement)
+        )
     ):
         return None
     return target.id, origin
@@ -2449,6 +2477,64 @@ def _definite_class_binding_names(value: ast.AST) -> tuple[str, ...]:
     return ()
 
 
+def _preview_repository_module_origins(
+    modules: list[_ParsedModule],
+    repository_modules: frozenset[str],
+) -> frozenset[str]:
+    previews: list[_ParsedModule] = []
+    for module in modules:
+        preview = _ParsedModule(
+            module.module,
+            module.path,
+            module.tree,
+            {},
+            {},
+            False,
+            module.is_package,
+            repository_modules=repository_modules,
+        )
+        for statement in preview.tree.body:
+            _bind_module_statement(preview, statement)
+            if isinstance(statement, ast.ClassDef):
+                _invalidate_executed_class_body_mutations(
+                    preview,
+                    statement,
+                    f"{preview.module}.{statement.name}",
+                )
+            for write in _nested_module_scope_writes(statement):
+                _bind_module_statement(preview, write, ambiguous=True)
+                if isinstance(write, ast.ClassDef):
+                    _invalidate_executed_class_body_mutations(
+                        preview,
+                        write,
+                        f"{preview.module}.{write.name}",
+                        ambiguous_execution=True,
+                    )
+        previews.append(preview)
+    return frozenset(_repository_module_object_origins(previews))
+
+
+def _repository_module_object_origins(modules: list[_ParsedModule]) -> set[str]:
+    by_name = {module.module: module for module in modules}
+    result: set[str] = set()
+    for symbol in by_name:
+        if "." not in symbol:
+            continue
+        owner_name, name = symbol.rsplit(".", 1)
+        owner = by_name.get(owner_name)
+        if owner is None:
+            result.add(symbol)
+            continue
+        if not owner.is_package:
+            continue
+        if name not in owner.bindings:
+            result.add(symbol)
+            continue
+        if symbol in owner.imported_module_alias_candidates.get(symbol, ()):
+            result.add(symbol)
+    return result
+
+
 def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set[str]:
     mutations = {symbol for module in modules for symbol in module.attribute_mutations}
     aliases: dict[str, set[str]] = {}
@@ -2460,23 +2546,9 @@ def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set
             candidates.setdefault(symbol, set()).update(origins)
 
     by_name = {module.module: module for module in modules}
-    repository_module_origins: set[str] = set()
-    for symbol in by_name:
-        if "." not in symbol:
-            continue
-        owner_name, name = symbol.rsplit(".", 1)
-        owner = by_name.get(owner_name)
-        if owner is None:
-            repository_module_origins.add(symbol)
-            continue
-        if not owner.is_package:
-            continue
-        if name not in owner.bindings:
-            repository_module_origins.add(symbol)
-            continue
-        if symbol in owner.imported_module_alias_candidates.get(symbol, ()):
-            repository_module_origins.add(symbol)
-
+    repository_module_origins = {
+        origin for module in modules for origin in module.repository_module_origins
+    }
     repository_modules = set(by_name)
     module_origins = repository_module_origins | {
         symbol
@@ -2608,6 +2680,7 @@ def _copy_parsed_module(module: _ParsedModule) -> _ParsedModule:
         repository_bindings=module.repository_bindings,
         repository_ambiguous_bindings=module.repository_ambiguous_bindings,
         repository_modules=module.repository_modules,
+        repository_module_origins=module.repository_module_origins,
         repository_star_imports=module.repository_star_imports,
     )
 

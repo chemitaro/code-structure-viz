@@ -2966,6 +2966,128 @@ class User(DeclarativeBase):
     assert result.snapshot.partial_safe is True
 
 
+def test_class_body_importfrom_repository_module_alias_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+from pkg import namespace
+
+class Mutator:
+    alias = namespace
+    alias.DeclarativeBase = object
+
+from pkg.namespace import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_class_body_importfrom_package_shadow_does_not_taint_source_import() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"""
+class Namespace:
+    pass
+
+namespace = Namespace()
+""",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+from pkg import namespace
+
+class Mutator:
+    alias = namespace
+    alias.DeclarativeBase = object
+
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_later_importfrom_does_not_prove_earlier_class_body_module_alias() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+class Mutator:
+    alias = namespace
+    alias.DeclarativeBase = object
+
+from pkg import namespace
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_rebound_importfrom_does_not_prove_class_body_module_alias() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+from pkg import namespace
+
+class Replacement:
+    pass
+
+namespace = Replacement()
+
+class Mutator:
+    alias = namespace
+    alias.DeclarativeBase = object
+
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
 def test_class_body_global_rebind_is_unknown_to_later_qualified_base() -> None:
     result = _analyze(
         {
