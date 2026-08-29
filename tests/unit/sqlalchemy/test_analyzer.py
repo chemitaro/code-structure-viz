@@ -2429,6 +2429,103 @@ class User(Base):
     assert result.snapshot.partial_safe is False
 
 
+def test_class_body_declarative_base_namespace_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+import sqlalchemy.orm as orm
+
+class Mutator:
+    orm.DeclarativeBase = object
+
+class User(orm.DeclarativeBase):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_class_body_control_flow_table_namespace_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+import sqlalchemy as sa
+
+class Mutator:
+    if condition:
+        sa.Table = replacement
+
+users = sa.Table("users", object())
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_class_body_local_shadow_namespace_mutation_does_not_taint_source() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+import sqlalchemy.orm as orm
+
+class Namespace:
+    pass
+
+replacement = Namespace()
+
+class Mutator:
+    orm = replacement
+    orm.DeclarativeBase = object
+
+class Base(orm.DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_class_method_namespace_mutation_does_not_taint_source() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+import sqlalchemy.orm as orm
+
+class Mutator:
+    def mutate(self):
+        orm.DeclarativeBase = object
+
+class Base(orm.DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
 def test_repository_attribute_mutation_taints_importfrom_binding() -> None:
     result = _analyze(
         {

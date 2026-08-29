@@ -492,6 +492,14 @@ class SqlAlchemySnapshotAnalyzer:
             for statement in module.tree.body:
                 for write in _nested_module_scope_writes(statement):
                     _bind_module_statement(module, write, ambiguous=True)
+            for statement in module.tree.body:
+                for candidate in (statement, *_nested_module_scope_writes(statement)):
+                    if isinstance(candidate, ast.ClassDef):
+                        _invalidate_executed_class_body_mutations(
+                            module,
+                            candidate,
+                            f"{module.module}.{candidate.name}",
+                        )
         attribute_mutations = _expand_imported_module_alias_mutations(modules)
         for module in modules:
             module.attribute_mutations.update(attribute_mutations)
@@ -2118,17 +2126,98 @@ def _clear_import_alias_provenance(
     )
 
 
-def _invalidate_attribute_target(module: _ParsedModule, target: ast.expr) -> None:
+def _invalidate_attribute_target(
+    module: _ParsedModule,
+    target: ast.expr,
+    *,
+    resolution_scope: _ParsedModule | None = None,
+) -> None:
+    scope = resolution_scope or module
     if isinstance(target, ast.Attribute):
-        resolved = _resolve_symbol(target, module)
+        resolved = _resolve_symbol(target, scope)
         if resolved is not None:
             module.attribute_mutations.add(resolved)
-        module.attribute_mutations.update(_ambiguous_symbols(target, module))
+        module.attribute_mutations.update(_ambiguous_symbols(target, scope))
     elif isinstance(target, (ast.Tuple, ast.List)):
         for element in target.elts:
-            _invalidate_attribute_target(module, element)
+            _invalidate_attribute_target(module, element, resolution_scope=scope)
     elif isinstance(target, ast.Starred):
-        _invalidate_attribute_target(module, target.value)
+        _invalidate_attribute_target(module, target.value, resolution_scope=scope)
+
+
+def _invalidate_executed_class_body_mutations(
+    module: _ParsedModule,
+    node: ast.ClassDef,
+    symbol: str,
+) -> None:
+    scopes = _class_mutation_scope_modules(_ClassDeclaration(module, node, symbol))
+    for statement in node.body:
+        for write in (statement, *_nested_module_scope_writes(statement)):
+            scope = scopes[id(write)]
+            for target in _attribute_write_targets(write):
+                _invalidate_attribute_target(module, target, resolution_scope=scope)
+            if isinstance(write, ast.ClassDef):
+                _invalidate_executed_class_body_mutations(
+                    module,
+                    write,
+                    f"{symbol}.{write.name}",
+                )
+
+
+def _attribute_write_targets(value: ast.AST) -> tuple[ast.expr, ...]:
+    if isinstance(value, ast.Assign):
+        return tuple(value.targets)
+    if isinstance(value, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        return (value.target,)
+    if isinstance(value, (ast.For, ast.AsyncFor)):
+        return (value.target,)
+    if isinstance(value, (ast.With, ast.AsyncWith)):
+        return tuple(item.optional_vars for item in value.items if item.optional_vars is not None)
+    if isinstance(value, ast.Delete):
+        return tuple(value.targets)
+    return ()
+
+
+def _class_mutation_scope_modules(
+    declaration: _ClassDeclaration,
+) -> dict[int, _ParsedModule]:
+    scope = _copy_parsed_module(declaration.module)
+    result: dict[int, _ParsedModule] = {}
+    for statement in declaration.node.body:
+        result[id(statement)] = _copy_parsed_module(scope)
+        for name in _definite_class_binding_names(statement):
+            scope.bindings.pop(name, None)
+            scope.ambiguous_bindings.pop(name, None)
+        _bind_module_statement(
+            scope,
+            statement,
+            binding_owner=declaration.symbol,
+        )
+        for write in _nested_module_scope_writes(statement):
+            result[id(write)] = _copy_parsed_module(scope)
+            _bind_module_statement(
+                scope,
+                write,
+                ambiguous=True,
+                binding_owner=declaration.symbol,
+            )
+    return result
+
+
+def _definite_class_binding_names(value: ast.AST) -> tuple[str, ...]:
+    if isinstance(value, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        return (value.name,)
+    if isinstance(value, ast.Import):
+        return tuple(alias.asname or alias.name.split(".", 1)[0] for alias in value.names)
+    if isinstance(value, ast.ImportFrom):
+        return tuple(alias.asname or alias.name for alias in value.names if alias.name != "*")
+    if isinstance(value, (ast.Assign, ast.AugAssign, ast.NamedExpr)):
+        return _assignment_names(value)
+    if isinstance(value, ast.AnnAssign):
+        return _assignment_names(value) if value.value is not None else ()
+    if isinstance(value, ast.TypeAlias):
+        return _target_names(value.name)
+    return ()
 
 
 def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set[str]:
