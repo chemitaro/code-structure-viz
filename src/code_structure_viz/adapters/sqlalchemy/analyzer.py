@@ -108,6 +108,13 @@ class _ClassDeclaration:
     shadowed_names: frozenset[str] = frozenset()
 
 
+@dataclass(frozen=True, slots=True)
+class _ClassSpecialBinding:
+    value: ast.expr | None
+    module: _ParsedModule
+    supported: bool
+
+
 @dataclass(slots=True)
 class _TableCandidate:
     origin: str
@@ -256,6 +263,7 @@ _TYPE_CATEGORIES: Final[dict[str, SqlAlchemyTypeCategory]] = {
     "sqlalchemy.ARRAY": SqlAlchemyTypeCategory.ARRAY,
 }
 _BUILTIN_TYPES: Final = frozenset({"int", "str", "bool", "float", "bytes"})
+_CLASS_TABLE_SPECIALS: Final = frozenset({"__tablename__", "__table__", "__table_args__"})
 
 
 class SqlAlchemySnapshotAnalyzer:
@@ -633,20 +641,43 @@ class SqlAlchemySnapshotAnalyzer:
                 if candidate is not None:
                     candidates[origin] = candidate
                     table_bindings[f"{module.module}.{target.id}"] = origin
+            for statement in module.tree.body:
+                self._unsupported_module_table_assignment(
+                    module,
+                    statement,
+                    nested=False,
+                    state=state,
+                )
+                for write in _nested_module_scope_writes(statement):
+                    self._unsupported_module_table_assignment(
+                        module,
+                        write,
+                        nested=True,
+                        state=state,
+                    )
 
         for declaration in declarative_classes:
-            special = _special_assignments(declaration.node)
+            scope_modules = _class_scope_modules(declaration)
+            special = _special_assignments(declaration, scope_modules)
             if any(
                 len(special.get(name, ())) > 1
-                for name in ("__tablename__", "__table__", "__table_args__")
+                or any(not binding.supported for binding in special.get(name, ()))
+                for name in _CLASS_TABLE_SPECIALS
             ):
                 self._unknown_table(declaration, state)
                 continue
             table_args = special.get("__table_args__", ())
             schema_from_args: str | None = None
             class_constraints: tuple[ast.Call, ...] = ()
+            table_args_module = declaration.module
             if table_args:
-                parsed_args = _parse_table_args(table_args[0][0], declaration.module)
+                table_args_binding = table_args[0]
+                assert table_args_binding.value is not None
+                table_args_module = table_args_binding.module
+                parsed_args = _parse_table_args(
+                    table_args_binding.value,
+                    table_args_module,
+                )
                 if parsed_args is None:
                     self._unknown_table(declaration, state)
                     continue
@@ -654,7 +685,9 @@ class SqlAlchemySnapshotAnalyzer:
 
             tablename: str | None = None
             if special.get("__tablename__"):
-                tablename = _static_structural_string(special["__tablename__"][0][0])
+                tablename_binding = special["__tablename__"][0]
+                assert tablename_binding.value is not None
+                tablename = _static_structural_string(tablename_binding.value)
                 if tablename is None:
                     self._unknown_table(declaration, state)
                     continue
@@ -663,14 +696,17 @@ class SqlAlchemySnapshotAnalyzer:
             direct_candidate: _TableCandidate | None = None
             table_values = special.get("__table__", ())
             if table_values:
-                table_value = table_values[0][0]
+                table_binding = table_values[0]
+                assert table_binding.value is not None
+                table_value = table_binding.value
+                table_module = table_binding.module
                 if (
                     isinstance(table_value, ast.Call)
-                    and _resolve_call(table_value, declaration.module) == "sqlalchemy.Table"
+                    and _resolve_call(table_value, table_module) == "sqlalchemy.Table"
                 ):
                     origin = _class_candidate_origin("class-table", declaration)
                     direct_candidate = self._candidate_from_table_call(
-                        declaration.module,
+                        table_module,
                         table_value,
                         origin,
                         f"{declaration.symbol}.__table__",
@@ -681,7 +717,7 @@ class SqlAlchemySnapshotAnalyzer:
                     candidates[origin] = direct_candidate
                     linked_origin = origin
                 else:
-                    symbol = _resolve_symbol(table_value, declaration.module)
+                    symbol = _resolve_symbol(table_value, table_module)
                     linked_origin = table_bindings.get(symbol or "")
                     if linked_origin is None:
                         self._unknown_table(declaration, state)
@@ -715,9 +751,36 @@ class SqlAlchemySnapshotAnalyzer:
                 )
             )
             candidate.class_constraints.extend(
-                (declaration.module, call) for call in class_constraints
+                (table_args_module, call) for call in class_constraints
             )
         return candidates, table_bindings
+
+    def _unsupported_module_table_assignment(
+        self,
+        module: _ParsedModule,
+        statement: ast.AST,
+        *,
+        nested: bool,
+        state: _State,
+    ) -> None:
+        value = _assignment_value(statement)
+        if not isinstance(value, ast.Call):
+            return
+        if _resolve_call(value, module) != "sqlalchemy.Table" and not _unresolved_terminal(
+            value.func,
+            module,
+            {"Table"},
+        ):
+            return
+        if not nested and _is_supported_module_table_assignment(statement):
+            return
+        span = _span(statement)
+        symbol = (
+            f"{module.module}.table_occurrence_"
+            f"{span.start_line}_{span.start_utf8_byte_column}_"
+            f"{span.end_line}_{span.end_utf8_byte_column}"
+        )
+        self._unknown_table_call(module, value, symbol, state)
 
     def _candidate_from_table_call(
         self,
@@ -871,8 +934,21 @@ class SqlAlchemySnapshotAnalyzer:
                 scope_modules = _class_scope_modules(declaration)
                 for statement in declaration.node.body:
                     module = scope_modules[id(statement)]
+                    for write in _nested_module_scope_writes(statement):
+                        self._unsupported_row_assignment(
+                            scope_modules[id(write)],
+                            table,
+                            write,
+                            state,
+                        )
                     assignment = _row_assignment(statement)
                     if assignment is None:
+                        self._unsupported_row_assignment(
+                            module,
+                            table,
+                            statement,
+                            state,
+                        )
                         continue
                     name, annotation, value = assignment
                     if name.startswith("__"):
@@ -1004,6 +1080,50 @@ class SqlAlchemySnapshotAnalyzer:
                     self._constraint_rows(module, table, call, known_columns, tables_by_id, state)
                 )
         return rows
+
+    def _unsupported_row_assignment(
+        self,
+        module: _ParsedModule,
+        table: SqlAlchemyTable,
+        statement: ast.AST,
+        state: _State,
+    ) -> None:
+        value = _assignment_value(statement)
+        names = _assignment_names(statement)
+        if any(name.startswith("__") for name in names):
+            return
+        if isinstance(value, ast.Call):
+            symbol = _resolve_call(value, module)
+            if symbol in _COLUMN_SYMBOLS:
+                kind = SqlAlchemyRowKind.COLUMN
+            elif symbol == "sqlalchemy.orm.relationship":
+                kind = SqlAlchemyRowKind.RELATIONSHIP
+            elif _unresolved_terminal(
+                value.func,
+                module,
+                _SQLALCHEMY_EVIDENCE_TERMINALS,
+            ):
+                kind = (
+                    SqlAlchemyRowKind.RELATIONSHIP
+                    if _terminal_name(value.func) == "relationship"
+                    else SqlAlchemyRowKind.COLUMN
+                )
+            else:
+                return
+            self._unknown_row(module, table, kind, value, state)
+            return
+        annotation = statement.annotation if isinstance(statement, ast.AnnAssign) else None
+        if annotation is not None and (
+            _mapped_inner(annotation, module) is not None
+            or _unresolved_mapped_annotation(annotation, module)
+        ):
+            self._unknown_row(
+                module,
+                table,
+                SqlAlchemyRowKind.COLUMN,
+                statement,
+                state,
+            )
 
     def _relationship_row(
         self,
@@ -1822,6 +1942,7 @@ def _class_scope_modules(declaration: _ClassDeclaration) -> dict[int, _ParsedMod
             binding_owner=declaration.symbol,
         )
         for write in _nested_module_scope_writes(statement):
+            result[id(write)] = _copy_parsed_module(scope)
             _bind_module_statement(
                 scope,
                 write,
@@ -1876,6 +1997,12 @@ def _class_scope_write_names(value: ast.AST) -> tuple[str, ...]:
             continue
         names.extend(_class_scope_write_names(child))
     return tuple(names)
+
+
+def _direct_binding_names(value: ast.AST) -> tuple[str, ...]:
+    if isinstance(value, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        return (value.name,)
+    return _statement_binding_names(value)
 
 
 def _statement_binding_names(value: ast.AST) -> tuple[str, ...]:
@@ -1954,9 +2081,8 @@ def _bind(
         bindings[name] = None
     else:
         bindings[name] = origin
-    if ambiguous and origin in _SQLALCHEMY_BINDING_SYMBOLS:
-        ambiguous_bindings.setdefault(name, set()).add(origin)
     if ambiguous:
+        ambiguous_bindings.setdefault(name, set()).add(origin)
         bindings[name] = None
 
 
@@ -2172,11 +2298,25 @@ def _pattern_binding_names(pattern: ast.pattern) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _assignment_names(
-    value: ast.Assign | ast.AnnAssign | ast.AugAssign | ast.NamedExpr,
-) -> tuple[str, ...]:
+def _assignment_value(value: ast.AST) -> ast.expr | None:
+    if isinstance(value, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        return value.value
+    return None
+
+
+def _assignment_names(value: ast.AST) -> tuple[str, ...]:
+    if not isinstance(value, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        return ()
     targets = value.targets if isinstance(value, ast.Assign) else (value.target,)
     return tuple(name for target in targets for name in _target_names(target))
+
+
+def _is_supported_module_table_assignment(value: ast.AST) -> bool:
+    return (
+        isinstance(value, ast.Assign)
+        and len(value.targets) == 1
+        and isinstance(value.targets[0], ast.Name)
+    )
 
 
 def _import_from_origin(module: _ParsedModule, value: ast.ImportFrom) -> str | None:
@@ -2310,23 +2450,66 @@ def _terminal_name(value: ast.expr) -> str | None:
 
 
 def _special_assignments(
-    value: ast.ClassDef,
-) -> dict[str, list[tuple[ast.expr, ast.AST]]]:
-    result: dict[str, list[tuple[ast.expr, ast.AST]]] = {}
-    for statement in value.body:
-        if (
-            isinstance(statement, ast.Assign)
-            and len(statement.targets) == 1
-            and isinstance(statement.targets[0], ast.Name)
-        ):
-            result.setdefault(statement.targets[0].id, []).append((statement.value, statement))
-        elif (
-            isinstance(statement, ast.AnnAssign)
-            and isinstance(statement.target, ast.Name)
-            and statement.value is not None
-        ):
-            result.setdefault(statement.target.id, []).append((statement.value, statement))
+    declaration: _ClassDeclaration,
+    scope_modules: dict[int, _ParsedModule],
+) -> dict[str, list[_ClassSpecialBinding]]:
+    result: dict[str, list[_ClassSpecialBinding]] = {}
+    for statement in declaration.node.body:
+        _record_special_assignments(
+            result,
+            statement,
+            scope_modules[id(statement)],
+            direct=True,
+        )
+        for write in _nested_module_scope_writes(statement):
+            _record_special_assignments(
+                result,
+                write,
+                scope_modules[id(write)],
+                direct=False,
+            )
     return result
+
+
+def _record_special_assignments(
+    result: dict[str, list[_ClassSpecialBinding]],
+    statement: ast.AST,
+    module: _ParsedModule,
+    *,
+    direct: bool,
+) -> None:
+    for name in _direct_binding_names(statement):
+        if name not in _CLASS_TABLE_SPECIALS:
+            continue
+        supported, value = _supported_special_assignment(statement, name)
+        result.setdefault(name, []).append(
+            _ClassSpecialBinding(
+                value,
+                module,
+                supported=direct and supported,
+            )
+        )
+
+
+def _supported_special_assignment(
+    statement: ast.AST,
+    name: str,
+) -> tuple[bool, ast.expr | None]:
+    if (
+        isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance(statement.targets[0], ast.Name)
+        and statement.targets[0].id == name
+    ):
+        return True, statement.value
+    if (
+        isinstance(statement, ast.AnnAssign)
+        and isinstance(statement.target, ast.Name)
+        and statement.target.id == name
+        and statement.value is not None
+    ):
+        return True, statement.value
+    return False, None
 
 
 def _class_candidate_origin(prefix: str, declaration: _ClassDeclaration) -> str:

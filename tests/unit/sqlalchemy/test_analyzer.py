@@ -1574,3 +1574,226 @@ class Plain:
     assert result.snapshot.diagnostics == ()
     assert result.snapshot.coverage.unknown_declarations == 0
     assert result.snapshot.partial_safe is False
+
+
+def test_conditional_repository_base_import_retains_ambiguous_provenance() -> None:
+    result = _analyze(
+        {
+            "src/pkg/base.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+""",
+            "src/pkg/models.py": b"""
+if condition:
+    from .base import Base
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_conditional_repository_module_import_retains_ambiguous_provenance() -> None:
+    result = _analyze(
+        {
+            "src/pkg/base.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+""",
+            "src/pkg/models.py": b"""
+if condition:
+    import pkg.base as local_base
+
+class User(local_base.Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_conditional_unknown_module_base_import_is_not_sqlalchemy_evidence() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+if condition:
+    from fake import DeclarativeBase as Base
+
+class Candidate(Base): pass
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.ABSENT
+    assert result.snapshot.entities == ()
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
+
+
+def test_unsupported_module_table_assignment_shapes_are_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Table
+
+if condition:
+    conditional = Table("conditional", object())
+first, second = Table("unpacked", object())
+holder.attribute = Table("attribute", object())
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == [
+        "CSV-SA-007",
+        "CSV-SA-007",
+        "CSV-SA-007",
+    ]
+    assert result.snapshot.coverage.unknown_declarations == 3
+    assert len(result.snapshot.coverage.frontier) == 3
+    assert result.snapshot.partial_safe is True
+
+
+def test_unsupported_declarative_row_assignment_shapes_are_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    if condition:
+        conditional = Column(Integer)
+    first, second = Column(Integer)
+    holder.attribute = Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == [
+        "CSV-SA-009",
+        "CSV-SA-009",
+        "CSV-SA-009",
+    ]
+    assert result.snapshot.coverage.unknown_declarations == 3
+    assert len(result.snapshot.coverage.frontier) == 3
+    assert result.snapshot.partial_safe is True
+
+
+def test_conditional_special_attribute_rebinding_makes_table_identity_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    if condition:
+        __tablename__ = "admins"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_class_local_constraint_shadow_makes_table_identity_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from helpers import helper
+from sqlalchemy import UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    UniqueConstraint = helper
+    __table_args__ = (UniqueConstraint("id"),)
+    id: Mapped[int] = mapped_column()
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert result.snapshot.entities == ()
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_class_local_constraint_import_is_used_by_table_args() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    from sqlalchemy import UniqueConstraint as LocalUniqueConstraint
+    __tablename__ = "users"
+    __table_args__ = (LocalUniqueConstraint("id"),)
+    id: Mapped[int] = mapped_column()
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert [row.kind for row in result.snapshot.members] == [
+        SqlAlchemyRowKind.COLUMN,
+        SqlAlchemyRowKind.UNIQUE,
+    ]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_class_local_table_import_is_used_by_table_special() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    from sqlalchemy import Column as LocalColumn, Integer as LocalInteger, Table as LocalTable
+    __table__ = LocalTable(
+        "users",
+        object(),
+        LocalColumn("id", LocalInteger),
+    )
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    columns = [row for row in result.snapshot.members if isinstance(row, SqlAlchemyColumnRow)]
+    assert len(columns) == 1
+    assert columns[0].name == "id"
+    assert columns[0].type.category is SqlAlchemyTypeCategory.INTEGER
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
