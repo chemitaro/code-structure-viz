@@ -2318,22 +2318,46 @@ def _module_object_origins_before(
     for candidate in _module_alias_origins_before(module, name, statement):
         if suffix:
             candidate = _normalize_symbol(f"{candidate}.{'.'.join(suffix)}")
-        resolved = module.repository_bindings.get(candidate, candidate)
-        possible = set(module.repository_module_aliases.get(candidate, ()))
-        possible.update(
-            origin
-            for origin in module.repository_ambiguous_bindings.get(candidate, ())
-            if origin in module.repository_module_aliases.get(candidate, ())
-        )
-        if resolved is not None:
-            possible.add(resolved)
         result.update(
             origin
-            for origin in possible
+            for origin in _module_object_path_candidates(module, candidate)
             if _external_sqlalchemy_module_origin(module, origin)
             or origin in module.repository_module_origins
         )
     return result
+
+
+def _module_object_path_candidates(module: _ParsedModule, origin: str) -> set[str]:
+    candidates = {origin}
+    step_limit = max(
+        1,
+        len(module.repository_bindings) + len(module.repository_module_aliases) + 1,
+    )
+    for _ in range(step_limit):
+        additions: set[str] = set()
+        for candidate in candidates:
+            resolved = module.repository_bindings.get(candidate)
+            if resolved is not None:
+                additions.add(resolved)
+            aliases = module.repository_module_aliases.get(candidate, ())
+            additions.update(aliases)
+            additions.update(
+                possible
+                for possible in module.repository_ambiguous_bindings.get(candidate, ())
+                if possible in aliases
+            )
+            for prefix, prefix_origins in module.repository_module_aliases.items():
+                if not candidate.startswith(f"{prefix}."):
+                    continue
+                remainder = candidate[len(prefix) :]
+                additions.update(
+                    _normalize_symbol(f"{prefix_origin}{remainder}")
+                    for prefix_origin in prefix_origins
+                )
+        if additions.issubset(candidates):
+            break
+        candidates.update(additions)
+    return candidates
 
 
 def _refresh_resolved_module_alias_provenance(modules: list[_ParsedModule]) -> None:
@@ -2576,11 +2600,36 @@ def _apply_class_global_write(
     ambiguous: bool,
     apply_outer: bool,
 ) -> None:
+    assignment = _static_module_alias_assignment(statement)
+    module_names: tuple[str, ...] = ()
+    module_origins: set[str] = set()
+    if assignment is not None:
+        assignment_names, value = assignment
+        module_names = tuple(name for name in assignment_names if name in names)
+        module_origins = _module_object_origins_before(before, value, statement)
+
     if apply_outer:
         outer_result = _copy_parsed_module(module)
         _bind_module_statement(outer_result, statement, ambiguous=ambiguous)
+        _materialize_global_module_aliases(
+            outer_result,
+            module_names,
+            module_origins,
+            statement,
+            ambiguous=ambiguous,
+            update_bindings=True,
+        )
         for name in names:
             _copy_module_binding(name, outer_result, module)
+    else:
+        _materialize_global_module_aliases(
+            module,
+            module_names,
+            module_origins,
+            statement,
+            ambiguous=ambiguous,
+            update_bindings=False,
+        )
 
     scope_result = _copy_parsed_module(before)
     if not ambiguous:
@@ -2590,6 +2639,39 @@ def _apply_class_global_write(
     _bind_module_statement(scope_result, statement, ambiguous=ambiguous)
     for name in names:
         _copy_module_binding(name, scope_result, scope)
+
+
+def _materialize_global_module_aliases(
+    module: _ParsedModule,
+    names: tuple[str, ...],
+    origins: set[str],
+    statement: ast.AST,
+    *,
+    ambiguous: bool,
+    update_bindings: bool,
+) -> None:
+    if not names or not origins:
+        return
+    position = _node_position(statement)
+    definite = not ambiguous and len(origins) == 1
+    for name in names:
+        if update_bindings:
+            if definite:
+                module.bindings[name] = next(iter(origins))
+                module.ambiguous_bindings.pop(name, None)
+            else:
+                module.bindings[name] = None
+                module.ambiguous_bindings.setdefault(name, set()).update(origins)
+        symbol = f"{module.module}.{name}"
+        events = module.import_alias_events.setdefault(symbol, [])
+        events.extend(
+            (position, origin)
+            for origin in sorted(origins, key=_utf8)
+            if (position, origin) not in events
+        )
+        definite_position = module.import_alias_definite_positions.get(symbol)
+        if definite_position is None or definite_position <= position:
+            module.imported_module_alias_candidates.setdefault(symbol, set()).update(origins)
 
 
 def _copy_module_binding(
@@ -2735,6 +2817,7 @@ def _repository_module_object_origins(modules: list[_ParsedModule]) -> set[str]:
     result: set[str] = set()
     for symbol in by_name:
         if "." not in symbol:
+            result.add(symbol)
             continue
         owner_name, name = symbol.rsplit(".", 1)
         owner = by_name.get(owner_name)
