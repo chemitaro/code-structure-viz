@@ -2070,9 +2070,15 @@ def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set
     candidates: dict[str, set[str]] = {}
     for module in modules:
         for symbol, origins in module.imported_module_aliases.items():
-            aliases.setdefault(symbol, set()).update(origins)
+            local = symbol.rsplit(".", 1)[-1]
+            origin = module.bindings.get(local)
+            if origin is not None and origin in origins and local not in module.ambiguous_bindings:
+                aliases.setdefault(symbol, set()).add(origin)
         for symbol, origins in module.imported_module_alias_candidates.items():
-            candidates.setdefault(symbol, set()).update(origins)
+            local = symbol.rsplit(".", 1)[-1]
+            origin = module.bindings.get(local)
+            if origin is not None and origin in origins and local not in module.ambiguous_bindings:
+                candidates.setdefault(symbol, set()).add(origin)
 
     by_name = {module.module: module for module in modules}
     repository_module_origins: set[str] = set()
