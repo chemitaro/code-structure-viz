@@ -12,6 +12,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyRelationshipRow,
     SqlAlchemyRowKind,
 )
+from code_structure_viz.adapters.sqlalchemy.plantuml import render_plantuml
 from code_structure_viz.adapters.sqlalchemy.selection import SqlAlchemyTargetSelector
 from code_structure_viz.core.config import PythonConfig
 from code_structure_viz.core.outcomes import DomainStatus
@@ -163,3 +164,18 @@ def test_lossy_fixtures_keep_only_safe_column_and_four_occurrence_diagnostics() 
         assert result.snapshot.coverage.unknown_declarations == 4
         assert result.snapshot.partial_safe is True
         assert all(not hasattr(item, "start_utf8_byte_column") for item in occurrences)
+
+
+def test_relationship_fixture_renders_only_selected_internal_er_graph() -> None:
+    result = _analyze_fixture("relationship_semantics")
+
+    rendered = render_plantuml(result.snapshot).decode("utf-8")
+
+    assert rendered.count('entity "') == 4
+    assert rendered.count(" : relationship ") == 2
+    assert rendered.count(" : inheritance") == 1
+    assert rendered.count(" : association ") == 1
+    assert "  redacted_values=2\n" in rendered
+    assert "this fixture must never execute" not in rendered
+    assert "src/models.py" not in rendered
+    assert render_plantuml(result.snapshot).decode("utf-8") == rendered
