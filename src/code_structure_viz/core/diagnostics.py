@@ -46,6 +46,19 @@ class DiagnosticCode(StrEnum):
     PY_TYPE_UNSUPPORTED = "CSV-PY-011"
     PY_CLASS_COLLISION = "CSV-PY-012"
     PY_FIELD_CONFLICT = "CSV-PY-013"
+    SA_READ = "CSV-SA-001"
+    SA_ENCODING = "CSV-SA-002"
+    SA_PARSE = "CSV-SA-003"
+    SA_MODULE_IDENTITY = "CSV-SA-004"
+    SA_MODULE_COLLISION = "CSV-SA-005"
+    SA_DECLARATIVE_BINDING = "CSV-SA-006"
+    SA_TABLE_IDENTITY = "CSV-SA-007"
+    SA_TABLE_COLLISION = "CSV-SA-008"
+    SA_ROW_UNREPRESENTABLE = "CSV-SA-009"
+    SA_RELATION_TARGET = "CSV-SA-010"
+    SA_TARGET_MISSING = "CSV-SA-011"
+    SA_TARGET_AMBIGUOUS = "CSV-SA-012"
+    SA_ENTITY_BUDGET = "CSV-SA-013"
     DIFF_ENDPOINT = "CSV-DIFF-001"
     DIFF_CHANGED_PATH_BUDGET = "CSV-DIFF-002"
     DIFF_FILE_CHANGE = "CSV-DIFF-003"
@@ -169,6 +182,65 @@ _SPECS: Final[dict[DiagnosticCode, _DiagnosticSpec]] = {
     DiagnosticCode.PY_FIELD_CONFLICT: _DiagnosticSpec(
         Severity.WARNING, True, "Conflicting field annotations were reduced to an unknown marker."
     ),
+    DiagnosticCode.SA_READ: _DiagnosticSpec(
+        Severity.ERROR, True, "SQLAlchemy source could not be read safely."
+    ),
+    DiagnosticCode.SA_ENCODING: _DiagnosticSpec(
+        Severity.ERROR, True, "SQLAlchemy source encoding could not be decoded safely."
+    ),
+    DiagnosticCode.SA_PARSE: _DiagnosticSpec(
+        Severity.ERROR,
+        True,
+        "SQLAlchemy source could not be parsed with the v1 Python 3.12 grammar.",
+    ),
+    DiagnosticCode.SA_MODULE_IDENTITY: _DiagnosticSpec(
+        Severity.ERROR,
+        True,
+        "SQLAlchemy source path does not map to a valid Python module identity.",
+    ),
+    DiagnosticCode.SA_MODULE_COLLISION: _DiagnosticSpec(
+        Severity.ERROR,
+        True,
+        "More than one SQLAlchemy source file maps to the same Python module identity.",
+    ),
+    DiagnosticCode.SA_DECLARATIVE_BINDING: _DiagnosticSpec(
+        Severity.WARNING,
+        True,
+        "SQLAlchemy declarative binding could not be resolved statically.",
+    ),
+    DiagnosticCode.SA_TABLE_IDENTITY: _DiagnosticSpec(
+        Severity.ERROR,
+        True,
+        "SQLAlchemy table identity could not be resolved statically.",
+    ),
+    DiagnosticCode.SA_TABLE_COLLISION: _DiagnosticSpec(
+        Severity.ERROR,
+        True,
+        "More than one unrelated declaration maps to the same SQLAlchemy table identity.",
+    ),
+    DiagnosticCode.SA_ROW_UNREPRESENTABLE: _DiagnosticSpec(
+        Severity.WARNING,
+        True,
+        "SQLAlchemy row declaration could not be represented safely.",
+    ),
+    DiagnosticCode.SA_RELATION_TARGET: _DiagnosticSpec(
+        Severity.WARNING,
+        True,
+        "SQLAlchemy relation target could not be resolved statically.",
+    ),
+    DiagnosticCode.SA_TARGET_MISSING: _DiagnosticSpec(
+        Severity.ERROR,
+        False,
+        "Requested SQLAlchemy target was not found in the safe source view.",
+    ),
+    DiagnosticCode.SA_TARGET_AMBIGUOUS: _DiagnosticSpec(
+        Severity.ERROR, False, "Requested SQLAlchemy target is ambiguous."
+    ),
+    DiagnosticCode.SA_ENTITY_BUDGET: _DiagnosticSpec(
+        Severity.ERROR,
+        False,
+        "SQLAlchemy table count exceeds the resolved max-entities limit.",
+    ),
     DiagnosticCode.DIFF_ENDPOINT: _DiagnosticSpec(
         Severity.ERROR, False, "Comparison endpoint or implicit base could not be resolved safely."
     ),
@@ -268,6 +340,9 @@ def _validate_context(
         if any(value is not None for value in (domain, path, symbol, line)):
             raise ValueError("run diagnostic context must be null")
         return
+    if domain == "sqlalchemy":
+        _validate_sqlalchemy_context(code, path=path, symbol=symbol, line=line)
+        return
     if domain != "python":
         raise ValueError("Python diagnostic domain must be python")
     if code in {DiagnosticCode.SOURCE_SYMLINK, DiagnosticCode.SOURCE_PATH_COLLISION}:
@@ -312,6 +387,67 @@ def _validate_context(
             raise ValueError("Python class collision context is invalid")
         return
     raise ValueError("diagnostic code has no context contract")
+
+
+def _validate_sqlalchemy_context(
+    code: DiagnosticCode,
+    *,
+    path: str | None,
+    symbol: str | None,
+    line: int | None,
+) -> None:
+    if code in {
+        DiagnosticCode.SA_READ,
+        DiagnosticCode.SA_ENCODING,
+        DiagnosticCode.SA_MODULE_IDENTITY,
+    }:
+        if path is None or symbol is not None or line is not None:
+            raise ValueError("SQLAlchemy file diagnostic context is invalid")
+        return
+    if code is DiagnosticCode.SA_PARSE:
+        if path is None or symbol is not None:
+            raise ValueError("SQLAlchemy parse diagnostic context is invalid")
+        return
+    if code in {DiagnosticCode.SA_MODULE_COLLISION, DiagnosticCode.SA_TABLE_COLLISION}:
+        if path is not None or symbol is None or line is not None:
+            raise ValueError("SQLAlchemy collision diagnostic context is invalid")
+        return
+    if code in {
+        DiagnosticCode.SA_DECLARATIVE_BINDING,
+        DiagnosticCode.SA_TABLE_IDENTITY,
+        DiagnosticCode.SA_RELATION_TARGET,
+    }:
+        if path is None or symbol is None or line is None:
+            raise ValueError("SQLAlchemy occurrence diagnostic context is invalid")
+        return
+    if code is DiagnosticCode.SA_ROW_UNREPRESENTABLE:
+        if (
+            path is None
+            or symbol is None
+            or line is None
+            or not _is_sqlalchemy_occurrence_symbol(symbol)
+        ):
+            raise ValueError("SQLAlchemy row occurrence context is invalid")
+        return
+    if code in {DiagnosticCode.SA_TARGET_MISSING, DiagnosticCode.SA_TARGET_AMBIGUOUS}:
+        if (path is None) == (symbol is None) or line is not None:
+            raise ValueError("SQLAlchemy target diagnostic context is invalid")
+        return
+    if code is DiagnosticCode.SA_ENTITY_BUDGET:
+        if any(value is not None for value in (path, symbol, line)):
+            raise ValueError("SQLAlchemy budget diagnostic context is invalid")
+        return
+    raise ValueError("diagnostic code has no SQLAlchemy context contract")
+
+
+def _is_sqlalchemy_occurrence_symbol(value: str) -> bool:
+    prefix = "sqlalchemy:occurrence:"
+    digest = value.removeprefix(prefix)
+    return (
+        value.startswith(prefix)
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+    )
 
 
 @dataclass(frozen=True, slots=True)

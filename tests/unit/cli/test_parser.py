@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from code_structure_viz.application.snapshot_domain import snapshot_adapter_for
 from code_structure_viz.cli.main import main
 from code_structure_viz.cli.parser import (
     CliUsageError,
@@ -10,6 +11,7 @@ from code_structure_viz.cli.parser import (
     parse_cli,
     parse_diff_cli,
 )
+from code_structure_viz.core.domains import DIFF_DOMAINS, SNAPSHOT_DOMAINS
 from code_structure_viz.source.targets import ModuleTarget
 
 
@@ -31,6 +33,26 @@ def test_snapshot_requires_python_domain_and_resolves_default_formats() -> None:
     assert request.output_dir == Path.cwd().parent / "output"
     assert request.formats == ("semantic-json", "plantuml")
     assert request.targets == ()
+
+
+def test_internal_domain_vocabulary_prepares_snapshot_without_public_acceptance() -> None:
+    assert SNAPSHOT_DOMAINS == ("python", "sqlalchemy")
+    assert DIFF_DOMAINS == ("python",)
+    assert snapshot_adapter_for("python").contract.domain == "python"
+    with pytest.raises(ValueError):
+        snapshot_adapter_for("sqlalchemy")
+    with pytest.raises(CliUsageError):
+        parse_cli(
+            [
+                "snapshot",
+                "--repo",
+                ".",
+                "--output-dir",
+                "../output",
+                "--domain",
+                "sqlalchemy",
+            ]
+        )
 
 
 def test_diff_resolves_closed_endpoint_and_output_format_grammar() -> None:

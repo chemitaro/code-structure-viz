@@ -4,6 +4,19 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from code_structure_viz.core.diagnostics import Diagnostic
+from code_structure_viz.core.domains import SNAPSHOT_DOMAINS, DomainName
+
+_DOMAIN_ARTIFACT_PATHS = {
+    "python": frozenset(
+        {
+            "python.snapshot.semantic.json",
+            "python.snapshot.puml",
+            "python.diff.semantic.json",
+            "python.diff.puml",
+        }
+    ),
+    "sqlalchemy": frozenset({"sqlalchemy.snapshot.semantic.json", "sqlalchemy.snapshot.puml"}),
+}
 
 
 class DomainStatus(StrEnum):
@@ -28,6 +41,7 @@ class RunStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class DomainOutcome:
+    domain: DomainName
     status: DomainStatus
     incomplete_kind: IncompleteKind | None
     payload_available: bool
@@ -39,6 +53,12 @@ class DomainOutcome:
     budget: object | None = None
 
     def __post_init__(self) -> None:
+        if self.domain not in SNAPSHOT_DOMAINS:
+            raise ValueError("domain outcome has an unknown domain")
+        if any(path not in _DOMAIN_ARTIFACT_PATHS[self.domain] for path in self.artifact_paths):
+            raise ValueError("domain outcome carries a cross-domain artifact path")
+        if any(item.domain not in {None, self.domain} for item in self.diagnostics):
+            raise ValueError("domain outcome carries a cross-domain diagnostic")
         if self.status is DomainStatus.COMPLETE:
             if (
                 self.incomplete_kind is not None
@@ -69,6 +89,7 @@ class DomainOutcome:
         cls,
         payload: object,
         *,
+        domain: DomainName,
         artifact_paths: tuple[str, ...] = (),
         diagnostics: tuple[Diagnostic, ...] = (),
         entity_count: int | None = None,
@@ -76,35 +97,38 @@ class DomainOutcome:
         budget: object | None = None,
     ) -> DomainOutcome:
         return cls(
-            DomainStatus.COMPLETE,
-            None,
-            True,
-            payload,
-            artifact_paths,
-            diagnostics,
-            entity_count,
-            coverage,
-            budget,
+            domain=domain,
+            status=DomainStatus.COMPLETE,
+            incomplete_kind=None,
+            payload_available=True,
+            payload=payload,
+            artifact_paths=artifact_paths,
+            diagnostics=diagnostics,
+            entity_count=entity_count,
+            coverage=coverage,
+            budget=budget,
         )
 
     @classmethod
     def not_applicable(
         cls,
         *,
+        domain: DomainName,
         diagnostics: tuple[Diagnostic, ...] = (),
         coverage: object | None = None,
         budget: object | None = None,
     ) -> DomainOutcome:
         return cls(
-            DomainStatus.NOT_APPLICABLE,
-            None,
-            False,
-            None,
-            (),
-            diagnostics,
-            0,
-            coverage,
-            budget,
+            domain=domain,
+            status=DomainStatus.NOT_APPLICABLE,
+            incomplete_kind=None,
+            payload_available=False,
+            payload=None,
+            artifact_paths=(),
+            diagnostics=diagnostics,
+            entity_count=0,
+            coverage=coverage,
+            budget=budget,
         )
 
     @classmethod
@@ -112,6 +136,7 @@ class DomainOutcome:
         cls,
         payload: object,
         *,
+        domain: DomainName,
         artifact_paths: tuple[str, ...] = (),
         diagnostics: tuple[Diagnostic, ...] = (),
         entity_count: int | None = None,
@@ -119,36 +144,39 @@ class DomainOutcome:
         budget: object | None = None,
     ) -> DomainOutcome:
         return cls(
-            DomainStatus.INCOMPLETE,
-            IncompleteKind.PARTIAL_SAFE,
-            True,
-            payload,
-            artifact_paths,
-            diagnostics,
-            entity_count,
-            coverage,
-            budget,
+            domain=domain,
+            status=DomainStatus.INCOMPLETE,
+            incomplete_kind=IncompleteKind.PARTIAL_SAFE,
+            payload_available=True,
+            payload=payload,
+            artifact_paths=artifact_paths,
+            diagnostics=diagnostics,
+            entity_count=entity_count,
+            coverage=coverage,
+            budget=budget,
         )
 
     @classmethod
     def payload_unavailable(
         cls,
         *,
+        domain: DomainName,
         diagnostics: tuple[Diagnostic, ...] = (),
         entity_count: int | None = None,
         coverage: object | None = None,
         budget: object | None = None,
     ) -> DomainOutcome:
         return cls(
-            DomainStatus.INCOMPLETE,
-            IncompleteKind.PAYLOAD_UNAVAILABLE,
-            False,
-            None,
-            (),
-            diagnostics,
-            entity_count,
-            coverage,
-            budget,
+            domain=domain,
+            status=DomainStatus.INCOMPLETE,
+            incomplete_kind=IncompleteKind.PAYLOAD_UNAVAILABLE,
+            payload_available=False,
+            payload=None,
+            artifact_paths=(),
+            diagnostics=diagnostics,
+            entity_count=entity_count,
+            coverage=coverage,
+            budget=budget,
         )
 
 

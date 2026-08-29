@@ -8,7 +8,7 @@ from code_structure_viz.core.outcomes import DomainOutcome, RunOutcome
 
 def test_no_selector_emits_exact_committed_summary() -> None:
     outcome = RunOutcome.completed(
-        (DomainOutcome.complete(object()),),
+        (DomainOutcome.complete(object(), domain="python"),),
         manifest_relative_path="run-manifest.json",
     )
 
@@ -24,7 +24,11 @@ def test_available_selector_copies_final_artifact_exactly(tmp_path: Path) -> Non
     payload = b"@startuml\n@enduml\n"
     (tmp_path / "python.snapshot.puml").write_bytes(payload)
     outcome = RunOutcome.completed(
-        (DomainOutcome.complete(object(), artifact_paths=("python.snapshot.puml",)),),
+        (
+            DomainOutcome.complete(
+                object(), domain="python", artifact_paths=("python.snapshot.puml",)
+            ),
+        ),
         manifest_relative_path="run-manifest.json",
     )
 
@@ -44,7 +48,11 @@ def test_available_selector_uses_bytes_bound_before_publication_mutation(
     committed = b"@startuml\n@enduml\n"
     (tmp_path / "python.snapshot.puml").write_bytes(b"mutated after rename\n")
     outcome = RunOutcome.completed(
-        (DomainOutcome.complete(object(), artifact_paths=("python.snapshot.puml",)),),
+        (
+            DomainOutcome.complete(
+                object(), domain="python", artifact_paths=("python.snapshot.puml",)
+            ),
+        ),
         manifest_relative_path="run-manifest.json",
     )
 
@@ -63,7 +71,7 @@ def test_unavailable_domain_and_manifest_fatal_use_closed_result_variants(
     tmp_path: Path,
 ) -> None:
     unavailable = RunOutcome.incomplete(
-        (DomainOutcome.payload_unavailable(),),
+        (DomainOutcome.payload_unavailable(domain="python"),),
         manifest_relative_path="run-manifest.json",
     )
     fatal = RunOutcome.fatal((diagnostic(DiagnosticCode.REPO_HEAD),))
@@ -88,7 +96,7 @@ def test_unavailable_domain_and_manifest_fatal_use_closed_result_variants(
 def test_stderr_is_canonical_jsonl_for_domain_and_run_diagnostics() -> None:
     domain_diagnostic = diagnostic(DiagnosticCode.PY_ENTITY_BUDGET, domain="python")
     outcome = RunOutcome.incomplete(
-        (DomainOutcome.payload_unavailable(diagnostics=(domain_diagnostic,)),),
+        (DomainOutcome.payload_unavailable(domain="python", diagnostics=(domain_diagnostic,)),),
         manifest_relative_path="run-manifest.json",
     )
 

@@ -54,6 +54,7 @@ def test_manifest_has_closed_order_descriptor_hash_and_no_self_descriptor() -> N
     budget = EntityBudget("max_entities", None, 500, 1, ConfigSource.BUILTIN)
     domain = DomainOutcome.complete(
         object(),
+        domain="python",
         artifact_paths=("python.snapshot.semantic.json",),
         entity_count=1,
         coverage=coverage,

@@ -4,6 +4,7 @@ from code_structure_viz.core.config import ConfigSource
 
 def test_entity_budget_admits_exact_limit_and_records_resolved_source() -> None:
     decision = EntityBudgetGate().admit(
+        domain="python",
         actual=500,
         requested=None,
         resolved=500,
@@ -23,6 +24,7 @@ def test_entity_budget_admits_exact_limit_and_records_resolved_source() -> None:
 
 def test_entity_budget_rejects_without_truncating_selected_count() -> None:
     decision = EntityBudgetGate().admit(
+        domain="python",
         actual=501,
         requested=None,
         resolved=500,
@@ -37,6 +39,7 @@ def test_entity_budget_rejects_without_truncating_selected_count() -> None:
 
 def test_entity_budget_cli_override_is_the_recorded_request_and_source() -> None:
     decision = EntityBudgetGate().admit(
+        domain="python",
         actual=600,
         requested=600,
         resolved=600,
@@ -51,3 +54,17 @@ def test_entity_budget_cli_override_is_the_recorded_request_and_source() -> None
         "actual": 600,
         "source": "cli",
     }
+
+
+def test_entity_budget_uses_closed_sqlalchemy_diagnostic_mapping() -> None:
+    decision = EntityBudgetGate().admit(
+        domain="sqlalchemy",
+        actual=501,
+        requested=None,
+        resolved=500,
+        source=ConfigSource.BUILTIN,
+    )
+
+    assert decision.admitted is False
+    assert [item.code.value for item in decision.diagnostics] == ["CSV-SA-013"]
+    assert decision.diagnostics[0].domain == "sqlalchemy"
