@@ -2402,13 +2402,18 @@ def _module_import_precedes(
     for candidate in module.tree.body:
         if _node_position(candidate) >= position:
             continue
-        imports = (
-            (candidate,)
-            if isinstance(candidate, ast.Import)
-            else tuple(child for child in candidate.body if isinstance(child, ast.Import))
-            if isinstance(candidate, ast.ClassDef)
-            else ()
-        )
+        imports: list[ast.Import] = []
+        if isinstance(candidate, ast.Import):
+            imports.append(candidate)
+        elif isinstance(candidate, ast.ClassDef):
+            classes = [candidate]
+            while classes:
+                class_node = classes.pop()
+                for child in class_node.body:
+                    if isinstance(child, ast.Import):
+                        imports.append(child)
+                    elif isinstance(child, ast.ClassDef):
+                        classes.append(child)
         if any(
             _node_position(import_statement) < position and _normalize_symbol(alias.name) == origin
             for import_statement in imports

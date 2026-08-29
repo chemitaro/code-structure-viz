@@ -3537,6 +3537,32 @@ class User(DeclarativeBase):
     assert result.snapshot.partial_safe is True
 
 
+def test_nested_class_explicit_repository_submodule_import_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"namespace = object()\n",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+class Outer:
+    class Carrier:
+        import pkg.namespace as alias
+
+Outer.Carrier.alias.DeclarativeBase = object
+
+from pkg.namespace import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_class_importfrom_module_alias_mutation_is_unknown() -> None:
     result = _analyze(
         {
