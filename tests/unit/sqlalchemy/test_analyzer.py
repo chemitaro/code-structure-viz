@@ -3464,6 +3464,31 @@ class User(DeclarativeBase):
     assert result.snapshot.partial_safe is True
 
 
+def test_class_attribute_module_alias_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+import sqlalchemy.orm as orm
+
+class Carrier:
+    alias = orm
+
+Carrier.alias.DeclarativeBase = object
+
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_attribute_mutation_before_later_carrier_rebind_remains_unknown() -> None:
     result = _analyze(
         {

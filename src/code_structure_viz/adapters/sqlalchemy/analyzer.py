@@ -2258,6 +2258,9 @@ def _bind_attribute_target_module_alias_provenance(
     scope = resolution_scope or module
     if isinstance(target, ast.Attribute):
         parents = _module_object_origins_before(scope, target.value, statement)
+        class_parent = _local_class_namespace_origin_before(scope, target.value, statement)
+        if class_parent is not None:
+            parents.add(class_parent)
         position = _node_position(statement)
         for parent in parents:
             symbol = _normalize_symbol(f"{parent}.{target.attr}")
@@ -2455,6 +2458,27 @@ def _attribute_root_and_suffix(value: ast.expr) -> tuple[str, tuple[str, ...]] |
     return current.id, tuple(reversed(suffix))
 
 
+def _local_class_namespace_origin_before(
+    module: _ParsedModule,
+    value: ast.expr,
+    statement: ast.AST,
+) -> str | None:
+    if not isinstance(value, ast.Name):
+        return None
+    origin = f"{module.module}.{value.id}"
+    if module.bindings.get(value.id) != origin:
+        return None
+    statement_position = _node_position(statement)
+    if any(
+        isinstance(candidate, ast.ClassDef)
+        and candidate.name == value.id
+        and _node_position(candidate) < statement_position
+        for candidate in module.tree.body
+    ):
+        return origin
+    return None
+
+
 def _definite_non_module_attribute_base(
     module: _ParsedModule,
     value: ast.expr,
@@ -2486,7 +2510,16 @@ def _module_object_origins_before(
         return set()
     name, suffix = root
     result: set[str] = set()
-    for candidate in _module_alias_origins_before(module, name, statement):
+    candidates = _module_alias_origins_before(module, name, statement)
+    if not candidates and suffix:
+        class_origin = _local_class_namespace_origin_before(
+            module,
+            ast.Name(id=name),
+            statement,
+        )
+        if class_origin is not None:
+            candidates.add(class_origin)
+    for candidate in candidates:
         if suffix:
             candidate = _normalize_symbol(f"{candidate}.{'.'.join(suffix)}")
         result.update(
@@ -2789,6 +2822,13 @@ def _class_mutation_scope_modules(
                 resolution_scope=before,
                 respect_definite_watermark=True,
             )
+            _persist_class_name_module_alias_provenance(
+                declaration,
+                before,
+                write,
+                global_names,
+                ambiguous=ambiguous,
+            )
             _refresh_local_module_aliases(scope)
             bound_globals = set(_statement_binding_names(write)) & global_names
             if bound_globals:
@@ -2819,6 +2859,53 @@ def _class_mutation_scope_modules(
                     scope.bindings[name] = None
                     scope.ambiguous_bindings.setdefault(name, set()).update(origins)
     return result
+
+
+def _persist_class_name_module_alias_provenance(
+    declaration: _ClassDeclaration,
+    before: _ParsedModule,
+    statement: ast.AST,
+    global_names: set[str],
+    *,
+    ambiguous: bool,
+) -> None:
+    names = set(_definite_class_binding_names(statement)) - global_names
+    if isinstance(statement, ast.Delete):
+        names.update(
+            name
+            for target in statement.targets
+            for name in _target_names(target)
+            if name not in global_names
+        )
+    assignment = _static_module_alias_assignment(statement)
+    origins: set[str] = set()
+    if assignment is not None:
+        assignment_names, value = assignment
+        names.update(name for name in assignment_names if name not in global_names)
+        origins = _module_object_origins_before(before, value, statement)
+
+    position = _node_position(statement)
+    for name in names:
+        symbol = f"{declaration.symbol}.{name}"
+        events = declaration.module.import_alias_events.setdefault(symbol, [])
+        if not ambiguous and (position, None) not in events:
+            events.append((position, None))
+        events.extend(
+            (position, origin)
+            for origin in sorted(origins, key=_utf8)
+            if (position, origin) not in events
+        )
+        definite_position = declaration.module.import_alias_definite_positions.get(symbol)
+        if definite_position is not None and definite_position > position:
+            continue
+        if not ambiguous:
+            declaration.module.imported_module_aliases.pop(symbol, None)
+            declaration.module.imported_module_alias_candidates.pop(symbol, None)
+            declaration.module.import_alias_definite_positions[symbol] = position
+        if origins:
+            declaration.module.imported_module_alias_candidates.setdefault(symbol, set()).update(
+                origins
+            )
 
 
 def _apply_class_global_write(
