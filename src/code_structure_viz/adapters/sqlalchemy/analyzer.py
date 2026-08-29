@@ -2037,8 +2037,16 @@ def _bind_module_statement(
             and not ambiguous
             and (not isinstance(statement, ast.AnnAssign) or statement.value is not None)
         ):
+            preserved = _alias_preserving_assignment_provenance(module, statement)
             for name in names:
                 _clear_import_alias_provenance(module, name, statement)
+            if preserved is not None:
+                local, aliases, candidates = preserved
+                symbol = f"{module.module}.{local}"
+                if aliases:
+                    module.imported_module_aliases[symbol] = aliases
+                if candidates:
+                    module.imported_module_alias_candidates[symbol] = candidates
         for name in names:
             _bind(
                 module.bindings,
@@ -2124,6 +2132,31 @@ def _clear_import_alias_provenance(
         getattr(statement, "lineno", -1),
         getattr(statement, "col_offset", -1),
     )
+
+
+def _alias_preserving_assignment_provenance(
+    module: _ParsedModule,
+    statement: ast.Assign | ast.AnnAssign | ast.AugAssign | ast.NamedExpr,
+) -> tuple[str, set[str], set[str]] | None:
+    if isinstance(statement, ast.Assign):
+        if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            return None
+        target = statement.targets[0]
+    elif isinstance(statement, (ast.AnnAssign, ast.NamedExpr)):
+        if not isinstance(statement.target, ast.Name):
+            return None
+        target = statement.target
+    else:
+        return None
+    if not isinstance(statement.value, ast.Name):
+        return None
+
+    source = f"{module.module}.{statement.value.id}"
+    aliases = set(module.imported_module_aliases.get(source, ()))
+    candidates = set(module.imported_module_alias_candidates.get(source, ()))
+    if not aliases and not candidates:
+        return None
+    return target.id, aliases, candidates
 
 
 def _invalidate_attribute_target(

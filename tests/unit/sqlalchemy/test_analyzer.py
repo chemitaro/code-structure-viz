@@ -2337,6 +2337,112 @@ users = Table("users", object())
     assert result.snapshot.partial_safe is False
 
 
+def test_self_assigned_importfrom_module_alias_taints_source_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+from sqlalchemy import orm
+
+orm = orm
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.orm.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_self_assigned_imported_module_alias_taints_source_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+import sqlalchemy as sa
+
+sa = sa
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.sa.Table = replacement
+from sqlalchemy import Table
+
+users = Table("users", object())
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_assigned_proven_module_alias_taints_source_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+from sqlalchemy import orm
+
+exported = orm
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.exported.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_assigned_value_reexport_does_not_taint_source_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+exported = DeclarativeBase
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.exported = object
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
 def test_conditionally_rebound_importfrom_module_alias_taints_source_import() -> None:
     result = _analyze(
         {
