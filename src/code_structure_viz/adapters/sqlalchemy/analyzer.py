@@ -99,6 +99,8 @@ class _ClassDeclaration:
     module: _ParsedModule
     node: ast.ClassDef
     symbol: str
+    duplicate: bool = False
+    shadowed_names: frozenset[str] = frozenset()
 
 
 @dataclass(slots=True)
@@ -194,6 +196,16 @@ _SQLALCHEMY_BINDING_SYMBOLS: Final = _CONSTRUCTION_SYMBOLS | {
     "sqlalchemy.orm.DeclarativeBase",
     "sqlalchemy.orm.Mapped",
 }
+_SQLALCHEMY_IMPORT_NAMESPACES: Final = frozenset(
+    {
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "sqlalchemy.schema",
+        "sqlalchemy.sql",
+        "sqlalchemy.sql.schema",
+        "sqlalchemy.types",
+    }
+)
 _SQLALCHEMY_EVIDENCE_TERMINALS: Final = _CONSTRUCTION_TERMINALS | {"Mapped"}
 _COLUMN_SYMBOLS: Final = {"sqlalchemy.Column", "sqlalchemy.orm.mapped_column"}
 _COLUMN_SPECIALS: Final = {
@@ -463,6 +475,7 @@ class SqlAlchemySnapshotAnalyzer:
             for statement in module.tree.body:
                 for write in _nested_module_scope_writes(statement):
                     _bind_module_statement(module, write, ambiguous=True)
+        _resolve_repository_bindings(modules)
 
     def _classes(
         self,
@@ -479,15 +492,15 @@ class SqlAlchemySnapshotAnalyzer:
                 if not isinstance(statement, ast.ClassDef):
                     continue
                 symbol = f"{module.module}.{statement.name}"
-                if counts[statement.name] != 1:
-                    state.unknown(
-                        module=module,
-                        code=DiagnosticCode.SA_DECLARATIVE_BINDING,
-                        symbol=symbol,
-                        line=_line(statement),
-                        kind=SqlAlchemyFrontierKind.CLASS,
+                values.append(
+                    _ClassDeclaration(
+                        module,
+                        statement,
+                        symbol,
+                        duplicate=counts[statement.name] != 1,
+                        shadowed_names=_class_shadowed_names(module, statement),
                     )
-                values.append(_ClassDeclaration(module, statement, symbol))
+                )
         return values
 
     def _declarative_classes(
@@ -543,6 +556,14 @@ class SqlAlchemySnapshotAnalyzer:
                     proven_nodes.add(id(declaration.node))
                     proven_symbols.add(declaration.symbol)
                     state.supported(declaration.module)
+                    if declaration.duplicate:
+                        state.unknown(
+                            module=declaration.module,
+                            code=DiagnosticCode.SA_DECLARATIVE_BINDING,
+                            symbol=declaration.symbol,
+                            line=_line(declaration.node),
+                            kind=SqlAlchemyFrontierKind.CLASS,
+                        )
                     changed = True
                 elif any(
                     _unresolved_terminal(base, declaration.module, {"DeclarativeBase"})
@@ -599,6 +620,14 @@ class SqlAlchemySnapshotAnalyzer:
                             f"{module.module}.{target.id}",
                             state,
                         )
+                    continue
+                if module.bindings.get(target.id) != f"{module.module}.{target.id}":
+                    self._unknown_table_call(
+                        module,
+                        statement.value,
+                        f"{module.module}.{target.id}",
+                        state,
+                    )
                     continue
                 origin = f"table:{module.module}.{target.id}"
                 candidate = self._candidate_from_table_call(
@@ -852,6 +881,30 @@ class SqlAlchemySnapshotAnalyzer:
                         continue
                     name, annotation, value = assignment
                     if name.startswith("__"):
+                        continue
+                    if value is not None and _expression_uses_shadowed(
+                        value, declaration.shadowed_names
+                    ):
+                        self._unknown_row(
+                            declaration.module,
+                            table,
+                            _shadowed_row_kind(
+                                value, declaration.module, declaration.shadowed_names
+                            ),
+                            value,
+                            state,
+                        )
+                        continue
+                    if annotation is not None and _expression_uses_shadowed(
+                        annotation, declaration.shadowed_names
+                    ):
+                        self._unknown_row(
+                            declaration.module,
+                            table,
+                            SqlAlchemyRowKind.COLUMN,
+                            statement,
+                            state,
+                        )
                         continue
                     if (
                         isinstance(value, ast.Call)
@@ -1693,7 +1746,7 @@ def _bind_module_statement(
         if any(alias.name == "*" for alias in statement.names):
             module.star_import = True
             import_origin = _import_from_origin(module, statement)
-            if import_origin is None or not import_origin.startswith("sqlalchemy"):
+            if import_origin is None or not _is_sqlalchemy_namespace(import_origin):
                 _invalidate_star_import(module)
             return
         import_origin = _import_from_origin(module, statement)
@@ -1749,6 +1802,7 @@ def _nested_module_scope_writes(value: ast.AST) -> tuple[ast.AST, ...]:
     result: list[ast.AST] = []
     for child in ast.iter_child_nodes(value):
         if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            result.append(child)
             continue
         if isinstance(
             child,
@@ -1771,6 +1825,92 @@ def _nested_module_scope_writes(value: ast.AST) -> tuple[ast.AST, ...]:
             result.append(child)
         result.extend(_nested_module_scope_writes(child))
     return tuple(result)
+
+
+def _class_shadowed_names(module: _ParsedModule, value: ast.ClassDef) -> frozenset[str]:
+    names: set[str] = set()
+    for statement in value.body:
+        for candidate in _class_scope_write_names(statement):
+            if _binding_is_sqlalchemy(module, candidate):
+                names.add(candidate)
+    return frozenset(names)
+
+
+def _class_scope_write_names(value: ast.AST) -> tuple[str, ...]:
+    if isinstance(value, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        return (value.name,)
+    direct = _statement_binding_names(value)
+    if direct:
+        return direct + tuple(
+            name
+            for child in ast.iter_child_nodes(value)
+            for name in _class_scope_write_names(child)
+        )
+    names: list[str] = []
+    for child in ast.iter_child_nodes(value):
+        if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            names.extend(_class_scope_write_names(child))
+            continue
+        names.extend(_class_scope_write_names(child))
+    return tuple(names)
+
+
+def _statement_binding_names(value: ast.AST) -> tuple[str, ...]:
+    if isinstance(value, ast.Import):
+        return tuple(alias.asname or alias.name.split(".", 1)[0] for alias in value.names)
+    if isinstance(value, ast.ImportFrom):
+        return tuple(alias.asname or alias.name for alias in value.names if alias.name != "*")
+    if isinstance(value, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        return _assignment_names(value)
+    if isinstance(value, (ast.For, ast.AsyncFor)):
+        return _target_names(value.target)
+    if isinstance(value, (ast.With, ast.AsyncWith)):
+        return tuple(
+            name
+            for item in value.items
+            if item.optional_vars is not None
+            for name in _target_names(item.optional_vars)
+        )
+    if isinstance(value, ast.ExceptHandler):
+        return (value.name,) if value.name is not None else ()
+    if isinstance(value, ast.Match):
+        return tuple(name for case in value.cases for name in _pattern_binding_names(case.pattern))
+    if isinstance(value, ast.Delete):
+        return tuple(name for target in value.targets for name in _target_names(target))
+    return ()
+
+
+def _target_names(value: ast.expr) -> tuple[str, ...]:
+    if isinstance(value, ast.Name):
+        return (value.id,)
+    if isinstance(value, (ast.Tuple, ast.List)):
+        return tuple(name for item in value.elts for name in _target_names(item))
+    if isinstance(value, ast.Starred):
+        return _target_names(value.value)
+    return ()
+
+
+def _expression_uses_shadowed(value: ast.expr, names: frozenset[str]) -> bool:
+    if not names:
+        return False
+    return any(isinstance(node, ast.Name) and node.id in names for node in ast.walk(value))
+
+
+def _shadowed_row_kind(
+    value: ast.expr,
+    module: _ParsedModule,
+    names: frozenset[str],
+) -> SqlAlchemyRowKind:
+    for node in ast.walk(value):
+        if not isinstance(node, ast.Name) or node.id not in names:
+            continue
+        origins = set(module.ambiguous_bindings.get(node.id, ()))
+        origin = module.bindings.get(node.id)
+        if origin is not None:
+            origins.add(origin)
+        if any(candidate.endswith(".relationship") for candidate in origins):
+            return SqlAlchemyRowKind.RELATIONSHIP
+    return SqlAlchemyRowKind.COLUMN
 
 
 def _bind(
@@ -1800,6 +1940,62 @@ def _invalidate_star_import(module: _ParsedModule) -> None:
         if origin is not None:
             module.ambiguous_bindings.setdefault(name, set()).add(origin)
         module.bindings[name] = None
+
+
+def _binding_is_sqlalchemy(module: _ParsedModule, name: str) -> bool:
+    origin = module.bindings.get(name)
+    return _is_sqlalchemy_origin(origin) or any(
+        _is_sqlalchemy_origin(candidate) for candidate in module.ambiguous_bindings.get(name, ())
+    )
+
+
+def _is_sqlalchemy_origin(origin: str | None) -> bool:
+    return origin in _SQLALCHEMY_BINDING_SYMBOLS or origin in _TYPE_CATEGORIES
+
+
+def _is_sqlalchemy_namespace(origin: str | None) -> bool:
+    return origin in _SQLALCHEMY_IMPORT_NAMESPACES
+
+
+def _resolve_repository_bindings(modules: list[_ParsedModule]) -> None:
+    by_name = {module.module: module for module in modules}
+    for module in modules:
+        for name, origin in tuple(module.bindings.items()):
+            if origin is None:
+                continue
+            resolved = _resolve_repository_origin(origin, by_name, set())
+            if resolved is None:
+                module.ambiguous_bindings.setdefault(name, set()).add(origin)
+                module.bindings[name] = None
+            else:
+                module.bindings[name] = resolved
+        for name, origins in tuple(module.ambiguous_bindings.items()):
+            resolved_origins: set[str] = set()
+            for origin in origins:
+                resolved = _resolve_repository_origin(origin, by_name, set())
+                resolved_origins.add(resolved if resolved is not None else origin)
+            module.ambiguous_bindings[name] = resolved_origins
+
+
+def _resolve_repository_origin(
+    origin: str,
+    modules: dict[str, _ParsedModule],
+    seen: set[str],
+) -> str | None:
+    if origin in seen:
+        return None
+    if _is_sqlalchemy_origin(origin) or "." not in origin:
+        return origin
+    owner, name = origin.rsplit(".", 1)
+    target = modules.get(owner)
+    if target is None or name not in target.bindings:
+        return origin
+    target_origin = target.bindings[name]
+    if target_origin is None:
+        return None
+    if target_origin == origin:
+        return origin
+    return _resolve_repository_origin(target_origin, modules, {*seen, origin})
 
 
 def _bind_name(module: _ParsedModule, name: str, *, ambiguous: bool) -> None:
@@ -1836,7 +2032,7 @@ def _assignment_names(
     value: ast.Assign | ast.AnnAssign | ast.AugAssign | ast.NamedExpr,
 ) -> tuple[str, ...]:
     targets = value.targets if isinstance(value, ast.Assign) else (value.target,)
-    return tuple(target.id for target in targets if isinstance(target, ast.Name))
+    return tuple(name for target in targets for name in _target_names(target))
 
 
 def _import_from_origin(module: _ParsedModule, value: ast.ImportFrom) -> str | None:
@@ -1882,11 +2078,17 @@ def _unresolved_terminal(
 ) -> bool:
     if _resolve_symbol(value, module) is not None:
         return False
+    if _has_known_root_binding(value, module):
+        return any(
+            _is_sqlalchemy_origin(origin) and origin.rsplit(".", 1)[-1] in terminals
+            for origin in _ambiguous_symbols(value, module)
+        )
     terminal = _terminal_name(value)
     if terminal in terminals:
         return True
     return any(
-        origin.rsplit(".", 1)[-1] in terminals for origin in _ambiguous_symbols(value, module)
+        _is_sqlalchemy_origin(origin) and origin.rsplit(".", 1)[-1] in terminals
+        for origin in _ambiguous_symbols(value, module)
     )
 
 
@@ -1899,6 +2101,13 @@ def _ambiguous_symbols(value: ast.expr, module: _ParsedModule) -> set[str]:
             for origin in _ambiguous_symbols(value.value, module)
         }
     return set()
+
+
+def _has_known_root_binding(value: ast.expr, module: _ParsedModule) -> bool:
+    root: ast.expr = value
+    while isinstance(root, ast.Attribute):
+        root = root.value
+    return isinstance(root, ast.Name) and root.id in module.bindings
 
 
 def _ambiguous_binding_matches(

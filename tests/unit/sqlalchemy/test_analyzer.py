@@ -1071,3 +1071,158 @@ class Legacy(Base):
     }
     assert result.snapshot.diagnostics == ()
     assert result.snapshot.partial_safe is False
+
+
+def test_destructured_rebinding_of_sqlalchemy_column_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+Column, other = replacements
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_class_scope_rebinding_of_sqlalchemy_column_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    Column = helper
+    python_name = Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_unknown_module_same_terminal_alias_is_not_sqlalchemy_evidence() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from fake import DeclarativeBase as DB
+
+DB = replacement
+
+class Candidate(DB): pass
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.ABSENT
+    assert result.snapshot.entities == ()
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
+
+
+def test_reexported_repository_base_alias_resolves_across_modules() -> None:
+    result = _analyze(
+        {
+            "src/pkg/base.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+""",
+            "src/pkg/__init__.py": b"""
+from .base import Base
+""",
+            "src/pkg/models.py": b"""
+from . import Base
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_duplicate_module_table_binding_has_no_last_winner() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Table
+
+users = Table("first", object())
+users = Table("second", object())
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == [
+        "CSV-SA-007",
+        "CSV-SA-007",
+    ]
+    assert result.snapshot.coverage.unknown_declarations == 2
+    assert result.snapshot.partial_safe is True
+
+
+def test_duplicate_plain_python_classes_do_not_create_sqlalchemy_evidence() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+class Helper: pass
+class Helper: pass
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.ABSENT
+    assert result.snapshot.entities == ()
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
+
+
+def test_sqlalchemy_prefixed_module_star_import_is_not_trusted() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy_helpers import *
+from sqlalchemy.orm import DeclarativeBase as SafeBase
+
+class Base(SafeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
