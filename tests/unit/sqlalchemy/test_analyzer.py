@@ -2176,6 +2176,55 @@ class User(Base):
     assert result.snapshot.partial_safe is True
 
 
+def test_reexport_attribute_mutation_does_not_taint_direct_source_import() -> None:
+    result = _analyze(
+        {
+            "src/compat.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/mutator.py": b"""
+import compat
+
+compat.DeclarativeBase = object
+""",
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_reexport_attribute_mutation_taints_reexport_importfrom_binding() -> None:
+    result = _analyze(
+        {
+            "src/compat.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+import compat
+
+compat.DeclarativeBase = object
+from compat import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_unrelated_or_function_local_namespace_mutation_does_not_taint_base() -> None:
     result = _analyze(
         {

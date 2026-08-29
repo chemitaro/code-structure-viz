@@ -2276,27 +2276,32 @@ def _resolve_repository_bindings(modules: list[_ParsedModule]) -> None:
     }
     canonical_bindings: dict[str, str | None] = {}
     canonical_ambiguous: dict[str, frozenset[str]] = {}
+    attribute_mutations = {symbol for module in modules for symbol in module.attribute_mutations}
     for module in modules:
         names = set(raw_bindings[module.module]) | set(raw_ambiguous[module.module])
         for name in names:
             symbol = f"{module.module}.{name}"
+            traversed: set[str] = set()
             resolved, ambiguous_origins = _resolve_repository_origin(
                 symbol,
                 by_name,
                 raw_bindings,
                 raw_ambiguous,
                 set(),
+                traversed,
             )
-            canonical_bindings[symbol] = resolved
-            if ambiguous_origins:
-                canonical_ambiguous[symbol] = frozenset(ambiguous_origins)
-
-    attribute_mutations = {symbol for module in modules for symbol in module.attribute_mutations}
-    for symbol in tuple(attribute_mutations):
-        resolved = canonical_bindings.get(symbol, symbol)
-        if resolved is not None:
-            attribute_mutations.add(resolved)
-        attribute_mutations.update(canonical_ambiguous.get(symbol, ()))
+            if traversed.isdisjoint(attribute_mutations):
+                canonical_bindings[symbol] = resolved
+                if ambiguous_origins:
+                    canonical_ambiguous[symbol] = frozenset(ambiguous_origins)
+                continue
+            mutation_origins = set(ambiguous_origins)
+            if resolved is not None:
+                mutation_origins.add(resolved)
+            if not mutation_origins:
+                mutation_origins.update(traversed & attribute_mutations)
+            canonical_bindings[symbol] = None
+            canonical_ambiguous[symbol] = frozenset(mutation_origins)
 
     for module in modules:
         names = set(module.bindings) | set(module.ambiguous_bindings)
@@ -2321,7 +2326,9 @@ def _resolve_repository_origin(
     bindings: dict[str, dict[str, str | None]],
     ambiguous_bindings: dict[str, dict[str, frozenset[str]]],
     seen: set[str],
+    traversed: set[str],
 ) -> tuple[str | None, set[str]]:
+    traversed.add(origin)
     if origin in seen:
         return None, {origin}
     if "." not in origin:
@@ -2340,6 +2347,7 @@ def _resolve_repository_origin(
                 ambiguous_bindings,
                 {*seen, origin},
                 origin,
+                traversed,
             )
         return origin, set()
     target_origin = bindings[owner][name]
@@ -2353,6 +2361,7 @@ def _resolve_repository_origin(
             ambiguous_bindings,
             {*seen, origin},
             origin,
+            traversed,
         )
     if target_origin == origin:
         return origin, set()
@@ -2362,6 +2371,7 @@ def _resolve_repository_origin(
         bindings,
         ambiguous_bindings,
         {*seen, origin},
+        traversed,
     )
 
 
@@ -2372,6 +2382,7 @@ def _resolve_ambiguous_repository_origins(
     ambiguous_bindings: dict[str, dict[str, frozenset[str]]],
     seen: set[str],
     fallback: str,
+    traversed: set[str],
 ) -> tuple[None, set[str]]:
     resolved_origins: set[str] = set()
     for candidate in candidates:
@@ -2381,6 +2392,7 @@ def _resolve_ambiguous_repository_origins(
             bindings,
             ambiguous_bindings,
             seen,
+            traversed,
         )
         if resolved is not None:
             resolved_origins.add(resolved)
@@ -2514,19 +2526,13 @@ def _resolve_symbol(value: ast.expr, module: _ParsedModule) -> str | None:
         if _repository_star_candidates(module, candidate):
             return None
         resolved = module.repository_bindings.get(candidate, candidate)
-        if resolved in module.attribute_mutations:
-            return None
         return resolved if _binding_origin_is_usable(module, resolved) else None
     return None
 
 
 def _binding_origin_is_usable(module: _ParsedModule, origin: str | None) -> bool:
-    return (
-        origin is not None
-        and origin not in module.attribute_mutations
-        and not (
-            _is_sqlalchemy_origin(origin) and not _binding_origin_is_sqlalchemy(module, origin)
-        )
+    return origin is not None and not (
+        _is_sqlalchemy_origin(origin) and not _binding_origin_is_sqlalchemy(module, origin)
     )
 
 
@@ -2553,19 +2559,14 @@ def _unresolved_terminal(
 
 def _ambiguous_symbols(value: ast.expr, module: _ParsedModule) -> set[str]:
     if isinstance(value, ast.Name):
-        origins = set(module.ambiguous_bindings.get(value.id, ()))
-        origin = module.bindings.get(value.id)
-        if origin in module.attribute_mutations:
-            assert origin is not None
-            origins.add(origin)
-        return origins
+        return set(module.ambiguous_bindings.get(value.id, ()))
     if isinstance(value, ast.Attribute):
         result: set[str] = set()
         base = _resolve_symbol(value.value, module)
         if base is not None:
             candidate = _normalize_symbol(f"{base}.{value.attr}")
             resolved = module.repository_bindings.get(candidate, candidate)
-            if candidate in module.attribute_mutations or resolved in module.attribute_mutations:
+            if candidate in module.attribute_mutations:
                 result.add(resolved or candidate)
             result.update(module.repository_ambiguous_bindings.get(candidate, ()))
             result.update(_repository_star_candidates(module, candidate))
