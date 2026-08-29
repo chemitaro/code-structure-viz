@@ -1724,6 +1724,57 @@ class User(Base):
     assert result.snapshot.partial_safe is True
 
 
+def test_global_tablename_assignment_makes_table_identity_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    global __tablename__
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_global_column_assignments_are_not_class_rows() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+    global leaked, conditional
+    leaked = Column(Integer, primary_key=True)
+    if condition:
+        conditional = Column(Integer)
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
+
+
 def test_class_local_constraint_shadow_makes_table_identity_unknown() -> None:
     result = _analyze(
         {
@@ -2440,6 +2491,127 @@ class User(DeclarativeBase):
     assert result.snapshot.partial_safe is True
 
 
+def test_conditionally_assigned_proven_module_alias_taints_source_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+from sqlalchemy import orm
+
+if condition:
+    exported = orm
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.exported.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_conditionally_assigned_attribute_module_alias_taints_source_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+import sqlalchemy.orm
+
+if condition:
+    exported = sqlalchemy.orm
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.exported.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_later_rebind_invalidates_conditional_assignment_alias() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+from sqlalchemy import orm
+
+if condition:
+    exported = orm
+
+class Replacement:
+    pass
+
+exported = Replacement()
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.exported.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_later_source_rebind_preserves_conditional_assignment_alias() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+from sqlalchemy import orm
+
+if condition:
+    exported = orm
+
+class Replacement:
+    pass
+
+orm = Replacement()
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.exported.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_attribute_assigned_repository_module_alias_taints_local_import() -> None:
     result = _analyze(
         {
@@ -2466,6 +2638,71 @@ class User(DeclarativeBase):
     assert result.snapshot.entities == ()
     assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
     assert result.snapshot.partial_safe is True
+
+
+def test_package_attribute_shadow_is_not_treated_as_repository_module() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"""
+class Namespace:
+    pass
+
+namespace = Namespace()
+""",
+            "src/pkg/namespace.py": b"import sqlalchemy as sa\n",
+            "src/aliases.py": b"""
+import pkg
+
+exported = pkg.namespace
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.exported.sa.Table = replacement
+from sqlalchemy import Table
+
+users = Table("users", object())
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_later_submodule_import_does_not_change_copied_package_attribute() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"""
+class Namespace:
+    pass
+
+namespace = Namespace()
+""",
+            "src/pkg/namespace.py": b"import sqlalchemy as sa\n",
+            "src/aliases.py": b"""
+import pkg
+
+exported = pkg.namespace
+import pkg.namespace
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.exported.sa.Table = replacement
+from sqlalchemy import Table
+
+users = Table("users", object())
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
 
 
 def test_assigned_value_reexport_does_not_taint_source_import() -> None:
@@ -2694,6 +2931,32 @@ from sqlalchemy.orm import DeclarativeBase
 class User(DeclarativeBase):
     __tablename__ = "users"
 """
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_class_body_imported_repository_module_alias_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+import pkg.namespace
+
+class Mutator:
+    alias = pkg.namespace
+    alias.DeclarativeBase = object
+
+from pkg.namespace import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
         }
     )
 

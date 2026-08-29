@@ -498,7 +498,6 @@ class SqlAlchemySnapshotAnalyzer:
                         statement,
                         f"{module.module}.{statement.name}",
                     )
-            for statement in module.tree.body:
                 for write in _nested_module_scope_writes(statement):
                     _bind_module_statement(module, write, ambiguous=True)
                     if isinstance(write, ast.ClassDef):
@@ -816,8 +815,8 @@ class SqlAlchemySnapshotAnalyzer:
                     )
 
         for declaration in declarative_classes:
-            scope_modules = _class_scope_modules(declaration)
-            special = _special_assignments(declaration, scope_modules)
+            scope_modules, global_names = _class_scope_modules(declaration)
+            special = _special_assignments(declaration, scope_modules, global_names)
             if any(
                 len(special.get(name, ())) > 1
                 or any(not binding.supported for binding in special.get(name, ()))
@@ -1090,16 +1089,17 @@ class SqlAlchemySnapshotAnalyzer:
                         self._unknown_row(module, table, SqlAlchemyRowKind.COLUMN, argument, state)
 
             for declaration in candidate.classes:
-                scope_modules = _class_scope_modules(declaration)
+                scope_modules, global_names = _class_scope_modules(declaration)
                 for statement in declaration.node.body:
                     module = scope_modules[id(statement)]
                     for write in _nested_module_scope_writes(statement):
-                        self._unsupported_row_assignment(
-                            scope_modules[id(write)],
-                            table,
-                            write,
-                            state,
-                        )
+                        if not _only_global_bindings(write, global_names[id(write)]):
+                            self._unsupported_row_assignment(
+                                scope_modules[id(write)],
+                                table,
+                                write,
+                                state,
+                            )
                     assignment = _row_assignment(statement)
                     if assignment is None:
                         self._unsupported_row_assignment(
@@ -1110,6 +1110,8 @@ class SqlAlchemySnapshotAnalyzer:
                         )
                         continue
                     name, annotation, value = assignment
+                    if name in global_names[id(statement)]:
+                        continue
                     if name.startswith("__"):
                         continue
                     if value is not None and _expression_uses_shadowed(
@@ -2052,21 +2054,38 @@ def _bind_module_statement(
             for target in targets:
                 _invalidate_attribute_target(module, target)
         names = _assignment_names(statement)
-        if (
-            binding_owner is None
-            and not ambiguous
-            and (not isinstance(statement, ast.AnnAssign) or statement.value is not None)
-        ):
+        if binding_owner is None:
             preserved = _alias_preserving_assignment_provenance(module, statement)
-            for name in names:
-                _clear_import_alias_provenance(module, name, statement)
-            if preserved is not None:
+            if not ambiguous:
+                for name in names:
+                    _clear_import_alias_provenance(module, name, statement)
+            if preserved is not None and not ambiguous:
                 local, aliases, candidates = preserved
                 symbol = f"{module.module}.{local}"
                 if aliases:
                     module.imported_module_aliases[symbol] = aliases
                 if candidates:
                     module.imported_module_alias_candidates[symbol] = candidates
+            elif preserved is not None:
+                local, aliases, candidates = preserved
+                for origin in aliases:
+                    _record_import_alias_provenance(
+                        module,
+                        local,
+                        origin,
+                        candidate=False,
+                        ambiguous=True,
+                        statement=statement,
+                    )
+                for origin in candidates:
+                    _record_import_alias_provenance(
+                        module,
+                        local,
+                        origin,
+                        candidate=True,
+                        ambiguous=True,
+                        statement=statement,
+                    )
         for name in names:
             _bind(
                 module.bindings,
@@ -2173,7 +2192,11 @@ def _alias_preserving_assignment_provenance(
         if not _proven_module_origin(module, origin):
             return None
         assert origin is not None
-        return target.id, {origin}, set()
+        if origin in module.repository_modules and _module_import_precedes(
+            module, origin, statement
+        ):
+            return target.id, {origin}, set()
+        return target.id, set(), {origin}
     if not isinstance(statement.value, ast.Name):
         return None
 
@@ -2183,6 +2206,29 @@ def _alias_preserving_assignment_provenance(
     if not aliases and not candidates:
         return None
     return target.id, aliases, candidates
+
+
+def _module_import_precedes(
+    module: _ParsedModule,
+    origin: str,
+    statement: ast.AST,
+) -> bool:
+    position = (
+        getattr(statement, "lineno", -1),
+        getattr(statement, "col_offset", -1),
+    )
+    return any(
+        _normalize_symbol(alias.name) == origin
+        and (
+            getattr(candidate, "lineno", -1),
+            getattr(candidate, "col_offset", -1),
+        )
+        < position
+        for top_level in module.tree.body
+        for candidate in (top_level, *_nested_module_scope_writes(top_level))
+        if isinstance(candidate, ast.Import)
+        for alias in candidate.names
+    )
 
 
 def _invalidate_attribute_target(
@@ -2378,9 +2424,12 @@ def _proven_sqlalchemy_module_assignment(
     if not isinstance(value, (ast.Name, ast.Attribute)):
         return None
     origin = _resolve_symbol(value, module)
-    if not _proven_module_origin(module, origin):
+    if origin is None:
         return None
-    assert origin is not None
+    if not _external_sqlalchemy_module_origin(module, origin) and not (
+        origin in module.repository_modules and _module_import_precedes(module, origin, statement)
+    ):
+        return None
     return target.id, origin
 
 
@@ -2497,25 +2546,42 @@ def _nested_module_scope_writes(value: ast.AST) -> tuple[ast.AST, ...]:
     return tuple(result)
 
 
-def _class_scope_modules(declaration: _ClassDeclaration) -> dict[int, _ParsedModule]:
+def _class_scope_modules(
+    declaration: _ClassDeclaration,
+) -> tuple[dict[int, _ParsedModule], dict[int, frozenset[str]]]:
     scope = _copy_parsed_module(declaration.module)
     result: dict[int, _ParsedModule] = {}
+    global_result: dict[int, frozenset[str]] = {}
+    global_names: set[str] = set()
     for statement in declaration.node.body:
-        result[id(statement)] = _copy_parsed_module(scope)
-        _bind_module_statement(
-            scope,
-            statement,
-            binding_owner=declaration.symbol,
-        )
-        for write in _nested_module_scope_writes(statement):
+        for write, nested in (
+            (statement, False),
+            *((candidate, True) for candidate in _nested_module_scope_writes(statement)),
+        ):
             result[id(write)] = _copy_parsed_module(scope)
+            global_result[id(write)] = frozenset(global_names)
+            if isinstance(write, ast.Global):
+                global_names.update(write.names)
+                continue
+            before = _copy_parsed_module(scope)
             _bind_module_statement(
                 scope,
                 write,
-                ambiguous=True,
+                ambiguous=nested,
                 binding_owner=declaration.symbol,
             )
-    return result
+            bound_globals = set(_statement_binding_names(write)) & global_names
+            if bound_globals:
+                _apply_class_global_write(
+                    declaration.module,
+                    scope,
+                    before,
+                    write,
+                    bound_globals,
+                    ambiguous=nested,
+                    apply_outer=False,
+                )
+    return result, global_result
 
 
 def _copy_parsed_module(module: _ParsedModule) -> _ParsedModule:
@@ -2578,6 +2644,11 @@ def _direct_binding_names(value: ast.AST) -> tuple[str, ...]:
     if isinstance(value, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
         return (value.name,)
     return _statement_binding_names(value)
+
+
+def _only_global_bindings(value: ast.AST, global_names: frozenset[str]) -> bool:
+    names = _direct_binding_names(value)
+    return bool(names) and all(name in global_names for name in names)
 
 
 def _statement_binding_names(value: ast.AST) -> tuple[str, ...]:
@@ -2695,6 +2766,13 @@ def _binding_origin_is_sqlalchemy(module: _ParsedModule, origin: str | None) -> 
 def _proven_module_origin(module: _ParsedModule, origin: str | None) -> bool:
     if origin in module.repository_modules:
         return True
+    return _external_sqlalchemy_module_origin(module, origin)
+
+
+def _external_sqlalchemy_module_origin(
+    module: _ParsedModule,
+    origin: str | None,
+) -> bool:
     return origin in _SQLALCHEMY_MODULE_SYMBOLS and not any(
         origin == repository_module or origin.startswith(f"{repository_module}.")
         for repository_module in module.repository_modules
@@ -3086,6 +3164,7 @@ def _terminal_name(value: ast.expr) -> str | None:
 def _special_assignments(
     declaration: _ClassDeclaration,
     scope_modules: dict[int, _ParsedModule],
+    global_names: dict[int, frozenset[str]],
 ) -> dict[str, list[_ClassSpecialBinding]]:
     result: dict[str, list[_ClassSpecialBinding]] = {}
     for statement in declaration.node.body:
@@ -3094,6 +3173,7 @@ def _special_assignments(
             statement,
             scope_modules[id(statement)],
             direct=True,
+            global_names=global_names[id(statement)],
         )
         for write in _nested_module_scope_writes(statement):
             _record_special_assignments(
@@ -3101,6 +3181,7 @@ def _special_assignments(
                 write,
                 scope_modules[id(write)],
                 direct=False,
+                global_names=global_names[id(write)],
             )
     return result
 
@@ -3111,6 +3192,7 @@ def _record_special_assignments(
     module: _ParsedModule,
     *,
     direct: bool,
+    global_names: frozenset[str],
 ) -> None:
     for name in _direct_binding_names(statement):
         if name not in _CLASS_TABLE_SPECIALS:
@@ -3120,7 +3202,7 @@ def _record_special_assignments(
             _ClassSpecialBinding(
                 value,
                 module,
-                supported=direct and supported,
+                supported=direct and supported and name not in global_names,
             )
         )
 
