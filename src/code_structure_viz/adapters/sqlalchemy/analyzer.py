@@ -2216,6 +2216,7 @@ def _bind_attribute_module_alias_provenance(
     *,
     ambiguous: bool,
     resolution_scope: _ParsedModule | None = None,
+    respect_definite_watermark: bool = False,
 ) -> None:
     scope = resolution_scope or module
     targets = _attribute_write_targets(statement)
@@ -2239,6 +2240,7 @@ def _bind_attribute_module_alias_provenance(
             statement,
             ambiguous=ambiguous,
             resolution_scope=scope,
+            respect_definite_watermark=respect_definite_watermark,
         )
 
 
@@ -2250,6 +2252,7 @@ def _bind_attribute_target_module_alias_provenance(
     *,
     ambiguous: bool,
     resolution_scope: _ParsedModule | None = None,
+    respect_definite_watermark: bool = False,
 ) -> None:
     scope = resolution_scope or module
     if isinstance(target, ast.Attribute):
@@ -2257,11 +2260,20 @@ def _bind_attribute_target_module_alias_provenance(
         position = _node_position(statement)
         for parent in parents:
             symbol = _normalize_symbol(f"{parent}.{target.attr}")
+            definite_position = module.import_alias_definite_positions.get(symbol)
+            if (
+                respect_definite_watermark
+                and definite_position is not None
+                and definite_position > position
+            ):
+                continue
             if not ambiguous:
                 module.imported_module_aliases.pop(symbol, None)
                 module.imported_module_alias_candidates.pop(symbol, None)
                 module.import_alias_definite_positions[symbol] = position
-                module.import_alias_events.setdefault(symbol, []).append((position, None))
+                events = module.import_alias_events.setdefault(symbol, [])
+                if (position, None) not in events:
+                    events.append((position, None))
             if origins:
                 module.imported_module_alias_candidates.setdefault(symbol, set()).update(origins)
                 events = module.import_alias_events.setdefault(symbol, [])
@@ -2280,6 +2292,7 @@ def _bind_attribute_target_module_alias_provenance(
                 statement,
                 ambiguous=ambiguous,
                 resolution_scope=scope,
+                respect_definite_watermark=respect_definite_watermark,
             )
     elif isinstance(target, ast.Starred):
         _bind_attribute_target_module_alias_provenance(
@@ -2289,6 +2302,7 @@ def _bind_attribute_target_module_alias_provenance(
             statement,
             ambiguous=ambiguous,
             resolution_scope=scope,
+            respect_definite_watermark=respect_definite_watermark,
         )
 
 
@@ -2313,14 +2327,6 @@ def _refresh_attribute_module_alias_provenance(
             continue
         for parent in _module_object_origins_before(module, target.value, statement):
             symbol = _normalize_symbol(f"{parent}.{target.attr}")
-            definite_position = module.import_alias_definite_positions.get(symbol)
-            if definite_position is not None and definite_position > position:
-                continue
-            candidates = module.imported_module_alias_candidates.setdefault(symbol, set())
-            new_origins = origins - candidates
-            if new_origins:
-                candidates.update(new_origins)
-                changed = True
             events = module.import_alias_events.setdefault(symbol, [])
             additions = [
                 (position, origin)
@@ -2329,6 +2335,14 @@ def _refresh_attribute_module_alias_provenance(
             ]
             if additions:
                 events.extend(additions)
+                changed = True
+            definite_position = module.import_alias_definite_positions.get(symbol)
+            if definite_position is not None and definite_position > position:
+                continue
+            candidates = module.imported_module_alias_candidates.setdefault(symbol, set())
+            new_origins = origins - candidates
+            if new_origins:
+                candidates.update(new_origins)
                 changed = True
     return changed
 
@@ -2383,8 +2397,7 @@ def _module_import_precedes(
     position = _node_position(statement)
     return any(
         _normalize_symbol(alias.name) == origin and _node_position(candidate) < position
-        for top_level in module.tree.body
-        for candidate in (top_level, *_nested_module_scope_writes(top_level))
+        for candidate in module.tree.body
         if isinstance(candidate, ast.Import)
         for alias in candidate.names
     )
@@ -2396,13 +2409,24 @@ def _module_alias_origins_before(
     statement: ast.AST,
 ) -> set[str]:
     symbol = f"{module.module}.{name}"
+    event_origins = _import_alias_event_origins_before(module, symbol, statement)
+    if event_origins is not None:
+        return event_origins
+    fallback_origins = set(module.ambiguous_bindings.get(name, ()))
+    current = module.bindings.get(name)
+    if current is not None:
+        fallback_origins.add(current)
+    return fallback_origins
+
+
+def _import_alias_event_origins_before(
+    module: _ParsedModule,
+    symbol: str,
+    statement: ast.AST,
+) -> set[str] | None:
     events = module.import_alias_events.get(symbol)
-    if not events:
-        fallback_origins = set(module.ambiguous_bindings.get(name, ()))
-        current = module.bindings.get(name)
-        if current is not None:
-            fallback_origins.add(current)
-        return fallback_origins
+    if events is None:
+        return None
     origins: set[str] = set()
     statement_position = _node_position(statement)
     ordered_events = sorted(
@@ -2430,6 +2454,27 @@ def _attribute_root_and_suffix(value: ast.expr) -> tuple[str, tuple[str, ...]] |
     return current.id, tuple(reversed(suffix))
 
 
+def _definite_non_module_attribute_base(
+    module: _ParsedModule,
+    value: ast.expr,
+    statement: ast.AST,
+) -> bool:
+    root = _attribute_root_and_suffix(value)
+    if root is None:
+        return False
+    name, suffix = root
+    candidates = {
+        _normalize_symbol(f"{origin}.{'.'.join(suffix)}") if suffix else origin
+        for origin in _module_alias_origins_before(module, name, statement)
+    }
+    if not candidates:
+        return False
+    return all(
+        _import_alias_event_origins_before(module, candidate, statement) == set()
+        for candidate in candidates
+    )
+
+
 def _module_object_origins_before(
     module: _ParsedModule,
     value: ast.expr,
@@ -2445,7 +2490,7 @@ def _module_object_origins_before(
             candidate = _normalize_symbol(f"{candidate}.{'.'.join(suffix)}")
         result.update(
             origin
-            for origin in _module_object_path_candidates(module, candidate)
+            for origin in _module_object_path_candidates(module, candidate, statement)
             if _external_sqlalchemy_module_origin(module, origin)
             or origin in module.repository_module_origins
             or (
@@ -2456,7 +2501,11 @@ def _module_object_origins_before(
     return result
 
 
-def _module_object_path_candidates(module: _ParsedModule, origin: str) -> set[str]:
+def _module_object_path_candidates(
+    module: _ParsedModule,
+    origin: str,
+    statement: ast.AST,
+) -> set[str]:
     candidates = {origin}
     step_limit = max(
         1,
@@ -2465,6 +2514,10 @@ def _module_object_path_candidates(module: _ParsedModule, origin: str) -> set[st
     for _ in range(step_limit):
         additions: set[str] = set()
         for candidate in candidates:
+            event_origins = _import_alias_event_origins_before(module, candidate, statement)
+            if event_origins is not None:
+                additions.update(event_origins)
+                continue
             resolved = module.repository_bindings.get(candidate)
             if resolved is not None:
                 additions.add(resolved)
@@ -2617,6 +2670,8 @@ def _invalidate_attribute_target(
                 _normalize_symbol(f"{origin}.{target.attr}") for origin in module_bases
             )
             return
+        if _definite_non_module_attribute_base(scope, target.value, target):
+            return
         resolved_base = _resolve_symbol(target.value, scope)
         resolved: str | None
         if _proven_module_origin(scope, resolved_base):
@@ -2725,6 +2780,13 @@ def _class_mutation_scope_modules(
                 write,
                 ambiguous=ambiguous,
                 resolution_scope=before,
+            )
+            _bind_attribute_module_alias_provenance(
+                declaration.module,
+                write,
+                ambiguous=ambiguous,
+                resolution_scope=before,
+                respect_definite_watermark=True,
             )
             _refresh_local_module_aliases(scope)
             bound_globals = set(_statement_binding_names(write)) & global_names
