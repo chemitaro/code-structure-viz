@@ -12,9 +12,12 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyRelationshipRow,
     SqlAlchemyRowKind,
 )
+from code_structure_viz.adapters.sqlalchemy.selection import SqlAlchemyTargetSelector
 from code_structure_viz.core.config import PythonConfig
+from code_structure_viz.core.outcomes import DomainStatus
 from code_structure_viz.source.python_modules import PythonSourceIndex
 from code_structure_viz.source.source_view import SourceFile, SourceFileKind, SourceView
+from code_structure_viz.source.targets import ClassTarget
 
 
 def _analyze_fixture(case: str) -> SqlAlchemyAnalysisResult:
@@ -106,6 +109,45 @@ def test_relationship_inheritance_and_association_fixture_builds_safe_graph() ->
     }
     assert result.snapshot.partial_safe is False
     assert "this fixture must never execute" not in repr(result.snapshot)
+
+
+def test_relationship_fixture_selection_expands_the_safe_graph_without_execution() -> None:
+    analysis = _analyze_fixture("relationship_semantics")
+    selector = SqlAlchemyTargetSelector()
+
+    seed_only = selector.select(
+        analysis,
+        (ClassTarget("models.User"),),
+        upstream_depth=0,
+        downstream_depth=0,
+    )
+    assert seed_only.status is DomainStatus.COMPLETE
+    assert seed_only.snapshot is not None
+    assert [table.name for table in seed_only.snapshot.entities] == ["users"]
+    assert seed_only.snapshot.relations == ()
+
+    expanded = selector.select(
+        analysis,
+        (ClassTarget("models.User"),),
+        upstream_depth=1,
+        downstream_depth=1,
+    )
+    assert expanded.status is DomainStatus.COMPLETE
+    assert expanded.snapshot is not None
+    assert {table.name for table in expanded.snapshot.entities} == {
+        "admins",
+        "groups",
+        "membership",
+        "users",
+    }
+    assert {relation.kind for relation in expanded.snapshot.relations} >= {
+        SqlAlchemyRelationKind.RELATIONSHIP,
+        SqlAlchemyRelationKind.INHERITANCE,
+        SqlAlchemyRelationKind.ASSOCIATION,
+    }
+    assert expanded.coverage.mapped_classes == analysis.snapshot.coverage.mapped_classes
+    assert expanded.coverage.association_tables == analysis.snapshot.coverage.association_tables
+    assert "this fixture must never execute" not in repr(expanded)
 
 
 def test_lossy_fixtures_keep_only_safe_column_and_four_occurrence_diagnostics() -> None:
