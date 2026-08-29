@@ -658,3 +658,187 @@ class User(Base):
     assert [row.kind for row in result.snapshot.members].count(SqlAlchemyRowKind.UNIQUE) == 1
     assert result.snapshot.diagnostics == ()
     assert result.snapshot.partial_safe is False
+
+
+def test_rebound_column_is_unknown_instead_of_false_complete() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+Column = replacement
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_star_import_mapped_annotation_is_unknown_in_a_safe_table() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import *
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int]
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_star_import_declarative_base_is_indeterminate() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import *
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_star_import_relationship_call_is_unknown_in_a_safe_table() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped
+from sqlalchemy.orm import *
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    parent: Mapped["Parent"] = relationship("Parent")
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_unrelated_star_import_call_is_not_sqlalchemy_evidence() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import *
+
+def helper():
+    return relationship("not-a-declaration")
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.ABSENT
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
+
+
+def test_explicit_column_names_override_class_attribute_names_for_both_styles() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase): pass
+
+class Modern(Base):
+    __tablename__ = "modern"
+    python_name: Mapped[int] = mapped_column("modern_db_name", Integer)
+
+class Legacy(Base):
+    __tablename__ = "legacy"
+    python_name = Column("legacy_db_name", Integer)
+"""
+        }
+    )
+
+    columns = {row.name for row in result.snapshot.members if isinstance(row, SqlAlchemyColumnRow)}
+    assert columns == {"modern_db_name", "legacy_db_name"}
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_empty_table_args_mapping_is_a_safe_no_options_state() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = {}
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
+
+
+def test_callable_check_constraints_are_locally_unknown_without_run_fatal() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import CheckConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+def named_check():
+    return True
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(lambda: True),
+        CheckConstraint(named_check),
+    )
+    id: Mapped[int] = mapped_column()
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert [row.kind for row in result.snapshot.members] == [SqlAlchemyRowKind.COLUMN]
+    assert [item.code.value for item in result.snapshot.diagnostics] == [
+        "CSV-SA-009",
+        "CSV-SA-009",
+    ]
+    assert result.snapshot.coverage.unknown_declarations == 2
+    assert result.snapshot.partial_safe is True

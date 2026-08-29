@@ -183,6 +183,7 @@ _CONSTRUCTION_SYMBOLS: Final = frozenset(
 _CONSTRUCTION_TERMINALS: Final = frozenset(
     value.rsplit(".", 1)[-1] for value in _CONSTRUCTION_SYMBOLS
 )
+_SQLALCHEMY_EVIDENCE_TERMINALS: Final = _CONSTRUCTION_TERMINALS | {"Mapped"}
 _COLUMN_SYMBOLS: Final = {"sqlalchemy.Column", "sqlalchemy.orm.mapped_column"}
 _COLUMN_SPECIALS: Final = {
     "sqlalchemy.ForeignKey",
@@ -511,7 +512,22 @@ class SqlAlchemySnapshotAnalyzer:
                 target = statement.targets[0]
                 if not isinstance(target, ast.Name) or not isinstance(statement.value, ast.Call):
                     continue
-                if _resolve_call(statement.value, module) != "sqlalchemy.orm.declarative_base":
+                resolved_call = _resolve_call(statement.value, module)
+                if resolved_call != "sqlalchemy.orm.declarative_base":
+                    if _unresolved_terminal(
+                        statement.value.func,
+                        module,
+                        {"declarative_base"},
+                    ):
+                        _consume_construction_calls(module, statement.value, state)
+                        state.unknown(
+                            module=module,
+                            code=DiagnosticCode.SA_DECLARATIVE_BINDING,
+                            symbol=f"{module.module}.{target.id}",
+                            line=_line(statement.value),
+                            kind=SqlAlchemyFrontierKind.CLASS,
+                            reference=f"module:{module.module}",
+                        )
                     continue
                 classic_bases.add(f"{module.module}.{target.id}")
                 state.supported(module, statement.value)
@@ -536,6 +552,17 @@ class SqlAlchemySnapshotAnalyzer:
                     proven_symbols.add(declaration.symbol)
                     state.supported(declaration.module)
                     changed = True
+                elif any(
+                    _unresolved_terminal(base, declaration.module, {"DeclarativeBase"})
+                    for base in declaration.node.bases
+                ):
+                    state.unknown(
+                        module=declaration.module,
+                        code=DiagnosticCode.SA_DECLARATIVE_BINDING,
+                        symbol=declaration.symbol,
+                        line=_line(declaration.node),
+                        kind=SqlAlchemyFrontierKind.CLASS,
+                    )
             if not changed:
                 break
         return sorted(
@@ -562,7 +589,19 @@ class SqlAlchemySnapshotAnalyzer:
                 target = statement.targets[0]
                 if not isinstance(target, ast.Name) or not isinstance(statement.value, ast.Call):
                     continue
-                if _resolve_call(statement.value, module) != "sqlalchemy.Table":
+                resolved_call = _resolve_call(statement.value, module)
+                if resolved_call != "sqlalchemy.Table":
+                    if _unresolved_terminal(
+                        statement.value.func,
+                        module,
+                        {"Table"},
+                    ):
+                        self._unknown_table_call(
+                            module,
+                            statement.value,
+                            f"{module.module}.{target.id}",
+                            state,
+                        )
                     continue
                 origin = f"table:{module.module}.{target.id}"
                 candidate = self._candidate_from_table_call(
@@ -882,6 +921,29 @@ class SqlAlchemySnapshotAnalyzer:
                         rows.append(SqlAlchemyRowEvidence(row, _span(statement)))
                         known_columns.add(name)
                         state.supported(declaration.module)
+                    elif isinstance(value, ast.Call) and _unresolved_terminal(
+                        value.func,
+                        declaration.module,
+                        _SQLALCHEMY_EVIDENCE_TERMINALS,
+                    ):
+                        kind = (
+                            SqlAlchemyRowKind.RELATIONSHIP
+                            if _terminal_name(value.func) == "relationship"
+                            else SqlAlchemyRowKind.COLUMN
+                        )
+                        self._unknown_row(declaration.module, table, kind, value, state)
+                    elif (
+                        value is None
+                        and annotation is not None
+                        and _unresolved_mapped_annotation(annotation, declaration.module)
+                    ):
+                        self._unknown_row(
+                            declaration.module,
+                            table,
+                            SqlAlchemyRowKind.COLUMN,
+                            statement,
+                            state,
+                        )
                 rows.extend(
                     self._inheritance_rows(
                         declaration,
@@ -1126,7 +1188,7 @@ class SqlAlchemySnapshotAnalyzer:
             and isinstance(arguments[0].value, str)
         ):
             explicit_name = _static_structural_string(arguments.pop(0))
-            if explicit_name is None or (name is not None and name != explicit_name):
+            if explicit_name is None:
                 self._unknown_row(module, table, SqlAlchemyRowKind.COLUMN, call, state)
                 return []
             name = explicit_name
@@ -1312,13 +1374,21 @@ class SqlAlchemySnapshotAnalyzer:
             if "name" in keywords and name is _INVALID:
                 self._unknown_row(module, table, SqlAlchemyRowKind.CHECK, call, state)
                 return []
+            expression = _redacted(call.args[0], module, state)
+            if expression.category not in {
+                RedactedExpressionCategory.SQL_EXPRESSION,
+                RedactedExpressionCategory.LITERAL,
+                RedactedExpressionCategory.UNKNOWN,
+            }:
+                self._unknown_row(module, table, SqlAlchemyRowKind.CHECK, call, state)
+                return []
             return [
                 SqlAlchemyRowEvidence(
                     SqlAlchemyCheckRow.create(
                         owner_id=table.id,
                         name=name if isinstance(name, str) else None,
                         source=source,
-                        expression=_redacted(call.args[0], module, state),
+                        expression=expression,
                     ),
                     span,
                 )
@@ -1565,10 +1635,7 @@ class SqlAlchemySnapshotAnalyzer:
                 if not isinstance(node, ast.Call) or id(node) in state.consumed_calls:
                     continue
                 symbol = _resolve_call(node, module)
-                terminal = _terminal_name(node.func)
-                if symbol not in _CONSTRUCTION_SYMBOLS and not (
-                    module.star_import and terminal in _CONSTRUCTION_TERMINALS
-                ):
+                if symbol not in _CONSTRUCTION_SYMBOLS:
                     continue
                 state.consumed_calls.add(id(node))
                 state.unknown(
@@ -1643,6 +1710,14 @@ def _resolve_symbol(value: ast.expr, module: _ParsedModule) -> str | None:
         base = _resolve_symbol(value.value, module)
         return _normalize_symbol(f"{base}.{value.attr}") if base is not None else None
     return None
+
+
+def _unresolved_terminal(
+    value: ast.expr,
+    module: _ParsedModule,
+    terminals: frozenset[str] | set[str],
+) -> bool:
+    return _resolve_symbol(value, module) is None and _terminal_name(value) in terminals
 
 
 def _resolve_call(value: ast.Call, module: _ParsedModule) -> str | None:
@@ -1724,6 +1799,8 @@ _INVALID: Final = _Invalid()
 
 
 def _schema_dict(value: ast.Dict) -> str | _Invalid | None:
+    if not value.keys:
+        return None
     if len(value.keys) != 1 or value.keys[0] is None:
         return _INVALID
     key = value.keys[0]
@@ -1770,9 +1847,7 @@ def _consume_construction_calls(
             continue
         symbol = _resolve_call(node, module)
         terminal = _terminal_name(node.func)
-        if symbol in _CONSTRUCTION_SYMBOLS or (
-            module.star_import and terminal in _CONSTRUCTION_TERMINALS
-        ):
+        if symbol in _CONSTRUCTION_SYMBOLS or terminal in _CONSTRUCTION_TERMINALS:
             state.consumed_calls.add(id(node))
 
 
@@ -1795,6 +1870,14 @@ def _mapped_inner(value: ast.expr, module: _ParsedModule) -> ast.expr | None:
     ):
         return value.slice
     return None
+
+
+def _unresolved_mapped_annotation(value: ast.expr, module: _ParsedModule) -> bool:
+    return isinstance(value, ast.Subscript) and _unresolved_terminal(
+        value.value,
+        module,
+        {"Mapped"},
+    )
 
 
 def _relationship_annotation(
