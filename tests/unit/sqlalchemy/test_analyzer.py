@@ -2211,6 +2211,72 @@ users = Table("users", object())
     assert result.snapshot.partial_safe is True
 
 
+def test_importfrom_module_alias_mutation_taints_direct_declarative_base_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"from sqlalchemy import orm\n",
+            "src/models.py": b"""
+import aliases
+
+aliases.orm.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_importfrom_module_alias_mutation_taints_direct_table_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"from sqlalchemy import schema\n",
+            "src/models.py": b"""
+import aliases
+
+aliases.schema.Table = replacement
+from sqlalchemy import Table
+
+users = Table("users", object())
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_repository_reexported_module_alias_mutation_taints_source_import() -> None:
+    result = _analyze(
+        {
+            "src/bridge.py": b"from sqlalchemy import orm\n",
+            "src/aliases.py": b"from bridge import orm\n",
+            "src/models.py": b"""
+import aliases
+
+aliases.orm.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_repository_attribute_mutation_taints_importfrom_binding() -> None:
     result = _analyze(
         {

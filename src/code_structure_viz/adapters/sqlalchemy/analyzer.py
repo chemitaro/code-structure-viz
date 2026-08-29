@@ -94,6 +94,7 @@ class _ParsedModule:
     is_package: bool
     attribute_mutations: set[str] = field(default_factory=set)
     imported_module_aliases: dict[str, set[str]] = field(default_factory=dict)
+    imported_module_alias_candidates: dict[str, set[str]] = field(default_factory=dict)
     star_import_origins: set[str] = field(default_factory=set)
     repository_bindings: dict[str, str | None] = field(default_factory=dict)
     repository_ambiguous_bindings: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -199,6 +200,18 @@ _CONSTRUCTION_SYMBOLS: Final = frozenset(
 )
 _CONSTRUCTION_TERMINALS: Final = frozenset(
     value.rsplit(".", 1)[-1] for value in _CONSTRUCTION_SYMBOLS
+)
+_SQLALCHEMY_MODULE_SYMBOLS: Final = frozenset(
+    {
+        "sqlalchemy",
+        "sqlalchemy.ext",
+        "sqlalchemy.ext.declarative",
+        "sqlalchemy.orm",
+        "sqlalchemy.schema",
+        "sqlalchemy.sql",
+        "sqlalchemy.sql.schema",
+        "sqlalchemy.types",
+    }
 )
 _SQLALCHEMY_BINDING_SYMBOLS: Final = _CONSTRUCTION_SYMBOLS | {
     "sqlalchemy",
@@ -1972,13 +1985,18 @@ def _bind_module_statement(
             return
         for alias in statement.names:
             local = alias.asname or alias.name
+            normalized_origin = _normalize_symbol(f"{import_origin}.{alias.name}")
             _bind(
                 module.bindings,
                 module.ambiguous_bindings,
                 local,
-                _normalize_symbol(f"{import_origin}.{alias.name}"),
+                normalized_origin,
                 ambiguous=ambiguous,
             )
+            if binding_owner is None:
+                module.imported_module_alias_candidates.setdefault(
+                    f"{module.module}.{local}", set()
+                ).add(normalized_origin)
     elif isinstance(statement, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
         _bind(
             module.bindings,
@@ -2049,22 +2067,68 @@ def _invalidate_attribute_target(module: _ParsedModule, target: ast.expr) -> Non
 def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set[str]:
     mutations = {symbol for module in modules for symbol in module.attribute_mutations}
     aliases: dict[str, set[str]] = {}
+    candidates: dict[str, set[str]] = {}
     for module in modules:
         for symbol, origins in module.imported_module_aliases.items():
             aliases.setdefault(symbol, set()).update(origins)
+        for symbol, origins in module.imported_module_alias_candidates.items():
+            candidates.setdefault(symbol, set()).update(origins)
+
+    by_name = {module.module: module for module in modules}
+    repository_module_origins: set[str] = set()
+    for symbol in by_name:
+        if "." not in symbol:
+            continue
+        owner_name, name = symbol.rsplit(".", 1)
+        owner = by_name.get(owner_name)
+        if owner is None:
+            repository_module_origins.add(symbol)
+            continue
+        if not owner.is_package:
+            continue
+        if name not in owner.bindings:
+            repository_module_origins.add(symbol)
+            continue
+        if (
+            owner.bindings[name] == symbol
+            and name not in owner.ambiguous_bindings
+            and symbol in owner.imported_module_alias_candidates.get(symbol, ())
+        ):
+            repository_module_origins.add(symbol)
+
+    repository_modules = set(by_name)
+    module_origins = repository_module_origins | {
+        symbol
+        for symbol in _SQLALCHEMY_MODULE_SYMBOLS
+        if not any(
+            symbol == repository_module or symbol.startswith(f"{repository_module}.")
+            for repository_module in repository_modules
+        )
+    }
+    for _ in range(len(candidates)):
+        alias_additions = {
+            (symbol, origin)
+            for symbol, origins in candidates.items()
+            for origin in origins
+            if origin in module_origins or origin in aliases
+        }
+        if all(origin in aliases.get(symbol, ()) for symbol, origin in alias_additions):
+            break
+        for symbol, origin in alias_additions:
+            aliases.setdefault(symbol, set()).add(origin)
 
     expanded = set(mutations)
     for _ in range(len(aliases)):
-        additions = {
+        mutation_additions = {
             _normalize_symbol(f"{origin}{mutation[len(alias) :]}")
             for mutation in expanded
             for alias, origins in aliases.items()
             if mutation.startswith(f"{alias}.")
             for origin in origins
         }
-        if additions.issubset(expanded):
+        if mutation_additions.issubset(expanded):
             break
-        expanded.update(additions)
+        expanded.update(mutation_additions)
     return expanded
 
 
@@ -2135,6 +2199,10 @@ def _copy_parsed_module(module: _ParsedModule) -> _ParsedModule:
         attribute_mutations=set(module.attribute_mutations),
         imported_module_aliases={
             symbol: set(origins) for symbol, origins in module.imported_module_aliases.items()
+        },
+        imported_module_alias_candidates={
+            symbol: set(origins)
+            for symbol, origins in module.imported_module_alias_candidates.items()
         },
         star_import_origins=set(module.star_import_origins),
         repository_bindings=module.repository_bindings,
