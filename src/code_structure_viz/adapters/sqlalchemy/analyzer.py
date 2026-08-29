@@ -92,6 +92,7 @@ class _ParsedModule:
     ambiguous_bindings: dict[str, set[str]]
     star_import: bool
     is_package: bool
+    attribute_mutations: set[str] = field(default_factory=set)
     star_import_origins: set[str] = field(default_factory=set)
     repository_bindings: dict[str, str | None] = field(default_factory=dict)
     repository_ambiguous_bindings: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -476,6 +477,11 @@ class SqlAlchemySnapshotAnalyzer:
             for statement in module.tree.body:
                 for write in _nested_module_scope_writes(statement):
                     _bind_module_statement(module, write, ambiguous=True)
+        attribute_mutations = {
+            symbol for module in modules for symbol in module.attribute_mutations
+        }
+        for module in modules:
+            module.attribute_mutations.update(attribute_mutations)
         _resolve_repository_bindings(modules)
 
     def _classes(
@@ -1978,6 +1984,10 @@ def _bind_module_statement(
             ambiguous=ambiguous,
         )
     elif isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        targets = statement.targets if isinstance(statement, ast.Assign) else (statement.target,)
+        if binding_owner is None:
+            for target in targets:
+                _invalidate_attribute_target(module, target)
         for name in _assignment_names(statement):
             _bind(
                 module.bindings,
@@ -1996,10 +2006,14 @@ def _bind_module_statement(
                 ambiguous=ambiguous,
             )
     elif isinstance(statement, (ast.For, ast.AsyncFor)):
+        if binding_owner is None:
+            _invalidate_attribute_target(module, statement.target)
         _bind_target(module, statement.target, ambiguous=True, binding_owner=owner)
     elif isinstance(statement, (ast.With, ast.AsyncWith)):
         for item in statement.items:
             if item.optional_vars is not None:
+                if binding_owner is None:
+                    _invalidate_attribute_target(module, item.optional_vars)
                 _bind_target(module, item.optional_vars, ambiguous=True, binding_owner=owner)
     elif isinstance(statement, ast.ExceptHandler):
         if statement.name is not None:
@@ -2010,7 +2024,22 @@ def _bind_module_statement(
                 _bind_name(module, name, ambiguous=True, binding_owner=owner)
     elif isinstance(statement, ast.Delete):
         for target in statement.targets:
+            if binding_owner is None:
+                _invalidate_attribute_target(module, target)
             _bind_target(module, target, ambiguous=True, binding_owner=owner)
+
+
+def _invalidate_attribute_target(module: _ParsedModule, target: ast.expr) -> None:
+    if isinstance(target, ast.Attribute):
+        resolved = _resolve_symbol(target, module)
+        if resolved is not None:
+            module.attribute_mutations.add(resolved)
+        module.attribute_mutations.update(_ambiguous_symbols(target, module))
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            _invalidate_attribute_target(module, element)
+    elif isinstance(target, ast.Starred):
+        _invalidate_attribute_target(module, target.value)
 
 
 def _nested_module_scope_writes(value: ast.AST) -> tuple[ast.AST, ...]:
@@ -2077,6 +2106,7 @@ def _copy_parsed_module(module: _ParsedModule) -> _ParsedModule:
         },
         star_import=module.star_import,
         is_package=module.is_package,
+        attribute_mutations=set(module.attribute_mutations),
         star_import_origins=set(module.star_import_origins),
         repository_bindings=module.repository_bindings,
         repository_ambiguous_bindings=module.repository_ambiguous_bindings,
@@ -2471,9 +2501,13 @@ def _resolve_symbol(value: ast.expr, module: _ParsedModule) -> str | None:
         if base is None:
             return None
         candidate = _normalize_symbol(f"{base}.{value.attr}")
+        if candidate in module.attribute_mutations:
+            return None
         if _repository_star_candidates(module, candidate):
             return None
         resolved = module.repository_bindings.get(candidate, candidate)
+        if resolved in module.attribute_mutations:
+            return None
         return resolved if _binding_origin_is_usable(module, resolved) else None
     return None
 
@@ -2513,6 +2547,9 @@ def _ambiguous_symbols(value: ast.expr, module: _ParsedModule) -> set[str]:
         base = _resolve_symbol(value.value, module)
         if base is not None:
             candidate = _normalize_symbol(f"{base}.{value.attr}")
+            resolved = module.repository_bindings.get(candidate, candidate)
+            if candidate in module.attribute_mutations or resolved in module.attribute_mutations:
+                result.add(resolved or candidate)
             result.update(module.repository_ambiguous_bindings.get(candidate, ()))
             result.update(_repository_star_candidates(module, candidate))
         for origin in _ambiguous_symbols(value.value, module):
