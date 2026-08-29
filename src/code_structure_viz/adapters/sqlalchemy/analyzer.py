@@ -2291,6 +2291,13 @@ def _resolve_repository_bindings(modules: list[_ParsedModule]) -> None:
             if ambiguous_origins:
                 canonical_ambiguous[symbol] = frozenset(ambiguous_origins)
 
+    attribute_mutations = {symbol for module in modules for symbol in module.attribute_mutations}
+    for symbol in tuple(attribute_mutations):
+        resolved = canonical_bindings.get(symbol, symbol)
+        if resolved is not None:
+            attribute_mutations.add(resolved)
+        attribute_mutations.update(canonical_ambiguous.get(symbol, ()))
+
     for module in modules:
         names = set(module.bindings) | set(module.ambiguous_bindings)
         for name in names:
@@ -2305,6 +2312,7 @@ def _resolve_repository_bindings(modules: list[_ParsedModule]) -> None:
         module.repository_ambiguous_bindings = canonical_ambiguous
         module.repository_modules = repository_modules
         module.repository_star_imports = repository_star_imports
+        module.attribute_mutations.update(attribute_mutations)
 
 
 def _resolve_repository_origin(
@@ -2513,8 +2521,12 @@ def _resolve_symbol(value: ast.expr, module: _ParsedModule) -> str | None:
 
 
 def _binding_origin_is_usable(module: _ParsedModule, origin: str | None) -> bool:
-    return origin is not None and not (
-        _is_sqlalchemy_origin(origin) and not _binding_origin_is_sqlalchemy(module, origin)
+    return (
+        origin is not None
+        and origin not in module.attribute_mutations
+        and not (
+            _is_sqlalchemy_origin(origin) and not _binding_origin_is_sqlalchemy(module, origin)
+        )
     )
 
 
@@ -2541,7 +2553,12 @@ def _unresolved_terminal(
 
 def _ambiguous_symbols(value: ast.expr, module: _ParsedModule) -> set[str]:
     if isinstance(value, ast.Name):
-        return set(module.ambiguous_bindings.get(value.id, ()))
+        origins = set(module.ambiguous_bindings.get(value.id, ()))
+        origin = module.bindings.get(value.id)
+        if origin in module.attribute_mutations:
+            assert origin is not None
+            origins.add(origin)
+        return origins
     if isinstance(value, ast.Attribute):
         result: set[str] = set()
         base = _resolve_symbol(value.value, module)

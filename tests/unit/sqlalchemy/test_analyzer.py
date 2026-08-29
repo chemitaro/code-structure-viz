@@ -2107,6 +2107,75 @@ class User(local_pkg.Base):
     assert result.snapshot.partial_safe is True
 
 
+def test_qualified_declarative_base_mutation_taints_importfrom_binding() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+import sqlalchemy.orm as orm
+
+orm.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_qualified_table_mutation_taints_importfrom_binding() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+import sqlalchemy as sa
+
+sa.Table = replacement
+from sqlalchemy import Table
+
+users = Table("users", object())
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_repository_attribute_mutation_taints_importfrom_binding() -> None:
+    result = _analyze(
+        {
+            "src/pkg/base.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+""",
+            "src/pkg/__init__.py": b"from .base import Base\n",
+            "src/pkg/models.py": b"""
+import pkg
+
+pkg.Base = replacement
+from pkg import Base
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_unrelated_or_function_local_namespace_mutation_does_not_taint_base() -> None:
     result = _analyze(
         {
@@ -2118,7 +2187,9 @@ orm.unrelated = object
 def helper():
     orm.DeclarativeBase = object
 
-class Base(orm.DeclarativeBase):
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
     pass
 
 class User(Base):
