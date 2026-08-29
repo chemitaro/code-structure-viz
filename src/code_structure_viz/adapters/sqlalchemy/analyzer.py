@@ -599,6 +599,16 @@ class SqlAlchemySnapshotAnalyzer:
             if not changed:
                 break
         base_symbols = proven_symbols | classic_bases
+        base_candidate_bindings: set[str] = set()
+        for declaration in classes:
+            for base in declaration.node.bases:
+                for node in ast.walk(base):
+                    if not isinstance(node, (ast.Name, ast.Attribute)):
+                        continue
+                    resolved = _resolve_symbol(node, declaration.module)
+                    if resolved is not None:
+                        base_candidate_bindings.add(resolved)
+                    base_candidate_bindings.update(_ambiguous_symbols(node, declaration.module))
         for module in modules:
             for statement in module.tree.body:
                 self._unsupported_declarative_base_assignment(
@@ -606,6 +616,7 @@ class SqlAlchemySnapshotAnalyzer:
                     statement,
                     nested=False,
                     base_symbols=base_symbols,
+                    base_candidate_bindings=base_candidate_bindings,
                     state=state,
                 )
                 for write in _nested_module_scope_writes(statement):
@@ -614,6 +625,7 @@ class SqlAlchemySnapshotAnalyzer:
                         write,
                         nested=True,
                         base_symbols=base_symbols,
+                        base_candidate_bindings=base_candidate_bindings,
                         state=state,
                     )
         return sorted(
@@ -632,8 +644,27 @@ class SqlAlchemySnapshotAnalyzer:
         *,
         nested: bool,
         base_symbols: set[str],
+        base_candidate_bindings: set[str],
         state: _State,
     ) -> None:
+        assigned_bindings = {f"{module.module}.{name}" for name in _assignment_names(statement)}
+        targets: tuple[ast.expr, ...]
+        if isinstance(statement, ast.Assign):
+            targets = tuple(statement.targets)
+        elif isinstance(statement, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+            targets = (statement.target,)
+        else:
+            targets = ()
+        for target in targets:
+            for node in ast.walk(target):
+                if not isinstance(node, ast.Attribute):
+                    continue
+                resolved = _resolve_symbol(node, module)
+                if resolved is not None:
+                    assigned_bindings.add(resolved)
+                assigned_bindings.update(_ambiguous_symbols(node, module))
+        if not assigned_bindings & base_candidate_bindings:
+            return
         value = _assignment_value(statement)
         if value is None or not _declarative_base_expression_evidence(
             value,

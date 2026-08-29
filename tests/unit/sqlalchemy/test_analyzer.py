@@ -1952,3 +1952,71 @@ class User(Base):
     assert result.snapshot.entities == ()
     assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
     assert result.snapshot.partial_safe is True
+
+
+def test_composite_attribute_assignment_consumed_as_base_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import declarative_base
+
+class Namespace:
+    pass
+
+namespace = Namespace()
+namespace.Base = (declarative_base(),)[0]
+
+class User(namespace.Base):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_unused_declarative_base_reference_is_not_domain_evidence() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+unused = DeclarativeBase
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.ABSENT
+    assert result.snapshot.entities == ()
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
+
+
+def test_declarative_class_registries_are_not_unknown_evidence() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+
+MODEL_TYPES = (User,)
+REGISTRY = [Base]
+all_models = (User,)
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
