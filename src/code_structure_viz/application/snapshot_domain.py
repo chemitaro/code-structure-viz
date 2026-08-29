@@ -126,5 +126,9 @@ def snapshot_adapter_for(domain: DomainName) -> SnapshotDomainAdapter:
 
         return PythonSnapshotDomainAdapter()
     if domain == "sqlalchemy":
-        raise ValueError("SQLAlchemy snapshot adapter is not implemented")
+        from code_structure_viz.adapters.sqlalchemy.snapshot_adapter import (
+            SqlAlchemySnapshotDomainAdapter,
+        )
+
+        return SqlAlchemySnapshotDomainAdapter()
     raise ValueError("unknown snapshot domain")

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
+from code_structure_viz.core.domains import SNAPSHOT_DOMAINS, DomainName
 from code_structure_viz.core.path_safety import lexical_absolute
 from code_structure_viz.source.targets import TargetSpec, parse_target, target_sort_key
 
@@ -32,7 +33,7 @@ StdoutSelector = ManifestSelector | DomainFormatSelector
 class SnapshotCliRequest:
     repo: Path
     output_dir: Path
-    domain: Literal["python"]
+    domain: DomainName
     config_path: Path | None
     targets: tuple[TargetSpec, ...]
     upstream_depth_override: int | None
@@ -189,8 +190,9 @@ def _validate_usage_priority(argv: Sequence[str]) -> None:
         candidates.append(_UsageCandidate(0, len(argv), DiagnosticCode.USAGE_GRAMMAR))
 
     domain_values = occurrences.get("--domain", [])
-    if domain_values and domain_values[0][2] != "python":
+    if domain_values and domain_values[0][2] not in SNAPSHOT_DOMAINS:
         candidates.append(_UsageCandidate(0, domain_values[0][1], DiagnosticCode.USAGE_GRAMMAR))
+    selected_domain = domain_values[0][2] if domain_values else None
 
     format_values = occurrences.get("--format", [])
     seen_formats: set[str] = set()
@@ -231,7 +233,7 @@ def _validate_usage_priority(argv: Sequence[str]) -> None:
         else:
             resolved_formats = {item[2] for item in format_values} or {"semantic-json", "plantuml"}
             if isinstance(selector, DomainFormatSelector) and (
-                selector.domain != "python" or selector.format not in resolved_formats
+                selector.domain != selected_domain or selector.format not in resolved_formats
             ):
                 candidates.append(
                     _UsageCandidate(4, option_index, DiagnosticCode.USAGE_STDOUT_COMPATIBILITY)
@@ -276,8 +278,9 @@ def parse_cli(argv: Sequence[str]) -> SnapshotCliRequest:
 
     if not {"--repo", "--output-dir", "--domain"}.issubset(values):
         raise _usage(DiagnosticCode.USAGE_GRAMMAR)
-    if values["--domain"] != "python":
+    if values["--domain"] not in SNAPSHOT_DOMAINS:
         raise _usage(DiagnosticCode.USAGE_GRAMMAR)
+    domain = values["--domain"]
     if len(formats) != len(set(formats)) or any(
         value not in {"semantic-json", "plantuml"} for value in formats
     ):
@@ -310,7 +313,7 @@ def parse_cli(argv: Sequence[str]) -> SnapshotCliRequest:
         )
     stdout_selector = _parse_stdout(values["--stdout"]) if "--stdout" in values else None
     if isinstance(stdout_selector, DomainFormatSelector) and (
-        stdout_selector.domain != "python" or stdout_selector.format not in resolved_formats
+        stdout_selector.domain != domain or stdout_selector.format not in resolved_formats
     ):
         raise _usage(DiagnosticCode.USAGE_STDOUT_COMPATIBILITY)
 
@@ -325,7 +328,7 @@ def parse_cli(argv: Sequence[str]) -> SnapshotCliRequest:
     return SnapshotCliRequest(
         repo=resolve_path(values["--repo"]),
         output_dir=resolve_path(values["--output-dir"]),
-        domain="python",
+        domain=domain,
         config_path=resolve_path(values["--config"]) if "--config" in values else None,
         targets=normalized_targets,
         upstream_depth_override=upstream,

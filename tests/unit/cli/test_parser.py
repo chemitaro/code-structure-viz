@@ -35,13 +35,46 @@ def test_snapshot_requires_python_domain_and_resolves_default_formats() -> None:
     assert request.targets == ()
 
 
-def test_internal_domain_vocabulary_prepares_snapshot_without_public_acceptance() -> None:
+def test_closed_domain_vocabulary_dispatches_both_snapshot_adapters() -> None:
     assert SNAPSHOT_DOMAINS == ("python", "sqlalchemy")
     assert DIFF_DOMAINS == ("python",)
     assert snapshot_adapter_for("python").contract.domain == "python"
-    with pytest.raises(ValueError):
-        snapshot_adapter_for("sqlalchemy")
-    with pytest.raises(CliUsageError):
+    assert snapshot_adapter_for("sqlalchemy").contract.domain == "sqlalchemy"
+
+
+def test_snapshot_accepts_sqlalchemy_domain_and_domain_matching_stdout_selector() -> None:
+    request = parse_cli(
+        [
+            "snapshot",
+            "--repo",
+            ".",
+            "--output-dir",
+            "../output",
+            "--domain",
+            "sqlalchemy",
+            "--format",
+            "semantic-json",
+            "--stdout",
+            "sqlalchemy:semantic-json",
+        ]
+    )
+
+    assert request.domain == "sqlalchemy"
+    assert request.stdout_selector == DomainFormatSelector(
+        domain="sqlalchemy", format="semantic-json"
+    )
+
+
+@pytest.mark.parametrize(
+    ("domain", "selector"),
+    [
+        ("python", "sqlalchemy:semantic-json"),
+        ("sqlalchemy", "python:semantic-json"),
+        ("sqlalchemy", "next:semantic-json"),
+    ],
+)
+def test_snapshot_rejects_cross_domain_stdout_selector(domain: str, selector: str) -> None:
+    with pytest.raises(CliUsageError) as caught:
         parse_cli(
             [
                 "snapshot",
@@ -50,9 +83,30 @@ def test_internal_domain_vocabulary_prepares_snapshot_without_public_acceptance(
                 "--output-dir",
                 "../output",
                 "--domain",
+                domain,
+                "--stdout",
+                selector,
+            ]
+        )
+
+    assert caught.value.diagnostic.code.value == "CSV-USAGE-005"
+
+
+def test_diff_remains_python_only() -> None:
+    with pytest.raises(CliUsageError) as caught:
+        parse_diff_cli(
+            [
+                "diff",
+                "--repo",
+                ".",
+                "--output-dir",
+                "../output",
+                "--domain",
                 "sqlalchemy",
             ]
         )
+
+    assert caught.value.diagnostic.code.value == "CSV-USAGE-001"
 
 
 def test_diff_resolves_closed_endpoint_and_output_format_grammar() -> None:
@@ -356,6 +410,19 @@ def test_version_is_an_exact_meta_operation_without_diagnostics(
     captured = capsysbinary.readouterr()
     assert exit_code == 0
     assert captured.out == b"code-structure-viz 0.1.0.dev0\n"
+    assert captured.err == b""
+
+
+def test_help_names_both_snapshot_domains_without_advertising_sqlalchemy_diff(
+    capsysbinary: pytest.CaptureFixture[bytes],
+) -> None:
+    exit_code = main(["--help"])
+
+    captured = capsysbinary.readouterr()
+    assert exit_code == 0
+    assert b"--domain python|sqlalchemy" in captured.out
+    assert b"Python or SQLAlchemy working-tree structure snapshot" in captured.out
+    assert b"diff" not in captured.out
     assert captured.err == b""
 
 
