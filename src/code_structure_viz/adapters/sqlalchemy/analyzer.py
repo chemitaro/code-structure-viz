@@ -2215,7 +2215,9 @@ def _bind_attribute_module_alias_provenance(
     statement: ast.AST,
     *,
     ambiguous: bool,
+    resolution_scope: _ParsedModule | None = None,
 ) -> None:
+    scope = resolution_scope or module
     targets = _attribute_write_targets(statement)
     if not targets:
         return
@@ -2225,7 +2227,7 @@ def _bind_attribute_module_alias_provenance(
     ):
         value = statement.value
     origins = (
-        _module_object_origins_before(module, value, statement)
+        _module_object_origins_before(scope, value, statement)
         if isinstance(value, (ast.Name, ast.Attribute))
         else set()
     )
@@ -2236,6 +2238,7 @@ def _bind_attribute_module_alias_provenance(
             origins,
             statement,
             ambiguous=ambiguous,
+            resolution_scope=scope,
         )
 
 
@@ -2246,9 +2249,11 @@ def _bind_attribute_target_module_alias_provenance(
     statement: ast.AST,
     *,
     ambiguous: bool,
+    resolution_scope: _ParsedModule | None = None,
 ) -> None:
+    scope = resolution_scope or module
     if isinstance(target, ast.Attribute):
-        parents = _module_object_origins_before(module, target.value, statement)
+        parents = _module_object_origins_before(scope, target.value, statement)
         position = _node_position(statement)
         for parent in parents:
             symbol = _normalize_symbol(f"{parent}.{target.attr}")
@@ -2274,6 +2279,7 @@ def _bind_attribute_target_module_alias_provenance(
                 set(),
                 statement,
                 ambiguous=ambiguous,
+                resolution_scope=scope,
             )
     elif isinstance(target, ast.Starred):
         _bind_attribute_target_module_alias_provenance(
@@ -2282,7 +2288,49 @@ def _bind_attribute_target_module_alias_provenance(
             set(),
             statement,
             ambiguous=ambiguous,
+            resolution_scope=scope,
         )
+
+
+def _refresh_attribute_module_alias_provenance(
+    module: _ParsedModule,
+    statement: ast.AST,
+) -> bool:
+    if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+        return False
+    if isinstance(statement, ast.AnnAssign) and statement.value is None:
+        return False
+    value = statement.value
+    if not isinstance(value, (ast.Name, ast.Attribute)):
+        return False
+    origins = _module_object_origins_before(module, value, statement)
+    if not origins:
+        return False
+    changed = False
+    position = _node_position(statement)
+    for target in _attribute_write_targets(statement):
+        if not isinstance(target, ast.Attribute):
+            continue
+        for parent in _module_object_origins_before(module, target.value, statement):
+            symbol = _normalize_symbol(f"{parent}.{target.attr}")
+            definite_position = module.import_alias_definite_positions.get(symbol)
+            if definite_position is not None and definite_position > position:
+                continue
+            candidates = module.imported_module_alias_candidates.setdefault(symbol, set())
+            new_origins = origins - candidates
+            if new_origins:
+                candidates.update(new_origins)
+                changed = True
+            events = module.import_alias_events.setdefault(symbol, [])
+            additions = [
+                (position, origin)
+                for origin in sorted(origins, key=_utf8)
+                if (position, origin) not in events
+            ]
+            if additions:
+                events.extend(additions)
+                changed = True
+    return changed
 
 
 def _alias_preserving_assignment_provenance(
@@ -2441,6 +2489,28 @@ def _module_object_path_candidates(module: _ParsedModule, origin: str) -> set[st
     return candidates
 
 
+def _refresh_local_module_aliases(module: _ParsedModule) -> None:
+    aliases = {symbol: set(origins) for symbol, origins in module.repository_module_aliases.items()}
+    for symbol in module.import_alias_definite_positions:
+        aliases.pop(symbol, None)
+    for symbol, origins in _resolved_imported_module_aliases([module]).items():
+        aliases.setdefault(symbol, set()).update(origins)
+    for _ in range(max(1, len(aliases))):
+        additions = {
+            (symbol, transitive)
+            for symbol, origins in aliases.items()
+            for origin in origins
+            for transitive in aliases.get(origin, ())
+        }
+        if all(transitive in aliases.get(symbol, ()) for symbol, transitive in additions):
+            break
+        for symbol, transitive in additions:
+            aliases.setdefault(symbol, set()).add(transitive)
+    module.repository_module_aliases = {
+        symbol: frozenset(origins) for symbol, origins in aliases.items()
+    }
+
+
 def _refresh_resolved_module_alias_provenance(modules: list[_ParsedModule]) -> None:
     statements_by_module = [
         (
@@ -2460,6 +2530,7 @@ def _refresh_resolved_module_alias_provenance(modules: list[_ParsedModule]) -> N
     ]
     assignment_count = sum(
         _static_module_alias_assignment(statement) is not None
+        or bool(_attribute_write_targets(statement))
         for _, statements in statements_by_module
         for statement in statements
     )
@@ -2467,6 +2538,8 @@ def _refresh_resolved_module_alias_provenance(modules: list[_ParsedModule]) -> N
         changed = False
         for module, statements in statements_by_module:
             for statement in statements:
+                if _refresh_attribute_module_alias_provenance(module, statement):
+                    changed = True
                 assignment = _static_module_alias_assignment(statement)
                 if assignment is None:
                     continue
@@ -2538,6 +2611,12 @@ def _invalidate_attribute_target(
 ) -> None:
     scope = resolution_scope or module
     if isinstance(target, ast.Attribute):
+        module_bases = _module_object_origins_before(scope, target.value, target)
+        if module_bases:
+            module.attribute_mutations.update(
+                _normalize_symbol(f"{origin}.{target.attr}") for origin in module_bases
+            )
+            return
         resolved_base = _resolve_symbol(target.value, scope)
         resolved: str | None
         if _proven_module_origin(scope, resolved_base):
@@ -2634,12 +2713,20 @@ def _class_mutation_scope_modules(
                     if name not in global_names:
                         scope.bindings.pop(name, None)
                         scope.ambiguous_bindings.pop(name, None)
+                        _clear_import_alias_provenance(scope, name, write)
             _bind_module_statement(
                 scope,
                 write,
                 ambiguous=ambiguous,
                 binding_owner=declaration.symbol,
             )
+            _bind_attribute_module_alias_provenance(
+                scope,
+                write,
+                ambiguous=ambiguous,
+                resolution_scope=before,
+            )
+            _refresh_local_module_aliases(scope)
             bound_globals = set(_statement_binding_names(write)) & global_names
             if bound_globals:
                 _apply_class_global_write(
@@ -2808,11 +2895,9 @@ def _static_module_alias_assignment(
     statement: ast.AST,
 ) -> tuple[tuple[str, ...], ast.expr] | None:
     if isinstance(statement, ast.Assign):
-        if not statement.targets or not all(
-            isinstance(target, ast.Name) for target in statement.targets
-        ):
-            return None
         names = tuple(target.id for target in statement.targets if isinstance(target, ast.Name))
+        if not names:
+            return None
         value = statement.value
     elif isinstance(statement, (ast.AnnAssign, ast.NamedExpr)):
         if not isinstance(statement.target, ast.Name) or statement.value is None:
@@ -3549,9 +3634,26 @@ def _resolve_symbol(value: ast.expr, module: _ParsedModule) -> str | None:
             return None
         if _repository_star_candidates(module, candidate):
             return None
+        if _implicit_dynamic_package_attribute(module, candidate, value):
+            return None
         resolved = module.repository_bindings.get(candidate, candidate)
         return resolved if _binding_origin_is_usable(module, resolved) else None
     return None
+
+
+def _implicit_dynamic_package_attribute(
+    module: _ParsedModule,
+    candidate: str,
+    statement: ast.AST,
+) -> bool:
+    if candidate not in module.repository_modules or "." not in candidate:
+        return False
+    owner, _ = candidate.rsplit(".", 1)
+    if f"{owner}.__getattr__" not in module.repository_bindings:
+        return False
+    if module.repository_bindings.get(candidate) is not None:
+        return False
+    return not _module_import_precedes(module, candidate, statement)
 
 
 def _binding_origin_is_usable(module: _ParsedModule, origin: str | None) -> bool:
@@ -3589,6 +3691,9 @@ def _ambiguous_symbols(value: ast.expr, module: _ParsedModule) -> set[str]:
         base = _resolve_symbol(value.value, module)
         if base is not None:
             candidate = _normalize_symbol(f"{base}.{value.attr}")
+            if _implicit_dynamic_package_attribute(module, candidate, value):
+                result.add(candidate)
+                return result
             resolved = module.repository_bindings.get(candidate, candidate)
             if candidate in module.attribute_mutations:
                 result.add(resolved or candidate)

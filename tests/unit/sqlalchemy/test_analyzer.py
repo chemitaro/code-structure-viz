@@ -3383,6 +3383,85 @@ class User(DeclarativeBase):
     assert result.snapshot.partial_safe is True
 
 
+def test_postcanonical_attribute_target_module_alias_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/bridge.py": b"from pkg import namespace\n",
+            "src/holder.py": b"",
+            "src/models.py": b"""
+import holder
+import bridge
+
+holder.alias = bridge.namespace
+holder.alias.DeclarativeBase = object
+
+from pkg.namespace import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_class_body_attribute_target_module_alias_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/holder.py": b"",
+            "src/models.py": b"""
+import holder
+import sqlalchemy.orm as orm
+
+class Mutator:
+    holder.alias = orm
+    holder.alias.DeclarativeBase = object
+
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_mixed_chained_module_alias_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/holder.py": b"",
+            "src/models.py": b"""
+import holder
+import sqlalchemy.orm as orm
+
+holder.alias = local = orm
+local.DeclarativeBase = object
+
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_package_getattr_implicit_submodule_is_unknown() -> None:
     result = _analyze(
         {
@@ -3398,6 +3477,32 @@ def __getattr__(name):
 from pkg import namespace
 
 class User(namespace.DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_package_getattr_direct_attribute_submodule_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"""
+class Namespace:
+    DeclarativeBase = object
+
+def __getattr__(name):
+    return Namespace()
+""",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+import pkg
+
+class User(pkg.namespace.DeclarativeBase):
     __tablename__ = "users"
 """,
         }
