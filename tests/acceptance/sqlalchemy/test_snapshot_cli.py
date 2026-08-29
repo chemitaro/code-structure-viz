@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.helpers.acceptance import initialize_repository
 from tests.helpers.sqlalchemy_snapshot import (
     initialize_sqlalchemy_fixture_repository,
@@ -149,3 +151,27 @@ def test_sqlalchemy_missing_target_is_payload_unavailable_manifest_only(
     manifest = json.loads((output / "run-manifest.json").read_bytes())
     assert manifest["domains"][0]["incomplete_kind"] == "payload_unavailable"
     assert manifest["domains"][0]["artifact_paths"] == []
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_entities"),
+    [
+        ("classic_declarative", {"legacy"}),
+        ("association_table", {"groups", "membership", "users"}),
+        ("cross_module", {"groups", "membership", "users"}),
+    ],
+)
+def test_fixture_families_are_reachable_through_the_cli(
+    tmp_path: Path,
+    case: str,
+    expected_entities: set[str],
+) -> None:
+    repository = initialize_sqlalchemy_fixture_repository(tmp_path, case)
+    output = tmp_path / "output"
+
+    result = run_snapshot_cli(repository, output)
+
+    assert result.returncode == 0, result.stderr
+    semantic = json.loads((output / "sqlalchemy.snapshot.semantic.json").read_bytes())
+    assert semantic["status"] == "complete"
+    assert {item["name"] for item in semantic["entities"]} == expected_entities

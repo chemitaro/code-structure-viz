@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 
 from tests.helpers.acceptance import ROOT, initialize_repository
-from tests.helpers.sqlalchemy_snapshot import run_snapshot_cli
+from tests.helpers.sqlalchemy_snapshot import (
+    initialize_sqlalchemy_fixture_repository,
+    run_snapshot_cli,
+)
 
 
 def _relationship_repository(tmp_path: Path) -> Path:
@@ -100,3 +103,52 @@ def test_sqlalchemy_multiple_targets_are_a_normalized_union(tmp_path: Path) -> N
         {"kind": "module", "value": "models"},
         {"kind": "class", "value": "models.User"},
     ]
+
+
+def test_targeted_fixture_resolves_path_module_and_class_targets(tmp_path: Path) -> None:
+    repository = initialize_sqlalchemy_fixture_repository(tmp_path, "targeted")
+
+    path_result = run_snapshot_cli(
+        repository,
+        tmp_path / "path-output",
+        "--target",
+        "path:src/models.py",
+        "--upstream-depth",
+        "0",
+        "--downstream-depth",
+        "0",
+    )
+    module_result = run_snapshot_cli(
+        repository,
+        tmp_path / "module-output",
+        "--target",
+        "module:models",
+        "--upstream-depth",
+        "0",
+        "--downstream-depth",
+        "0",
+    )
+    class_result = run_snapshot_cli(
+        repository,
+        tmp_path / "class-output",
+        "--target",
+        "class:models.User",
+        "--upstream-depth",
+        "0",
+        "--downstream-depth",
+        "0",
+    )
+
+    assert path_result.returncode == module_result.returncode == class_result.returncode == 0
+    path_entities = json.loads(
+        (tmp_path / "path-output" / "sqlalchemy.snapshot.semantic.json").read_bytes()
+    )["entities"]
+    module_entities = json.loads(
+        (tmp_path / "module-output" / "sqlalchemy.snapshot.semantic.json").read_bytes()
+    )["entities"]
+    class_entities = json.loads(
+        (tmp_path / "class-output" / "sqlalchemy.snapshot.semantic.json").read_bytes()
+    )["entities"]
+    assert {item["name"] for item in path_entities} == {"accounts", "users"}
+    assert {item["name"] for item in module_entities} == {"accounts", "users"}
+    assert [item["name"] for item in class_entities] == ["users"]

@@ -1,0 +1,19 @@
+@startuml
+title SQLAlchemy ER snapshot
+left to right direction
+skinparam linetype ortho
+hide methods
+entity "_U0022_" as T_acf4af6f78cd92591f9b04e80c29a4cc5225e513ed95612ab7ada58b385a5aa7 {
+}
+entity "_U005F_U0022_U005F_" as T_bfe33f1f2d8ccdb17c00cf5eaab455c464c13298b737b0c0e7e65a78f284adac {
+}
+legend right
+  rule_version=code-structure-viz.sqlalchemy-redaction/v1
+  redacted_values=0
+  --> foreign_key
+  ..> relationship
+  --|> inheritance
+  -- association table
+  [redacted] literal/expression value omitted
+endlegend
+@enduml

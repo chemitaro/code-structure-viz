@@ -16,6 +16,8 @@ SQLALCHEMY_GOLDEN_CASES = (
     "relationship_semantics",
     "lossy_identity_conflict",
     "lossy_same_line_siblings",
+    "escape_collision",
+    "component_split_collision",
 )
 
 
@@ -26,14 +28,29 @@ def initialize_sqlalchemy_fixture_repository(
     fixture_root: Path = SQLALCHEMY_FIXTURE_ROOT,
 ) -> Path:
     root = fixture_root.resolve()
-    source = (root / case / "repo").resolve()
-    if not source.is_relative_to(root):
+    case_root = (root / case).resolve()
+    if not case_root.is_relative_to(root):
         raise ValueError("fixture case must stay within the fixture root")
-    if not source.is_dir():
-        raise FileNotFoundError(source)
+    source = case_root / "repo"
+    if source.is_dir():
+        source = source.resolve()
+    elif any(case_root.glob("*.py")):
+        source = case_root
+    else:
+        raise FileNotFoundError(case_root)
 
     repository = tmp_path / "repo"
-    shutil.copytree(source, repository, symlinks=True)
+    if source.name == "repo":
+        shutil.copytree(source, repository, symlinks=True)
+    else:
+        destination_root = repository / "src" / ("pkg" if case == "cross_module" else "")
+        destination_root.mkdir(parents=True, exist_ok=True)
+        for path in source.rglob("*.py"):
+            destination = destination_root / path.relative_to(source)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, destination)
+        if case == "cross_module":
+            (destination_root / "__init__.py").write_text("", encoding="utf-8")
     initialize_repository(repository)
     return repository
 
