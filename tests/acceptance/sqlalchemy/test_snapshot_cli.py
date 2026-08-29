@@ -159,6 +159,7 @@ def test_sqlalchemy_missing_target_is_payload_unavailable_manifest_only(
         ("classic_declarative", {"legacy"}),
         ("association_table", {"groups", "membership", "users"}),
         ("cross_module", {"groups", "membership", "users"}),
+        ("table_binding", {"users"}),
     ],
 )
 def test_fixture_families_are_reachable_through_the_cli(

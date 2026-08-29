@@ -40,11 +40,14 @@ def test_identity_order_fixture_keeps_ids_and_order_stable_across_declaration_or
     second_repository = initialize_sqlalchemy_fixture_repository(
         tmp_path / "second", "identity_order"
     )
-    (second_repository / "src" / "models.py").write_text(
-        "from sqlalchemy.orm import DeclarativeBase\n\n"
-        "class Base(DeclarativeBase):\n    pass\n\n"
-        'class Alpha(Base):\n    __tablename__ = "alpha"\n\n'
-        'class Zed(Base):\n    __tablename__ = "zed"\n',
+    (second_repository / "src" / "a.py").write_text(
+        "from base import Base as DeclarativeBaseAlias\n\n"
+        'class Zed(DeclarativeBaseAlias):\n    __tablename__ = "zed"\n',
+        encoding="utf-8",
+    )
+    (second_repository / "src" / "z.py").write_text(
+        "from base import Base as DeclarativeBaseAlias\n\n"
+        'class Alpha(DeclarativeBaseAlias):\n    __tablename__ = "alpha"\n',
         encoding="utf-8",
     )
 
