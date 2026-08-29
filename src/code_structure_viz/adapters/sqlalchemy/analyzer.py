@@ -10,6 +10,8 @@ from typing import Final
 from code_structure_viz.adapters.sqlalchemy.model import (
     RedactedExpression,
     RedactedExpressionCategory,
+    SqlAlchemyAssociationTableRow,
+    SqlAlchemyCardinality,
     SqlAlchemyCheckRow,
     SqlAlchemyColumnRow,
     SqlAlchemyCoverage,
@@ -22,6 +24,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyFrontierReason,
     SqlAlchemyIndexRow,
     SqlAlchemyIndexTerm,
+    SqlAlchemyInheritanceRow,
     SqlAlchemyInternalDeclarationSpan,
     SqlAlchemyMappingSource,
     SqlAlchemyMappingSourceKind,
@@ -29,6 +32,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyRedactionSummary,
     SqlAlchemyRelation,
     SqlAlchemyRelationKind,
+    SqlAlchemyRelationshipRow,
     SqlAlchemyRelationTarget,
     SqlAlchemyRow,
     SqlAlchemyRowEvidence,
@@ -37,6 +41,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemySourceLocation,
     SqlAlchemySourceRange,
     SqlAlchemyTable,
+    SqlAlchemyTargetResolution,
     SqlAlchemyTypeCategory,
     SqlAlchemyTypeDescriptor,
     SqlAlchemyUniqueRow,
@@ -45,6 +50,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     failed_source_sort_key,
     frontier_sort_key,
     redacted_value_count,
+    row_sort_key,
     safe_dotted_symbol,
     safe_structural_string,
     sqlalchemy_occurrence_diagnostic_symbol,
@@ -256,11 +262,29 @@ class SqlAlchemySnapshotAnalyzer:
             table_bindings,
             class_tables,
             collided_ids,
+            frozenset(module.module for module in modules),
+            frozenset(declaration.symbol for declaration in declarative_classes),
             state,
         )
         rows, row_diagnostics = canonicalize_row_evidence(tuple(row_evidence))
         state.diagnostics.extend(row_diagnostics)
-        relations = self._relations(rows)
+        state.unknown_declarations += len(row_diagnostics)
+        for item in row_diagnostics:
+            assert item.symbol is not None
+            state.frontier.append(
+                SqlAlchemyCoverageFrontier(
+                    SqlAlchemyFrontierDirection.FAILURE,
+                    SqlAlchemyFrontierKind.ROW,
+                    item.symbol,
+                    SqlAlchemyFrontierReason.UNSUPPORTED_PATTERN,
+                )
+            )
+        module_table_ids = frozenset(
+            surviving[origin][1].id for origin in table_bindings.values() if origin in surviving
+        )
+        association_rows = self._association_rows(rows, tables, module_table_ids)
+        rows = tuple(sorted((*rows, *association_rows), key=row_sort_key))
+        relations = self._relations(rows, tables)
         canonical_relations, relation_conflicts = canonicalize_relations(relations)
         if relation_conflicts:
             raise ValueError("SQLAlchemy relation identity conflict escaped row canonicalization")
@@ -283,7 +307,9 @@ class SqlAlchemySnapshotAnalyzer:
             evidence_files=tuple(sorted(state.evidence_files, key=_utf8)),
             selected_modules=selected_modules,
             mapped_classes=len(class_tables),
-            association_tables=0,
+            association_tables=len(
+                {row.owner_id for row in rows if isinstance(row, SqlAlchemyAssociationTableRow)}
+            ),
             selected_entities=len(tables),
             unknown_declarations=state.unknown_declarations,
             frontier=frontier,
@@ -723,10 +749,16 @@ class SqlAlchemySnapshotAnalyzer:
         table_bindings: dict[str, str],
         class_tables: dict[str, SqlAlchemyTable],
         collided_ids: set[str],
+        source_modules: frozenset[str],
+        declarative_symbols: frozenset[str],
         state: _State,
     ) -> list[SqlAlchemyRowEvidence]:
-        del class_tables, collided_ids
         tables_by_id = {table.id: table for table in tables}
+        bound_tables = {
+            symbol: surviving[origin][1]
+            for symbol, origin in table_bindings.items()
+            if origin in surviving
+        }
         rows: list[SqlAlchemyRowEvidence] = []
         for candidate, table in surviving.values():
             known_columns: set[str] = set()
@@ -788,6 +820,27 @@ class SqlAlchemySnapshotAnalyzer:
                             if isinstance(row.row, SqlAlchemyColumnRow) and row.row.name is not None
                         )
                     elif (
+                        isinstance(value, ast.Call)
+                        and _resolve_call(value, declaration.module)
+                        == "sqlalchemy.orm.relationship"
+                    ):
+                        relationship = self._relationship_row(
+                            declaration,
+                            table,
+                            name,
+                            annotation,
+                            value,
+                            class_tables,
+                            bound_tables,
+                            tables_by_id,
+                            collided_ids,
+                            source_modules,
+                            declarative_symbols,
+                            state,
+                        )
+                        if relationship is not None:
+                            rows.append(relationship)
+                    elif (
                         value is None
                         and annotation is not None
                         and _mapped_inner(annotation, declaration.module) is not None
@@ -806,12 +859,210 @@ class SqlAlchemySnapshotAnalyzer:
                         rows.append(SqlAlchemyRowEvidence(row, _span(statement)))
                         known_columns.add(name)
                         state.supported(declaration.module)
+                rows.extend(
+                    self._inheritance_rows(
+                        declaration,
+                        table,
+                        class_tables,
+                    )
+                )
             deferred_constraints.extend(candidate.class_constraints)
             for module, call in deferred_constraints:
                 rows.extend(
                     self._constraint_rows(module, table, call, known_columns, tables_by_id, state)
                 )
         return rows
+
+    def _relationship_row(
+        self,
+        declaration: _ClassDeclaration,
+        table: SqlAlchemyTable,
+        name: str,
+        annotation: ast.expr | None,
+        call: ast.Call,
+        class_tables: dict[str, SqlAlchemyTable],
+        bound_tables: dict[str, SqlAlchemyTable],
+        tables_by_id: dict[str, SqlAlchemyTable],
+        collided_ids: set[str],
+        source_modules: frozenset[str],
+        declarative_symbols: frozenset[str],
+        state: _State,
+    ) -> SqlAlchemyRowEvidence | None:
+        module = declaration.module
+        state.supported(module, call)
+        keywords = _keyword_map(call)
+        allowed_keywords = {
+            "argument",
+            "uselist",
+            "back_populates",
+            "secondary",
+            "primaryjoin",
+            "secondaryjoin",
+            "order_by",
+            "foreign_keys",
+        }
+        if (
+            keywords is None
+            or len(call.args) > 1
+            or any(isinstance(argument, ast.Starred) for argument in call.args)
+            or set(keywords) - allowed_keywords
+            or (call.args and "argument" in keywords)
+        ):
+            self._unknown_row(module, table, SqlAlchemyRowKind.RELATIONSHIP, call, state)
+            return None
+
+        annotation_target, annotation_cardinality = _relationship_annotation(annotation, module)
+        target_node = (
+            call.args[0]
+            if call.args
+            else keywords.get("argument")
+            if "argument" in keywords
+            else annotation_target
+        )
+        target = _relationship_target(
+            target_node,
+            module,
+            class_tables,
+            source_modules,
+            declarative_symbols,
+        )
+        unresolved_target = target.resolution is SqlAlchemyTargetResolution.UNKNOWN
+
+        row_unrepresentable = False
+        uselist: bool | None = None
+        if "uselist" in keywords:
+            uselist = _static_bool(keywords["uselist"])
+            if uselist is None:
+                cardinality = SqlAlchemyCardinality.UNKNOWN
+                row_unrepresentable = True
+            else:
+                cardinality = (
+                    SqlAlchemyCardinality.MANY if uselist else SqlAlchemyCardinality.SCALAR
+                )
+        else:
+            cardinality = annotation_cardinality
+            if cardinality is SqlAlchemyCardinality.UNKNOWN:
+                row_unrepresentable = True
+
+        back_populates: str | None = None
+        if "back_populates" in keywords:
+            back_populates = _static_structural_string(keywords["back_populates"])
+            if back_populates is None:
+                row_unrepresentable = True
+
+        secondary: SqlAlchemyRelationTarget | None = None
+        if "secondary" in keywords:
+            secondary = _secondary_target(
+                keywords["secondary"],
+                module,
+                bound_tables,
+                tables_by_id,
+                collided_ids,
+            )
+            if secondary.resolution is SqlAlchemyTargetResolution.UNKNOWN:
+                unresolved_target = True
+
+        relationship = SqlAlchemyRelationshipRow.create(
+            owner_id=table.id,
+            name=name,
+            source=_location(module, call),
+            target=target,
+            cardinality=cardinality,
+            uselist=uselist,
+            back_populates=back_populates,
+            secondary=secondary,
+            primaryjoin=_redacted(keywords.get("primaryjoin"), module, state),
+            secondaryjoin=_redacted(keywords.get("secondaryjoin"), module, state),
+            order_by=_redacted(keywords.get("order_by"), module, state),
+            foreign_keys=_redacted(keywords.get("foreign_keys"), module, state),
+        )
+        if row_unrepresentable:
+            self._unknown_row(module, table, SqlAlchemyRowKind.RELATIONSHIP, call, state)
+        if unresolved_target:
+            symbol = f"{declaration.symbol}.{name}"
+            if row_unrepresentable:
+                state.diagnostics.append(
+                    diagnostic(
+                        DiagnosticCode.SA_RELATION_TARGET,
+                        domain="sqlalchemy",
+                        path=module.path,
+                        symbol=symbol,
+                        line=_line(call),
+                    )
+                )
+                state.frontier.append(
+                    SqlAlchemyCoverageFrontier(
+                        SqlAlchemyFrontierDirection.FAILURE,
+                        SqlAlchemyFrontierKind.RELATION,
+                        relationship.id,
+                        SqlAlchemyFrontierReason.UNRESOLVED_REFERENCE,
+                    )
+                )
+            else:
+                state.unknown(
+                    module=module,
+                    code=DiagnosticCode.SA_RELATION_TARGET,
+                    symbol=symbol,
+                    line=_line(call),
+                    kind=SqlAlchemyFrontierKind.RELATION,
+                    reference=relationship.id,
+                )
+        return SqlAlchemyRowEvidence(relationship, _span(call))
+
+    def _inheritance_rows(
+        self,
+        declaration: _ClassDeclaration,
+        table: SqlAlchemyTable,
+        class_tables: dict[str, SqlAlchemyTable],
+    ) -> list[SqlAlchemyRowEvidence]:
+        rows: list[SqlAlchemyRowEvidence] = []
+        for base in declaration.node.bases:
+            parent = class_tables.get(_resolve_symbol(base, declaration.module) or "")
+            if parent is None or parent.id == table.id:
+                continue
+            rows.append(
+                SqlAlchemyRowEvidence(
+                    SqlAlchemyInheritanceRow.create(
+                        owner_id=table.id,
+                        source=_location(declaration.module, declaration.node),
+                        target=SqlAlchemyRelationTarget.internal_table(parent),
+                    ),
+                    _span(declaration.node),
+                )
+            )
+        return rows
+
+    def _association_rows(
+        self,
+        rows: tuple[SqlAlchemyRow, ...],
+        tables: list[SqlAlchemyTable],
+        module_table_ids: frozenset[str],
+    ) -> tuple[SqlAlchemyAssociationTableRow, ...]:
+        tables_by_id = {table.id: table for table in tables}
+        values: list[SqlAlchemyAssociationTableRow] = []
+        for row in rows:
+            if (
+                not isinstance(row, SqlAlchemyRelationshipRow)
+                or row.secondary is None
+                or row.secondary.id not in tables_by_id
+                or row.secondary.id not in module_table_ids
+                or row.secondary.id == row.owner_id
+            ):
+                continue
+            source_table = tables_by_id[row.owner_id]
+            secondary_table = tables_by_id[row.secondary.id]
+            assert row.name is not None
+            values.append(
+                SqlAlchemyAssociationTableRow.create(
+                    owner_id=secondary_table.id,
+                    name=row.name,
+                    source=row.source,
+                    source_table=SqlAlchemyRelationTarget.internal_table(source_table),
+                    relationship_target=row.target,
+                    relationship_member_id=row.id,
+                )
+            )
+        return tuple(values)
 
     def _column_rows(
         self,
@@ -1135,19 +1386,54 @@ class SqlAlchemySnapshotAnalyzer:
             onupdate=_redacted(keywords.get("onupdate"), module, state),
         )
 
-    def _relations(self, rows: tuple[SqlAlchemyRow, ...]) -> tuple[SqlAlchemyRelation, ...]:
-        return tuple(
-            SqlAlchemyRelation.create(
-                kind=SqlAlchemyRelationKind.FOREIGN_KEY,
-                source_id=row.owner_id,
-                target=row.target,
-                via_member_id=row.id,
-                role=None,
-                source=row.source,
+    def _relations(
+        self,
+        rows: tuple[SqlAlchemyRow, ...],
+        tables: list[SqlAlchemyTable],
+    ) -> tuple[SqlAlchemyRelation, ...]:
+        tables_by_id = {table.id: table for table in tables}
+        relations: list[SqlAlchemyRelation] = []
+        for row in rows:
+            kind: SqlAlchemyRelationKind
+            source_id = row.owner_id
+            target: SqlAlchemyRelationTarget
+            via_member_id: str | None
+            role: str | None
+            if isinstance(row, SqlAlchemyForeignKeyRow):
+                kind = SqlAlchemyRelationKind.FOREIGN_KEY
+                target = row.target
+                via_member_id = row.id
+                role = None
+            elif isinstance(row, SqlAlchemyRelationshipRow):
+                kind = SqlAlchemyRelationKind.RELATIONSHIP
+                target = row.target
+                via_member_id = row.id
+                role = row.name
+            elif isinstance(row, SqlAlchemyInheritanceRow):
+                kind = SqlAlchemyRelationKind.INHERITANCE
+                target = row.target
+                via_member_id = None
+                role = None
+            elif isinstance(row, SqlAlchemyAssociationTableRow):
+                kind = SqlAlchemyRelationKind.ASSOCIATION
+                assert row.source_table.id is not None
+                source_id = row.source_table.id
+                target = SqlAlchemyRelationTarget.internal_table(tables_by_id[row.owner_id])
+                via_member_id = row.id
+                role = row.name
+            else:
+                continue
+            relations.append(
+                SqlAlchemyRelation.create(
+                    kind=kind,
+                    source_id=source_id,
+                    target=target,
+                    via_member_id=via_member_id,
+                    role=role,
+                    source=row.source,
+                )
             )
-            for row in rows
-            if isinstance(row, SqlAlchemyForeignKeyRow)
-        )
+        return tuple(relations)
 
     def _unknown_table(self, declaration: _ClassDeclaration, state: _State) -> None:
         state.unknown(
@@ -1424,6 +1710,168 @@ def _mapped_inner(value: ast.expr, module: _ParsedModule) -> ast.expr | None:
     ):
         return value.slice
     return None
+
+
+def _relationship_annotation(
+    value: ast.expr | None,
+    module: _ParsedModule,
+) -> tuple[ast.expr | None, SqlAlchemyCardinality]:
+    if value is None:
+        return None, SqlAlchemyCardinality.UNKNOWN
+    inner = _mapped_inner(value, module)
+    if inner is None:
+        return None, SqlAlchemyCardinality.UNKNOWN
+    inner = _optional_annotation_inner(inner, module)
+    if inner is None:
+        return None, SqlAlchemyCardinality.UNKNOWN
+    if isinstance(inner, ast.Subscript) and _annotation_container(inner.value, module) in {
+        "builtins.list",
+        "builtins.set",
+        "builtins.tuple",
+        "typing.List",
+        "typing.Set",
+        "typing.Tuple",
+    }:
+        if (
+            isinstance(inner.slice, ast.Tuple)
+            or _relationship_reference(inner.slice, module) is None
+        ):
+            return None, SqlAlchemyCardinality.UNKNOWN
+        return inner.slice, SqlAlchemyCardinality.MANY
+    if _relationship_reference(inner, module) is None:
+        return None, SqlAlchemyCardinality.UNKNOWN
+    return inner, SqlAlchemyCardinality.SCALAR
+
+
+def _optional_annotation_inner(
+    value: ast.expr,
+    module: _ParsedModule,
+) -> ast.expr | None:
+    if (
+        isinstance(value, ast.Subscript)
+        and _resolve_symbol(value.value, module) == "typing.Optional"
+        and not isinstance(value.slice, ast.Tuple)
+    ):
+        return value.slice
+    if isinstance(value, ast.BinOp) and isinstance(value.op, ast.BitOr):
+        if _is_none(value.left):
+            return value.right
+        if _is_none(value.right):
+            return value.left
+        return None
+    return value
+
+
+def _is_none(value: ast.expr) -> bool:
+    return isinstance(value, ast.Constant) and value.value is None
+
+
+def _annotation_container(value: ast.expr, module: _ParsedModule) -> str | None:
+    if isinstance(value, ast.Name) and value.id in {"list", "set", "tuple"}:
+        return f"builtins.{value.id}"
+    return _resolve_symbol(value, module)
+
+
+def _relationship_reference(
+    value: ast.expr,
+    module: _ParsedModule,
+) -> tuple[str, bool] | None:
+    candidate: str | None
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        candidate = value.value
+        from_static_string = True
+    else:
+        candidate = _resolve_symbol(value, module)
+        from_static_string = False
+    if candidate is None:
+        return None
+    try:
+        return safe_dotted_symbol(candidate, field="relationship target"), from_static_string
+    except ValueError:
+        return None
+
+
+def _relationship_target(
+    value: ast.expr | None,
+    module: _ParsedModule,
+    class_tables: dict[str, SqlAlchemyTable],
+    source_modules: frozenset[str],
+    declarative_symbols: frozenset[str],
+) -> SqlAlchemyRelationTarget:
+    if value is None:
+        return SqlAlchemyRelationTarget.unknown()
+    reference = _relationship_reference(value, module)
+    if reference is None:
+        return SqlAlchemyRelationTarget.unknown()
+    symbol, from_static_string = reference
+    direct = class_tables.get(symbol)
+    if direct is not None:
+        return SqlAlchemyRelationTarget.internal_table(direct)
+    if "." not in symbol:
+        same_module = class_tables.get(f"{module.module}.{symbol}")
+        if same_module is not None:
+            return SqlAlchemyRelationTarget.internal_table(same_module)
+        matches = [
+            table
+            for class_symbol, table in class_tables.items()
+            if class_symbol.rsplit(".", 1)[-1] == symbol
+        ]
+        if len(matches) == 1:
+            return SqlAlchemyRelationTarget.internal_table(matches[0])
+        return SqlAlchemyRelationTarget.unknown()
+    if symbol in declarative_symbols:
+        return SqlAlchemyRelationTarget.unknown()
+    if from_static_string:
+        return SqlAlchemyRelationTarget.external_mapped_class(symbol)
+    if _symbol_is_in_source(symbol, source_modules):
+        return SqlAlchemyRelationTarget.unknown()
+    return SqlAlchemyRelationTarget.external_mapped_class(symbol)
+
+
+def _symbol_is_in_source(symbol: str, source_modules: frozenset[str]) -> bool:
+    return symbol.rsplit(".", 1)[0] in source_modules
+
+
+def _secondary_target(
+    value: ast.expr,
+    module: _ParsedModule,
+    bound_tables: dict[str, SqlAlchemyTable],
+    tables_by_id: dict[str, SqlAlchemyTable],
+    collided_ids: set[str],
+) -> SqlAlchemyRelationTarget:
+    symbol = _resolve_symbol(value, module)
+    if symbol is not None:
+        table = bound_tables.get(symbol)
+        return (
+            SqlAlchemyRelationTarget.internal_table(table)
+            if table is not None
+            else SqlAlchemyRelationTarget.unknown()
+        )
+    if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+        return SqlAlchemyRelationTarget.unknown()
+    parts = value.value.split(".")
+    if len(parts) not in {1, 2}:
+        return SqlAlchemyRelationTarget.unknown()
+    try:
+        normalized = tuple(
+            safe_structural_string(part, field="secondary table identity") for part in parts
+        )
+    except ValueError:
+        return SqlAlchemyRelationTarget.unknown()
+    schema_name = normalized[0] if len(normalized) == 2 else None
+    table_name = normalized[-1]
+    table_id = sqlalchemy_table_id(schema_name, table_name)
+    if table_id in collided_ids:
+        return SqlAlchemyRelationTarget.unknown()
+    table = tables_by_id.get(table_id)
+    return (
+        SqlAlchemyRelationTarget.internal_table(table)
+        if table is not None
+        else SqlAlchemyRelationTarget.external_table(
+            schema_name=schema_name,
+            table_name=table_name,
+        )
+    )
 
 
 def _type_descriptor(

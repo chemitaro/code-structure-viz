@@ -7,9 +7,15 @@ from code_structure_viz.adapters.sqlalchemy.analyzer import (
     SqlAlchemySnapshotAnalyzer,
 )
 from code_structure_viz.adapters.sqlalchemy.model import (
+    SqlAlchemyAssociationTableRow,
+    SqlAlchemyCardinality,
     SqlAlchemyColumnRow,
+    SqlAlchemyInheritanceRow,
     SqlAlchemyMappingKind,
+    SqlAlchemyRelationKind,
+    SqlAlchemyRelationshipRow,
     SqlAlchemyRowKind,
+    SqlAlchemyTargetResolution,
     SqlAlchemyTypeCategory,
 )
 from code_structure_viz.core.config import PythonConfig
@@ -207,3 +213,336 @@ class Item(Base):
 
     assert first == second
     assert [table.name for table in first.snapshot.entities] == ["items"]
+
+
+def test_relationship_descriptors_and_relations_are_extracted_statically() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+class Base(DeclarativeBase): pass
+
+class Parent(Base):
+    __tablename__ = "parents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    children: Mapped[list["Child"]] = relationship(
+        "Child",
+        back_populates="parent",
+        primaryjoin=id == "never-publish-join",
+        secondaryjoin=object(),
+        order_by=id,
+        foreign_keys=[id],
+    )
+    audit: Mapped[list["external.models.Audit"]] = relationship(
+        "external.models.Audit",
+        uselist=True,
+    )
+
+class Child(Base):
+    __tablename__ = "children"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    parent: Mapped[Parent] = relationship(
+        argument=Parent,
+        uselist=False,
+        back_populates="children",
+    )
+"""
+        }
+    )
+
+    relationships = {
+        row.name: row
+        for row in result.snapshot.members
+        if isinstance(row, SqlAlchemyRelationshipRow)
+    }
+    assert set(relationships) == {"audit", "children", "parent"}
+    assert relationships["children"].target.resolution is SqlAlchemyTargetResolution.INTERNAL
+    assert relationships["children"].target.table_name == "children"
+    assert relationships["children"].cardinality is SqlAlchemyCardinality.MANY
+    assert relationships["children"].uselist is None
+    assert relationships["children"].back_populates == "parent"
+    assert relationships["children"].primaryjoin.present is True
+    assert relationships["children"].secondaryjoin.present is True
+    assert relationships["children"].order_by.present is True
+    assert relationships["children"].foreign_keys.present is True
+    assert relationships["parent"].cardinality is SqlAlchemyCardinality.SCALAR
+    assert relationships["parent"].uselist is False
+    assert relationships["audit"].target.resolution is SqlAlchemyTargetResolution.EXTERNAL
+    assert relationships["audit"].target.symbol == "external.models.Audit"
+    assert [
+        relation.kind
+        for relation in result.snapshot.relations
+        if relation.kind is SqlAlchemyRelationKind.RELATIONSHIP
+    ] == [SqlAlchemyRelationKind.RELATIONSHIP] * 3
+    assert result.snapshot.coverage.redaction.redacted_values == 4
+    assert result.snapshot.partial_safe is False
+    assert "never-publish-join" not in repr(result.snapshot)
+
+
+def test_relationship_unknown_values_are_partial_and_closed_keywords_are_rejected() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+
+class Base(DeclarativeBase): pass
+
+class User(Base):
+    __tablename__ = "users"
+    missing: Mapped["Missing"] = relationship("Missing")
+    dynamic: Mapped["external.Target"] = relationship(
+        "external.Target",
+        uselist=USING_LIST,
+        back_populates=BACK_NAME,
+        secondary=secondary_factory(),
+    )
+    rejected_backref: Mapped["external.Target"] = relationship(
+        "external.Target", backref="users"
+    )
+    rejected_cascade: Mapped["external.Target"] = relationship(
+        "external.Target", cascade="all"
+    )
+"""
+        }
+    )
+
+    relationships = {
+        row.name: row
+        for row in result.snapshot.members
+        if isinstance(row, SqlAlchemyRelationshipRow)
+    }
+    assert set(relationships) == {"dynamic", "missing"}
+    assert relationships["missing"].target.resolution is SqlAlchemyTargetResolution.UNKNOWN
+    assert relationships["dynamic"].cardinality is SqlAlchemyCardinality.UNKNOWN
+    assert relationships["dynamic"].back_populates is None
+    assert relationships["dynamic"].secondary is not None
+    assert relationships["dynamic"].secondary.resolution is SqlAlchemyTargetResolution.UNKNOWN
+    codes = [item.code.value for item in result.snapshot.diagnostics]
+    assert codes.count("CSV-SA-009") == 3
+    assert codes.count("CSV-SA-010") == 2
+    assert result.snapshot.coverage.unknown_declarations == 4
+    assert result.snapshot.partial_safe is True
+
+
+def test_relationship_annotation_fallback_supports_optional_union_and_collection() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from typing import List, Optional
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+class Base(DeclarativeBase): pass
+class Child(Base): __tablename__ = "children"
+class Parent(Base):
+    __tablename__ = "parents"
+    optional_child: Mapped[Optional[Child]] = relationship()
+    union_child: Mapped[Child | None] = relationship()
+    children: Mapped[List["Child"]] = relationship()
+"""
+        }
+    )
+
+    relationships = {
+        row.name: row
+        for row in result.snapshot.members
+        if isinstance(row, SqlAlchemyRelationshipRow)
+    }
+    assert relationships["optional_child"].cardinality is SqlAlchemyCardinality.SCALAR
+    assert relationships["union_child"].cardinality is SqlAlchemyCardinality.SCALAR
+    assert relationships["children"].cardinality is SqlAlchemyCardinality.MANY
+    assert all(row.target.table_name == "children" for row in relationships.values())
+    assert result.snapshot.partial_safe is False
+
+
+def test_inheritance_and_internal_secondary_create_rows_and_relations() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer, Table
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+
+membership = Table("membership", object(), Column("id", Integer))
+
+class Base(DeclarativeBase): pass
+
+class User(Base):
+    __tablename__ = "users"
+    groups: Mapped[list["Group"]] = relationship("Group", secondary=membership)
+
+class Group(Base):
+    __tablename__ = "groups"
+
+class Admin(User):
+    __tablename__ = "admins"
+
+class SameTableUser(User):
+    pass
+"""
+        }
+    )
+
+    inheritance = [
+        row for row in result.snapshot.members if isinstance(row, SqlAlchemyInheritanceRow)
+    ]
+    associations = [
+        row for row in result.snapshot.members if isinstance(row, SqlAlchemyAssociationTableRow)
+    ]
+    assert len(inheritance) == 1
+    assert inheritance[0].target.table_name == "users"
+    assert len(associations) == 1
+    assert associations[0].owner_id == next(
+        table.id for table in result.snapshot.entities if table.name == "membership"
+    )
+    assert associations[0].source_table.table_name == "users"
+    assert associations[0].relationship_target.table_name == "groups"
+    assert result.snapshot.coverage.association_tables == 1
+    assert {relation.kind for relation in result.snapshot.relations} == {
+        SqlAlchemyRelationKind.RELATIONSHIP,
+        SqlAlchemyRelationKind.INHERITANCE,
+        SqlAlchemyRelationKind.ASSOCIATION,
+    }
+
+
+def test_cross_module_relationship_and_secondary_aliases_resolve_to_internal_tables() -> None:
+    result = _analyze(
+        {
+            "src/pkg/base.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+class Base(DeclarativeBase): pass
+""",
+            "src/pkg/tables.py": b"""
+from sqlalchemy import Table
+membership = Table("membership", object())
+""",
+            "src/pkg/groups.py": b"""
+from .base import Base
+class Group(Base): __tablename__ = "groups"
+""",
+            "src/pkg/users.py": b"""
+from .base import Base
+from .groups import Group as Team
+from .tables import membership as membership_table
+from sqlalchemy.orm import Mapped, relationship
+class User(Base):
+    __tablename__ = "users"
+    teams: Mapped[list[Team]] = relationship(Team, secondary=membership_table)
+""",
+        }
+    )
+
+    relationship = next(
+        row for row in result.snapshot.members if isinstance(row, SqlAlchemyRelationshipRow)
+    )
+    association = next(
+        row for row in result.snapshot.members if isinstance(row, SqlAlchemyAssociationTableRow)
+    )
+    assert relationship.target.resolution is SqlAlchemyTargetResolution.INTERNAL
+    assert relationship.target.table_name == "groups"
+    assert relationship.secondary is not None
+    assert relationship.secondary.table_name == "membership"
+    assert association.source_table.table_name == "users"
+    assert result.snapshot.partial_safe is False
+
+
+def test_static_secondary_to_declarative_table_does_not_synthesize_association_marker() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+class Base(DeclarativeBase): pass
+class Link(Base): __tablename__ = "links"
+class User(Base):
+    __tablename__ = "users"
+    links: Mapped[list[Link]] = relationship(Link, secondary="links")
+"""
+        }
+    )
+
+    relationship = next(
+        row for row in result.snapshot.members if isinstance(row, SqlAlchemyRelationshipRow)
+    )
+    assert relationship.secondary is not None
+    assert relationship.secondary.resolution is SqlAlchemyTargetResolution.INTERNAL
+    assert not any(
+        isinstance(row, SqlAlchemyAssociationTableRow) for row in result.snapshot.members
+    )
+    assert result.snapshot.coverage.association_tables == 0
+
+
+def test_lossy_constraint_and_index_occurrences_are_all_excluded() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import CheckConstraint, Index
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase): pass
+
+class Item(Base):
+    __tablename__ = "items"
+    __table_args__ = (
+        CheckConstraint("private-a"),
+        CheckConstraint("private-b"),
+        Index(None, lower(first_secret)),
+        Index(None, upper(second_secret)),
+    )
+    id: Mapped[int] = mapped_column()
+"""
+        }
+    )
+
+    assert [row.kind for row in result.snapshot.members] == [SqlAlchemyRowKind.COLUMN]
+    occurrences = [item for item in result.snapshot.diagnostics if item.code.value == "CSV-SA-009"]
+    assert len(occurrences) == 4
+    assert len({item.symbol for item in occurrences}) == 4
+    assert result.snapshot.coverage.unknown_declarations == 4
+    assert result.snapshot.partial_safe is True
+    assert "private-a" not in repr(result.snapshot)
+    assert "private-b" not in repr(result.snapshot)
+
+
+def test_same_line_lossy_siblings_keep_distinct_occurrence_symbols() -> None:
+    result = _analyze(
+        {
+            "src/models.py": (
+                b"""
+from sqlalchemy import CheckConstraint, Index
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class Item(Base):
+    __tablename__ = "items"
+"""
+                b'    __table_args__ = (CheckConstraint("a"), CheckConstraint("b"), '
+                b"Index(None, lower(a)), Index(None, upper(b)))\n"
+                b"""
+    id: Mapped[int] = mapped_column()
+"""
+            )
+        }
+    )
+
+    occurrences = [item for item in result.snapshot.diagnostics if item.code.value == "CSV-SA-009"]
+    assert len(occurrences) == 4
+    assert {item.line for item in occurrences} == {7}
+    assert len({item.symbol for item in occurrences}) == 4
+    assert [row.kind for row in result.snapshot.members] == [SqlAlchemyRowKind.COLUMN]
+
+
+def test_ordinary_non_lossy_duplicate_is_canonicalized_without_partial_status() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("email"),)
+    email: Mapped[str] = mapped_column(unique=True)
+"""
+        }
+    )
+
+    assert [row.kind for row in result.snapshot.members].count(SqlAlchemyRowKind.UNIQUE) == 1
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
