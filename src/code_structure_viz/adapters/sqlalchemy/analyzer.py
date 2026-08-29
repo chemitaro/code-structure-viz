@@ -104,6 +104,7 @@ class _ParsedModule:
     repository_ambiguous_bindings: dict[str, frozenset[str]] = field(default_factory=dict)
     repository_modules: frozenset[str] = frozenset()
     repository_module_origins: frozenset[str] = frozenset()
+    repository_module_aliases: dict[str, frozenset[str]] = field(default_factory=dict)
     repository_star_imports: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
@@ -534,6 +535,7 @@ class SqlAlchemySnapshotAnalyzer:
             for module in modules
         }
         _resolve_repository_bindings(modules)
+        _refresh_resolved_module_alias_provenance(modules)
         for module in modules:
             for statement in module.tree.body:
                 for candidate in (statement, *_nested_module_scope_writes(statement)):
@@ -2303,23 +2305,84 @@ def _attribute_root_and_suffix(value: ast.expr) -> tuple[str, tuple[str, ...]] |
     return current.id, tuple(reversed(suffix))
 
 
-def _module_origin_precedes(
+def _module_object_origins_before(
     module: _ParsedModule,
     value: ast.expr,
-    origin: str,
     statement: ast.AST,
-) -> bool:
+) -> set[str]:
     root = _attribute_root_and_suffix(value)
     if root is None:
-        return False
+        return set()
     name, suffix = root
+    result: set[str] = set()
     for candidate in _module_alias_origins_before(module, name, statement):
         if suffix:
             candidate = _normalize_symbol(f"{candidate}.{'.'.join(suffix)}")
         resolved = module.repository_bindings.get(candidate, candidate)
-        if resolved == origin or origin in module.repository_ambiguous_bindings.get(candidate, ()):
-            return True
-    return False
+        possible = {
+            origin
+            for origin in module.repository_ambiguous_bindings.get(candidate, ())
+            if origin in module.repository_module_aliases.get(candidate, ())
+        }
+        if resolved is not None:
+            possible.add(resolved)
+        result.update(
+            origin
+            for origin in possible
+            if _external_sqlalchemy_module_origin(module, origin)
+            or origin in module.repository_module_origins
+        )
+    return result
+
+
+def _refresh_resolved_module_alias_provenance(modules: list[_ParsedModule]) -> None:
+    for module in modules:
+        statements = sorted(
+            (
+                candidate
+                for statement in module.tree.body
+                for candidate in (statement, *_nested_module_scope_writes(statement))
+            ),
+            key=_node_position,
+        )
+        for statement in statements:
+            assignment = _static_module_alias_assignment(statement)
+            if assignment is not None:
+                name, value = assignment
+                origins = _module_object_origins_before(module, value, statement)
+                if origins:
+                    symbol = f"{module.module}.{name}"
+                    position = _node_position(statement)
+                    events = module.import_alias_events.setdefault(symbol, [])
+                    events.extend(
+                        (position, origin)
+                        for origin in sorted(origins, key=_utf8)
+                        if (position, origin) not in events
+                    )
+                    definite_position = module.import_alias_definite_positions.get(symbol)
+                    if definite_position is None or definite_position <= position:
+                        module.imported_module_alias_candidates.setdefault(symbol, set()).update(
+                            origins
+                        )
+            for target in _attribute_write_targets(statement):
+                _record_resolved_attribute_mutation(module, target, statement)
+
+
+def _record_resolved_attribute_mutation(
+    module: _ParsedModule,
+    target: ast.expr,
+    statement: ast.AST,
+) -> None:
+    if isinstance(target, ast.Attribute):
+        module.attribute_mutations.update(
+            _normalize_symbol(f"{origin}.{target.attr}")
+            for origin in _module_object_origins_before(module, target.value, statement)
+        )
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            _record_resolved_attribute_mutation(module, element, statement)
+    elif isinstance(target, ast.Starred):
+        _record_resolved_attribute_mutation(module, target.value, statement)
 
 
 def _invalidate_attribute_target(
@@ -2526,6 +2589,17 @@ def _proven_sqlalchemy_module_assignment(
     module: _ParsedModule,
     statement: ast.AST,
 ) -> tuple[str, str] | None:
+    assignment = _static_module_alias_assignment(statement)
+    if assignment is None:
+        return None
+    name, value = assignment
+    origins = _module_object_origins_before(module, value, statement)
+    if len(origins) != 1:
+        return None
+    return name, next(iter(origins))
+
+
+def _static_module_alias_assignment(statement: ast.AST) -> tuple[str, ast.expr] | None:
     if isinstance(statement, ast.Assign):
         if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
             return None
@@ -2540,46 +2614,21 @@ def _proven_sqlalchemy_module_assignment(
         return None
     if not isinstance(value, (ast.Name, ast.Attribute)):
         return None
-    origin = _resolve_symbol(value, module)
-    if origin is None:
-        return None
-    if not _proven_module_origin(module, origin):
-        return None
-    if not _module_origin_precedes(module, value, origin, statement):
-        return None
-    return target.id, origin
+    return target.id, value
 
 
 def _possible_sqlalchemy_module_assignment(
     module: _ParsedModule,
     statement: ast.AST,
 ) -> tuple[str, set[str]] | None:
-    if isinstance(statement, ast.Assign):
-        if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
-            return None
-        target = statement.targets[0]
-        value = statement.value
-    elif isinstance(statement, (ast.AnnAssign, ast.NamedExpr)):
-        if not isinstance(statement.target, ast.Name) or statement.value is None:
-            return None
-        target = statement.target
-        value = statement.value
-    else:
+    assignment = _static_module_alias_assignment(statement)
+    if assignment is None:
         return None
-    if not isinstance(value, (ast.Name, ast.Attribute)):
-        return None
-    origins = {
-        origin
-        for origin in _ambiguous_symbols(value, module)
-        if (
-            _external_sqlalchemy_module_origin(module, origin)
-            or origin in module.repository_module_origins
-        )
-        and _module_origin_precedes(module, value, origin, statement)
-    }
+    name, value = assignment
+    origins = _module_object_origins_before(module, value, statement)
     if not origins:
         return None
-    return target.id, origins
+    return name, origins
 
 
 def _definite_class_binding_names(value: ast.AST) -> tuple[str, ...]:
@@ -2658,6 +2707,26 @@ def _repository_module_object_origins(modules: list[_ParsedModule]) -> set[str]:
 
 def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set[str]:
     mutations = {symbol for module in modules for symbol in module.attribute_mutations}
+    aliases = _resolved_imported_module_aliases(modules)
+
+    expanded = set(mutations)
+    for _ in range(len(aliases)):
+        mutation_additions = {
+            _normalize_symbol(f"{origin}{mutation[len(alias) :]}")
+            for mutation in expanded
+            for alias, origins in aliases.items()
+            if mutation.startswith(f"{alias}.")
+            for origin in origins
+        }
+        if mutation_additions.issubset(expanded):
+            break
+        expanded.update(mutation_additions)
+    return expanded
+
+
+def _resolved_imported_module_aliases(
+    modules: list[_ParsedModule],
+) -> dict[str, set[str]]:
     aliases: dict[str, set[str]] = {}
     candidates: dict[str, set[str]] = {}
     for module in modules:
@@ -2690,20 +2759,20 @@ def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set
             break
         for symbol, origin in alias_additions:
             aliases.setdefault(symbol, set()).add(origin)
-
-    expanded = set(mutations)
     for _ in range(len(aliases)):
-        mutation_additions = {
-            _normalize_symbol(f"{origin}{mutation[len(alias) :]}")
-            for mutation in expanded
-            for alias, origins in aliases.items()
-            if mutation.startswith(f"{alias}.")
+        transitive_additions = {
+            (symbol, transitive)
+            for symbol, origins in aliases.items()
             for origin in origins
+            for transitive in aliases.get(origin, ())
         }
-        if mutation_additions.issubset(expanded):
+        if all(
+            transitive in aliases.get(symbol, ()) for symbol, transitive in transitive_additions
+        ):
             break
-        expanded.update(mutation_additions)
-    return expanded
+        for symbol, transitive in transitive_additions:
+            aliases.setdefault(symbol, set()).add(transitive)
+    return aliases
 
 
 def _nested_module_scope_writes(value: ast.AST) -> tuple[ast.AST, ...]:
@@ -2805,6 +2874,7 @@ def _copy_parsed_module(module: _ParsedModule) -> _ParsedModule:
         repository_ambiguous_bindings=module.repository_ambiguous_bindings,
         repository_modules=module.repository_modules,
         repository_module_origins=module.repository_module_origins,
+        repository_module_aliases=module.repository_module_aliases,
         repository_star_imports=module.repository_star_imports,
     )
 
@@ -2979,6 +3049,10 @@ def _external_sqlalchemy_module_origin(
 def _resolve_repository_bindings(modules: list[_ParsedModule]) -> None:
     by_name = {module.module: module for module in modules}
     repository_modules = frozenset(by_name)
+    repository_module_aliases = {
+        symbol: frozenset(origins)
+        for symbol, origins in _resolved_imported_module_aliases(modules).items()
+    }
     repository_star_imports = {
         module.module: frozenset(module.star_import_origins)
         for module in modules
@@ -3033,6 +3107,7 @@ def _resolve_repository_bindings(modules: list[_ParsedModule]) -> None:
         module.repository_bindings = canonical_bindings
         module.repository_ambiguous_bindings = canonical_ambiguous
         module.repository_modules = repository_modules
+        module.repository_module_aliases = repository_module_aliases
         module.repository_star_imports = repository_star_imports
         module.attribute_mutations.update(attribute_mutations)
 
