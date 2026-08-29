@@ -1872,6 +1872,14 @@ def test_arbitrary_call_result_base_is_not_sqlalchemy_evidence() -> None:
 def make_base():
     return object
 
+candidate = (make_base(),)[0]
+
+def helper():
+    return (make_base(),)[0]
+
+class Plain:
+    candidate = (make_base(),)[0]
+
 class Candidate(make_base()):
     pass
 """
@@ -1883,3 +1891,64 @@ class Candidate(make_base()):
     assert result.snapshot.diagnostics == ()
     assert result.snapshot.coverage.unknown_declarations == 0
     assert result.snapshot.partial_safe is False
+
+
+def test_conditional_expression_base_with_declarative_evidence_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase if USE_SQLA else object):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_composite_declarative_base_factory_assignment_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import declarative_base
+
+Base = (declarative_base(),)[0]
+
+class User(Base):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_composite_assignment_from_proven_base_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Root(DeclarativeBase):
+    pass
+
+Base = (Root,)[0]
+
+class User(Base):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
