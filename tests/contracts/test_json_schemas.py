@@ -1,12 +1,19 @@
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 from referencing import Registry, Resource
 
+from code_structure_viz.adapters.sqlalchemy.model import (
+    SqlAlchemyCoverage,
+    SqlAlchemyRedactionSummary,
+    SqlAlchemySnapshot,
+)
+from code_structure_viz.adapters.sqlalchemy.semantic_json import render_semantic_snapshot
+from code_structure_viz.source.source_view import SourceView
 from tests.helpers.acceptance import (
     initialize_fixture_repository,
     initialize_repository,
@@ -191,6 +198,312 @@ def test_semantic_schema_accepts_zero_class_vector_and_rejects_shape_mutations()
         validator.validate({**value, "status": "incomplete"})
     with pytest.raises(ValidationError):
         validator.validate({**value, "entities": None})
+
+
+def _sqlalchemy_semantic_vector() -> dict[str, Any]:
+    table_id = f"sqlalchemy:table:{'1' * 64}"
+    target_table_id = f"sqlalchemy:table:{'2' * 64}"
+    row_ids = [f"sqlalchemy:row:{index:064x}" for index in range(1, 10)]
+    source = {"path": "src/models.py", "range": {"start_line": 1, "end_line": 1}}
+    absent = {"present": False, "category": "absent", "redacted": False}
+    present = {"present": True, "category": "literal", "redacted": True}
+    internal_target = {
+        "resolution": "internal",
+        "kind": "table",
+        "id": target_table_id,
+        "schema_name": None,
+        "table_name": "target",
+        "symbol": None,
+        "display_name": "<default>.target",
+    }
+    source_target = {
+        "resolution": "internal",
+        "kind": "table",
+        "id": table_id,
+        "schema_name": None,
+        "table_name": "source",
+        "symbol": None,
+        "display_name": "<default>.source",
+    }
+    common = {"owner_id": table_id, "name": None, "source": source}
+    members = [
+        {
+            "id": row_ids[0],
+            **common,
+            "kind": "column",
+            "name": "id",
+            "type": {
+                "category": "integer",
+                "name": "sqlalchemy.Integer",
+                "parameters": absent,
+            },
+            "nullable": False,
+            "primary_key": True,
+            "unique": False,
+            "index": False,
+            "default": present,
+            "server_default": absent,
+            "onupdate": absent,
+            "server_onupdate": absent,
+            "computed": absent,
+            "identity": absent,
+        },
+        {"id": row_ids[1], **common, "kind": "primary_key", "columns": ["id"]},
+        {"id": row_ids[2], **common, "kind": "unique", "columns": ["email"]},
+        {"id": row_ids[3], **common, "kind": "check", "expression": present},
+        {
+            "id": row_ids[4],
+            **common,
+            "kind": "index",
+            "unique": False,
+            "terms": [
+                {"kind": "column", "column_name": "email", "expression": absent},
+                {"kind": "expression", "column_name": None, "expression": present},
+            ],
+        },
+        {
+            "id": row_ids[5],
+            **common,
+            "kind": "foreign_key",
+            "local_columns": ["target_id"],
+            "target": internal_target,
+            "target_columns": ["id"],
+            "ondelete": absent,
+            "onupdate": absent,
+        },
+        {
+            "id": row_ids[6],
+            **common,
+            "kind": "relationship",
+            "name": "target",
+            "target": internal_target,
+            "cardinality": "scalar",
+            "uselist": False,
+            "back_populates": None,
+            "secondary": None,
+            "primaryjoin": present,
+            "secondaryjoin": absent,
+            "order_by": absent,
+            "foreign_keys": absent,
+        },
+        {
+            "id": row_ids[7],
+            **common,
+            "kind": "inheritance",
+            "target": internal_target,
+        },
+        {
+            "id": row_ids[8],
+            **common,
+            "owner_id": target_table_id,
+            "kind": "association_table",
+            "name": "target",
+            "source_table": source_target,
+            "relationship_target": internal_target,
+            "relationship_member_id": row_ids[6],
+        },
+    ]
+    mapping_source = {
+        "kind": "declarative_class",
+        "module": "models",
+        "symbol": "models.Source",
+        "source": source,
+    }
+    return {
+        "type": "semantic_snapshot",
+        "schema": "code-structure-viz.semantic/v1",
+        "domain": "sqlalchemy",
+        "document_kind": "snapshot",
+        "status": "incomplete",
+        "incomplete_kind": "partial_safe",
+        "source": {
+            "schema": "code-structure-viz.source-view/v1",
+            "kind": "working-tree",
+            "head_commit": None,
+            "fingerprint": "b" * 64,
+            "file_count": 1,
+        },
+        "request": {
+            "targets": [{"kind": "class", "value": "models.Source"}],
+            "upstream_depth": 1,
+            "downstream_depth": 2,
+        },
+        "coverage": {
+            "candidate_files": 1,
+            "parsed_files": 1,
+            "failed_files": [],
+            "evidence_files": ["src/models.py"],
+            "selected_modules": ["models"],
+            "mapped_classes": 1,
+            "association_tables": 1,
+            "selected_entities": 2,
+            "unknown_declarations": 1,
+            "frontier": [
+                {
+                    "direction": "failure",
+                    "kind": "row",
+                    "reference": f"sqlalchemy:occurrence:{'a' * 64}",
+                    "reason": "unsupported_pattern",
+                }
+            ],
+            "redaction": {
+                "rule_version": "code-structure-viz.sqlalchemy-redaction/v1",
+                "redacted_values": 4,
+            },
+        },
+        "entities": [
+            {
+                "id": table_id,
+                "kind": "table",
+                "schema_name": None,
+                "name": "source",
+                "display_name": "<default>.source",
+                "mapping_kind": "declarative_class",
+                "mapping_sources": [mapping_source],
+            },
+            {
+                "id": target_table_id,
+                "kind": "table",
+                "schema_name": None,
+                "name": "target",
+                "display_name": "<default>.target",
+                "mapping_kind": "table",
+                "mapping_sources": [
+                    {
+                        **mapping_source,
+                        "kind": "table",
+                        "symbol": "models.target_table",
+                    }
+                ],
+            },
+        ],
+        "members": members,
+        "relations": [
+            {
+                "id": f"sqlalchemy:relation:{'3' * 64}",
+                "kind": "relationship",
+                "source_id": table_id,
+                "target": internal_target,
+                "via_member_id": row_ids[6],
+                "role": "target",
+                "source": source,
+            }
+        ],
+        "diagnostics": [
+            {
+                "type": "diagnostic",
+                "schema": "code-structure-viz.diagnostic/v1",
+                "code": "CSV-SA-009",
+                "severity": "warning",
+                "domain": "sqlalchemy",
+                "path": "src/models.py",
+                "symbol": f"sqlalchemy:occurrence:{'a' * 64}",
+                "line": 1,
+                "recoverable": True,
+                "message": "SQLAlchemy row declaration could not be represented safely.",
+            }
+        ],
+    }
+
+
+def test_semantic_schema_accepts_closed_sqlalchemy_snapshot_variants() -> None:
+    validator = _validator("semantic-v1.schema.json")
+    partial = _sqlalchemy_semantic_vector()
+    validator.validate(partial)
+
+    complete = deepcopy(partial)
+    complete["status"] = "complete"
+    complete.pop("incomplete_kind")
+    complete["diagnostics"] = []
+    validator.validate(complete)
+
+
+def test_semantic_schema_accepts_actual_sqlalchemy_renderer_bytes() -> None:
+    coverage = SqlAlchemyCoverage(
+        candidate_files=0,
+        parsed_files=0,
+        failed_files=(),
+        evidence_files=(),
+        selected_modules=(),
+        mapped_classes=0,
+        association_tables=0,
+        selected_entities=0,
+        unknown_declarations=0,
+        frontier=(),
+        redaction=SqlAlchemyRedactionSummary.create(0),
+    )
+    snapshot = SqlAlchemySnapshot((), (), (), coverage, (), partial_safe=False)
+    rendered = render_semantic_snapshot(
+        snapshot,
+        SourceView(None, (), (), "b" * 64),
+        (),
+        1,
+        1,
+    )
+
+    _validator("semantic-v1.schema.json").validate(json.loads(rendered))
+
+
+def test_semantic_schema_rejects_sqlalchemy_cross_domain_and_raw_shape_mutations() -> None:
+    validator = _validator("semantic-v1.schema.json")
+    value = _sqlalchemy_semantic_vector()
+
+    mutations = []
+    sql_diff = deepcopy(value)
+    sql_diff["type"] = "semantic_diff"
+    sql_diff["document_kind"] = "diff"
+    mutations.append(sql_diff)
+    diff_field_in_snapshot = deepcopy(value)
+    diff_field_in_snapshot["before"] = {
+        "kind": "real",
+        "domain": "python",
+        "schema": "code-structure-viz.semantic/v1",
+        "digest": "0" * 64,
+        "head_commit": None,
+        "file_count": 0,
+    }
+    mutations.append(diff_field_in_snapshot)
+    not_applicable = deepcopy(value)
+    not_applicable["status"] = "not_applicable"
+    mutations.append(not_applicable)
+    unknown_row = deepcopy(value)
+    unknown_row["members"][0]["kind"] = "unknown"
+    mutations.append(unknown_row)
+    cross_kind = deepcopy(value)
+    cross_kind["members"][0]["columns"] = ["id"]
+    mutations.append(cross_kind)
+    raw_expression = deepcopy(value)
+    raw_expression["members"][0]["default"]["raw"] = "DO_NOT_LEAK"
+    mutations.append(raw_expression)
+    internal_column = deepcopy(value)
+    internal_column["members"][0]["source"]["range"]["start_utf8_byte_column"] = 0
+    mutations.append(internal_column)
+    python_diagnostic = deepcopy(value)
+    python_diagnostic["diagnostics"][0]["code"] = "CSV-PY-003"
+    mutations.append(python_diagnostic)
+    wrong_failure = deepcopy(value)
+    wrong_failure["coverage"]["failed_files"] = [
+        {"path": "src/broken.py", "stage": "parse", "diagnostic_code": "CSV-SA-002"}
+    ]
+    mutations.append(wrong_failure)
+    cross_domain = deepcopy(value)
+    cross_domain["domain"] = "python"
+    mutations.append(cross_domain)
+
+    for mutation in mutations:
+        with pytest.raises(ValidationError):
+            validator.validate(mutation)
+
+
+def test_diagnostic_schema_accepts_closed_sqlalchemy_occurrence_vector() -> None:
+    value = _sqlalchemy_semantic_vector()["diagnostics"][0]
+
+    _validator("diagnostic-v1.schema.json").validate(value)
+
+    invalid = deepcopy(value)
+    invalid["start_utf8_byte_column"] = 0
+    with pytest.raises(ValidationError):
+        _validator("diagnostic-v1.schema.json").validate(invalid)
 
 
 def test_package_root_relative_import_renders_schema_valid_semantic_artifact(
