@@ -45,14 +45,14 @@ SQLAlchemy temporal diff、ghost row、before/after matching は後続 `iss-0000
 
 ### verified current implementation
 
-現行 repository では Issue 4 と Issue 5 の実装が既に存在し、次の境界が実装済みである。
+現行 repository の Issue 4/5 hardened common spine と Issue 6 の実装 checkpoint には、次の境界が既に存在する。以降の実装者はこの状態を入力として受け取り、実装前の不存在を仮定して second path や別 lifecycle を作らない。
 
-- `src/code_structure_viz/application/snapshot.py::SnapshotApplication` が Python snapshot の source acquisition、analysis、budget、render、manifest、drift check、atomic publication を一つの lifecycle として所有する。
-- `src/code_structure_viz/application/diff.py::DiffApplication` と `src/code_structure_viz/source/{endpoints,freezer,file_changes,git_repository}.py` が hardened Python diff/Git safety boundary を所有する。
-- `src/code_structure_viz/core/{config,diagnostics,outcomes,budget}.py`、`src/code_structure_viz/artifacts/{manifest,writer,streams}.py`、schemas、contract docs、acceptance/security/packaging tests、minimum/latest/macOS/offline CI が存在する。
-- 現行 CLI request、manifest、writer、stream、schema は `python` domain と Python artifact path を hard-code しており、`src/code_structure_viz/adapters/sqlalchemy/` は存在しない。
-- runtime dependency は 0 件であり、`pyproject.toml`、`uv.lock`、`THIRD_PARTY_LICENSES.md` は SQLAlchemy package を含まない。
-- verified commit には root `AGENTS.md` が存在しない。ただし実装開始時に再確認する。
+- `src/code_structure_viz/application/snapshot.py::SnapshotApplication` は Python/SQLAlchemy snapshot の source acquisition、analysis、budget、render、manifest、drift check、atomic publication を一つの lifecycle として所有する。
+- `src/code_structure_viz/application/diff.py::DiffApplication` と `src/code_structure_viz/source/{endpoints,freezer,file_changes,git_repository}.py` は hardened Python diff/Git safety boundary を所有し、SQLAlchemy diff は登録しない。
+- `src/code_structure_viz/adapters/sqlalchemy/` の analyzer、selector、immutable model、semantic JSON/PlantUML renderer、snapshot adapter、および SQLAlchemy acceptance/integration/security/unit tests が存在し、frozen `.py` AST だけから ER snapshot を構成する。
+- CLI request、manifest、writer、stream、schema、contract docs は `sqlalchemy` domain と SQLAlchemy artifact path を closed additive branch として実装済みであり、既存 Python public bytes/path/status は回帰で固定される。
+- runtime dependency は 0 件であり、`pyproject.toml`、`uv.lock`、`THIRD_PARTY_LICENSES.md` は SQLAlchemy package を含まない。offline wheel でも target ORM を import しない。
+- 実装開始時は repository root の `AGENTS.md` の有無と指定された repository/branch/full SHA を再確認する。現在の checkpoint では root `AGENTS.md` は存在しない。
 
 ### 旧 Issue 6 記述から置き換える事項
 

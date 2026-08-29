@@ -41,13 +41,13 @@ package_sequence_key: "ISSUE-03"
 
 ### Current（verified implementation state）
 
-- `src/code_structure_viz/application/snapshot.py` はPython concrete analyzer/selector/rendererを直接importし、`SnapshotCliRequest.domain`、`ArtifactDescriptor.domain`、manifest/stream paths、schemaが`python`に固定されている。
-- `SnapshotApplication`、`SourceViewBuilder`、`EntityBudgetGate`、`DomainOutcome`、`RunManifestBuilder`、`OutputTransaction`、`StdoutEmitter`/`StderrEmitter`は実装済みであり、race/path/Git/output hardeningを含む。
-- `application/diff.py`、`semantic/diff.py`、`source/endpoints.py`、`source/freezer.py`、`source/file_changes.py`、`source/git_repository.py`はPython diffのaccepted implementationである。
-- `schemas/semantic-v1.schema.json`、`run-manifest-v1.schema.json`、`run-summary-v1.schema.json`、`stdout-result-v1.schema.json`、`diagnostic-v1.schema.json`はPython-only closed schemaである。
-- `tests/contracts/test_scope_exclusions.py`は現状SQLAlchemy CLI/directoryを禁止し、`tests/packaging/test_distribution.py`はPython snapshotだけをoffline wheelで実行する。
-- `src/code_structure_viz/adapters/sqlalchemy/`、SQLAlchemy fixtures/goldens/contractsは存在しない。
-- runtime dependencyは0件。existing workflowは新規test pathもfull `pytest`/contract/security/package jobで自動的に実行するため、workflow job追加は不要である。
+- `src/code_structure_viz/application/snapshot.py` は closed domain adapter factory 経由で Python/SQLAlchemy analyzer・selector・renderer を同一 lifecycle に dispatchし、`SnapshotCliRequest.domain`、`ArtifactDescriptor.domain`、manifest/stream paths、schema の SQLAlchemy branch も実装済みである。
+- `SnapshotApplication`、`SourceViewBuilder`、`EntityBudgetGate`、`DomainOutcome`、`RunManifestBuilder`、`OutputTransaction`、`StdoutEmitter`/`StderrEmitter` は race/path/Git/output hardening を含めて実装済みである。
+- `application/diff.py`、`semantic/diff.py`、`source/endpoints.py`、`source/freezer.py`、`source/file_changes.py`、`source/git_repository.py` は Python diff の accepted implementation のままであり、SQLAlchemy diff は接続されていない。
+- `schemas/semantic-v1.schema.json`、`run-manifest-v1.schema.json`、`run-summary-v1.schema.json`、`stdout-result-v1.schema.json`、`diagnostic-v1.schema.json` は Python branch を維持したまま SQLAlchemy の closed branch を実装済みである。
+- `tests/contracts/test_scope_exclusions.py` と `tests/packaging/test_distribution.py` は SQLAlchemy runtime/import、SQLAlchemy diff、HTML を拒否しつつ、未インストール・offline wheel の SQLAlchemy source snapshot を検証する。
+- `src/code_structure_viz/adapters/sqlalchemy/`、SQLAlchemy fixtures、contracts、acceptance/integration/security/unit tests は現行 checkpoint に存在し、最終ゲートで再検証する対象である。
+- runtime dependency は 0 件。existing workflow は SQLAlchemy test path を full `pytest`/contract/security/package job で実行するため、workflow job 追加は不要である。
 
 ### Target architecture
 
@@ -99,7 +99,7 @@ application.diff / semantic.diff -X-> adapters.sqlalchemy in this Issue
 
 ## repository path / symbol contract
 
-下表以外のproduction pathを追加・変更しない。existing symbolのsignature変更は表に記載した範囲に限定し、Python public behaviorを変えない。
+下表以外のproduction pathを追加・変更しない。下表の `new — add` は実装着手時の作成責務を示す履歴ラベルであり、現行 checkpoint では実在する path を既存成果物として扱う。現行 branch から継続する実装者は不存在を前提に再作成せず、必要な修正・検証だけを表の責務内で行う。existing symbolのsignature変更は表に記載した範囲に限定し、Python public behaviorを変えない。
 
 ### existing — modify
 
@@ -136,7 +136,7 @@ application.diff / semantic.diff -X-> adapters.sqlalchemy in this Issue
 | `tests/contracts/test_scope_exclusions.py` | existing tests | SQLAlchemy snapshotを許可し、SQLAlchemy package import、SQLAlchemy diff、Next、HTMLを引き続き拒否する。 |
 | `tests/packaging/test_distribution.py` | existing tests | SQLAlchemy未install・network trap下でSQLAlchemy source snapshotを実行するoffline wheel caseを追加する。 |
 
-### new — add
+### new — add（実装着手時の作成責務。現行 checkpoint では実在 path を既存成果物として扱う）
 
 | path | new symbol / content | responsibility |
 | --- | --- | --- |
