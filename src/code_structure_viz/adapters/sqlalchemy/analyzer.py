@@ -96,6 +96,9 @@ class _ParsedModule:
     imported_module_aliases: dict[str, set[str]] = field(default_factory=dict)
     imported_module_alias_candidates: dict[str, set[str]] = field(default_factory=dict)
     import_alias_definite_positions: dict[str, tuple[int, int]] = field(default_factory=dict)
+    import_alias_events: dict[str, list[tuple[tuple[int, int], str | None]]] = field(
+        default_factory=dict
+    )
     star_import_origins: set[str] = field(default_factory=set)
     repository_bindings: dict[str, str | None] = field(default_factory=dict)
     repository_ambiguous_bindings: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -2093,6 +2096,11 @@ def _bind_module_statement(
                     module.imported_module_aliases[symbol] = aliases
                 if candidates:
                     module.imported_module_alias_candidates[symbol] = candidates
+                events = module.import_alias_events.setdefault(symbol, [])
+                position = _node_position(statement)
+                events.extend(
+                    (position, origin) for origin in sorted((*aliases, *candidates), key=_utf8)
+                )
             elif preserved is not None:
                 local, aliases, candidates = preserved
                 for origin in aliases:
@@ -2169,10 +2177,7 @@ def _record_import_alias_provenance(
     statement: ast.AST,
 ) -> None:
     symbol = f"{module.module}.{local}"
-    position = (
-        getattr(statement, "lineno", -1),
-        getattr(statement, "col_offset", -1),
-    )
+    position = _node_position(statement)
     definite_position = module.import_alias_definite_positions.get(symbol)
     if ambiguous and definite_position is not None and position < definite_position:
         return
@@ -2180,10 +2185,12 @@ def _record_import_alias_provenance(
         module.imported_module_aliases.pop(symbol, None)
         module.imported_module_alias_candidates.pop(symbol, None)
         module.import_alias_definite_positions[symbol] = position
+        module.import_alias_events.setdefault(symbol, []).append((position, None))
     target = (
         module.imported_module_alias_candidates if candidate else module.imported_module_aliases
     )
     target.setdefault(symbol, set()).add(origin)
+    module.import_alias_events.setdefault(symbol, []).append((position, origin))
 
 
 def _clear_import_alias_provenance(
@@ -2194,10 +2201,9 @@ def _clear_import_alias_provenance(
     symbol = f"{module.module}.{local}"
     module.imported_module_aliases.pop(symbol, None)
     module.imported_module_alias_candidates.pop(symbol, None)
-    module.import_alias_definite_positions[symbol] = (
-        getattr(statement, "lineno", -1),
-        getattr(statement, "col_offset", -1),
-    )
+    position = _node_position(statement)
+    module.import_alias_definite_positions[symbol] = position
+    module.import_alias_events.setdefault(symbol, []).append((position, None))
 
 
 def _alias_preserving_assignment_provenance(
@@ -2235,22 +2241,21 @@ def _alias_preserving_assignment_provenance(
     return target.id, aliases, candidates
 
 
+def _node_position(value: ast.AST) -> tuple[int, int]:
+    return (
+        getattr(value, "lineno", -1),
+        getattr(value, "col_offset", -1),
+    )
+
+
 def _module_import_precedes(
     module: _ParsedModule,
     origin: str,
     statement: ast.AST,
 ) -> bool:
-    position = (
-        getattr(statement, "lineno", -1),
-        getattr(statement, "col_offset", -1),
-    )
+    position = _node_position(statement)
     return any(
-        _normalize_symbol(alias.name) == origin
-        and (
-            getattr(candidate, "lineno", -1),
-            getattr(candidate, "col_offset", -1),
-        )
-        < position
+        _normalize_symbol(alias.name) == origin and _node_position(candidate) < position
         for top_level in module.tree.body
         for candidate in (top_level, *_nested_module_scope_writes(top_level))
         if isinstance(candidate, ast.Import)
@@ -2258,29 +2263,63 @@ def _module_import_precedes(
     )
 
 
-def _module_import_from_precedes(
+def _module_alias_origins_before(
+    module: _ParsedModule,
+    name: str,
+    statement: ast.AST,
+) -> set[str]:
+    symbol = f"{module.module}.{name}"
+    events = module.import_alias_events.get(symbol)
+    if not events:
+        fallback_origins = set(module.ambiguous_bindings.get(name, ()))
+        current = module.bindings.get(name)
+        if current is not None:
+            fallback_origins.add(current)
+        return fallback_origins
+    origins: set[str] = set()
+    statement_position = _node_position(statement)
+    ordered_events = sorted(
+        enumerate(events),
+        key=lambda item: (item[1][0], item[0]),
+    )
+    for _, (position, origin) in ordered_events:
+        if position >= statement_position:
+            break
+        if origin is None:
+            origins.clear()
+        else:
+            origins.add(origin)
+    return origins
+
+
+def _attribute_root_and_suffix(value: ast.expr) -> tuple[str, tuple[str, ...]] | None:
+    suffix: list[str] = []
+    current = value
+    while isinstance(current, ast.Attribute):
+        suffix.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    return current.id, tuple(reversed(suffix))
+
+
+def _module_origin_precedes(
     module: _ParsedModule,
     value: ast.expr,
     origin: str,
     statement: ast.AST,
 ) -> bool:
-    if origin not in module.repository_module_origins or not isinstance(value, ast.Name):
+    root = _attribute_root_and_suffix(value)
+    if root is None:
         return False
-    symbol = f"{module.module}.{value.id}"
-    if module.bindings.get(value.id) != origin or value.id in module.ambiguous_bindings:
-        return False
-    candidate_origins = module.imported_module_alias_candidates.get(symbol, ())
-    if not any(
-        module.repository_bindings.get(candidate, candidate) == origin
-        for candidate in candidate_origins
-    ):
-        return False
-    import_position = module.import_alias_definite_positions.get(symbol)
-    statement_position = (
-        getattr(statement, "lineno", -1),
-        getattr(statement, "col_offset", -1),
-    )
-    return import_position is not None and import_position < statement_position
+    name, suffix = root
+    for candidate in _module_alias_origins_before(module, name, statement):
+        if suffix:
+            candidate = _normalize_symbol(f"{candidate}.{'.'.join(suffix)}")
+        resolved = module.repository_bindings.get(candidate, candidate)
+        if resolved == origin or origin in module.repository_ambiguous_bindings.get(candidate, ()):
+            return True
+    return False
 
 
 def _invalidate_attribute_target(
@@ -2477,6 +2516,10 @@ def _copy_module_binding(
         ]
     else:
         target.import_alias_definite_positions.pop(symbol, None)
+    if symbol in source.import_alias_events:
+        target.import_alias_events[symbol] = list(source.import_alias_events[symbol])
+    else:
+        target.import_alias_events.pop(symbol, None)
 
 
 def _proven_sqlalchemy_module_assignment(
@@ -2500,13 +2543,9 @@ def _proven_sqlalchemy_module_assignment(
     origin = _resolve_symbol(value, module)
     if origin is None:
         return None
-    if not _external_sqlalchemy_module_origin(module, origin) and not (
-        origin in module.repository_modules
-        and (
-            _module_import_precedes(module, origin, statement)
-            or _module_import_from_precedes(module, value, origin, statement)
-        )
-    ):
+    if not _proven_module_origin(module, origin):
+        return None
+    if not _module_origin_precedes(module, value, origin, statement):
         return None
     return target.id, origin
 
@@ -2532,8 +2571,11 @@ def _possible_sqlalchemy_module_assignment(
     origins = {
         origin
         for origin in _ambiguous_symbols(value, module)
-        if _external_sqlalchemy_module_origin(module, origin)
-        or origin in module.repository_module_origins
+        if (
+            _external_sqlalchemy_module_origin(module, origin)
+            or origin in module.repository_module_origins
+        )
+        and _module_origin_precedes(module, value, origin, statement)
     }
     if not origins:
         return None
@@ -2755,6 +2797,9 @@ def _copy_parsed_module(module: _ParsedModule) -> _ParsedModule:
             for symbol, origins in module.imported_module_alias_candidates.items()
         },
         import_alias_definite_positions=dict(module.import_alias_definite_positions),
+        import_alias_events={
+            symbol: list(events) for symbol, events in module.import_alias_events.items()
+        },
         star_import_origins=set(module.star_import_origins),
         repository_bindings=module.repository_bindings,
         repository_ambiguous_bindings=module.repository_ambiguous_bindings,
