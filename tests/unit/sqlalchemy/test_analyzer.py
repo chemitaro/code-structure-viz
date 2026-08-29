@@ -693,8 +693,9 @@ def test_star_import_mapped_annotation_is_unknown_in_a_safe_table() -> None:
             "src/models.py": b"""
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import *
+from sqlalchemy.orm import DeclarativeBase as SafeBase
 
-class Base(DeclarativeBase): pass
+class Base(SafeBase): pass
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int]
@@ -735,11 +736,12 @@ def test_star_import_relationship_call_is_unknown_in_a_safe_table() -> None:
             "src/models.py": b"""
 from sqlalchemy.orm import DeclarativeBase, Mapped
 from sqlalchemy.orm import *
+from sqlalchemy.orm import DeclarativeBase as SafeBase, Mapped as SafeMapped
 
-class Base(DeclarativeBase): pass
+class Base(SafeBase): pass
 class User(Base):
     __tablename__ = "users"
-    parent: Mapped["Parent"] = relationship("Parent")
+    parent: SafeMapped["Parent"] = relationship("Parent")
 """
         }
     )
@@ -1397,3 +1399,178 @@ class Child(Base):
     assert relationships[0].cardinality is SqlAlchemyCardinality.UNKNOWN
     assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
     assert result.snapshot.partial_safe is True
+
+
+def test_sqlalchemy_star_import_invalidates_existing_column_binding() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import *
+from sqlalchemy.orm import DeclarativeBase as SafeBase
+
+class Base(SafeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_class_local_sqlalchemy_import_alias_resolves_column() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    from sqlalchemy import Column as LocalColumn, Integer as LocalInteger
+    id = LocalColumn(LocalInteger)
+"""
+        }
+    )
+
+    columns = [row for row in result.snapshot.members if isinstance(row, SqlAlchemyColumnRow)]
+    assert len(columns) == 1
+    assert columns[0].name == "id"
+    assert columns[0].type.category is SqlAlchemyTypeCategory.INTEGER
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_star_imported_repository_reexport_remains_unknown() -> None:
+    result = _analyze(
+        {
+            "src/pkg/base.py": b"from sqlalchemy.orm import *\n",
+            "src/pkg/models.py": b"""
+from .base import DeclarativeBase as Base
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_repository_sqlalchemy_module_shadows_external_namespace() -> None:
+    result = _analyze(
+        {
+            "src/sqlalchemy.py": b"def Table(*args): return args\n",
+            "src/models.py": b"""
+import sqlalchemy
+
+users = sqlalchemy.Table("users", object())
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.ABSENT
+    assert result.snapshot.entities == ()
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
+
+
+def test_class_local_scalar_binding_shadows_builtin_in_statement_order() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from custom_types import CustomType
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase): pass
+class Before(Base):
+    __tablename__ = "before"
+    int = CustomType
+    id: Mapped[int] = mapped_column()
+
+class After(Base):
+    __tablename__ = "after"
+    id: Mapped[int] = mapped_column()
+    int = CustomType
+"""
+        }
+    )
+
+    columns = {
+        next(table.name for table in result.snapshot.entities if table.id == row.owner_id): row
+        for row in result.snapshot.members
+        if isinstance(row, SqlAlchemyColumnRow)
+    }
+    assert columns["before"].type.category is SqlAlchemyTypeCategory.CUSTOM
+    assert columns["before"].type.name == "models.Before.int"
+    assert columns["after"].type.category is SqlAlchemyTypeCategory.INTEGER
+    assert columns["after"].type.name == "builtins.int"
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_class_local_collection_binding_shadows_builtin_in_statement_order() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from custom_types import CustomCollection
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+
+class Base(DeclarativeBase): pass
+class Parent(Base):
+    __tablename__ = "parents"
+    before: Mapped[list["Child"]] = relationship("Child")
+    list = CustomCollection
+    after: Mapped[list["Child"]] = relationship("Child")
+
+class Child(Base):
+    __tablename__ = "children"
+"""
+        }
+    )
+
+    relationships = {
+        row.name: row
+        for row in result.snapshot.members
+        if isinstance(row, SqlAlchemyRelationshipRow)
+    }
+    assert relationships["before"].cardinality is SqlAlchemyCardinality.MANY
+    assert relationships["after"].cardinality is SqlAlchemyCardinality.UNKNOWN
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_canonical_calls_outside_declaration_positions_are_not_evidence() -> None:
+    result = _analyze(
+        {
+            "src/helpers.py": b"""
+from sqlalchemy import Column, Table
+from sqlalchemy.orm import relationship
+
+Column("top-level-expression")
+Table("top-level-expression", object())
+relationship("top-level-expression")
+
+def helper():
+    return Column("function-local")
+
+class Plain:
+    value = Column("plain-class")
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.ABSENT
+    assert result.snapshot.entities == ()
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
