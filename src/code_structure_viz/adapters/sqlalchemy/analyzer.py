@@ -92,6 +92,8 @@ class _ParsedModule:
     ambiguous_bindings: dict[str, set[str]]
     star_import: bool
     is_package: bool
+    repository_bindings: dict[str, str | None] = field(default_factory=dict)
+    repository_ambiguous_bindings: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -1778,6 +1780,15 @@ def _bind_module_statement(
                 f"{module.module}.{name}",
                 ambiguous=ambiguous,
             )
+    elif isinstance(statement, ast.TypeAlias):
+        for name in _target_names(statement.name):
+            _bind(
+                module.bindings,
+                module.ambiguous_bindings,
+                name,
+                f"{module.module}.{name}",
+                ambiguous=ambiguous,
+            )
     elif isinstance(statement, (ast.For, ast.AsyncFor)):
         _bind_target(module, statement.target, ambiguous=True)
     elif isinstance(statement, (ast.With, ast.AsyncWith)):
@@ -1820,6 +1831,7 @@ def _nested_module_scope_writes(value: ast.AST) -> tuple[ast.AST, ...]:
                 ast.ExceptHandler,
                 ast.Match,
                 ast.Delete,
+                ast.TypeAlias,
             ),
         ):
             result.append(child)
@@ -1862,6 +1874,8 @@ def _statement_binding_names(value: ast.AST) -> tuple[str, ...]:
         return tuple(alias.asname or alias.name for alias in value.names if alias.name != "*")
     if isinstance(value, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
         return _assignment_names(value)
+    if isinstance(value, ast.TypeAlias):
+        return _target_names(value.name)
     if isinstance(value, (ast.For, ast.AsyncFor)):
         return _target_names(value.target)
     if isinstance(value, (ast.With, ast.AsyncWith)):
@@ -1959,43 +1973,83 @@ def _is_sqlalchemy_namespace(origin: str | None) -> bool:
 
 def _resolve_repository_bindings(modules: list[_ParsedModule]) -> None:
     by_name = {module.module: module for module in modules}
+    raw_bindings = {module.module: dict(module.bindings) for module in modules}
+    raw_ambiguous = {
+        module.module: {
+            name: frozenset(origins) for name, origins in module.ambiguous_bindings.items()
+        }
+        for module in modules
+    }
+    canonical_bindings: dict[str, str | None] = {}
+    canonical_ambiguous: dict[str, frozenset[str]] = {}
     for module in modules:
-        for name, origin in tuple(module.bindings.items()):
-            if origin is None:
-                continue
-            resolved = _resolve_repository_origin(origin, by_name, set())
-            if resolved is None:
-                module.ambiguous_bindings.setdefault(name, set()).add(origin)
-                module.bindings[name] = None
+        names = set(raw_bindings[module.module]) | set(raw_ambiguous[module.module])
+        for name in names:
+            symbol = f"{module.module}.{name}"
+            resolved, ambiguous_origins = _resolve_repository_origin(
+                symbol,
+                by_name,
+                raw_bindings,
+                raw_ambiguous,
+                set(),
+            )
+            canonical_bindings[symbol] = resolved
+            if ambiguous_origins:
+                canonical_ambiguous[symbol] = frozenset(ambiguous_origins)
+
+    for module in modules:
+        names = set(module.bindings) | set(module.ambiguous_bindings)
+        for name in names:
+            symbol = f"{module.module}.{name}"
+            module.bindings[name] = canonical_bindings[symbol]
+            origins = canonical_ambiguous.get(symbol)
+            if origins:
+                module.ambiguous_bindings[name] = set(origins)
             else:
-                module.bindings[name] = resolved
-        for name, origins in tuple(module.ambiguous_bindings.items()):
-            resolved_origins: set[str] = set()
-            for origin in origins:
-                resolved = _resolve_repository_origin(origin, by_name, set())
-                resolved_origins.add(resolved if resolved is not None else origin)
-            module.ambiguous_bindings[name] = resolved_origins
+                module.ambiguous_bindings.pop(name, None)
+        module.repository_bindings = canonical_bindings
+        module.repository_ambiguous_bindings = canonical_ambiguous
 
 
 def _resolve_repository_origin(
     origin: str,
     modules: dict[str, _ParsedModule],
+    bindings: dict[str, dict[str, str | None]],
+    ambiguous_bindings: dict[str, dict[str, frozenset[str]]],
     seen: set[str],
-) -> str | None:
+) -> tuple[str | None, set[str]]:
     if origin in seen:
-        return None
+        return None, {origin}
     if _is_sqlalchemy_origin(origin) or "." not in origin:
-        return origin
+        return origin, set()
     owner, name = origin.rsplit(".", 1)
     target = modules.get(owner)
-    if target is None or name not in target.bindings:
-        return origin
-    target_origin = target.bindings[name]
+    if target is None or name not in bindings[owner]:
+        return origin, set()
+    target_origin = bindings[owner][name]
     if target_origin is None:
-        return None
+        resolved_origins: set[str] = set()
+        for candidate in ambiguous_bindings[owner].get(name, ()):
+            resolved, candidate_ambiguities = _resolve_repository_origin(
+                candidate,
+                modules,
+                bindings,
+                ambiguous_bindings,
+                {*seen, origin},
+            )
+            if resolved is not None:
+                resolved_origins.add(resolved)
+            resolved_origins.update(candidate_ambiguities)
+        return None, resolved_origins or {origin}
     if target_origin == origin:
-        return origin
-    return _resolve_repository_origin(target_origin, modules, {*seen, origin})
+        return origin, set()
+    return _resolve_repository_origin(
+        target_origin,
+        modules,
+        bindings,
+        ambiguous_bindings,
+        {*seen, origin},
+    )
 
 
 def _bind_name(module: _ParsedModule, name: str, *, ambiguous: bool) -> None:
@@ -2062,12 +2116,17 @@ def _normalize_symbol(value: str) -> str:
 
 def _resolve_symbol(value: ast.expr, module: _ParsedModule) -> str | None:
     if isinstance(value, ast.Name):
+        if value.id in module.bindings:
+            return module.bindings[value.id]
         if value.id in _BUILTIN_TYPES:
             return f"builtins.{value.id}"
-        return module.bindings.get(value.id)
+        return None
     if isinstance(value, ast.Attribute):
         base = _resolve_symbol(value.value, module)
-        return _normalize_symbol(f"{base}.{value.attr}") if base is not None else None
+        if base is None:
+            return None
+        candidate = _normalize_symbol(f"{base}.{value.attr}")
+        return module.repository_bindings.get(candidate, candidate)
     return None
 
 
@@ -2084,7 +2143,7 @@ def _unresolved_terminal(
             for origin in _ambiguous_symbols(value, module)
         )
     terminal = _terminal_name(value)
-    if terminal in terminals:
+    if module.star_import and terminal in terminals:
         return True
     return any(
         _is_sqlalchemy_origin(origin) and origin.rsplit(".", 1)[-1] in terminals
@@ -2096,10 +2155,18 @@ def _ambiguous_symbols(value: ast.expr, module: _ParsedModule) -> set[str]:
     if isinstance(value, ast.Name):
         return set(module.ambiguous_bindings.get(value.id, ()))
     if isinstance(value, ast.Attribute):
-        return {
-            _normalize_symbol(f"{origin}.{value.attr}")
-            for origin in _ambiguous_symbols(value.value, module)
-        }
+        result: set[str] = set()
+        base = _resolve_symbol(value.value, module)
+        if base is not None:
+            candidate = _normalize_symbol(f"{base}.{value.attr}")
+            result.update(module.repository_ambiguous_bindings.get(candidate, ()))
+        for origin in _ambiguous_symbols(value.value, module):
+            candidate = _normalize_symbol(f"{origin}.{value.attr}")
+            resolved = module.repository_bindings.get(candidate, candidate)
+            if resolved is not None:
+                result.add(resolved)
+            result.update(module.repository_ambiguous_bindings.get(candidate, ()))
+        return result
     return set()
 
 
@@ -2333,7 +2400,11 @@ def _is_none(value: ast.expr) -> bool:
 
 
 def _annotation_container(value: ast.expr, module: _ParsedModule) -> str | None:
-    if isinstance(value, ast.Name) and value.id in {"list", "set", "tuple"}:
+    if (
+        isinstance(value, ast.Name)
+        and value.id in {"list", "set", "tuple"}
+        and value.id not in module.bindings
+    ):
         return f"builtins.{value.id}"
     return _resolve_symbol(value, module)
 

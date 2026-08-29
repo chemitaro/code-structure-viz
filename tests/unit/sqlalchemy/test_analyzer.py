@@ -1226,3 +1226,174 @@ class User(Base):
     assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
     assert result.snapshot.coverage.unknown_declarations == 1
     assert result.snapshot.partial_safe is True
+
+
+def test_type_alias_rebinding_of_sqlalchemy_column_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+type Column = object
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_conditional_type_alias_rebinding_of_sqlalchemy_column_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+if condition:
+    type Column = object
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_ambiguous_reexport_propagates_proven_declarative_base_origin() -> None:
+    result = _analyze(
+        {
+            "src/pkg/base.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+""",
+            "src/pkg/__init__.py": b"""
+from .base import Base
+
+if condition:
+    Base = replacement
+""",
+            "src/pkg/models.py": b"""
+from . import Base
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_repository_module_attribute_base_alias_resolves_across_modules() -> None:
+    result = _analyze(
+        {
+            "src/pkg/base.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+""",
+            "src/pkg/__init__.py": b"""
+from .base import Base
+""",
+            "src/pkg/models.py": b"""
+import pkg
+
+class User(pkg.Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_unbound_sqlalchemy_terminal_names_are_not_domain_evidence() -> None:
+    result = _analyze(
+        {
+            "src/plain_base.py": b"class Candidate(DeclarativeBase): pass\n",
+            "src/plain_factory.py": b"Base = declarative_base()\nclass Candidate(Base): pass\n",
+            "src/plain_table.py": b'users = Table("users", object())\n',
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.ABSENT
+    assert result.snapshot.entities == ()
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
+    assert result.snapshot.partial_safe is False
+
+
+def test_module_binding_shadows_builtin_scalar_column_type() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from custom_types import CustomType
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+int = CustomType
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column()
+"""
+        }
+    )
+
+    columns = [row for row in result.snapshot.members if isinstance(row, SqlAlchemyColumnRow)]
+    assert len(columns) == 1
+    assert columns[0].type.category is SqlAlchemyTypeCategory.CUSTOM
+    assert columns[0].type.name == "models.int"
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_module_binding_shadows_builtin_relationship_collection() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from custom_types import CustomCollection
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+
+list = CustomCollection
+
+class Base(DeclarativeBase): pass
+class Parent(Base):
+    __tablename__ = "parents"
+    children: Mapped[list["Child"]] = relationship("Child")
+
+class Child(Base):
+    __tablename__ = "children"
+"""
+        }
+    )
+
+    relationships = [
+        row for row in result.snapshot.members if isinstance(row, SqlAlchemyRelationshipRow)
+    ]
+    assert len(relationships) == 1
+    assert relationships[0].cardinality is SqlAlchemyCardinality.UNKNOWN
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.partial_safe is True
