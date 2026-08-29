@@ -3088,6 +3088,242 @@ class User(Base):
     assert result.snapshot.partial_safe is False
 
 
+def test_transitive_importfrom_class_body_module_alias_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/bridge.py": b"from pkg import namespace\n",
+            "src/models.py": b"""
+from bridge import namespace
+
+class Mutator:
+    alias = namespace
+    alias.DeclarativeBase = object
+
+from pkg.namespace import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_transitive_importfrom_class_alias_mutation_does_not_taint_direct_source() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/bridge.py": b"from pkg import namespace\n",
+            "src/models.py": b"""
+from bridge import namespace
+
+class Mutator:
+    alias = namespace
+    alias.DeclarativeBase = object
+
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_package_importfrom_local_shadow_is_unknown_declarative_evidence() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"""
+class Namespace:
+    DeclarativeBase = object
+
+namespace = Namespace()
+""",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+from pkg import namespace
+
+class User(namespace.DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_package_local_object_mutation_does_not_taint_direct_source_import() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"""
+class Namespace:
+    DeclarativeBase = object
+
+namespace = Namespace()
+""",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+from pkg import namespace
+
+class Mutator:
+    namespace.DeclarativeBase = replacement
+
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_package_importfrom_proven_module_reexport_resolves_declarative_base() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"from . import namespace\n",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/models.py": b"""
+from pkg import namespace
+
+class User(namespace.DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_rebound_transitive_importfrom_does_not_taint_source_import() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/bridge.py": b"""
+from pkg import namespace
+
+class Replacement:
+    pass
+
+namespace = Replacement()
+""",
+            "src/models.py": b"""
+from bridge import namespace
+
+class Mutator:
+    alias = namespace
+    alias.DeclarativeBase = object
+
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_later_transitive_importfrom_does_not_prove_class_body_module_alias() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/bridge.py": b"from pkg import namespace\n",
+            "src/models.py": b"""
+class Mutator:
+    alias = namespace
+    alias.DeclarativeBase = object
+
+from bridge import namespace
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_conditionally_rebound_transitive_importfrom_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/bridge.py": b"""
+from pkg import namespace
+
+class Replacement:
+    pass
+
+if condition:
+    namespace = Replacement()
+""",
+            "src/models.py": b"""
+from bridge import namespace
+
+class Mutator:
+    alias = namespace
+    alias.DeclarativeBase = object
+
+from pkg.namespace import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_class_body_global_rebind_is_unknown_to_later_qualified_base() -> None:
     result = _analyze(
         {

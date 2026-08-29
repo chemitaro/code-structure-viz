@@ -523,6 +523,30 @@ class SqlAlchemySnapshotAnalyzer:
         attribute_mutations = _expand_imported_module_alias_mutations(modules)
         for module in modules:
             module.attribute_mutations.update(attribute_mutations)
+        raw_bindings = {module.module: dict(module.bindings) for module in modules}
+        raw_ambiguous_bindings = {
+            module.module: {
+                name: set(origins) for name, origins in module.ambiguous_bindings.items()
+            }
+            for module in modules
+        }
+        _resolve_repository_bindings(modules)
+        for module in modules:
+            for statement in module.tree.body:
+                for candidate in (statement, *_nested_module_scope_writes(statement)):
+                    if isinstance(candidate, ast.ClassDef):
+                        _invalidate_executed_class_body_mutations(
+                            module,
+                            candidate,
+                            f"{module.module}.{candidate.name}",
+                            ambiguous_execution=candidate is not statement,
+                            apply_global_bindings=False,
+                        )
+        attribute_mutations = _expand_imported_module_alias_mutations(modules)
+        for module in modules:
+            module.attribute_mutations.update(attribute_mutations)
+            module.bindings = raw_bindings[module.module]
+            module.ambiguous_bindings = raw_ambiguous_bindings[module.module]
         _resolve_repository_bindings(modules)
 
     def _classes(
@@ -2245,7 +2269,11 @@ def _module_import_from_precedes(
     symbol = f"{module.module}.{value.id}"
     if module.bindings.get(value.id) != origin or value.id in module.ambiguous_bindings:
         return False
-    if origin not in module.imported_module_alias_candidates.get(symbol, ()):
+    candidate_origins = module.imported_module_alias_candidates.get(symbol, ())
+    if not any(
+        module.repository_bindings.get(candidate, candidate) == origin
+        for candidate in candidate_origins
+    ):
         return False
     import_position = module.import_alias_definite_positions.get(symbol)
     statement_position = (
@@ -2263,10 +2291,26 @@ def _invalidate_attribute_target(
 ) -> None:
     scope = resolution_scope or module
     if isinstance(target, ast.Attribute):
-        resolved = _resolve_symbol(target, scope)
+        resolved_base = _resolve_symbol(target.value, scope)
+        resolved: str | None
+        if _proven_module_origin(scope, resolved_base):
+            assert resolved_base is not None
+            resolved = _normalize_symbol(f"{resolved_base}.{target.attr}")
+        else:
+            resolved = _resolve_symbol(target, scope)
         if resolved is not None:
             module.attribute_mutations.add(resolved)
-        module.attribute_mutations.update(_ambiguous_symbols(target, scope))
+        ambiguous_bases = {
+            origin
+            for origin in _ambiguous_symbols(target.value, scope)
+            if _proven_module_origin(scope, origin)
+        }
+        if ambiguous_bases:
+            module.attribute_mutations.update(
+                _normalize_symbol(f"{origin}.{target.attr}") for origin in ambiguous_bases
+            )
+        else:
+            module.attribute_mutations.update(_ambiguous_symbols(target, scope))
     elif isinstance(target, (ast.Tuple, ast.List)):
         for element in target.elts:
             _invalidate_attribute_target(module, element, resolution_scope=scope)
@@ -2369,6 +2413,12 @@ def _class_mutation_scope_modules(
                 else:
                     scope.bindings[name] = origin
                     scope.ambiguous_bindings.pop(name, None)
+                continue
+            possible_module = _possible_sqlalchemy_module_assignment(before, write)
+            if possible_module is not None:
+                name, origins = possible_module
+                scope.bindings[name] = None
+                scope.ambiguous_bindings.setdefault(name, set()).update(origins)
     return result
 
 
@@ -2459,6 +2509,35 @@ def _proven_sqlalchemy_module_assignment(
     ):
         return None
     return target.id, origin
+
+
+def _possible_sqlalchemy_module_assignment(
+    module: _ParsedModule,
+    statement: ast.AST,
+) -> tuple[str, set[str]] | None:
+    if isinstance(statement, ast.Assign):
+        if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            return None
+        target = statement.targets[0]
+        value = statement.value
+    elif isinstance(statement, (ast.AnnAssign, ast.NamedExpr)):
+        if not isinstance(statement.target, ast.Name) or statement.value is None:
+            return None
+        target = statement.target
+        value = statement.value
+    else:
+        return None
+    if not isinstance(value, (ast.Name, ast.Attribute)):
+        return None
+    origins = {
+        origin
+        for origin in _ambiguous_symbols(value, module)
+        if _external_sqlalchemy_module_origin(module, origin)
+        or origin in module.repository_module_origins
+    }
+    if not origins:
+        return None
+    return target.id, origins
 
 
 def _definite_class_binding_names(value: ast.AST) -> tuple[str, ...]:
@@ -2957,6 +3036,12 @@ def _resolve_repository_origin(
             traversed,
         )
     if target_origin == origin:
+        if (
+            target.is_package
+            and origin in modules
+            and origin not in target.repository_module_origins
+        ):
+            return None, {origin}
         return origin, set()
     return _resolve_repository_origin(
         target_origin,
