@@ -546,6 +546,11 @@ class SqlAlchemySnapshotAnalyzer:
                     changed = True
                 elif any(
                     _unresolved_terminal(base, declaration.module, {"DeclarativeBase"})
+                    or _ambiguous_binding_matches(
+                        base,
+                        declaration.module,
+                        proven_symbols | classic_bases,
+                    )
                     for base in declaration.node.bases
                 ):
                     state.unknown(
@@ -1687,6 +1692,9 @@ def _bind_module_statement(
     elif isinstance(statement, ast.ImportFrom):
         if any(alias.name == "*" for alias in statement.names):
             module.star_import = True
+            import_origin = _import_from_origin(module, statement)
+            if import_origin is None or not import_origin.startswith("sqlalchemy"):
+                _invalidate_star_import(module)
             return
         import_origin = _import_from_origin(module, statement)
         if import_origin is None:
@@ -1775,10 +1783,9 @@ def _bind(
 ) -> None:
     previous = bindings.get(name)
     if name in bindings:
-        if previous in _SQLALCHEMY_BINDING_SYMBOLS:
+        if previous is not None:
             ambiguous_bindings.setdefault(name, set()).add(previous)
-        if origin in _SQLALCHEMY_BINDING_SYMBOLS:
-            ambiguous_bindings.setdefault(name, set()).add(origin)
+        ambiguous_bindings.setdefault(name, set()).add(origin)
         bindings[name] = None
     else:
         bindings[name] = origin
@@ -1786,6 +1793,13 @@ def _bind(
         ambiguous_bindings.setdefault(name, set()).add(origin)
     if ambiguous:
         bindings[name] = None
+
+
+def _invalidate_star_import(module: _ParsedModule) -> None:
+    for name, origin in module.bindings.items():
+        if origin is not None:
+            module.ambiguous_bindings.setdefault(name, set()).add(origin)
+        module.bindings[name] = None
 
 
 def _bind_name(module: _ParsedModule, name: str, *, ambiguous: bool) -> None:
@@ -1885,6 +1899,14 @@ def _ambiguous_symbols(value: ast.expr, module: _ParsedModule) -> set[str]:
             for origin in _ambiguous_symbols(value.value, module)
         }
     return set()
+
+
+def _ambiguous_binding_matches(
+    value: ast.expr,
+    module: _ParsedModule,
+    symbols: set[str],
+) -> bool:
+    return bool(_ambiguous_symbols(value, module) & symbols)
 
 
 def _resolve_call(value: ast.Call, module: _ParsedModule) -> str | None:

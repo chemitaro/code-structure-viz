@@ -946,6 +946,54 @@ class User(Base):
     assert result.snapshot.partial_safe is True
 
 
+def test_conditionally_rebound_local_declarative_base_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+
+if condition:
+    Base = replacement
+
+class User(Base):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.coverage.unknown_declarations >= 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_star_import_invalidates_existing_sqlalchemy_column_binding() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, Integer
+from sqlalchemy.orm import DeclarativeBase
+from helpers import *
+from sqlalchemy.orm import DeclarativeBase as SafeBase
+
+class Base(SafeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
 def test_unrebound_sqlalchemy_alias_remains_supported() -> None:
     result = _analyze(
         {
