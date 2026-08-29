@@ -1,7 +1,8 @@
 # Stdout and stderr v1
 
 `--stdout` は高々一回で、`manifest`、`python:semantic-json`、
-`python:plantuml` のいずれかだけを受理する。選択されていないformatを指すselectorは
+`python:plantuml`、`sqlalchemy:semantic-json`、`sqlalchemy:plantuml` のclosed setから、
+選択domainと一致するものだけを受理する。別domainまたは選択されていないformatを指すselectorは
 source acquisition前にexit 2とし、stdoutとArtifactを空にする。
 
 selector省略時、stdoutは `code-structure-viz.run-summary/v1` のcanonical JSON一行。

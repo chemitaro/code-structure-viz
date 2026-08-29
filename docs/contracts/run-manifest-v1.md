@@ -4,9 +4,9 @@ Every valid core snapshot run publishes `run-manifest.json`, including
 `not_applicable` and `payload_unavailable` outcomes. Usage errors, run-level
 fatal errors, and handled pre-publication interrupts publish no manifest.
 
-The manifest identifies the tool and Python AST adapter versions, resolved
+The manifest identifies the tool and selected domain AST adapter versions, resolved
 command and target request, immutable working-tree source fingerprint,
-resolved configuration and value sources, run outcome, Python domain outcome,
+resolved configuration and value sources, run outcome, selected domain outcome,
 payload descriptors, and diagnostics. It contains repository-relative paths
 only and never contains raw source, an output path, a staging path, a timestamp,
 or a process identifier.
@@ -22,12 +22,22 @@ versions, source and configuration fingerprints, command formats and stdout
 selector, and the normalized target/depth request. Output locations, temporary
 paths, wall time, and PID are excluded.
 
-The single Python domain entry distinguishes `complete`, `not_applicable`,
+The single selected domain entry distinguishes `complete`, `not_applicable`,
 `incomplete/partial_safe`, and `incomplete/payload_unavailable`. It repeats the
 semantic coverage object, records the `max_entities` budget decision, lists
 only published payload paths, and carries domain diagnostics. Root diagnostics
 are reserved for valid-run diagnostics outside the domain; fatal runs have no
 manifest.
+
+Snapshot domainは`python`または`sqlalchemy`の一件だけである。SQLAlchemy snapshotは
+adapter `sqlalchemy-ast/1`、PlantUML contract
+`code-structure-viz.plantuml/sqlalchemy/v1`、Artifact
+`sqlalchemy.snapshot.semantic.json` / `sqlalchemy.snapshot.puml` を使う。coverageは
+candidate/parsed/failed/evidence/selected module、full-analysis mapped class/association table、
+selected entity、unknown declaration、frontier、redaction rule/countのclosed shapeである。
+`not_applicable`と`payload_unavailable`はpayload descriptorを持たず、`partial_safe`だけが
+安全なSQLAlchemy payloadを列挙する。Python snapshotのadapter contract、Artifact path、
+run fingerprint preimageは変更しない。SQLAlchemy domainを持つ`diff` manifestは不正である。
 
 ## Diff run
 

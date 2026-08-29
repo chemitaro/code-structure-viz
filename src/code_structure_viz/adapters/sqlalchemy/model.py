@@ -136,7 +136,9 @@ class SqlAlchemyFrontierReason(StrEnum):
 _TABLE_ID = re.compile(r"sqlalchemy:table:[0-9a-f]{64}\Z", flags=re.ASCII)
 _ROW_ID = re.compile(r"sqlalchemy:row:[0-9a-f]{64}\Z", flags=re.ASCII)
 _RELATION_ID = re.compile(r"sqlalchemy:relation:[0-9a-f]{64}\Z", flags=re.ASCII)
+_OCCURRENCE_ID = re.compile(r"sqlalchemy:occurrence:[0-9a-f]{64}\Z", flags=re.ASCII)
 _WINDOWS_DRIVE = re.compile(r"[A-Za-z]:")
+_URI_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 _REDACTION_RULE: Final = "code-structure-viz.sqlalchemy-redaction/v1"
 
 _ROW_KIND_RANK: Final = {kind: rank for rank, kind in enumerate(SqlAlchemyRowKind)}
@@ -205,6 +207,33 @@ def safe_repository_path(value: str, *, field: str = "source path") -> str:
     ):
         raise ValueError(f"{field} must be repository-relative")
     return normalized
+
+
+def _safe_frontier_reference(value: str) -> str:
+    normalized = _nfc(value, field="frontier reference")
+    if any(
+        pattern.fullmatch(normalized) is not None
+        for pattern in (_TABLE_ID, _ROW_ID, _RELATION_ID, _OCCURRENCE_ID)
+    ):
+        return normalized
+    for prefix in ("module:", "class:"):
+        if normalized.startswith(prefix):
+            return f"{prefix}{safe_dotted_symbol(normalized.removeprefix(prefix))}"
+    if normalized.endswith(".py"):
+        if _URI_SCHEME.match(normalized) is not None:
+            raise ValueError("frontier reference must be a safe path, symbol, or semantic id")
+        try:
+            return safe_repository_path(normalized, field="frontier reference")
+        except ValueError as error:
+            raise ValueError(
+                "frontier reference must be a safe path, symbol, or semantic id"
+            ) from error
+    try:
+        return safe_dotted_symbol(normalized, field="frontier reference")
+    except ValueError as error:
+        raise ValueError(
+            "frontier reference must be a safe path, symbol, or semantic id"
+        ) from error
 
 
 def _positive_int(value: int, *, field: str) -> int:
@@ -1451,19 +1480,18 @@ class SqlAlchemyRelation:
             role=self.role,
         ):
             raise ValueError("SQLAlchemy relation identity is invalid")
-        if (
-            self.kind
-            in {
-                SqlAlchemyRelationKind.FOREIGN_KEY,
-                SqlAlchemyRelationKind.RELATIONSHIP,
-                SqlAlchemyRelationKind.ASSOCIATION,
-            }
-            and self.via_member_id is None
-        ):
-            raise ValueError("SQLAlchemy relation kind requires a via-member id")
-        if self.kind is SqlAlchemyRelationKind.INHERITANCE and any(
-            value is not None for value in (self.via_member_id, self.role)
-        ):
+        if self.target.resolution is not SqlAlchemyTargetResolution.INTERNAL:
+            raise ValueError("SQLAlchemy relation requires an internal target")
+        if self.kind is SqlAlchemyRelationKind.FOREIGN_KEY:
+            if self.via_member_id is None or self.role is not None:
+                raise ValueError("foreign-key relation requires a member and null role")
+        elif self.kind in {
+            SqlAlchemyRelationKind.RELATIONSHIP,
+            SqlAlchemyRelationKind.ASSOCIATION,
+        }:
+            if self.via_member_id is None or self.role is None:
+                raise ValueError("relationship/association relation requires a member and role")
+        elif any(value is not None for value in (self.via_member_id, self.role)):
             raise ValueError("inheritance relation cannot have a member or role")
 
     @classmethod
@@ -1539,7 +1567,7 @@ class SqlAlchemyCoverageFrontier:
     reason: SqlAlchemyFrontierReason
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "reference", _nfc(self.reference, field="frontier reference"))
+        object.__setattr__(self, "reference", _safe_frontier_reference(self.reference))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1599,6 +1627,114 @@ class SqlAlchemyCoverage:
             raise ValueError("SQLAlchemy coverage frontier is not canonical")
 
 
+def _redacted_expression_is_unknown(value: RedactedExpression) -> bool:
+    return value.category is RedactedExpressionCategory.UNKNOWN
+
+
+def _target_is_unknown(value: SqlAlchemyRelationTarget | None) -> bool:
+    return value is not None and value.resolution is SqlAlchemyTargetResolution.UNKNOWN
+
+
+def _row_has_unknown_value(value: SqlAlchemyRow) -> bool:
+    descriptors: tuple[RedactedExpression, ...] = ()
+    if isinstance(value, SqlAlchemyColumnRow):
+        if value.type.category is SqlAlchemyTypeCategory.UNKNOWN:
+            return True
+        descriptors = (
+            value.type.parameters,
+            value.default,
+            value.server_default,
+            value.onupdate,
+            value.server_onupdate,
+            value.computed,
+            value.identity,
+        )
+    elif isinstance(value, SqlAlchemyCheckRow):
+        descriptors = (value.expression,)
+    elif isinstance(value, SqlAlchemyIndexRow):
+        descriptors = tuple(term.expression for term in value.terms)
+    elif isinstance(value, SqlAlchemyForeignKeyRow):
+        if _target_is_unknown(value.target):
+            return True
+        descriptors = (value.ondelete, value.onupdate)
+    elif isinstance(value, SqlAlchemyRelationshipRow):
+        if (
+            _target_is_unknown(value.target)
+            or _target_is_unknown(value.secondary)
+            or value.cardinality is SqlAlchemyCardinality.UNKNOWN
+        ):
+            return True
+        descriptors = (
+            value.primaryjoin,
+            value.secondaryjoin,
+            value.order_by,
+            value.foreign_keys,
+        )
+    elif isinstance(value, SqlAlchemyAssociationTableRow) and _target_is_unknown(
+        value.relationship_target
+    ):
+        return True
+    return any(_redacted_expression_is_unknown(item) for item in descriptors)
+
+
+def _validate_relation_member(
+    relation: SqlAlchemyRelation,
+    members_by_id: dict[str, SqlAlchemyRow],
+) -> None:
+    if relation.kind is SqlAlchemyRelationKind.INHERITANCE:
+        matches = [
+            member
+            for member in members_by_id.values()
+            if isinstance(member, SqlAlchemyInheritanceRow)
+            and member.owner_id == relation.source_id
+            and member.target == relation.target
+            and member.source == relation.source
+        ]
+        if len(matches) != 1:
+            raise ValueError("inheritance relation has no matching inheritance row")
+        return
+
+    assert relation.via_member_id is not None
+    member = members_by_id[relation.via_member_id]
+    if relation.kind is SqlAlchemyRelationKind.FOREIGN_KEY:
+        if not (
+            isinstance(member, SqlAlchemyForeignKeyRow)
+            and member.owner_id == relation.source_id
+            and member.target == relation.target
+            and member.source == relation.source
+        ):
+            raise ValueError("foreign-key relation member is inconsistent")
+        return
+    if relation.kind is SqlAlchemyRelationKind.RELATIONSHIP:
+        if not (
+            isinstance(member, SqlAlchemyRelationshipRow)
+            and member.owner_id == relation.source_id
+            and member.target == relation.target
+            and member.name == relation.role
+            and member.source == relation.source
+        ):
+            raise ValueError("relationship relation member is inconsistent")
+        return
+
+    if not isinstance(member, SqlAlchemyAssociationTableRow):
+        raise ValueError("association relation member is inconsistent")
+    relationship = members_by_id.get(member.relationship_member_id)
+    if not (
+        member.owner_id == relation.target.id
+        and member.source_table.id == relation.source_id
+        and member.name == relation.role
+        and member.source == relation.source
+        and isinstance(relationship, SqlAlchemyRelationshipRow)
+        and relationship.owner_id == relation.source_id
+        and relationship.name == member.name
+        and relationship.target == member.relationship_target
+        and relationship.secondary is not None
+        and relationship.secondary.resolution is SqlAlchemyTargetResolution.INTERNAL
+        and relationship.secondary.id == member.owner_id
+    ):
+        raise ValueError("association relation member is inconsistent")
+
+
 @dataclass(frozen=True, slots=True)
 class SqlAlchemySnapshot:
     entities: tuple[SqlAlchemyTable, ...]
@@ -1627,15 +1763,12 @@ class SqlAlchemySnapshot:
             raise ValueError("SQLAlchemy relation ids are not unique")
         entity_ids = {value.id for value in self.entities}
         member_ids = {value.id for value in self.members}
+        members_by_id = {value.id: value for value in self.members}
         if any(value.owner_id not in entity_ids for value in self.members):
             raise ValueError("SQLAlchemy row owner is absent from the snapshot")
         if any(value.source_id not in entity_ids for value in self.relations):
             raise ValueError("SQLAlchemy relation source is absent from the snapshot")
-        if any(
-            value.target.resolution is SqlAlchemyTargetResolution.INTERNAL
-            and value.target.id not in entity_ids
-            for value in self.relations
-        ):
+        if any(value.target.id not in entity_ids for value in self.relations):
             raise ValueError("SQLAlchemy internal relation target is absent from the snapshot")
         if any(
             value.via_member_id is not None and value.via_member_id not in member_ids
@@ -1646,6 +1779,34 @@ class SqlAlchemySnapshot:
             raise ValueError("SQLAlchemy selected-entity coverage is inconsistent")
         if self.coverage.redaction.redacted_values != redacted_value_count(self.members):
             raise ValueError("SQLAlchemy redaction coverage is inconsistent")
+        for relation in self.relations:
+            _validate_relation_member(relation, members_by_id)
+        if not self.partial_safe:
+            if self.coverage.failed_files:
+                raise ValueError("complete SQLAlchemy snapshot cannot carry failed files")
+            if self.coverage.unknown_declarations:
+                raise ValueError("complete SQLAlchemy snapshot cannot carry unknown declarations")
+            if self.diagnostics:
+                raise ValueError("complete SQLAlchemy snapshot cannot carry diagnostics")
+            if any(
+                item.direction is SqlAlchemyFrontierDirection.FAILURE
+                for item in self.coverage.frontier
+            ):
+                raise ValueError("complete SQLAlchemy snapshot cannot carry a failure frontier")
+            if any(
+                item.direction
+                not in {
+                    SqlAlchemyFrontierDirection.UPSTREAM,
+                    SqlAlchemyFrontierDirection.DOWNSTREAM,
+                }
+                or item.reason is not SqlAlchemyFrontierReason.DEPTH_LIMIT
+                for item in self.coverage.frontier
+            ):
+                raise ValueError(
+                    "complete SQLAlchemy snapshot frontier must be a depth-limit frontier"
+                )
+            if any(_row_has_unknown_value(row) for row in self.members):
+                raise ValueError("complete snapshot contains an unknown SQLAlchemy value")
 
 
 def table_sort_key(value: SqlAlchemyTable) -> tuple[object, ...]:

@@ -332,6 +332,35 @@ def test_class_target_ambiguity_never_selects_a_winner() -> None:
     )
 
 
+def test_duplicate_source_class_target_is_ambiguous_without_whole_fallback() -> None:
+    analysis = _analysis(
+        {
+            "models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+class Base(DeclarativeBase): pass
+class User(Base): __tablename__ = "users"
+class User(Base): __tablename__ = "users"
+"""
+        }
+    )
+
+    result = _select(analysis, ClassTarget("models.User"))
+
+    assert result.status is DomainStatus.INCOMPLETE
+    assert result.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE
+    assert result.snapshot is None
+    assert [diagnostic.code for diagnostic in result.diagnostics].count(
+        DiagnosticCode.SA_TARGET_AMBIGUOUS
+    ) == 1
+    assert [diagnostic.code for diagnostic in result.diagnostics].count(
+        DiagnosticCode.SA_DECLARATIVE_BINDING
+    ) == 2
+    assert [diagnostic.code for diagnostic in result.diagnostics].count(
+        DiagnosticCode.SA_TABLE_COLLISION
+    ) == 1
+    assert result.coverage.selected_entities == 0
+
+
 def test_upstream_and_downstream_bfs_are_independent_and_report_depth_frontier() -> None:
     analysis = _analysis(
         {

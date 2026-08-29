@@ -179,3 +179,36 @@ def test_relationship_fixture_renders_only_selected_internal_er_graph() -> None:
     assert "this fixture must never execute" not in rendered
     assert "src/models.py" not in rendered
     assert render_plantuml(result.snapshot).decode("utf-8") == rendered
+
+
+def test_unknown_and_external_relationship_targets_never_create_public_edges() -> None:
+    content = b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    audit: Mapped[list["external.Audit"]] = relationship("external.Audit")
+    missing: Mapped["Missing"] = relationship("Missing")
+"""
+    source = SourceFile(
+        PurePosixPath("src/models.py"),
+        SourceFileKind.REGULAR,
+        None,
+        len(content),
+        hashlib.sha256(content).hexdigest(),
+        content,
+    )
+    result = SqlAlchemySnapshotAnalyzer().analyze(
+        PythonSourceIndex.build(
+            SourceView(None, (source,), (), "0" * 64),
+            PythonConfig(("src",), ("**/*.py",), ()),
+        )
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.relations == ()
+    assert result.snapshot.partial_safe is True
+    assert [item.code.value for item in result.snapshot.diagnostics] == [
+        "CSV-SA-009",
+        "CSV-SA-010",
+    ]

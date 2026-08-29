@@ -274,7 +274,7 @@ class Child(Base):
         relation.kind
         for relation in result.snapshot.relations
         if relation.kind is SqlAlchemyRelationKind.RELATIONSHIP
-    ] == [SqlAlchemyRelationKind.RELATIONSHIP] * 3
+    ] == [SqlAlchemyRelationKind.RELATIONSHIP] * 2
     assert result.snapshot.coverage.redaction.redacted_values == 4
     assert result.snapshot.partial_safe is False
     assert "never-publish-join" not in repr(result.snapshot)
@@ -319,9 +319,121 @@ class User(Base):
     assert relationships["dynamic"].secondary is not None
     assert relationships["dynamic"].secondary.resolution is SqlAlchemyTargetResolution.UNKNOWN
     codes = [item.code.value for item in result.snapshot.diagnostics]
-    assert codes.count("CSV-SA-009") == 3
+    assert codes.count("CSV-SA-009") == 4
     assert codes.count("CSV-SA-010") == 2
     assert result.snapshot.coverage.unknown_declarations == 4
+    assert result.snapshot.partial_safe is True
+
+
+def test_unknown_type_target_and_cardinality_are_partial_with_failure_frontier() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+class Base(DeclarativeBase): pass
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column()
+    dynamic = mapped_column(type_factory())
+    missing: Mapped["Missing"] = relationship("Missing")
+    cardinality = relationship("external.Target")
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert {row.name for row in result.snapshot.members} == {
+        "cardinality",
+        "dynamic",
+        "id",
+        "missing",
+    }
+    assert [item.code.value for item in result.snapshot.diagnostics].count("CSV-SA-009") == 3
+    assert [item.code.value for item in result.snapshot.diagnostics].count("CSV-SA-010") == 1
+    assert result.snapshot.coverage.unknown_declarations == 3
+    assert result.snapshot.partial_safe is True
+    assert all(item.direction.value == "failure" for item in result.snapshot.coverage.frontier)
+
+
+def test_closed_outer_call_grammar_omits_each_offending_row_once() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import CheckConstraint, Computed, ForeignKey, Identity, Index, Integer
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase): pass
+
+class Item(Base):
+    __tablename__ = "items"
+    __table_args__ = (
+        CheckConstraint(*checks),
+        Index("ix_dynamic", *terms),
+    )
+    id: Mapped[int] = mapped_column()
+    starred = mapped_column(*parts)
+    keyword_star = mapped_column(**options)
+    type_after_special = mapped_column(ForeignKey("parents.id"), Integer)
+    duplicate_computed = mapped_column(Integer, Computed("first"), Computed("second"))
+    duplicate_identity = mapped_column(Integer, Identity(), Identity())
+"""
+        }
+    )
+
+    assert [row.name for row in result.snapshot.members] == ["id"]
+    codes = [item.code.value for item in result.snapshot.diagnostics]
+    assert codes == ["CSV-SA-009"] * 7
+    assert result.snapshot.coverage.unknown_declarations == 7
+    assert len(result.snapshot.coverage.frontier) == 7
+    assert result.snapshot.partial_safe is True
+
+
+def test_unsupported_table_call_consumes_nested_construction_calls_once() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column, ForeignKey, Integer, Table
+
+users = Table(
+    "users",
+    object(),
+    Column("account_id", Integer, ForeignKey("accounts.id")),
+    autoload_with=engine,
+)
+"""
+        }
+    )
+
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert len(result.snapshot.coverage.frontier) == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_duplicate_source_class_declarations_remain_ambiguous_without_a_winner() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+class Base(DeclarativeBase): pass
+class User(Base): __tablename__ = "users_one"
+class User(Base): __tablename__ = "users_two"
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users_one", "users_two"]
+    assert all(
+        [source.symbol for source in table.mapping_sources] == ["models.User"]
+        for table in result.snapshot.entities
+    )
+    assert [item.code.value for item in result.snapshot.diagnostics] == [
+        "CSV-SA-006",
+        "CSV-SA-006",
+    ]
     assert result.snapshot.partial_safe is True
 
 

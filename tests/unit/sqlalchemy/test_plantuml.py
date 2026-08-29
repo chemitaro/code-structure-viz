@@ -8,7 +8,11 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyCheckRow,
     SqlAlchemyColumnRow,
     SqlAlchemyCoverage,
+    SqlAlchemyCoverageFrontier,
     SqlAlchemyForeignKeyRow,
+    SqlAlchemyFrontierDirection,
+    SqlAlchemyFrontierKind,
+    SqlAlchemyFrontierReason,
     SqlAlchemyIndexRow,
     SqlAlchemyIndexTerm,
     SqlAlchemyInheritanceRow,
@@ -39,6 +43,7 @@ from code_structure_viz.adapters.sqlalchemy.plantuml import (
     escape_plantuml_label,
     render_plantuml,
 )
+from code_structure_viz.core.diagnostics import DiagnosticCode, diagnostic
 
 
 def _location(line: int = 1) -> SqlAlchemySourceLocation:
@@ -75,10 +80,33 @@ def _snapshot(
     relations: tuple[SqlAlchemyRelation, ...] = (),
     *,
     association_tables: int = 0,
+    unknown_declarations: int = 0,
 ) -> SqlAlchemySnapshot:
     typed_members = tuple(sorted(members, key=row_sort_key))
     redacted_values = redacted_value_count(typed_members)
     canonical_entities = tuple(sorted(entities, key=table_sort_key))
+    occurrence_symbols = tuple(
+        f"sqlalchemy:occurrence:{index:064x}" for index in range(1, unknown_declarations + 1)
+    )
+    frontier = tuple(
+        SqlAlchemyCoverageFrontier(
+            SqlAlchemyFrontierDirection.FAILURE,
+            SqlAlchemyFrontierKind.ROW,
+            symbol,
+            SqlAlchemyFrontierReason.UNSUPPORTED_PATTERN,
+        )
+        for symbol in occurrence_symbols
+    )
+    diagnostics = tuple(
+        diagnostic(
+            DiagnosticCode.SA_ROW_UNREPRESENTABLE,
+            domain="sqlalchemy",
+            path="src/DO_NOT_RENDER_secret.py",
+            symbol=symbol,
+            line=index,
+        )
+        for index, symbol in enumerate(occurrence_symbols, start=1)
+    )
     coverage = SqlAlchemyCoverage(
         candidate_files=1 if canonical_entities else 0,
         parsed_files=1 if canonical_entities else 0,
@@ -88,8 +116,8 @@ def _snapshot(
         mapped_classes=len(canonical_entities),
         association_tables=association_tables,
         selected_entities=len(canonical_entities),
-        unknown_declarations=0,
-        frontier=(),
+        unknown_declarations=unknown_declarations,
+        frontier=frontier,
         redaction=SqlAlchemyRedactionSummary.create(redacted_values),
     )
     return SqlAlchemySnapshot(
@@ -97,8 +125,8 @@ def _snapshot(
         typed_members,
         tuple(sorted(relations, key=relation_sort_key)),
         coverage,
-        (),
-        False,
+        diagnostics,
+        bool(unknown_declarations),
     )
 
 
@@ -308,6 +336,7 @@ def test_renderer_uses_all_closed_row_templates_and_four_relation_arrows() -> No
         members,
         relations,
         association_tables=1,
+        unknown_declarations=2,
     )
 
     rendered = render_plantuml(snapshot).decode()

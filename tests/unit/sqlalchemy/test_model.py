@@ -7,10 +7,15 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     IndexTermKind,
     RedactedExpression,
     RedactedExpressionCategory,
+    SqlAlchemyAssociationTableRow,
     SqlAlchemyCardinality,
     SqlAlchemyCheckRow,
     SqlAlchemyColumnRow,
     SqlAlchemyCoverage,
+    SqlAlchemyCoverageFrontier,
+    SqlAlchemyFrontierDirection,
+    SqlAlchemyFrontierKind,
+    SqlAlchemyFrontierReason,
     SqlAlchemyIndexRow,
     SqlAlchemyIndexTerm,
     SqlAlchemyInternalDeclarationSpan,
@@ -19,6 +24,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyRedactionSummary,
     SqlAlchemyRelation,
     SqlAlchemyRelationKind,
+    SqlAlchemyRelationshipRow,
     SqlAlchemyRelationTarget,
     SqlAlchemyRowEvidence,
     SqlAlchemyRowKind,
@@ -37,6 +43,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     sqlalchemy_relation_id,
     sqlalchemy_row_id,
     sqlalchemy_table_id,
+    table_sort_key,
 )
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
 
@@ -206,6 +213,110 @@ def test_row_and_relation_id_preimages_exclude_source_and_display_fields() -> No
         source=first.source,
     )
     assert relation.id == relation_id
+
+
+@pytest.mark.parametrize(
+    "reference",
+    (
+        "/private/secret.py",
+        "../secret.py",
+        "src/../secret.py",
+        "https://example.invalid/secret.py",
+        "urn:private:secret.py",
+        "C:/secret.py",
+        r"src\secret.py",
+        "raw secret",
+        "sqlalchemy:binding:models",
+        "row\x00secret",
+    ),
+)
+def test_frontier_reference_rejects_private_path_and_raw_spellings(reference: str) -> None:
+    with pytest.raises(ValueError, match="frontier reference"):
+        SqlAlchemyCoverageFrontier(
+            SqlAlchemyFrontierDirection.FAILURE,
+            SqlAlchemyFrontierKind.ROW,
+            reference,
+            SqlAlchemyFrontierReason.UNSUPPORTED_PATTERN,
+        )
+
+
+def test_frontier_reference_accepts_closed_path_symbol_and_semantic_id_shapes() -> None:
+    table = _table()
+    column = SqlAlchemyColumnRow.create(
+        owner_id=table.id,
+        name="id",
+        source=_location(),
+        type=_integer_type(),
+    )
+    occurrence = sqlalchemy_occurrence_diagnostic_symbol(
+        table.id,
+        SqlAlchemyRowKind.COLUMN,
+        "models.py",
+        _span(),
+    )
+
+    for reference in (
+        "models.py",
+        "src/models.py",
+        "models.User",
+        "module:models",
+        "class:models.User",
+        table.id,
+        column.id,
+        occurrence,
+    ):
+        assert (
+            SqlAlchemyCoverageFrontier(
+                SqlAlchemyFrontierDirection.FAILURE,
+                SqlAlchemyFrontierKind.ROW,
+                reference,
+                SqlAlchemyFrontierReason.UNSUPPORTED_PATTERN,
+            ).reference
+            == reference
+        )
+
+
+def test_relation_kind_matrix_requires_internal_targets_and_exact_role_shape() -> None:
+    source = _table(name="source")
+    target = _table(name="target")
+    column = SqlAlchemyColumnRow.create(
+        owner_id=source.id,
+        name="target_id",
+        source=_location(),
+        type=_integer_type(),
+    )
+    internal = SqlAlchemyRelationTarget.internal_table(target)
+
+    with pytest.raises(ValueError, match="internal target"):
+        SqlAlchemyRelation.create(
+            kind=SqlAlchemyRelationKind.FOREIGN_KEY,
+            source_id=source.id,
+            target=SqlAlchemyRelationTarget.external_table(
+                schema_name=None,
+                table_name="external",
+            ),
+            via_member_id=column.id,
+            role=None,
+            source=column.source,
+        )
+    with pytest.raises(ValueError, match="role"):
+        SqlAlchemyRelation.create(
+            kind=SqlAlchemyRelationKind.FOREIGN_KEY,
+            source_id=source.id,
+            target=internal,
+            via_member_id=column.id,
+            role="target",
+            source=column.source,
+        )
+    with pytest.raises(ValueError, match="role"):
+        SqlAlchemyRelation.create(
+            kind=SqlAlchemyRelationKind.RELATIONSHIP,
+            source_id=source.id,
+            target=internal,
+            via_member_id=column.id,
+            role=None,
+            source=column.source,
+        )
 
 
 def test_occurrence_symbol_uses_full_internal_span_and_distinguishes_same_line_siblings() -> None:
@@ -378,6 +489,286 @@ def test_snapshot_requires_redaction_count_from_final_selected_rows() -> None:
                 frontier=(),
                 redaction=SqlAlchemyRedactionSummary.create(0),
             ),
+            (),
+            False,
+        )
+
+
+def test_snapshot_rejects_unknown_complete_payload_and_failure_frontier() -> None:
+    table = _table()
+    unknown = SqlAlchemyColumnRow.create(
+        owner_id=table.id,
+        name="dynamic",
+        source=_location(),
+        type=SqlAlchemyTypeDescriptor(
+            SqlAlchemyTypeCategory.UNKNOWN,
+            None,
+            RedactedExpression.absent(),
+        ),
+    )
+    base_coverage = SqlAlchemyCoverage(
+        candidate_files=1,
+        parsed_files=1,
+        failed_files=(),
+        evidence_files=("models.py",),
+        selected_modules=("models",),
+        mapped_classes=1,
+        association_tables=0,
+        selected_entities=1,
+        unknown_declarations=0,
+        frontier=(),
+        redaction=SqlAlchemyRedactionSummary.create(0),
+    )
+
+    with pytest.raises(ValueError, match="unknown SQLAlchemy value"):
+        SqlAlchemySnapshot((table,), (unknown,), (), base_coverage, (), False)
+
+    failure = SqlAlchemyCoverageFrontier(
+        SqlAlchemyFrontierDirection.FAILURE,
+        SqlAlchemyFrontierKind.TABLE,
+        table.id,
+        SqlAlchemyFrontierReason.UNSUPPORTED_PATTERN,
+    )
+    with pytest.raises(ValueError, match="failure frontier"):
+        SqlAlchemySnapshot(
+            (table,),
+            (),
+            (),
+            SqlAlchemyCoverage(
+                candidate_files=1,
+                parsed_files=1,
+                failed_files=(),
+                evidence_files=("models.py",),
+                selected_modules=("models",),
+                mapped_classes=1,
+                association_tables=0,
+                selected_entities=1,
+                unknown_declarations=0,
+                frontier=(failure,),
+                redaction=SqlAlchemyRedactionSummary.create(0),
+            ),
+            (),
+            False,
+        )
+
+    depth = SqlAlchemyCoverageFrontier(
+        SqlAlchemyFrontierDirection.UPSTREAM,
+        SqlAlchemyFrontierKind.TABLE,
+        table.id,
+        SqlAlchemyFrontierReason.DEPTH_LIMIT,
+    )
+    complete = SqlAlchemySnapshot(
+        (table,),
+        (),
+        (),
+        SqlAlchemyCoverage(
+            candidate_files=1,
+            parsed_files=1,
+            failed_files=(),
+            evidence_files=("models.py",),
+            selected_modules=("models",),
+            mapped_classes=1,
+            association_tables=0,
+            selected_entities=1,
+            unknown_declarations=0,
+            frontier=(depth,),
+            redaction=SqlAlchemyRedactionSummary.create(0),
+        ),
+        (),
+        False,
+    )
+    assert complete.coverage.frontier == (depth,)
+
+    unsupported = SqlAlchemyCoverageFrontier(
+        SqlAlchemyFrontierDirection.UPSTREAM,
+        SqlAlchemyFrontierKind.TABLE,
+        table.id,
+        SqlAlchemyFrontierReason.UNSUPPORTED_PATTERN,
+    )
+    with pytest.raises(ValueError, match="depth-limit frontier"):
+        SqlAlchemySnapshot(
+            (table,),
+            (),
+            (),
+            SqlAlchemyCoverage(
+                candidate_files=1,
+                parsed_files=1,
+                failed_files=(),
+                evidence_files=("models.py",),
+                selected_modules=("models",),
+                mapped_classes=1,
+                association_tables=0,
+                selected_entities=1,
+                unknown_declarations=0,
+                frontier=(unsupported,),
+                redaction=SqlAlchemyRedactionSummary.create(0),
+            ),
+            (),
+            False,
+        )
+
+
+@pytest.mark.parametrize(
+    "direction",
+    (
+        SqlAlchemyFrontierDirection.UPSTREAM,
+        SqlAlchemyFrontierDirection.DOWNSTREAM,
+    ),
+)
+def test_complete_snapshot_rejects_non_depth_directional_frontier(
+    direction: SqlAlchemyFrontierDirection,
+) -> None:
+    table = _table()
+    frontier = SqlAlchemyCoverageFrontier(
+        direction,
+        SqlAlchemyFrontierKind.TABLE,
+        table.id,
+        SqlAlchemyFrontierReason.UNRESOLVED_REFERENCE,
+    )
+
+    with pytest.raises(ValueError, match="depth-limit frontier"):
+        SqlAlchemySnapshot(
+            (table,),
+            (),
+            (),
+            SqlAlchemyCoverage(
+                candidate_files=1,
+                parsed_files=1,
+                failed_files=(),
+                evidence_files=("models.py",),
+                selected_modules=("models",),
+                mapped_classes=1,
+                association_tables=0,
+                selected_entities=1,
+                unknown_declarations=0,
+                frontier=(frontier,),
+                redaction=SqlAlchemyRedactionSummary.create(0),
+            ),
+            (),
+            False,
+        )
+
+
+def test_snapshot_rejects_via_member_kind_and_role_mismatch() -> None:
+    source = _table(name="source")
+    target = _table(name="target")
+    target_descriptor = SqlAlchemyRelationTarget.internal_table(target)
+    column = SqlAlchemyColumnRow.create(
+        owner_id=source.id,
+        name="target_id",
+        source=_location(),
+        type=_integer_type(),
+    )
+    relationship = SqlAlchemyRelationshipRow.create(
+        owner_id=source.id,
+        name="target",
+        source=_location(line=2),
+        target=target_descriptor,
+        cardinality=SqlAlchemyCardinality.SCALAR,
+        uselist=False,
+        back_populates=None,
+        secondary=None,
+    )
+    coverage = SqlAlchemyCoverage(
+        candidate_files=1,
+        parsed_files=1,
+        failed_files=(),
+        evidence_files=("models.py",),
+        selected_modules=("models",),
+        mapped_classes=2,
+        association_tables=0,
+        selected_entities=2,
+        unknown_declarations=0,
+        frontier=(),
+        redaction=SqlAlchemyRedactionSummary.create(0),
+    )
+    wrong_kind = SqlAlchemyRelation.create(
+        kind=SqlAlchemyRelationKind.FOREIGN_KEY,
+        source_id=source.id,
+        target=target_descriptor,
+        via_member_id=column.id,
+        role=None,
+        source=column.source,
+    )
+    wrong_role = SqlAlchemyRelation.create(
+        kind=SqlAlchemyRelationKind.RELATIONSHIP,
+        source_id=source.id,
+        target=target_descriptor,
+        via_member_id=relationship.id,
+        role="other",
+        source=relationship.source,
+    )
+
+    with pytest.raises(ValueError, match="foreign-key relation member"):
+        SqlAlchemySnapshot(
+            tuple(sorted((source, target), key=table_sort_key)),
+            tuple(sorted((column, relationship), key=row_sort_key)),
+            (wrong_kind,),
+            coverage,
+            (),
+            False,
+        )
+    with pytest.raises(ValueError, match="relationship relation member"):
+        SqlAlchemySnapshot(
+            tuple(sorted((source, target), key=table_sort_key)),
+            tuple(sorted((column, relationship), key=row_sort_key)),
+            (wrong_role,),
+            coverage,
+            (),
+            False,
+        )
+
+
+def test_snapshot_rejects_association_marker_role_mismatch() -> None:
+    source = _table(name="source")
+    target = _table(name="target")
+    secondary = _table(name="secondary")
+    relationship = SqlAlchemyRelationshipRow.create(
+        owner_id=source.id,
+        name="targets",
+        source=_location(),
+        target=SqlAlchemyRelationTarget.internal_table(target),
+        cardinality=SqlAlchemyCardinality.MANY,
+        uselist=True,
+        back_populates=None,
+        secondary=SqlAlchemyRelationTarget.internal_table(secondary),
+    )
+    marker = SqlAlchemyAssociationTableRow.create(
+        owner_id=secondary.id,
+        name="targets",
+        source=_location(line=2),
+        source_table=SqlAlchemyRelationTarget.internal_table(source),
+        relationship_target=SqlAlchemyRelationTarget.internal_table(target),
+        relationship_member_id=relationship.id,
+    )
+    relation = SqlAlchemyRelation.create(
+        kind=SqlAlchemyRelationKind.ASSOCIATION,
+        source_id=source.id,
+        target=SqlAlchemyRelationTarget.internal_table(secondary),
+        via_member_id=marker.id,
+        role="other",
+        source=marker.source,
+    )
+    coverage = SqlAlchemyCoverage(
+        candidate_files=1,
+        parsed_files=1,
+        failed_files=(),
+        evidence_files=("models.py",),
+        selected_modules=("models",),
+        mapped_classes=3,
+        association_tables=1,
+        selected_entities=3,
+        unknown_declarations=0,
+        frontier=(),
+        redaction=SqlAlchemyRedactionSummary.create(0),
+    )
+
+    with pytest.raises(ValueError, match="association relation member"):
+        SqlAlchemySnapshot(
+            tuple(sorted((source, target, secondary), key=table_sort_key)),
+            tuple(sorted((relationship, marker), key=row_sort_key)),
+            (relation,),
+            coverage,
             (),
             False,
         )

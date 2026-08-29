@@ -894,6 +894,21 @@
         }
       ]
     },
+    "sqlalchemy_frontier_reference": {
+      "type": "string",
+      "anyOf": [
+        {
+          "pattern": "^sqlalchemy:(?:table|row|relation|occurrence):[0-9a-f]{64}$"
+        },
+        {
+          "pattern": "^(?:module|class):[^\\W\\d]\\w*(?:\\.[^\\W\\d]\\w*)*$"
+        },
+        {"pattern": "^[^\\W\\d]\\w*(?:\\.[^\\W\\d]\\w*)*$"},
+        {
+          "pattern": "^(?!/)(?!~)(?![A-Za-z][A-Za-z0-9+.-]*:)(?!\\.{1,2}/)(?!.*(?:/\\.{1,2}/))(?!.*//)(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+\\.py$"
+        }
+      ]
+    },
     "sqlalchemy_frontier": {
       "type": "object",
       "additionalProperties": false,
@@ -901,7 +916,7 @@
       "properties": {
         "direction": {"enum": ["upstream", "downstream", "failure"]},
         "kind": {"enum": ["file", "module", "class", "table", "row", "relation"]},
-        "reference": {"type": "string", "minLength": 1},
+        "reference": {"$ref": "#/$defs/sqlalchemy_frontier_reference"},
         "reason": {
           "enum": [
             "depth_limit",
@@ -1252,7 +1267,19 @@
                   "properties": {
                     "failed_files": {"maxItems": 0},
                     "unknown_declarations": {"const": 0},
-                    "frontier": {"maxItems": 0}
+                    "frontier": {
+                      "items": {
+                        "allOf": [
+                          {"$ref": "#/$defs/sqlalchemy_frontier"},
+                          {
+                            "properties": {
+                              "direction": {"enum": ["upstream", "downstream"]},
+                              "reason": {"const": "depth_limit"}
+                            }
+                          }
+                        ]
+                      }
+                    }
                   }
                 }
               },

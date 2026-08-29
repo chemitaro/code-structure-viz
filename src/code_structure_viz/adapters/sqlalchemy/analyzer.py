@@ -494,7 +494,6 @@ class SqlAlchemySnapshotAnalyzer:
                         line=_line(statement),
                         kind=SqlAlchemyFrontierKind.CLASS,
                     )
-                    continue
                 values.append(_ClassDeclaration(module, statement, symbol))
         return values
 
@@ -517,25 +516,36 @@ class SqlAlchemySnapshotAnalyzer:
                 classic_bases.add(f"{module.module}.{target.id}")
                 state.supported(module, statement.value)
 
-        proven: dict[str, _ClassDeclaration] = {}
+        proven: list[_ClassDeclaration] = []
+        proven_nodes: set[int] = set()
+        proven_symbols: set[str] = set()
         bound = set(classic_bases)
         for _ in range(len(classes) + 1):
             changed = False
             for declaration in classes:
-                if declaration.symbol in proven:
+                if id(declaration.node) in proven_nodes:
                     continue
                 bases = tuple(
                     _resolve_symbol(base, declaration.module) for base in declaration.node.bases
                 )
                 if "sqlalchemy.orm.DeclarativeBase" in bases or any(
-                    base in bound or base in proven for base in bases if base is not None
+                    base in bound or base in proven_symbols for base in bases if base is not None
                 ):
-                    proven[declaration.symbol] = declaration
+                    proven.append(declaration)
+                    proven_nodes.add(id(declaration.node))
+                    proven_symbols.add(declaration.symbol)
                     state.supported(declaration.module)
                     changed = True
             if not changed:
                 break
-        return sorted(proven.values(), key=lambda item: _utf8(item.symbol)), classic_bases
+        return sorted(
+            proven,
+            key=lambda item: (
+                _utf8(item.symbol),
+                _utf8(item.module.path),
+                _line(item.node),
+            ),
+        ), classic_bases
 
     def _table_candidates(
         self,
@@ -600,7 +610,7 @@ class SqlAlchemySnapshotAnalyzer:
                     isinstance(table_value, ast.Call)
                     and _resolve_call(table_value, declaration.module) == "sqlalchemy.Table"
                 ):
-                    origin = f"class-table:{declaration.symbol}"
+                    origin = _class_candidate_origin("class-table", declaration)
                     direct_candidate = self._candidate_from_table_call(
                         declaration.module,
                         table_value,
@@ -628,7 +638,7 @@ class SqlAlchemySnapshotAnalyzer:
                     self._unknown_table(declaration, state)
                     continue
             elif tablename is not None:
-                origin = f"class:{declaration.symbol}"
+                origin = _class_candidate_origin("class", declaration)
                 candidate = _TableCandidate(origin, schema_from_args, tablename)
                 candidates[origin] = candidate
                 linked_origin = origin
@@ -707,7 +717,7 @@ class SqlAlchemySnapshotAnalyzer:
             ).append(candidate)
         tables: list[SqlAlchemyTable] = []
         surviving: dict[str, tuple[_TableCandidate, SqlAlchemyTable]] = {}
-        class_tables: dict[str, SqlAlchemyTable] = {}
+        class_table_candidates: dict[str, list[SqlAlchemyTable]] = {}
         collided: set[str] = set()
         for table_id in sorted(identity_groups, key=_utf8):
             group = identity_groups[table_id]
@@ -739,7 +749,12 @@ class SqlAlchemySnapshotAnalyzer:
             tables.append(table)
             surviving[candidate.origin] = (candidate, table)
             for declaration in candidate.classes:
-                class_tables[declaration.symbol] = table
+                class_table_candidates.setdefault(declaration.symbol, []).append(table)
+        class_tables = {
+            symbol: values[0]
+            for symbol, values in class_table_candidates.items()
+            if len(values) == 1
+        }
         return tables, surviving, class_tables, collided
 
     def _extract_rows(
@@ -856,6 +871,14 @@ class SqlAlchemySnapshotAnalyzer:
                                 state,
                             ),
                         )
+                        if row.type.category is SqlAlchemyTypeCategory.UNKNOWN:
+                            self._unknown_row(
+                                declaration.module,
+                                table,
+                                SqlAlchemyRowKind.COLUMN,
+                                statement,
+                                state,
+                            )
                         rows.append(SqlAlchemyRowEvidence(row, _span(statement)))
                         known_columns.add(name)
                         state.supported(declaration.module)
@@ -976,37 +999,37 @@ class SqlAlchemySnapshotAnalyzer:
             order_by=_redacted(keywords.get("order_by"), module, state),
             foreign_keys=_redacted(keywords.get("foreign_keys"), module, state),
         )
-        if row_unrepresentable:
+        if any(
+            value.category is RedactedExpressionCategory.UNKNOWN
+            for value in (
+                relationship.primaryjoin,
+                relationship.secondaryjoin,
+                relationship.order_by,
+                relationship.foreign_keys,
+            )
+        ):
+            row_unrepresentable = True
+        if row_unrepresentable or unresolved_target:
             self._unknown_row(module, table, SqlAlchemyRowKind.RELATIONSHIP, call, state)
         if unresolved_target:
             symbol = f"{declaration.symbol}.{name}"
-            if row_unrepresentable:
-                state.diagnostics.append(
-                    diagnostic(
-                        DiagnosticCode.SA_RELATION_TARGET,
-                        domain="sqlalchemy",
-                        path=module.path,
-                        symbol=symbol,
-                        line=_line(call),
-                    )
-                )
-                state.frontier.append(
-                    SqlAlchemyCoverageFrontier(
-                        SqlAlchemyFrontierDirection.FAILURE,
-                        SqlAlchemyFrontierKind.RELATION,
-                        relationship.id,
-                        SqlAlchemyFrontierReason.UNRESOLVED_REFERENCE,
-                    )
-                )
-            else:
-                state.unknown(
-                    module=module,
-                    code=DiagnosticCode.SA_RELATION_TARGET,
+            state.diagnostics.append(
+                diagnostic(
+                    DiagnosticCode.SA_RELATION_TARGET,
+                    domain="sqlalchemy",
+                    path=module.path,
                     symbol=symbol,
                     line=_line(call),
-                    kind=SqlAlchemyFrontierKind.RELATION,
-                    reference=relationship.id,
                 )
+            )
+            state.frontier.append(
+                SqlAlchemyCoverageFrontier(
+                    SqlAlchemyFrontierDirection.FAILURE,
+                    SqlAlchemyFrontierKind.RELATION,
+                    relationship.id,
+                    SqlAlchemyFrontierReason.UNRESOLVED_REFERENCE,
+                )
+            )
         return SqlAlchemyRowEvidence(relationship, _span(call))
 
     def _inheritance_rows(
@@ -1088,7 +1111,11 @@ class SqlAlchemySnapshotAnalyzer:
             "server_onupdate",
         }
         keywords = _keyword_map(call)
-        if keywords is None or any(name not in allowed_keywords for name in keywords):
+        if (
+            keywords is None
+            or any(isinstance(argument, ast.Starred) for argument in call.args)
+            or any(name not in allowed_keywords for name in keywords)
+        ):
             self._unknown_row(module, table, SqlAlchemyRowKind.COLUMN, call, state)
             return []
         arguments = list(call.args)
@@ -1112,16 +1139,24 @@ class SqlAlchemySnapshotAnalyzer:
 
         type_node: ast.expr | None = None
         special_calls: list[tuple[str, ast.Call]] = []
+        seen_special = False
         for argument in arguments:
             if isinstance(argument, ast.Call):
                 symbol = _resolve_call(argument, module)
                 if symbol in _COLUMN_SPECIALS:
                     special_calls.append((symbol, argument))
+                    seen_special = True
                     continue
-            if type_node is not None:
+            if seen_special or type_node is not None:
                 self._unknown_row(module, table, SqlAlchemyRowKind.COLUMN, call, state)
                 return []
             type_node = argument
+        if any(
+            sum(candidate == symbol for candidate, _ in special_calls) > 1
+            for symbol in ("sqlalchemy.Computed", "sqlalchemy.Identity")
+        ):
+            self._unknown_row(module, table, SqlAlchemyRowKind.COLUMN, call, state)
+            return []
         if type_node is None and annotation is not None:
             type_node = _mapped_inner(annotation, module)
         type_descriptor = _type_descriptor(type_node, module, state)
@@ -1148,6 +1183,19 @@ class SqlAlchemySnapshotAnalyzer:
             computed=_special_redaction(special_calls, "sqlalchemy.Computed", module, state),
             identity=_special_redaction(special_calls, "sqlalchemy.Identity", module, state),
         )
+        if column.type.category is SqlAlchemyTypeCategory.UNKNOWN or any(
+            value.category is RedactedExpressionCategory.UNKNOWN
+            for value in (
+                column.type.parameters,
+                column.default,
+                column.server_default,
+                column.onupdate,
+                column.server_onupdate,
+                column.computed,
+                column.identity,
+            )
+        ):
+            self._unknown_row(module, table, SqlAlchemyRowKind.COLUMN, call, state)
         span = _span(call)
         rows: list[SqlAlchemyRowEvidence] = [SqlAlchemyRowEvidence(column, span)]
         if flags["primary_key"] is True:
@@ -1214,24 +1262,31 @@ class SqlAlchemySnapshotAnalyzer:
         state: _State,
     ) -> list[SqlAlchemyRowEvidence]:
         symbol = _resolve_call(call, module)
+        constraint_kind = {
+            "sqlalchemy.PrimaryKeyConstraint": SqlAlchemyRowKind.PRIMARY_KEY,
+            "sqlalchemy.UniqueConstraint": SqlAlchemyRowKind.UNIQUE,
+            "sqlalchemy.CheckConstraint": SqlAlchemyRowKind.CHECK,
+            "sqlalchemy.Index": SqlAlchemyRowKind.INDEX,
+            "sqlalchemy.ForeignKeyConstraint": SqlAlchemyRowKind.FOREIGN_KEY,
+        }.get(symbol or "", SqlAlchemyRowKind.CHECK)
         state.supported(module, call)
         keywords = _keyword_map(call)
-        if keywords is None:
-            self._unknown_row(module, table, SqlAlchemyRowKind.CHECK, call, state)
+        if keywords is None or any(isinstance(argument, ast.Starred) for argument in call.args):
+            self._unknown_row(module, table, constraint_kind, call, state)
             return []
         source = _location(module, call)
         span = _span(call)
         if symbol in {"sqlalchemy.PrimaryKeyConstraint", "sqlalchemy.UniqueConstraint"}:
             if set(keywords) - {"name"}:
-                self._unknown_row(module, table, SqlAlchemyRowKind.PRIMARY_KEY, call, state)
+                self._unknown_row(module, table, constraint_kind, call, state)
                 return []
             name = _optional_static_name(keywords.get("name"))
             if "name" in keywords and name is _INVALID:
-                self._unknown_row(module, table, SqlAlchemyRowKind.PRIMARY_KEY, call, state)
+                self._unknown_row(module, table, constraint_kind, call, state)
                 return []
             columns = tuple(_column_reference(argument, known_columns) for argument in call.args)
             if not columns or any(column is None for column in columns):
-                self._unknown_row(module, table, SqlAlchemyRowKind.PRIMARY_KEY, call, state)
+                self._unknown_row(module, table, constraint_kind, call, state)
                 return []
             row: SqlAlchemyRow = (
                 SqlAlchemyPrimaryKeyRow.create(
@@ -1343,7 +1398,7 @@ class SqlAlchemySnapshotAnalyzer:
                     span,
                 )
             ]
-        self._unknown_row(module, table, SqlAlchemyRowKind.CHECK, call, state)
+        self._unknown_row(module, table, constraint_kind, call, state)
         return []
 
     def _inline_foreign_key(
@@ -1359,6 +1414,7 @@ class SqlAlchemySnapshotAnalyzer:
         keywords = _keyword_map(call)
         if (
             keywords is None
+            or any(isinstance(argument, ast.Starred) for argument in call.args)
             or len(call.args) != 1
             or set(keywords) - {"name", "ondelete", "onupdate"}
             or not isinstance(call.args[0], ast.Constant)
@@ -1423,6 +1479,8 @@ class SqlAlchemySnapshotAnalyzer:
                 role = row.name
             else:
                 continue
+            if target.resolution is not SqlAlchemyTargetResolution.INTERNAL:
+                continue
             relations.append(
                 SqlAlchemyRelation.create(
                     kind=kind,
@@ -1436,6 +1494,7 @@ class SqlAlchemySnapshotAnalyzer:
         return tuple(relations)
 
     def _unknown_table(self, declaration: _ClassDeclaration, state: _State) -> None:
+        _consume_construction_calls(declaration.module, declaration.node, state)
         state.unknown(
             module=declaration.module,
             code=DiagnosticCode.SA_TABLE_IDENTITY,
@@ -1451,7 +1510,7 @@ class SqlAlchemySnapshotAnalyzer:
         symbol: str,
         state: _State,
     ) -> None:
-        state.consumed_calls.add(id(call))
+        _consume_construction_calls(module, call, state)
         state.unknown(
             module=module,
             code=DiagnosticCode.SA_TABLE_IDENTITY,
@@ -1468,9 +1527,14 @@ class SqlAlchemySnapshotAnalyzer:
         node: ast.AST,
         state: _State,
     ) -> None:
-        if isinstance(node, ast.Call):
-            state.consumed_calls.add(id(node))
+        _consume_construction_calls(module, node, state)
         span = _span(node)
+        occurrence = sqlalchemy_occurrence_diagnostic_symbol(
+            table.id,
+            kind,
+            module.path,
+            span,
+        )
         state.unknown_declarations += 1
         state.evidence_files.add(module.path)
         state.diagnostics.append(
@@ -1478,12 +1542,7 @@ class SqlAlchemySnapshotAnalyzer:
                 DiagnosticCode.SA_ROW_UNREPRESENTABLE,
                 domain="sqlalchemy",
                 path=module.path,
-                symbol=sqlalchemy_occurrence_diagnostic_symbol(
-                    table.id,
-                    kind,
-                    module.path,
-                    span,
-                ),
+                symbol=occurrence,
                 line=span.start_line,
             )
         )
@@ -1491,7 +1550,7 @@ class SqlAlchemySnapshotAnalyzer:
             SqlAlchemyCoverageFrontier(
                 SqlAlchemyFrontierDirection.FAILURE,
                 SqlAlchemyFrontierKind.ROW,
-                table.id,
+                occurrence,
                 SqlAlchemyFrontierReason.UNSUPPORTED_PATTERN,
             )
         )
@@ -1518,6 +1577,7 @@ class SqlAlchemySnapshotAnalyzer:
                     symbol=f"sqlalchemy:binding:{module.module}",
                     line=_line(node),
                     kind=SqlAlchemyFrontierKind.CLASS,
+                    reference=f"module:{module.module}",
                 )
 
 
@@ -1617,6 +1677,15 @@ def _special_assignments(
     return result
 
 
+def _class_candidate_origin(prefix: str, declaration: _ClassDeclaration) -> str:
+    span = _span(declaration.node)
+    return (
+        f"{prefix}:{declaration.symbol}:{declaration.module.path}:"
+        f"{span.start_line}:{span.start_utf8_byte_column}:"
+        f"{span.end_line}:{span.end_utf8_byte_column}"
+    )
+
+
 def _parse_table_args(
     value: ast.expr,
     module: _ParsedModule,
@@ -1689,6 +1758,22 @@ def _keyword_map(value: ast.Call) -> dict[str, ast.expr] | None:
             return None
         result[keyword.arg] = keyword.value
     return result
+
+
+def _consume_construction_calls(
+    module: _ParsedModule,
+    value: ast.AST,
+    state: _State,
+) -> None:
+    for node in ast.walk(value):
+        if not isinstance(node, ast.Call):
+            continue
+        symbol = _resolve_call(node, module)
+        terminal = _terminal_name(node.func)
+        if symbol in _CONSTRUCTION_SYMBOLS or (
+            module.star_import and terminal in _CONSTRUCTION_TERMINALS
+        ):
+            state.consumed_calls.add(id(node))
 
 
 def _row_assignment(value: ast.stmt) -> tuple[str, ast.expr | None, ast.expr | None] | None:

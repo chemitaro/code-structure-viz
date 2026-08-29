@@ -181,6 +181,12 @@ def _resolve_target(
             if any(source.module == target.value for source in table.mapping_sources)
         )
     else:
+        duplicate_bindings = sum(
+            item.code is DiagnosticCode.SA_DECLARATIVE_BINDING and item.symbol == target.raw
+            for item in snapshot.diagnostics
+        )
+        if duplicate_bindings > 1:
+            return frozenset(), _TargetFailure(target, DiagnosticCode.SA_TARGET_AMBIGUOUS)
         matches = frozenset(
             table.id
             for table in snapshot.entities

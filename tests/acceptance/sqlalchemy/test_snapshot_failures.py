@@ -62,7 +62,7 @@ def test_table_identity_collision_has_no_winner_and_no_payload(tmp_path: Path) -
     assert json.loads(result.stderr)["code"] == "CSV-SA-008"
 
 
-def test_duplicate_class_binding_is_payload_unavailable_without_fallback(
+def test_duplicate_class_target_is_ambiguous_without_fallback(
     tmp_path: Path,
 ) -> None:
     repository = tmp_path / "repo"
@@ -89,7 +89,7 @@ def test_duplicate_class_binding_is_payload_unavailable_without_fallback(
     assert sorted(path.name for path in output.iterdir()) == ["run-manifest.json"]
     diagnostics = [json.loads(line) for line in result.stderr.splitlines()]
     assert [item["code"] for item in diagnostics] == [
-        "CSV-SA-011",
+        "CSV-SA-012",
         "CSV-SA-006",
         "CSV-SA-006",
     ]

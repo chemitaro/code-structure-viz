@@ -277,6 +277,29 @@ class Safe(Base): __tablename__ = "safe"
     assert value["diagnostics"][0]["code"] == "CSV-SA-003"
 
 
+def test_unknown_selected_member_is_always_serialized_as_partial_safe() -> None:
+    source, snapshot = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase, mapped_column
+class Base(DeclarativeBase): pass
+class Safe(Base):
+    __tablename__ = "safe"
+    dynamic = mapped_column(type_factory())
+"""
+        }
+    )
+
+    value = json.loads(render_semantic_snapshot(snapshot, source, (), 0, 0))
+
+    assert value["status"] == "incomplete"
+    assert value["incomplete_kind"] == "partial_safe"
+    assert value["members"][0]["type"]["category"] == "unknown"
+    assert [item["code"] for item in value["diagnostics"]] == ["CSV-SA-009"]
+    assert value["coverage"]["unknown_declarations"] == 1
+    assert value["coverage"]["frontier"][0]["direction"] == "failure"
+
+
 def test_renderer_rejects_a_non_snapshot_payload() -> None:
     renderer = SqlAlchemySemanticJsonRenderer(
         source_view=SourceView(None, (), (), "c" * 64),

@@ -448,6 +448,25 @@ def test_semantic_schema_accepts_closed_sqlalchemy_snapshot_variants() -> None:
     complete["coverage"]["frontier"] = []
     validator.validate(complete)
 
+    complete_with_depth_frontier = deepcopy(complete)
+    complete_with_depth_frontier["coverage"]["frontier"] = [
+        {
+            "direction": "upstream",
+            "kind": "table",
+            "reference": complete["entities"][0]["id"],
+            "reason": "depth_limit",
+        }
+    ]
+    validator.validate(complete_with_depth_frontier)
+
+    complete_with_failure_frontier = deepcopy(complete_with_depth_frontier)
+    complete_with_failure_frontier["coverage"]["frontier"][0].update(
+        direction="failure",
+        reason="unsupported_pattern",
+    )
+    with pytest.raises(ValidationError):
+        validator.validate(complete_with_failure_frontier)
+
 
 def test_semantic_schema_rejects_unknown_sqlalchemy_values_from_complete_snapshot() -> None:
     validator = _validator("semantic-v1.schema.json")
@@ -504,8 +523,13 @@ def test_semantic_schema_rejects_unknown_sqlalchemy_values_from_complete_snapsho
         "../secret.py",
         "src/../secret.py",
         "https://example.invalid/secret",
+        "urn:private:secret.py",
         "C:/secret.py",
         "src\\secret.py",
+        "sqlalchemy:binding:models",
+        "raw secret",
+        "sqlalchemy:table:not-a-digest",
+        "module:bad/value",
         "row\u0000secret",
     ],
 )
@@ -729,14 +753,33 @@ def test_manifest_and_stream_schemas_accept_closed_sqlalchemy_cli_output(
 
     assert result.returncode == 0, result.stderr
     _validator("run-summary-v1.schema.json").validate(json.loads(result.stdout))
-    _validator("semantic-v1.schema.json").validate(
-        json.loads((output / "sqlalchemy.snapshot.semantic.json").read_bytes())
-    )
+    semantic = json.loads((output / "sqlalchemy.snapshot.semantic.json").read_bytes())
+    _validator("semantic-v1.schema.json").validate(semantic)
     manifest = json.loads((output / "run-manifest.json").read_bytes())
     validator = _validator("run-manifest-v1.schema.json")
     validator.validate(manifest)
 
+    depth_frontier = deepcopy(manifest)
+    depth_frontier["domains"][0]["coverage"]["frontier"] = [
+        {
+            "direction": "downstream",
+            "kind": "table",
+            "reference": semantic["entities"][0]["id"],
+            "reason": "depth_limit",
+        }
+    ]
+    validator.validate(depth_frontier)
+
     mutations = []
+    failure_frontier = deepcopy(depth_frontier)
+    failure_frontier["domains"][0]["coverage"]["frontier"][0].update(
+        direction="failure",
+        reason="unsupported_pattern",
+    )
+    mutations.append(failure_frontier)
+    unsafe_frontier = deepcopy(depth_frontier)
+    unsafe_frontier["domains"][0]["coverage"]["frontier"][0]["reference"] = "/private/secret.py"
+    mutations.append(unsafe_frontier)
     sql_diff = deepcopy(manifest)
     sql_diff["command"]["name"] = "diff"
     mutations.append(sql_diff)
