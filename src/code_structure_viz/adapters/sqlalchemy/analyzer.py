@@ -2017,6 +2017,8 @@ def _bind_module_statement(
     binding_owner: str | None = None,
 ) -> None:
     owner = binding_owner or module.module
+    if binding_owner is None:
+        _bind_attribute_module_alias_provenance(module, statement, ambiguous=ambiguous)
     if isinstance(statement, ast.Import):
         for alias in statement.names:
             local = alias.asname or alias.name.split(".", 1)[0]
@@ -2208,6 +2210,81 @@ def _clear_import_alias_provenance(
     module.import_alias_events.setdefault(symbol, []).append((position, None))
 
 
+def _bind_attribute_module_alias_provenance(
+    module: _ParsedModule,
+    statement: ast.AST,
+    *,
+    ambiguous: bool,
+) -> None:
+    targets = _attribute_write_targets(statement)
+    if not targets:
+        return
+    value: ast.expr | None = None
+    if isinstance(statement, ast.Assign) or (
+        isinstance(statement, ast.AnnAssign) and statement.value is not None
+    ):
+        value = statement.value
+    origins = (
+        _module_object_origins_before(module, value, statement)
+        if isinstance(value, (ast.Name, ast.Attribute))
+        else set()
+    )
+    for target in targets:
+        _bind_attribute_target_module_alias_provenance(
+            module,
+            target,
+            origins,
+            statement,
+            ambiguous=ambiguous,
+        )
+
+
+def _bind_attribute_target_module_alias_provenance(
+    module: _ParsedModule,
+    target: ast.expr,
+    origins: set[str],
+    statement: ast.AST,
+    *,
+    ambiguous: bool,
+) -> None:
+    if isinstance(target, ast.Attribute):
+        parents = _module_object_origins_before(module, target.value, statement)
+        position = _node_position(statement)
+        for parent in parents:
+            symbol = _normalize_symbol(f"{parent}.{target.attr}")
+            if not ambiguous:
+                module.imported_module_aliases.pop(symbol, None)
+                module.imported_module_alias_candidates.pop(symbol, None)
+                module.import_alias_definite_positions[symbol] = position
+                module.import_alias_events.setdefault(symbol, []).append((position, None))
+            if origins:
+                module.imported_module_alias_candidates.setdefault(symbol, set()).update(origins)
+                events = module.import_alias_events.setdefault(symbol, [])
+                events.extend(
+                    (position, origin)
+                    for origin in sorted(origins, key=_utf8)
+                    if (position, origin) not in events
+                )
+        return
+    if isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            _bind_attribute_target_module_alias_provenance(
+                module,
+                element,
+                set(),
+                statement,
+                ambiguous=ambiguous,
+            )
+    elif isinstance(target, ast.Starred):
+        _bind_attribute_target_module_alias_provenance(
+            module,
+            target.value,
+            set(),
+            statement,
+            ambiguous=ambiguous,
+        )
+
+
 def _alias_preserving_assignment_provenance(
     module: _ParsedModule,
     statement: ast.Assign | ast.AnnAssign | ast.AugAssign | ast.NamedExpr,
@@ -2323,6 +2400,10 @@ def _module_object_origins_before(
             for origin in _module_object_path_candidates(module, candidate)
             if _external_sqlalchemy_module_origin(module, origin)
             or origin in module.repository_module_origins
+            or (
+                origin in module.repository_modules
+                and _module_import_precedes(module, origin, statement)
+            )
         )
     return result
 
@@ -2827,6 +2908,8 @@ def _repository_module_object_origins(modules: list[_ParsedModule]) -> set[str]:
         if not owner.is_package:
             continue
         if name not in owner.bindings:
+            if "__getattr__" in owner.bindings:
+                continue
             result.add(symbol)
             continue
         if symbol in owner.imported_module_alias_candidates.get(symbol, ()):
@@ -3209,6 +3292,7 @@ def _resolve_repository_bindings(modules: list[_ParsedModule]) -> None:
                 raw_ambiguous,
                 set(),
                 traversed,
+                frozenset(module.imported_module_aliases.get(symbol, ())),
             )
             if traversed.isdisjoint(attribute_mutations):
                 canonical_bindings[symbol] = resolved
@@ -3248,6 +3332,7 @@ def _resolve_repository_origin(
     ambiguous_bindings: dict[str, dict[str, frozenset[str]]],
     seen: set[str],
     traversed: set[str],
+    explicit_module_origins: frozenset[str],
 ) -> tuple[str | None, set[str]]:
     traversed.add(origin)
     if origin in seen:
@@ -3259,6 +3344,13 @@ def _resolve_repository_origin(
     if target is None:
         return origin, set()
     if name not in bindings[owner]:
+        if (
+            target.is_package
+            and origin in modules
+            and "__getattr__" in bindings[owner]
+            and origin not in explicit_module_origins
+        ):
+            return None, {origin}
         candidates = _star_import_candidates(target.star_import_origins, name)
         if candidates:
             return _resolve_ambiguous_repository_origins(
@@ -3269,6 +3361,7 @@ def _resolve_repository_origin(
                 {*seen, origin},
                 origin,
                 traversed,
+                explicit_module_origins,
             )
         return origin, set()
     target_origin = bindings[owner][name]
@@ -3283,6 +3376,7 @@ def _resolve_repository_origin(
             {*seen, origin},
             origin,
             traversed,
+            explicit_module_origins,
         )
     if target_origin == origin:
         if (
@@ -3299,6 +3393,7 @@ def _resolve_repository_origin(
         ambiguous_bindings,
         {*seen, origin},
         traversed,
+        explicit_module_origins,
     )
 
 
@@ -3310,6 +3405,7 @@ def _resolve_ambiguous_repository_origins(
     seen: set[str],
     fallback: str,
     traversed: set[str],
+    explicit_module_origins: frozenset[str],
 ) -> tuple[None, set[str]]:
     resolved_origins: set[str] = set()
     for candidate in candidates:
@@ -3320,6 +3416,7 @@ def _resolve_ambiguous_repository_origins(
             ambiguous_bindings,
             seen,
             traversed,
+            explicit_module_origins,
         )
         if resolved is not None:
             resolved_origins.add(resolved)
