@@ -15,7 +15,13 @@
     "type": {"const": "stdout_result"},
     "schema": {"const": "code-structure-viz.stdout-result/v1"},
     "selector": {
-      "enum": ["manifest", "python:semantic-json", "python:plantuml"]
+      "enum": [
+        "manifest",
+        "python:semantic-json",
+        "python:plantuml",
+        "sqlalchemy:semantic-json",
+        "sqlalchemy:plantuml"
+      ]
     },
     "availability": {"const": false},
     "domain_status": {"enum": ["not_applicable", "incomplete"]},
@@ -36,7 +42,14 @@
       "required": ["domain_status"],
       "not": {"required": ["run_status"]},
       "properties": {
-        "selector": {"enum": ["python:semantic-json", "python:plantuml"]},
+        "selector": {
+          "enum": [
+            "python:semantic-json",
+            "python:plantuml",
+            "sqlalchemy:semantic-json",
+            "sqlalchemy:plantuml"
+          ]
+        },
         "domain_status": {"const": "not_applicable"},
         "stable_reason": {"const": "domain_not_applicable"}
       }
@@ -45,7 +58,14 @@
       "required": ["domain_status"],
       "not": {"required": ["run_status"]},
       "properties": {
-        "selector": {"enum": ["python:semantic-json", "python:plantuml"]},
+        "selector": {
+          "enum": [
+            "python:semantic-json",
+            "python:plantuml",
+            "sqlalchemy:semantic-json",
+            "sqlalchemy:plantuml"
+          ]
+        },
         "domain_status": {"const": "incomplete"},
         "stable_reason": {"const": "domain_payload_unavailable"}
       }
@@ -54,7 +74,14 @@
       "required": ["run_status"],
       "not": {"required": ["domain_status"]},
       "properties": {
-        "selector": {"enum": ["python:semantic-json", "python:plantuml"]},
+        "selector": {
+          "enum": [
+            "python:semantic-json",
+            "python:plantuml",
+            "sqlalchemy:semantic-json",
+            "sqlalchemy:plantuml"
+          ]
+        },
         "run_status": {"const": "fatal"},
         "stable_reason": {"const": "run_fatal"}
       }

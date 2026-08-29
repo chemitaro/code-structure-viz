@@ -108,6 +108,7 @@ def test_production_has_one_closed_ast_path_and_no_target_execution_loader() -> 
     assert ast_calls == [
         "src/code_structure_viz/adapters/python/analyzer.py",
         "src/code_structure_viz/adapters/python/type_expr.py",
+        "src/code_structure_viz/adapters/sqlalchemy/analyzer.py",
     ]
 
 

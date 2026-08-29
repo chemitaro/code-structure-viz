@@ -20,6 +20,12 @@ from tests.helpers.acceptance import (
     run_cli,
 )
 from tests.helpers.diff import create_two_commit_repository_from_files, run_diff_cli
+from tests.helpers.sqlalchemy_snapshot import (
+    initialize_sqlalchemy_fixture_repository,
+)
+from tests.helpers.sqlalchemy_snapshot import (
+    run_snapshot_cli as run_sqlalchemy_snapshot_cli,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 SEMANTIC_GOLDEN_ROOT = ROOT / "tests" / "golden" / "python_snapshot"
@@ -130,6 +136,17 @@ def test_diagnostic_schema_accepts_diff_diagnostic_vectors(
             },
         ),
         (
+            "run-summary-v1.schema.json",
+            {
+                "type": "run_summary",
+                "schema": "code-structure-viz.run-summary/v1",
+                "run_status": "complete",
+                "exit_code": 0,
+                "domains": [{"domain": "sqlalchemy", "status": "complete"}],
+                "manifest": "run-manifest.json",
+            },
+        ),
+        (
             "stdout-result-v1.schema.json",
             {
                 "type": "stdout_result",
@@ -138,6 +155,18 @@ def test_diagnostic_schema_accepts_diff_diagnostic_vectors(
                 "availability": False,
                 "domain_status": "not_applicable",
                 "stable_reason": "domain_not_applicable",
+                "artifact": None,
+            },
+        ),
+        (
+            "stdout-result-v1.schema.json",
+            {
+                "type": "stdout_result",
+                "schema": "code-structure-viz.stdout-result/v1",
+                "selector": "sqlalchemy:plantuml",
+                "availability": False,
+                "domain_status": "incomplete",
+                "stable_reason": "domain_payload_unavailable",
                 "artifact": None,
             },
         ),
@@ -415,7 +444,79 @@ def test_semantic_schema_accepts_closed_sqlalchemy_snapshot_variants() -> None:
     complete["status"] = "complete"
     complete.pop("incomplete_kind")
     complete["diagnostics"] = []
+    complete["coverage"]["unknown_declarations"] = 0
+    complete["coverage"]["frontier"] = []
     validator.validate(complete)
+
+
+def test_semantic_schema_rejects_unknown_sqlalchemy_values_from_complete_snapshot() -> None:
+    validator = _validator("semantic-v1.schema.json")
+    complete = _sqlalchemy_semantic_vector()
+    complete["status"] = "complete"
+    complete.pop("incomplete_kind")
+    complete["diagnostics"] = []
+    complete["coverage"]["unknown_declarations"] = 0
+    complete["coverage"]["frontier"] = []
+
+    mutations = []
+    unknown_type = deepcopy(complete)
+    unknown_type["members"][0]["type"] = {
+        "category": "unknown",
+        "name": None,
+        "parameters": {"present": False, "category": "absent", "redacted": False},
+    }
+    mutations.append(unknown_type)
+    unknown_descriptor = deepcopy(complete)
+    unknown_descriptor["members"][0]["default"] = {
+        "present": True,
+        "category": "unknown",
+        "redacted": True,
+    }
+    mutations.append(unknown_descriptor)
+    unknown_target = deepcopy(complete)
+    unknown_target["members"][6]["target"] = {
+        "resolution": "unknown",
+        "kind": "unknown",
+        "id": None,
+        "schema_name": None,
+        "table_name": None,
+        "symbol": None,
+        "display_name": "<unknown>",
+    }
+    mutations.append(unknown_target)
+    unknown_cardinality = deepcopy(complete)
+    unknown_cardinality["members"][6]["cardinality"] = "unknown"
+    mutations.append(unknown_cardinality)
+
+    for mutation in mutations:
+        with pytest.raises(ValidationError):
+            validator.validate(mutation)
+
+    partial = _sqlalchemy_semantic_vector()
+    partial["members"][6]["cardinality"] = "unknown"
+    validator.validate(partial)
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "/private/secret.py",
+        "../secret.py",
+        "src/../secret.py",
+        "https://example.invalid/secret",
+        "C:/secret.py",
+        "src\\secret.py",
+        "row\u0000secret",
+    ],
+)
+def test_semantic_schema_rejects_unsafe_sqlalchemy_frontier_reference(
+    reference: str,
+) -> None:
+    value = _sqlalchemy_semantic_vector()
+    value["coverage"]["frontier"][0]["reference"] = reference
+
+    with pytest.raises(ValidationError):
+        _validator("semantic-v1.schema.json").validate(value)
 
 
 def test_semantic_schema_accepts_actual_sqlalchemy_renderer_bytes() -> None:
@@ -616,6 +717,46 @@ def test_schemas_accept_captured_complete_and_unavailable_cli_json(
         validator.validate({**manifest, "absolute_path": "/private/secret"})
     with pytest.raises(ValidationError):
         validator.validate({**manifest, "artifacts": [{"path": "run-manifest.json"}]})
+
+
+def test_manifest_and_stream_schemas_accept_closed_sqlalchemy_cli_output(
+    tmp_path: Path,
+) -> None:
+    repository = initialize_sqlalchemy_fixture_repository(tmp_path, "canonical_model")
+    output = tmp_path / "output"
+
+    result = run_sqlalchemy_snapshot_cli(repository, output)
+
+    assert result.returncode == 0, result.stderr
+    _validator("run-summary-v1.schema.json").validate(json.loads(result.stdout))
+    _validator("semantic-v1.schema.json").validate(
+        json.loads((output / "sqlalchemy.snapshot.semantic.json").read_bytes())
+    )
+    manifest = json.loads((output / "run-manifest.json").read_bytes())
+    validator = _validator("run-manifest-v1.schema.json")
+    validator.validate(manifest)
+
+    mutations = []
+    sql_diff = deepcopy(manifest)
+    sql_diff["command"]["name"] = "diff"
+    mutations.append(sql_diff)
+    python_adapter = deepcopy(manifest)
+    python_adapter["adapters"][0] = {
+        "domain": "python",
+        "name": "python-ast",
+        "version": "1",
+    }
+    mutations.append(python_adapter)
+    cross_artifact = deepcopy(manifest)
+    cross_artifact["artifacts"][0]["path"] = "python.snapshot.semantic.json"
+    mutations.append(cross_artifact)
+    wrong_contract = deepcopy(manifest)
+    wrong_contract["contracts"]["plantuml"] = "code-structure-viz.plantuml/python/v1"
+    mutations.append(wrong_contract)
+
+    for mutation in mutations:
+        with pytest.raises(ValidationError):
+            validator.validate(mutation)
 
 
 def test_schemas_accept_captured_complete_diff_json(tmp_path: Path) -> None:

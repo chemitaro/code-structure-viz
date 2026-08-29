@@ -20,9 +20,11 @@ from code_structure_viz.core.outcomes import (
 )
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
 
-_DOMAIN_PATHS = {
-    "semantic-json": "python.snapshot.semantic.json",
-    "plantuml": "python.snapshot.puml",
+_SNAPSHOT_DOMAIN_PATHS = {
+    ("python", "semantic-json"): "python.snapshot.semantic.json",
+    ("python", "plantuml"): "python.snapshot.puml",
+    ("sqlalchemy", "semantic-json"): "sqlalchemy.snapshot.semantic.json",
+    ("sqlalchemy", "plantuml"): "sqlalchemy.snapshot.puml",
 }
 _DIFF_DOMAIN_PATHS = {
     "semantic-json": "python.diff.semantic.json",
@@ -40,7 +42,7 @@ def _summary(outcome: RunOutcome) -> bytes:
     domains: list[dict[str, object]] = []
     for domain in outcome.domains:
         value: dict[str, object] = {
-            "domain": "python",
+            "domain": domain.domain,
             "status": domain.status.value,
         }
         if domain.status is DomainStatus.INCOMPLETE:
@@ -122,14 +124,21 @@ class StdoutEmitter:
 
         assert isinstance(selector, DomainFormatSelector)
         if len(outcome.domains) != 1:
-            raise ValueError("domain selector requires one Python outcome")
+            raise ValueError("domain selector requires one domain outcome")
         domain = outcome.domains[0]
+        if selector.domain != domain.domain:
+            raise ValueError("stdout selector and outcome domain do not match")
         if domain.status is DomainStatus.NOT_APPLICABLE:
             return _domain_unavailable(selector, domain.status, "domain_not_applicable")
         if domain.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE:
             return _domain_unavailable(selector, domain.status, "domain_payload_unavailable")
-        candidates = (_DIFF_DOMAIN_PATHS[selector.format], _DOMAIN_PATHS[selector.format])
-        relative_path = next((item for item in candidates if item in domain.artifact_paths), None)
+        candidates = (
+            *((_DIFF_DOMAIN_PATHS[selector.format],) if domain.domain == "python" else ()),
+            _SNAPSHOT_DOMAIN_PATHS[(domain.domain, selector.format)],
+        )
+        relative_path: str | None = next(
+            (item for item in candidates if item in domain.artifact_paths), None
+        )
         if relative_path is None:
             raise ValueError("selected domain artifact was not published")
         if published_artifacts is not None:

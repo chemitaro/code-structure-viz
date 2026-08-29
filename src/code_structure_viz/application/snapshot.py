@@ -89,7 +89,11 @@ class SnapshotApplication:
                         request,
                         config,
                     )
-                    transaction.stage_payload(artifact_format(format_value), content)
+                    transaction.stage_snapshot_payload(
+                        request.domain,
+                        artifact_format(format_value),
+                        content,
+                    )
 
             outcome = (
                 RunOutcome.incomplete((domain,), manifest_relative_path="run-manifest.json")
@@ -102,6 +106,8 @@ class SnapshotApplication:
                 config=config,
                 outcome=outcome,
                 artifacts=transaction.descriptors,
+                adapter_contract=adapter.contract,
+                coverage_encoder=adapter.coverage_value,
             )
             transaction.stage_manifest(manifest)
 

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
 from code_structure_viz import __version__
 from code_structure_viz.adapters.python.model import PythonCoverage
-from code_structure_viz.adapters.python.semantic_json import coverage_value, target_value
+from code_structure_viz.adapters.python.semantic_json import (
+    coverage_value as python_coverage_value,
+)
+from code_structure_viz.adapters.python.semantic_json import target_value
+from code_structure_viz.application.snapshot_domain import SnapshotAdapterContract
 from code_structure_viz.cli.parser import (
     DiffCliRequest,
     DomainFormatSelector,
@@ -19,6 +23,7 @@ from code_structure_viz.cli.parser import (
 from code_structure_viz.core.budget import EntityBudget
 from code_structure_viz.core.config import ResolvedConfig
 from code_structure_viz.core.diagnostics import canonical_diagnostics
+from code_structure_viz.core.domains import DomainName
 from code_structure_viz.core.outcomes import DomainOutcome, DomainStatus, RunOutcome
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
 from code_structure_viz.source.source_view import SourceView
@@ -26,13 +31,21 @@ from code_structure_viz.source.targets import target_sort_key
 
 ArtifactFormat = Literal["semantic-json", "plantuml", "file-change-set"]
 
-_ARTIFACT_CONTRACT = {
-    "semantic-json": (
+_SNAPSHOT_ARTIFACT_CONTRACT = {
+    ("python", "semantic-json"): (
         "python.snapshot.semantic.json",
         "application/json",
     ),
-    "plantuml": (
+    ("python", "plantuml"): (
         "python.snapshot.puml",
+        "text/vnd.plantuml; charset=utf-8",
+    ),
+    ("sqlalchemy", "semantic-json"): (
+        "sqlalchemy.snapshot.semantic.json",
+        "application/json",
+    ),
+    ("sqlalchemy", "plantuml"): (
+        "sqlalchemy.snapshot.puml",
         "text/vnd.plantuml; charset=utf-8",
     ),
 }
@@ -51,12 +64,20 @@ _DIFF_ARTIFACT_CONTRACT = {
     ),
 }
 _FORMAT_RANK = {"semantic-json": 0, "plantuml": 1}
+_PYTHON_SNAPSHOT_CONTRACT = SnapshotAdapterContract(
+    domain="python",
+    adapter_name="python-ast",
+    adapter_version="1",
+    plantuml_contract="code-structure-viz.plantuml/python/v1",
+    semantic_path="python.snapshot.semantic.json",
+    plantuml_path="python.snapshot.puml",
+)
 
 
 @dataclass(frozen=True, slots=True)
 class ArtifactDescriptor:
     path: str
-    domain: Literal["python"]
+    domain: DomainName
     format: ArtifactFormat
     media_type: str
     size_bytes: int
@@ -64,10 +85,21 @@ class ArtifactDescriptor:
 
     @classmethod
     def create(cls, format_value: ArtifactFormat, content: bytes) -> ArtifactDescriptor:
-        path, media_type = _ARTIFACT_CONTRACT[format_value]
+        return cls.create_snapshot("python", format_value, content)
+
+    @classmethod
+    def create_snapshot(
+        cls,
+        domain: DomainName,
+        format_value: ArtifactFormat,
+        content: bytes,
+    ) -> ArtifactDescriptor:
+        if format_value not in {"semantic-json", "plantuml"}:
+            raise ValueError("snapshot artifact format is not supported")
+        path, media_type = _SNAPSHOT_ARTIFACT_CONTRACT[(domain, format_value)]
         return cls(
             path=path,
-            domain="python",
+            domain=domain,
             format=format_value,
             media_type=media_type,
             size_bytes=len(content),
@@ -173,11 +205,12 @@ def _run_fingerprint(
     request: SnapshotCliRequest,
     source_view: SourceView,
     config: ResolvedConfig,
+    adapter_contract: SnapshotAdapterContract,
 ) -> str:
     preimage = {
         "schema": "code-structure-viz.run-fingerprint/v1",
         "tool_version": __version__,
-        "adapter_version": "python-ast/1",
+        "adapter_version": (f"{adapter_contract.adapter_name}/{adapter_contract.adapter_version}"),
         "source_fingerprint": source_view.fingerprint,
         "config_sha256": config.sha256,
         "command": _command_value(request),
@@ -186,13 +219,24 @@ def _run_fingerprint(
     return hashlib.sha256(encode_canonical_json(preimage)).hexdigest()
 
 
-def _domain_value(domain: DomainOutcome) -> dict[str, object]:
-    if not isinstance(domain.coverage, PythonCoverage):
+def _python_coverage_encoder(value: object) -> Mapping[str, object]:
+    if not isinstance(value, PythonCoverage):
         raise ValueError("manifest domain requires Python coverage")
+    return python_coverage_value(value)
+
+
+def _domain_value(
+    domain: DomainOutcome,
+    expected_domain: DomainName,
+    coverage_encoder: Callable[[object], Mapping[str, object]],
+) -> dict[str, object]:
+    if domain.domain != expected_domain:
+        raise ValueError("manifest domain and adapter domain do not match")
     if not isinstance(domain.budget, EntityBudget):
         raise ValueError("manifest domain requires an entity budget")
+    coverage = coverage_encoder(domain.coverage)
     value: dict[str, object] = {
-        "domain": "python",
+        "domain": domain.domain,
         "status": domain.status.value,
     }
     if domain.status is DomainStatus.INCOMPLETE:
@@ -203,7 +247,7 @@ def _domain_value(domain: DomainOutcome) -> dict[str, object]:
         {
             "payload_available": domain.payload_available,
             "entity_count": domain.entity_count,
-            "coverage": coverage_value(domain.coverage),
+            "coverage": dict(coverage),
             "budget": domain.budget.to_json_value(),
             "artifact_paths": list(domain.artifact_paths),
             "diagnostics": [
@@ -223,20 +267,29 @@ class RunManifestBuilder:
         config: ResolvedConfig,
         outcome: RunOutcome,
         artifacts: tuple[ArtifactDescriptor, ...],
+        adapter_contract: SnapshotAdapterContract = _PYTHON_SNAPSHOT_CONTRACT,
+        coverage_encoder: Callable[[object], Mapping[str, object]] = _python_coverage_encoder,
     ) -> bytes:
         if len(outcome.domains) != 1 or outcome.manifest_relative_path != "run-manifest.json":
-            raise ValueError("manifest requires exactly one committed Python domain")
+            raise ValueError("manifest requires exactly one committed snapshot domain")
+        domain = outcome.domains[0]
+        if request.domain != adapter_contract.domain or domain.domain != adapter_contract.domain:
+            raise ValueError("manifest request, domain, and adapter do not match")
+        if any(item.format not in _FORMAT_RANK for item in artifacts):
+            raise ValueError("artifact descriptor violates the snapshot contract")
         ordered_artifacts = tuple(
             sorted(
                 artifacts,
                 key=lambda item: (_FORMAT_RANK[item.format], item.path.encode("utf-8")),
             )
         )
-        if tuple(item.path for item in ordered_artifacts) != outcome.domains[0].artifact_paths:
+        if tuple(item.path for item in ordered_artifacts) != domain.artifact_paths:
             raise ValueError("domain artifact paths and descriptors do not match")
         if any(
-            item.path != _ARTIFACT_CONTRACT[item.format][0]
-            or item.media_type != _ARTIFACT_CONTRACT[item.format][1]
+            item.domain != adapter_contract.domain
+            or item.path != _SNAPSHOT_ARTIFACT_CONTRACT[(adapter_contract.domain, item.format)][0]
+            or item.media_type
+            != _SNAPSHOT_ARTIFACT_CONTRACT[(adapter_contract.domain, item.format)][1]
             for item in ordered_artifacts
         ):
             raise ValueError("artifact descriptor violates the closed contract")
@@ -253,9 +306,15 @@ class RunManifestBuilder:
                 "manifest": "code-structure-viz.run-manifest/v1",
                 "run_summary": "code-structure-viz.run-summary/v1",
                 "stdout_result": "code-structure-viz.stdout-result/v1",
-                "plantuml": "code-structure-viz.plantuml/python/v1",
+                "plantuml": adapter_contract.plantuml_contract,
             },
-            "adapters": [{"domain": "python", "name": "python-ast", "version": "1"}],
+            "adapters": [
+                {
+                    "domain": adapter_contract.domain,
+                    "name": adapter_contract.adapter_name,
+                    "version": adapter_contract.adapter_version,
+                }
+            ],
             "command": _command_value(request),
             "request": _request_value(request, config),
             "source": _source_value(source_view),
@@ -263,9 +322,14 @@ class RunManifestBuilder:
             "run": {
                 "status": outcome.status.value,
                 "exit_code": outcome.exit_code,
-                "fingerprint": _run_fingerprint(request, source_view, config),
+                "fingerprint": _run_fingerprint(
+                    request,
+                    source_view,
+                    config,
+                    adapter_contract,
+                ),
             },
-            "domains": [_domain_value(outcome.domains[0])],
+            "domains": [_domain_value(domain, adapter_contract.domain, coverage_encoder)],
             "artifacts": [item.to_json_value() for item in ordered_artifacts],
             "diagnostics": [
                 item.to_json_value() for item in canonical_diagnostics(outcome.diagnostics)
@@ -299,7 +363,7 @@ class DiffManifestBuilder:
             raise ValueError("diff manifest requires one Python domain")
         domain = outcome.domains[0]
         if isinstance(domain.coverage, PythonCoverage):
-            coverage: object | None = coverage_value(domain.coverage)
+            coverage: object | None = python_coverage_value(domain.coverage)
         elif isinstance(domain.coverage, Mapping):
             coverage = dict(domain.coverage)
         else:

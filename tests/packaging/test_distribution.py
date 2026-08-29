@@ -138,6 +138,45 @@ def test_wheel_installs_offline_and_cli_runs_outside_checkout_with_network_trapp
     ]
     assert json.loads((output / "run-manifest.json").read_bytes())["source"]["head_commit"] is None
 
+    source.write_text(
+        "from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column\n"
+        "raise RuntimeError('target code must not execute')\n"
+        "class Base(DeclarativeBase): pass\n"
+        "class User(Base):\n"
+        "    __tablename__ = 'users'\n"
+        "    id: Mapped[int] = mapped_column(primary_key=True)\n",
+        encoding="utf-8",
+    )
+    sqlalchemy_output = tmp_path / "sqlalchemy-output"
+    sqlalchemy_run = subprocess.run(
+        (
+            str(executable),
+            "snapshot",
+            "--repo",
+            str(repository),
+            "--output-dir",
+            str(sqlalchemy_output),
+            "--domain",
+            "sqlalchemy",
+        ),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(trap), "NO_COLOR": "1"},
+    )
+    assert sqlalchemy_run.returncode == 0
+    assert sqlalchemy_run.stderr == b""
+    assert sorted(path.name for path in sqlalchemy_output.iterdir()) == [
+        "run-manifest.json",
+        "sqlalchemy.snapshot.puml",
+        "sqlalchemy.snapshot.semantic.json",
+    ]
+    sqlalchemy_manifest = json.loads((sqlalchemy_output / "run-manifest.json").read_bytes())
+    assert sqlalchemy_manifest["adapters"] == [
+        {"domain": "sqlalchemy", "name": "sqlalchemy-ast", "version": "1"}
+    ]
+
 
 def test_lock_and_third_party_license_inventory_match_exactly() -> None:
     lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))

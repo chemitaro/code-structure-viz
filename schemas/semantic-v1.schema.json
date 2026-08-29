@@ -149,19 +149,30 @@
         "domain": {"const": "sqlalchemy"},
         "document_kind": {"const": "snapshot"},
         "status": {"const": "complete"},
-        "coverage": {"$ref": "#/$defs/sqlalchemy_coverage"},
         "entities": {
           "type": "array",
           "items": {"$ref": "#/$defs/sqlalchemy_table"}
         },
-        "members": {"type": "array", "items": {"$ref": "#/$defs/sqlalchemy_row"}},
+        "members": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sqlalchemy_complete_row"}
+        },
         "relations": {
           "type": "array",
           "items": {"$ref": "#/$defs/sqlalchemy_relation"}
         },
-        "diagnostics": {
-          "type": "array",
-          "items": {"$ref": "#/$defs/sqlalchemy_diagnostic"}
+        "diagnostics": {"type": "array", "maxItems": 0},
+        "coverage": {
+          "allOf": [
+            {"$ref": "#/$defs/sqlalchemy_coverage"},
+            {
+              "properties": {
+                "failed_files": {"maxItems": 0},
+                "unknown_declarations": {"const": 0},
+                "frontier": {"maxItems": 0}
+              }
+            }
+          ]
         }
       },
       "required": ["source", "request", "coverage", "entities", "members", "relations"],
@@ -1235,6 +1246,125 @@
         {"$ref": "#/$defs/sqlalchemy_association_table_row"}
       ]
     },
+    "sqlalchemy_complete_redacted_expression": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        {"properties": {"category": {"not": {"const": "unknown"}}}}
+      ]
+    },
+    "sqlalchemy_complete_type": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_type"},
+        {
+          "properties": {
+            "category": {"not": {"const": "unknown"}},
+            "parameters": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_complete_relation_target": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_relation_target"},
+        {
+          "properties": {
+            "resolution": {"not": {"const": "unknown"}},
+            "kind": {"not": {"const": "unknown"}}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_complete_index_term": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_index_term"},
+        {
+          "properties": {
+            "expression": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_complete_row": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_row"},
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "kind": {"const": "column"},
+                "type": {"$ref": "#/$defs/sqlalchemy_complete_type"},
+                "default": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "server_default": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                },
+                "onupdate": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "server_onupdate": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                },
+                "computed": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "identity": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+              }
+            },
+            {"properties": {"kind": {"const": "primary_key"}}},
+            {"properties": {"kind": {"const": "unique"}}},
+            {
+              "properties": {
+                "kind": {"const": "check"},
+                "expression": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+              }
+            },
+            {
+              "properties": {
+                "kind": {"const": "index"},
+                "terms": {
+                  "items": {"$ref": "#/$defs/sqlalchemy_complete_index_term"}
+                }
+              }
+            },
+            {
+              "properties": {
+                "kind": {"const": "foreign_key"},
+                "target": {"$ref": "#/$defs/sqlalchemy_complete_relation_target"},
+                "ondelete": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "onupdate": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+              }
+            },
+            {
+              "properties": {
+                "kind": {"const": "relationship"},
+                "target": {"$ref": "#/$defs/sqlalchemy_complete_relation_target"},
+                "cardinality": {"enum": ["scalar", "many"]},
+                "secondary": {
+                  "oneOf": [
+                    {"$ref": "#/$defs/sqlalchemy_complete_relation_target"},
+                    {"type": "null"}
+                  ]
+                },
+                "primaryjoin": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                },
+                "secondaryjoin": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                },
+                "order_by": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "foreign_keys": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                }
+              }
+            },
+            {"properties": {"kind": {"const": "inheritance"}}},
+            {
+              "properties": {
+                "kind": {"const": "association_table"},
+                "relationship_target": {
+                  "$ref": "#/$defs/sqlalchemy_complete_relation_target"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
     "sqlalchemy_relation": {
       "type": "object",
       "additionalProperties": false,
@@ -1349,7 +1479,11 @@
       "properties": {
         "direction": {"enum": ["upstream", "downstream", "failure"]},
         "kind": {"enum": ["file", "module", "class", "table", "row", "relation"]},
-        "reference": {"type": "string", "minLength": 1},
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!~)(?![A-Za-z]:)(?!.*://)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
+        },
         "reason": {
           "enum": [
             "depth_limit",
