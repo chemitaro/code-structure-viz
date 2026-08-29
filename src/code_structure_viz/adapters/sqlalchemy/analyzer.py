@@ -2399,12 +2399,23 @@ def _module_import_precedes(
     statement: ast.AST,
 ) -> bool:
     position = _node_position(statement)
-    return any(
-        _normalize_symbol(alias.name) == origin and _node_position(candidate) < position
-        for candidate in module.tree.body
-        if isinstance(candidate, ast.Import)
-        for alias in candidate.names
-    )
+    for candidate in module.tree.body:
+        if _node_position(candidate) >= position:
+            continue
+        imports = (
+            (candidate,)
+            if isinstance(candidate, ast.Import)
+            else tuple(child for child in candidate.body if isinstance(child, ast.Import))
+            if isinstance(candidate, ast.ClassDef)
+            else ()
+        )
+        if any(
+            _node_position(import_statement) < position and _normalize_symbol(alias.name) == origin
+            for import_statement in imports
+            for alias in import_statement.names
+        ):
+            return True
+    return False
 
 
 def _module_alias_origins_before(
