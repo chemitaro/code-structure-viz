@@ -535,8 +535,31 @@ class SqlAlchemySnapshotAnalyzer:
                             reference=f"module:{module.module}",
                         )
                     continue
-                classic_bases.add(f"{module.module}.{target.id}")
+                symbol = f"{module.module}.{target.id}"
+                if module.bindings.get(target.id) != symbol:
+                    self._unknown_declarative_base_call(
+                        module,
+                        statement.value,
+                        symbol,
+                        state,
+                    )
+                    continue
+                classic_bases.add(symbol)
                 state.supported(module, statement.value)
+            for statement in module.tree.body:
+                self._unsupported_declarative_base_assignment(
+                    module,
+                    statement,
+                    nested=False,
+                    state=state,
+                )
+                for write in _nested_module_scope_writes(statement):
+                    self._unsupported_declarative_base_assignment(
+                        module,
+                        write,
+                        nested=True,
+                        state=state,
+                    )
 
         proven: list[_ClassDeclaration] = []
         proven_nodes: set[int] = set()
@@ -573,6 +596,11 @@ class SqlAlchemySnapshotAnalyzer:
                         declaration.module,
                         proven_symbols | classic_bases,
                     )
+                    or _dynamic_declarative_base_evidence(
+                        base,
+                        declaration.module,
+                        proven_symbols | classic_bases,
+                    )
                     for base in declaration.node.bases
                 ):
                     state.unknown(
@@ -592,6 +620,53 @@ class SqlAlchemySnapshotAnalyzer:
                 _line(item.node),
             ),
         ), classic_bases
+
+    def _unsupported_declarative_base_assignment(
+        self,
+        module: _ParsedModule,
+        statement: ast.AST,
+        *,
+        nested: bool,
+        state: _State,
+    ) -> None:
+        value = _assignment_value(statement)
+        if not isinstance(value, ast.Call):
+            return
+        if _resolve_call(
+            value,
+            module,
+        ) != "sqlalchemy.orm.declarative_base" and not _unresolved_terminal(
+            value.func,
+            module,
+            {"declarative_base"},
+        ):
+            return
+        if not nested and _is_supported_module_single_name_assignment(statement):
+            return
+        span = _span(statement)
+        symbol = (
+            f"{module.module}.declarative_base_occurrence_"
+            f"{span.start_line}_{span.start_utf8_byte_column}_"
+            f"{span.end_line}_{span.end_utf8_byte_column}"
+        )
+        self._unknown_declarative_base_call(module, value, symbol, state)
+
+    def _unknown_declarative_base_call(
+        self,
+        module: _ParsedModule,
+        call: ast.Call,
+        symbol: str,
+        state: _State,
+    ) -> None:
+        _consume_construction_calls(module, call, state)
+        state.unknown(
+            module=module,
+            code=DiagnosticCode.SA_DECLARATIVE_BINDING,
+            symbol=symbol,
+            line=_line(call),
+            kind=SqlAlchemyFrontierKind.CLASS,
+            reference=f"module:{module.module}",
+        )
 
     def _table_candidates(
         self,
@@ -772,7 +847,7 @@ class SqlAlchemySnapshotAnalyzer:
             {"Table"},
         ):
             return
-        if not nested and _is_supported_module_table_assignment(statement):
+        if not nested and _is_supported_module_single_name_assignment(statement):
             return
         span = _span(statement)
         symbol = (
@@ -2311,7 +2386,7 @@ def _assignment_names(value: ast.AST) -> tuple[str, ...]:
     return tuple(name for target in targets for name in _target_names(target))
 
 
-def _is_supported_module_table_assignment(value: ast.AST) -> bool:
+def _is_supported_module_single_name_assignment(value: ast.AST) -> bool:
     return (
         isinstance(value, ast.Assign)
         and len(value.targets) == 1
@@ -2435,6 +2510,31 @@ def _ambiguous_binding_matches(
     symbols: set[str],
 ) -> bool:
     return bool(_ambiguous_symbols(value, module) & symbols)
+
+
+def _dynamic_declarative_base_evidence(
+    value: ast.expr,
+    module: _ParsedModule,
+    base_symbols: set[str],
+) -> bool:
+    if not isinstance(value, ast.Call):
+        return False
+    class_symbols = base_symbols | {"sqlalchemy.orm.DeclarativeBase"}
+    for node in ast.walk(value):
+        if not isinstance(node, ast.expr):
+            continue
+        if _resolve_symbol(node, module) in class_symbols:
+            return True
+        if _unresolved_terminal(node, module, {"DeclarativeBase"}):
+            return True
+        if _ambiguous_binding_matches(node, module, base_symbols):
+            return True
+        if isinstance(node, ast.Call) and (
+            _resolve_call(node, module) == "sqlalchemy.orm.declarative_base"
+            or _unresolved_terminal(node.func, module, {"declarative_base"})
+        ):
+            return True
+    return False
 
 
 def _resolve_call(value: ast.Call, module: _ParsedModule) -> str | None:

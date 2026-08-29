@@ -1554,17 +1554,20 @@ def test_canonical_calls_outside_declaration_positions_are_not_evidence() -> Non
         {
             "src/helpers.py": b"""
 from sqlalchemy import Column, Table
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import declarative_base, relationship
 
 Column("top-level-expression")
 Table("top-level-expression", object())
 relationship("top-level-expression")
+declarative_base()
 
 def helper():
+    local_base = declarative_base()
     return Column("function-local")
 
 class Plain:
     value = Column("plain-class")
+    local_base = declarative_base()
 """
         }
     )
@@ -1796,4 +1799,87 @@ class User(Base):
     assert columns[0].name == "id"
     assert columns[0].type.category is SqlAlchemyTypeCategory.INTEGER
     assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_dynamic_call_result_base_with_declarative_argument_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase
+
+def wrap(value):
+    return value
+
+class User(wrap(DeclarativeBase)):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_conditional_declarative_base_factory_assignment_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import declarative_base
+
+if condition:
+    Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_rebound_direct_declarative_base_factory_assignment_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import declarative_base
+
+Base = declarative_base()
+Base = replacement
+
+class User(Base):
+    __tablename__ = "users"
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_arbitrary_call_result_base_is_not_sqlalchemy_evidence() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+def make_base():
+    return object
+
+class Candidate(make_base()):
+    pass
+"""
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.ABSENT
+    assert result.snapshot.entities == ()
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.coverage.unknown_declarations == 0
     assert result.snapshot.partial_safe is False
