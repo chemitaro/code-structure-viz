@@ -2877,15 +2877,31 @@ def _persist_class_name_module_alias_provenance(
             for name in _target_names(target)
             if name not in global_names
         )
+    origins_by_name: dict[str, set[str]] = {}
     assignment = _static_module_alias_assignment(statement)
-    origins: set[str] = set()
     if assignment is not None:
         assignment_names, value = assignment
         names.update(name for name in assignment_names if name not in global_names)
         origins = _module_object_origins_before(before, value, statement)
+        for name in assignment_names:
+            origins_by_name[name] = origins
+    elif isinstance(statement, ast.Import):
+        for alias in statement.names:
+            local = alias.asname or alias.name.split(".", 1)[0]
+            origin = alias.name if alias.asname else alias.name.split(".", 1)[0]
+            origins_by_name[local] = {_normalize_symbol(origin)}
+    elif isinstance(statement, ast.ImportFrom):
+        import_origin = _import_from_origin(before, statement)
+        if import_origin is not None:
+            for alias in statement.names:
+                if alias.name == "*":
+                    continue
+                local = alias.asname or alias.name
+                origins_by_name[local] = {_normalize_symbol(f"{import_origin}.{alias.name}")}
 
     position = _node_position(statement)
     for name in names:
+        origins = origins_by_name.get(name, set())
         symbol = f"{declaration.symbol}.{name}"
         events = declaration.module.import_alias_events.setdefault(symbol, [])
         if not ambiguous and (position, None) not in events:
