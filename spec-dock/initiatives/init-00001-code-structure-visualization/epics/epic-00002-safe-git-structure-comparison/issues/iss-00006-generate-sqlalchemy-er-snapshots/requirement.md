@@ -126,7 +126,7 @@ code-structure-viz snapshot \
 - `--format` 未指定時は `semantic-json`、`plantuml` の順で両方を生成する。同一format重複、unknown format、`html`はusage errorとする。
 - `--max-entities` はASCII base-10の1以上だけを受理する。zero、negative、sign、float、scientific notation、whitespace、underscoreはusage errorとする。
 - `--stdout` は高々1回。selector domainはselected domain、formatはrequested formatと一致しなければならない。
-- `--help` はPython snapshot、SQLAlchemy snapshot、Python diffの実装済みsurfaceだけを表示する。このhelp拡張は本Issueの意図したadditive public changeである。`--version`は既存exact lineを維持する。
+- `--help` はPython/SQLAlchemy snapshotの実装済みsurfaceだけを表示する。Python diffの既存command/contractは維持するが、本Issueのsnapshot helpへは追加しない（scope exclusion contract）。このhelp拡張は本Issueの意図したadditive public changeである。`--version`は既存exact lineを維持する。
 
 ### examples
 

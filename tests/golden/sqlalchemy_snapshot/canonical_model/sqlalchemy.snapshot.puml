@@ -1,0 +1,40 @@
+@startuml
+title SQLAlchemy ER snapshot
+left to right direction
+skinparam linetype ortho
+hide methods
+entity "accounts" as T_5277b6a04817dfa03dc4513fb71e6b33dfc2450b2e0f308a262183de29915c5c {
+  column id : integer type=sqlalchemy_U002E_Integer type_parameters=- nullable=? primary_key=true unique=? index=? default=- server_default=- onupdate=- server_onupdate=- computed=- identity=-
+  primary_key <unnamed> columns=id
+  relationship users target=users cardinality=many uselist=? back_populates=account secondary=- primaryjoin=- secondaryjoin=- order_by=- foreign_keys=-
+}
+entity "admins" as T_57faa9e90ee93a98e8877c096c4f14db031bbfd49031393dd61be85c559d8db6 {
+  inheritance target=users
+}
+entity "users" as T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 {
+  column account_U005F_id : integer type=builtins_U002E_int type_parameters=- nullable=? primary_key=? unique=? index=? default=- server_default=- onupdate=- server_onupdate=- computed=- identity=-
+  column email : string type=sqlalchemy_U002E_String type_parameters=[redacted:literal] nullable=? primary_key=? unique=true index=true default=[redacted:literal] server_default=- onupdate=- server_onupdate=- computed=- identity=-
+  column id : integer type=sqlalchemy_U002E_Integer type_parameters=- nullable=? primary_key=true unique=? index=? default=- server_default=- onupdate=- server_onupdate=- computed=- identity=-
+  primary_key <unnamed> columns=id
+  unique <unnamed> columns=email
+  unique uq_U005F_users_U005F_email columns=email
+  check ck_U005F_users_U005F_email expression=[redacted:literal]
+  index <unnamed> unique=? terms=column:email
+  index ix_U005F_users_U005F_email unique=? terms=column:email
+  foreign_key <unnamed> local=account_U005F_id target=accounts remote=id ondelete=- onupdate=-
+  relationship account target=accounts cardinality=scalar uselist=? back_populates=users secondary=- primaryjoin=- secondaryjoin=- order_by=- foreign_keys=-
+}
+T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 --> T_5277b6a04817dfa03dc4513fb71e6b33dfc2450b2e0f308a262183de29915c5c : foreign_key <unnamed>
+T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 ..> T_5277b6a04817dfa03dc4513fb71e6b33dfc2450b2e0f308a262183de29915c5c : relationship account
+T_5277b6a04817dfa03dc4513fb71e6b33dfc2450b2e0f308a262183de29915c5c ..> T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 : relationship users
+T_57faa9e90ee93a98e8877c096c4f14db031bbfd49031393dd61be85c559d8db6 --|> T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 : inheritance
+legend right
+  rule_version=code-structure-viz.sqlalchemy-redaction/v1
+  redacted_values=3
+  --> foreign_key
+  ..> relationship
+  --|> inheritance
+  -- association table
+  [redacted] literal/expression value omitted
+endlegend
+@enduml
