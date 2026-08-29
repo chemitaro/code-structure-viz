@@ -2148,6 +2148,69 @@ users = Table("users", object())
     assert result.snapshot.partial_safe is True
 
 
+def test_nested_imported_module_alias_table_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"import sqlalchemy as sa\n",
+            "src/models.py": b"""
+import aliases
+
+aliases.sa.Table = replacement
+users = aliases.sa.Table("users", object())
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_nested_imported_module_alias_declarative_base_mutation_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"import sqlalchemy.orm as orm\n",
+            "src/models.py": b"""
+import aliases
+
+aliases.orm.DeclarativeBase = object
+
+class User(aliases.orm.DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_nested_module_alias_mutation_taints_direct_source_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"import sqlalchemy as sa\n",
+            "src/mutator.py": b"""
+import aliases
+
+aliases.sa.Table = replacement
+""",
+            "src/models.py": b"""
+from sqlalchemy import Table
+
+users = Table("users", object())
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_repository_attribute_mutation_taints_importfrom_binding() -> None:
     result = _analyze(
         {

@@ -93,6 +93,7 @@ class _ParsedModule:
     star_import: bool
     is_package: bool
     attribute_mutations: set[str] = field(default_factory=set)
+    imported_module_aliases: dict[str, set[str]] = field(default_factory=dict)
     star_import_origins: set[str] = field(default_factory=set)
     repository_bindings: dict[str, str | None] = field(default_factory=dict)
     repository_ambiguous_bindings: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -477,9 +478,7 @@ class SqlAlchemySnapshotAnalyzer:
             for statement in module.tree.body:
                 for write in _nested_module_scope_writes(statement):
                     _bind_module_statement(module, write, ambiguous=True)
-        attribute_mutations = {
-            symbol for module in modules for symbol in module.attribute_mutations
-        }
+        attribute_mutations = _expand_imported_module_alias_mutations(modules)
         for module in modules:
             module.attribute_mutations.update(attribute_mutations)
         _resolve_repository_bindings(modules)
@@ -1948,13 +1947,18 @@ def _bind_module_statement(
         for alias in statement.names:
             local = alias.asname or alias.name.split(".", 1)[0]
             origin = alias.name if alias.asname else alias.name.split(".", 1)[0]
+            normalized_origin = _normalize_symbol(origin)
             _bind(
                 module.bindings,
                 module.ambiguous_bindings,
                 local,
-                _normalize_symbol(origin),
+                normalized_origin,
                 ambiguous=ambiguous,
             )
+            if binding_owner is None:
+                module.imported_module_aliases.setdefault(f"{module.module}.{local}", set()).add(
+                    normalized_origin
+                )
     elif isinstance(statement, ast.ImportFrom):
         if any(alias.name == "*" for alias in statement.names):
             module.star_import = True
@@ -2042,6 +2046,28 @@ def _invalidate_attribute_target(module: _ParsedModule, target: ast.expr) -> Non
         _invalidate_attribute_target(module, target.value)
 
 
+def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set[str]:
+    mutations = {symbol for module in modules for symbol in module.attribute_mutations}
+    aliases: dict[str, set[str]] = {}
+    for module in modules:
+        for symbol, origins in module.imported_module_aliases.items():
+            aliases.setdefault(symbol, set()).update(origins)
+
+    expanded = set(mutations)
+    for _ in range(len(aliases)):
+        additions = {
+            _normalize_symbol(f"{origin}{mutation[len(alias) :]}")
+            for mutation in expanded
+            for alias, origins in aliases.items()
+            if mutation.startswith(f"{alias}.")
+            for origin in origins
+        }
+        if additions.issubset(expanded):
+            break
+        expanded.update(additions)
+    return expanded
+
+
 def _nested_module_scope_writes(value: ast.AST) -> tuple[ast.AST, ...]:
     if isinstance(value, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
         return ()
@@ -2107,6 +2133,9 @@ def _copy_parsed_module(module: _ParsedModule) -> _ParsedModule:
         star_import=module.star_import,
         is_package=module.is_package,
         attribute_mutations=set(module.attribute_mutations),
+        imported_module_aliases={
+            symbol: set(origins) for symbol, origins in module.imported_module_aliases.items()
+        },
         star_import_origins=set(module.star_import_origins),
         repository_bindings=module.repository_bindings,
         repository_ambiguous_bindings=module.repository_ambiguous_bindings,
