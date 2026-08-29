@@ -2319,11 +2319,12 @@ def _module_object_origins_before(
         if suffix:
             candidate = _normalize_symbol(f"{candidate}.{'.'.join(suffix)}")
         resolved = module.repository_bindings.get(candidate, candidate)
-        possible = {
+        possible = set(module.repository_module_aliases.get(candidate, ()))
+        possible.update(
             origin
             for origin in module.repository_ambiguous_bindings.get(candidate, ())
             if origin in module.repository_module_aliases.get(candidate, ())
-        }
+        )
         if resolved is not None:
             possible.add(resolved)
         result.update(
@@ -2336,34 +2337,73 @@ def _module_object_origins_before(
 
 
 def _refresh_resolved_module_alias_provenance(modules: list[_ParsedModule]) -> None:
-    for module in modules:
-        statements = sorted(
-            (
-                candidate
-                for statement in module.tree.body
-                for candidate in (statement, *_nested_module_scope_writes(statement))
+    statements_by_module = [
+        (
+            module,
+            tuple(
+                sorted(
+                    (
+                        candidate
+                        for statement in module.tree.body
+                        for candidate in (statement, *_nested_module_scope_writes(statement))
+                    ),
+                    key=_node_position,
+                )
             ),
-            key=_node_position,
         )
-        for statement in statements:
-            assignment = _static_module_alias_assignment(statement)
-            if assignment is not None:
-                name, value = assignment
+        for module in modules
+    ]
+    assignment_count = sum(
+        _static_module_alias_assignment(statement) is not None
+        for _, statements in statements_by_module
+        for statement in statements
+    )
+    for _ in range(max(1, assignment_count + 1)):
+        changed = False
+        for module, statements in statements_by_module:
+            for statement in statements:
+                assignment = _static_module_alias_assignment(statement)
+                if assignment is None:
+                    continue
+                names, value = assignment
                 origins = _module_object_origins_before(module, value, statement)
-                if origins:
+                if not origins:
+                    continue
+                position = _node_position(statement)
+                for name in names:
                     symbol = f"{module.module}.{name}"
-                    position = _node_position(statement)
                     events = module.import_alias_events.setdefault(symbol, [])
-                    events.extend(
+                    additions = [
                         (position, origin)
                         for origin in sorted(origins, key=_utf8)
                         if (position, origin) not in events
-                    )
+                    ]
+                    if additions:
+                        events.extend(additions)
+                        changed = True
                     definite_position = module.import_alias_definite_positions.get(symbol)
                     if definite_position is None or definite_position <= position:
-                        module.imported_module_alias_candidates.setdefault(symbol, set()).update(
-                            origins
+                        candidates = module.imported_module_alias_candidates.setdefault(
+                            symbol, set()
                         )
+                        new_origins = origins - candidates
+                        if new_origins:
+                            candidates.update(new_origins)
+                            changed = True
+        repository_module_aliases = {
+            symbol: frozenset(origins)
+            for symbol, origins in _resolved_imported_module_aliases(modules).items()
+        }
+        aliases_changed = any(
+            module.repository_module_aliases != repository_module_aliases for module in modules
+        )
+        for module in modules:
+            module.repository_module_aliases = repository_module_aliases
+        if not changed and not aliases_changed:
+            break
+
+    for module, statements in statements_by_module:
+        for statement in statements:
             for target in _attribute_write_targets(statement):
                 _record_resolved_attribute_mutation(module, target, statement)
 
@@ -2508,19 +2548,21 @@ def _class_mutation_scope_modules(
                 )
             proven_module = _proven_sqlalchemy_module_assignment(before, write)
             if proven_module is not None:
-                name, origin = proven_module
-                if ambiguous:
-                    scope.bindings[name] = None
-                    scope.ambiguous_bindings.setdefault(name, set()).add(origin)
-                else:
-                    scope.bindings[name] = origin
-                    scope.ambiguous_bindings.pop(name, None)
+                names, origin = proven_module
+                for name in names:
+                    if ambiguous:
+                        scope.bindings[name] = None
+                        scope.ambiguous_bindings.setdefault(name, set()).add(origin)
+                    else:
+                        scope.bindings[name] = origin
+                        scope.ambiguous_bindings.pop(name, None)
                 continue
             possible_module = _possible_sqlalchemy_module_assignment(before, write)
             if possible_module is not None:
-                name, origins = possible_module
-                scope.bindings[name] = None
-                scope.ambiguous_bindings.setdefault(name, set()).update(origins)
+                names, origins = possible_module
+                for name in names:
+                    scope.bindings[name] = None
+                    scope.ambiguous_bindings.setdefault(name, set()).update(origins)
     return result
 
 
@@ -2588,47 +2630,51 @@ def _copy_module_binding(
 def _proven_sqlalchemy_module_assignment(
     module: _ParsedModule,
     statement: ast.AST,
-) -> tuple[str, str] | None:
+) -> tuple[tuple[str, ...], str] | None:
     assignment = _static_module_alias_assignment(statement)
     if assignment is None:
         return None
-    name, value = assignment
+    names, value = assignment
     origins = _module_object_origins_before(module, value, statement)
     if len(origins) != 1:
         return None
-    return name, next(iter(origins))
+    return names, next(iter(origins))
 
 
-def _static_module_alias_assignment(statement: ast.AST) -> tuple[str, ast.expr] | None:
+def _static_module_alias_assignment(
+    statement: ast.AST,
+) -> tuple[tuple[str, ...], ast.expr] | None:
     if isinstance(statement, ast.Assign):
-        if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+        if not statement.targets or not all(
+            isinstance(target, ast.Name) for target in statement.targets
+        ):
             return None
-        target = statement.targets[0]
+        names = tuple(target.id for target in statement.targets if isinstance(target, ast.Name))
         value = statement.value
     elif isinstance(statement, (ast.AnnAssign, ast.NamedExpr)):
         if not isinstance(statement.target, ast.Name) or statement.value is None:
             return None
-        target = statement.target
+        names = (statement.target.id,)
         value = statement.value
     else:
         return None
     if not isinstance(value, (ast.Name, ast.Attribute)):
         return None
-    return target.id, value
+    return names, value
 
 
 def _possible_sqlalchemy_module_assignment(
     module: _ParsedModule,
     statement: ast.AST,
-) -> tuple[str, set[str]] | None:
+) -> tuple[tuple[str, ...], set[str]] | None:
     assignment = _static_module_alias_assignment(statement)
     if assignment is None:
         return None
-    name, value = assignment
+    names, value = assignment
     origins = _module_object_origins_before(module, value, statement)
     if not origins:
         return None
-    return name, origins
+    return names, origins
 
 
 def _definite_class_binding_names(value: ast.AST) -> tuple[str, ...]:
