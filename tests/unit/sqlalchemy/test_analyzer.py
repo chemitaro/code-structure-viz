@@ -10,13 +10,16 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyAssociationTableRow,
     SqlAlchemyCardinality,
     SqlAlchemyColumnRow,
+    SqlAlchemyIndexRow,
     SqlAlchemyInheritanceRow,
     SqlAlchemyMappingKind,
+    SqlAlchemyPrimaryKeyRow,
     SqlAlchemyRelationKind,
     SqlAlchemyRelationshipRow,
     SqlAlchemyRowKind,
     SqlAlchemyTargetResolution,
     SqlAlchemyTypeCategory,
+    SqlAlchemyUniqueRow,
 )
 from code_structure_viz.core.config import PythonConfig
 from code_structure_viz.source.python_modules import PythonSourceIndex
@@ -842,3 +845,181 @@ class User(Base):
     ]
     assert result.snapshot.coverage.unknown_declarations == 2
     assert result.snapshot.partial_safe is True
+
+
+def test_rebound_sqlalchemy_alias_is_unknown_instead_of_false_complete() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column as SAColumn, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+SAColumn = replacement
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = SAColumn(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_conditionally_rebound_sqlalchemy_alias_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column as SAColumn, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+if condition:
+    SAColumn = replacement
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = SAColumn(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_conditionally_imported_sqlalchemy_module_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Integer
+from sqlalchemy.orm import DeclarativeBase
+
+if condition:
+    import sqlalchemy as sa
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = sa.Column(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_runtime_target_rebinding_of_sqlalchemy_alias_is_unknown() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column as SAColumn, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+for SAColumn in replacements:
+    pass
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = SAColumn(Integer)
+"""
+        }
+    )
+
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.members == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-009"]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
+def test_unrebound_sqlalchemy_alias_remains_supported() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import Column as SAColumn, Integer
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    python_name = SAColumn("db_name", Integer)
+"""
+        }
+    )
+
+    assert [row.name for row in result.snapshot.members] == ["db_name"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
+def test_explicit_column_names_resolve_attribute_references_in_class_constraints() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy import (
+    Column,
+    Index,
+    Integer,
+    PrimaryKeyConstraint,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase): pass
+
+class Modern(Base):
+    __tablename__ = "modern"
+    __table_args__ = (
+        PrimaryKeyConstraint(modern_name),
+        UniqueConstraint(modern_name),
+        Index("ix_modern", modern_name),
+    )
+    modern_name: Mapped[int] = mapped_column("modern_db_name", Integer)
+
+class Legacy(Base):
+    __tablename__ = "legacy"
+    __table_args__ = (
+        PrimaryKeyConstraint(legacy_name),
+        UniqueConstraint(legacy_name),
+        Index("ix_legacy", legacy_name),
+    )
+    legacy_name = Column("legacy_db_name", Integer)
+"""
+        }
+    )
+
+    columns = {row.name for row in result.snapshot.members if isinstance(row, SqlAlchemyColumnRow)}
+    primary_keys = {
+        row.columns for row in result.snapshot.members if isinstance(row, SqlAlchemyPrimaryKeyRow)
+    }
+    uniques = {
+        row.columns for row in result.snapshot.members if isinstance(row, SqlAlchemyUniqueRow)
+    }
+    indexes = {
+        (row.name, tuple(term.column_name for term in row.terms))
+        for row in result.snapshot.members
+        if isinstance(row, SqlAlchemyIndexRow)
+    }
+    assert columns == {"modern_db_name", "legacy_db_name"}
+    assert primary_keys == {("modern_db_name",), ("legacy_db_name",)}
+    assert uniques == {("modern_db_name",), ("legacy_db_name",)}
+    assert indexes == {
+        ("ix_modern", ("modern_db_name",)),
+        ("ix_legacy", ("legacy_db_name",)),
+    }
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False

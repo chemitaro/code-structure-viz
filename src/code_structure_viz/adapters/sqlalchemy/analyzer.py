@@ -89,6 +89,7 @@ class _ParsedModule:
     path: str
     tree: ast.Module
     bindings: dict[str, str | None]
+    ambiguous_bindings: dict[str, set[str]]
     star_import: bool
     is_package: bool
 
@@ -183,6 +184,16 @@ _CONSTRUCTION_SYMBOLS: Final = frozenset(
 _CONSTRUCTION_TERMINALS: Final = frozenset(
     value.rsplit(".", 1)[-1] for value in _CONSTRUCTION_SYMBOLS
 )
+_SQLALCHEMY_BINDING_SYMBOLS: Final = _CONSTRUCTION_SYMBOLS | {
+    "sqlalchemy",
+    "sqlalchemy.orm",
+    "sqlalchemy.schema",
+    "sqlalchemy.sql",
+    "sqlalchemy.sql.schema",
+    "sqlalchemy.types",
+    "sqlalchemy.orm.DeclarativeBase",
+    "sqlalchemy.orm.Mapped",
+}
 _SQLALCHEMY_EVIDENCE_TERMINALS: Final = _CONSTRUCTION_TERMINALS | {"Mapped"}
 _COLUMN_SYMBOLS: Final = {"sqlalchemy.Column", "sqlalchemy.orm.mapped_column"}
 _COLUMN_SPECIALS: Final = {
@@ -438,6 +449,7 @@ class SqlAlchemySnapshotAnalyzer:
                     path,
                     tree,
                     {},
+                    {},
                     False,
                     indexed.source.path.name == "__init__.py",
                 )
@@ -447,30 +459,10 @@ class SqlAlchemySnapshotAnalyzer:
     def _index_bindings(self, modules: list[_ParsedModule]) -> None:
         for module in modules:
             for statement in module.tree.body:
-                if isinstance(statement, ast.Import):
-                    for alias in statement.names:
-                        local = alias.asname or alias.name.split(".", 1)[0]
-                        origin = alias.name if alias.asname else alias.name.split(".", 1)[0]
-                        _bind(module.bindings, local, _normalize_symbol(origin))
-                elif isinstance(statement, ast.ImportFrom):
-                    if any(alias.name == "*" for alias in statement.names):
-                        module.star_import = True
-                        continue
-                    import_origin = _import_from_origin(module, statement)
-                    if import_origin is None:
-                        continue
-                    for alias in statement.names:
-                        local = alias.asname or alias.name
-                        _bind(
-                            module.bindings,
-                            local,
-                            _normalize_symbol(f"{import_origin}.{alias.name}"),
-                        )
-                elif isinstance(statement, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-                    _bind(module.bindings, statement.name, f"{module.module}.{statement.name}")
-                elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
-                    for name in _assignment_names(statement):
-                        _bind(module.bindings, name, f"{module.module}.{name}")
+                _bind_module_statement(module, statement)
+            for statement in module.tree.body:
+                for write in _nested_module_scope_writes(statement):
+                    _bind_module_statement(module, write, ambiguous=True)
 
     def _classes(
         self,
@@ -815,7 +807,7 @@ class SqlAlchemySnapshotAnalyzer:
         }
         rows: list[SqlAlchemyRowEvidence] = []
         for candidate, table in surviving.values():
-            known_columns: set[str] = set()
+            known_columns: dict[str, str | None] = {}
             deferred_constraints: list[tuple[_ParsedModule, ast.Call]] = []
             for module, call in candidate.table_calls:
                 for argument in call.args[2:]:
@@ -835,11 +827,14 @@ class SqlAlchemySnapshotAnalyzer:
                             state=state,
                         )
                         rows.extend(parsed)
-                        known_columns.update(
-                            row.row.name
-                            for row in parsed
-                            if isinstance(row.row, SqlAlchemyColumnRow) and row.row.name is not None
-                        )
+                        for parsed_row in parsed:
+                            if (
+                                isinstance(parsed_row.row, SqlAlchemyColumnRow)
+                                and parsed_row.row.name is not None
+                            ):
+                                _remember_column(
+                                    known_columns, parsed_row.row.name, parsed_row.row.name
+                                )
                     elif symbol in _CONSTRAINT_SYMBOLS:
                         deferred_constraints.append((module, argument))
                     else:
@@ -868,11 +863,12 @@ class SqlAlchemySnapshotAnalyzer:
                             state=state,
                         )
                         rows.extend(parsed)
-                        known_columns.update(
-                            row.row.name
-                            for row in parsed
-                            if isinstance(row.row, SqlAlchemyColumnRow) and row.row.name is not None
-                        )
+                        for parsed_row in parsed:
+                            if (
+                                isinstance(parsed_row.row, SqlAlchemyColumnRow)
+                                and parsed_row.row.name is not None
+                            ):
+                                _remember_column(known_columns, name, parsed_row.row.name)
                     elif (
                         isinstance(value, ast.Call)
                         and _resolve_call(value, declaration.module)
@@ -919,7 +915,7 @@ class SqlAlchemySnapshotAnalyzer:
                                 state,
                             )
                         rows.append(SqlAlchemyRowEvidence(row, _span(statement)))
-                        known_columns.add(name)
+                        _remember_column(known_columns, name, name)
                         state.supported(declaration.module)
                     elif isinstance(value, ast.Call) and _unresolved_terminal(
                         value.func,
@@ -1319,7 +1315,7 @@ class SqlAlchemySnapshotAnalyzer:
         module: _ParsedModule,
         table: SqlAlchemyTable,
         call: ast.Call,
-        known_columns: set[str],
+        known_columns: dict[str, str | None],
         tables_by_id: dict[str, SqlAlchemyTable],
         state: _State,
     ) -> list[SqlAlchemyRowEvidence]:
@@ -1408,6 +1404,13 @@ class SqlAlchemySnapshotAnalyzer:
             terms: list[SqlAlchemyIndexTerm] = []
             for argument in call.args[1:]:
                 column = _column_reference(argument, known_columns)
+                if (
+                    column is None
+                    and isinstance(argument, ast.Name)
+                    and argument.id in known_columns
+                ):
+                    self._unknown_row(module, table, SqlAlchemyRowKind.INDEX, call, state)
+                    return []
                 terms.append(
                     SqlAlchemyIndexTerm.column(column)
                     if column is not None
@@ -1664,14 +1667,160 @@ def _failed_source(value: PythonSourceFailure) -> SqlAlchemyFailedSource:
     return SqlAlchemyFailedSource(value.path.as_posix(), stage, code)
 
 
-def _bind(bindings: dict[str, str | None], name: str, origin: str) -> None:
+def _bind_module_statement(
+    module: _ParsedModule,
+    statement: ast.AST,
+    *,
+    ambiguous: bool = False,
+) -> None:
+    if isinstance(statement, ast.Import):
+        for alias in statement.names:
+            local = alias.asname or alias.name.split(".", 1)[0]
+            origin = alias.name if alias.asname else alias.name.split(".", 1)[0]
+            _bind(
+                module.bindings,
+                module.ambiguous_bindings,
+                local,
+                _normalize_symbol(origin),
+                ambiguous=ambiguous,
+            )
+    elif isinstance(statement, ast.ImportFrom):
+        if any(alias.name == "*" for alias in statement.names):
+            module.star_import = True
+            return
+        import_origin = _import_from_origin(module, statement)
+        if import_origin is None:
+            return
+        for alias in statement.names:
+            local = alias.asname or alias.name
+            _bind(
+                module.bindings,
+                module.ambiguous_bindings,
+                local,
+                _normalize_symbol(f"{import_origin}.{alias.name}"),
+                ambiguous=ambiguous,
+            )
+    elif isinstance(statement, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        _bind(
+            module.bindings,
+            module.ambiguous_bindings,
+            statement.name,
+            f"{module.module}.{statement.name}",
+            ambiguous=ambiguous,
+        )
+    elif isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        for name in _assignment_names(statement):
+            _bind(
+                module.bindings,
+                module.ambiguous_bindings,
+                name,
+                f"{module.module}.{name}",
+                ambiguous=ambiguous,
+            )
+    elif isinstance(statement, (ast.For, ast.AsyncFor)):
+        _bind_target(module, statement.target, ambiguous=True)
+    elif isinstance(statement, (ast.With, ast.AsyncWith)):
+        for item in statement.items:
+            if item.optional_vars is not None:
+                _bind_target(module, item.optional_vars, ambiguous=True)
+    elif isinstance(statement, ast.ExceptHandler):
+        if statement.name is not None:
+            _bind_name(module, statement.name, ambiguous=True)
+    elif isinstance(statement, ast.Match):
+        for case in statement.cases:
+            for name in _pattern_binding_names(case.pattern):
+                _bind_name(module, name, ambiguous=True)
+    elif isinstance(statement, ast.Delete):
+        for target in statement.targets:
+            _bind_target(module, target, ambiguous=True)
+
+
+def _nested_module_scope_writes(value: ast.AST) -> tuple[ast.AST, ...]:
+    if isinstance(value, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        return ()
+    result: list[ast.AST] = []
+    for child in ast.iter_child_nodes(value):
+        if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if isinstance(
+            child,
+            (
+                ast.Import,
+                ast.ImportFrom,
+                ast.Assign,
+                ast.AnnAssign,
+                ast.AugAssign,
+                ast.NamedExpr,
+                ast.For,
+                ast.AsyncFor,
+                ast.With,
+                ast.AsyncWith,
+                ast.ExceptHandler,
+                ast.Match,
+                ast.Delete,
+            ),
+        ):
+            result.append(child)
+        result.extend(_nested_module_scope_writes(child))
+    return tuple(result)
+
+
+def _bind(
+    bindings: dict[str, str | None],
+    ambiguous_bindings: dict[str, set[str]],
+    name: str,
+    origin: str,
+    *,
+    ambiguous: bool = False,
+) -> None:
+    previous = bindings.get(name)
     if name in bindings:
+        if previous in _SQLALCHEMY_BINDING_SYMBOLS:
+            ambiguous_bindings.setdefault(name, set()).add(previous)
+        if origin in _SQLALCHEMY_BINDING_SYMBOLS:
+            ambiguous_bindings.setdefault(name, set()).add(origin)
         bindings[name] = None
     else:
         bindings[name] = origin
+    if ambiguous and origin in _SQLALCHEMY_BINDING_SYMBOLS:
+        ambiguous_bindings.setdefault(name, set()).add(origin)
+    if ambiguous:
+        bindings[name] = None
 
 
-def _assignment_names(value: ast.Assign | ast.AnnAssign) -> tuple[str, ...]:
+def _bind_name(module: _ParsedModule, name: str, *, ambiguous: bool) -> None:
+    _bind(
+        module.bindings,
+        module.ambiguous_bindings,
+        name,
+        f"{module.module}.{name}",
+        ambiguous=ambiguous,
+    )
+
+
+def _bind_target(module: _ParsedModule, target: ast.expr, *, ambiguous: bool) -> None:
+    if isinstance(target, ast.Name):
+        _bind_name(module, target.id, ambiguous=ambiguous)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            _bind_target(module, element, ambiguous=ambiguous)
+    elif isinstance(target, ast.Starred):
+        _bind_target(module, target.value, ambiguous=ambiguous)
+
+
+def _pattern_binding_names(pattern: ast.pattern) -> tuple[str, ...]:
+    names: list[str] = []
+    for node in ast.walk(pattern):
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name is not None:
+            names.append(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+            names.append(node.rest)
+    return tuple(names)
+
+
+def _assignment_names(
+    value: ast.Assign | ast.AnnAssign | ast.AugAssign | ast.NamedExpr,
+) -> tuple[str, ...]:
     targets = value.targets if isinstance(value, ast.Assign) else (value.target,)
     return tuple(target.id for target in targets if isinstance(target, ast.Name))
 
@@ -1717,7 +1866,25 @@ def _unresolved_terminal(
     module: _ParsedModule,
     terminals: frozenset[str] | set[str],
 ) -> bool:
-    return _resolve_symbol(value, module) is None and _terminal_name(value) in terminals
+    if _resolve_symbol(value, module) is not None:
+        return False
+    terminal = _terminal_name(value)
+    if terminal in terminals:
+        return True
+    return any(
+        origin.rsplit(".", 1)[-1] in terminals for origin in _ambiguous_symbols(value, module)
+    )
+
+
+def _ambiguous_symbols(value: ast.expr, module: _ParsedModule) -> set[str]:
+    if isinstance(value, ast.Name):
+        return set(module.ambiguous_bindings.get(value.id, ()))
+    if isinstance(value, ast.Attribute):
+        return {
+            _normalize_symbol(f"{origin}.{value.attr}")
+            for origin in _ambiguous_symbols(value.value, module)
+        }
+    return set()
 
 
 def _resolve_call(value: ast.Call, module: _ParsedModule) -> str | None:
@@ -2123,21 +2290,34 @@ def _special_redaction(
     return _redacted(matches[0], module, state)
 
 
-def _column_reference(value: ast.expr, known: set[str]) -> str | None:
-    candidate = (
-        value.value
-        if isinstance(value, ast.Constant) and isinstance(value.value, str)
-        else value.id
-        if isinstance(value, ast.Name)
-        else None
-    )
-    if candidate is None:
+def _remember_column(
+    known: dict[str, str | None],
+    reference: str,
+    semantic_name: str,
+) -> None:
+    previous = known.get(reference)
+    if reference in known and previous != semantic_name:
+        known[reference] = None
+    else:
+        known[reference] = semantic_name
+
+
+def _column_reference(value: ast.expr, known: dict[str, str | None]) -> str | None:
+    if isinstance(value, ast.Name):
+        try:
+            reference = safe_structural_string(value.id, field="column name")
+        except ValueError:
+            return None
+        return known.get(reference)
+    if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
         return None
     try:
-        normalized = safe_structural_string(candidate, field="column name")
+        normalized = safe_structural_string(value.value, field="column name")
     except ValueError:
         return None
-    return normalized if not known or normalized in known else None
+    if not known:
+        return normalized
+    return normalized if normalized in known.values() else None
 
 
 def _static_string_sequence(value: ast.expr) -> tuple[str, ...] | None:
