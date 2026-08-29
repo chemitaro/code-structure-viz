@@ -3519,6 +3519,42 @@ class User(DeclarativeBase):
     assert result.snapshot.partial_safe is True
 
 
+def test_class_postcanonical_attribute_mutation_before_rebind_remains_unknown() -> None:
+    result = _analyze(
+        {
+            "src/pkg/__init__.py": b"",
+            "src/pkg/namespace.py": b"from sqlalchemy.orm import DeclarativeBase\n",
+            "src/bridge.py": b"from pkg import namespace\n",
+            "src/holder.py": b"",
+            "src/models.py": b"""
+import holder
+import bridge
+
+class Replacement:
+    pass
+
+replacement = Replacement()
+
+class Carrier:
+    holder.alias = bridge.namespace
+
+holder.alias.DeclarativeBase = object
+holder.alias = replacement
+
+from pkg.namespace import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
 def test_attribute_mutation_after_carrier_rebind_does_not_taint_source() -> None:
     result = _analyze(
         {

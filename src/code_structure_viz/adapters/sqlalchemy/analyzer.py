@@ -547,6 +547,7 @@ class SqlAlchemySnapshotAnalyzer:
                             ambiguous_execution=candidate is not statement,
                             apply_global_bindings=False,
                         )
+        _refresh_resolved_module_alias_provenance(modules)
         attribute_mutations = _expand_imported_module_alias_mutations(modules)
         for module in modules:
             module.attribute_mutations.update(attribute_mutations)
@@ -2260,6 +2261,15 @@ def _bind_attribute_target_module_alias_provenance(
         position = _node_position(statement)
         for parent in parents:
             symbol = _normalize_symbol(f"{parent}.{target.attr}")
+            events = module.import_alias_events.setdefault(symbol, [])
+            if not ambiguous and (position, None) not in events:
+                events.append((position, None))
+            if origins:
+                events.extend(
+                    (position, origin)
+                    for origin in sorted(origins, key=_utf8)
+                    if (position, origin) not in events
+                )
             definite_position = module.import_alias_definite_positions.get(symbol)
             if (
                 respect_definite_watermark
@@ -2271,17 +2281,8 @@ def _bind_attribute_target_module_alias_provenance(
                 module.imported_module_aliases.pop(symbol, None)
                 module.imported_module_alias_candidates.pop(symbol, None)
                 module.import_alias_definite_positions[symbol] = position
-                events = module.import_alias_events.setdefault(symbol, [])
-                if (position, None) not in events:
-                    events.append((position, None))
             if origins:
                 module.imported_module_alias_candidates.setdefault(symbol, set()).update(origins)
-                events = module.import_alias_events.setdefault(symbol, [])
-                events.extend(
-                    (position, origin)
-                    for origin in sorted(origins, key=_utf8)
-                    if (position, origin) not in events
-                )
         return
     if isinstance(target, (ast.Tuple, ast.List)):
         for element in target.elts:
