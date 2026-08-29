@@ -2337,6 +2337,98 @@ users = Table("users", object())
     assert result.snapshot.partial_safe is False
 
 
+def test_conditionally_rebound_importfrom_module_alias_taints_source_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+from sqlalchemy import orm
+
+class Replacement:
+    pass
+
+if condition:
+    orm = Replacement()
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.orm.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class User(DeclarativeBase):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-006"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_conditionally_rebound_imported_module_alias_taints_source_import() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+import sqlalchemy as sa
+
+class Replacement:
+    pass
+
+if condition:
+    sa = Replacement()
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.sa.Table = replacement
+from sqlalchemy import Table
+
+users = Table("users", object())
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.INDETERMINATE
+    assert result.snapshot.entities == ()
+    assert [item.code.value for item in result.snapshot.diagnostics] == ["CSV-SA-007"]
+    assert result.snapshot.partial_safe is True
+
+
+def test_later_definite_rebind_invalidates_conditional_module_alias() -> None:
+    result = _analyze(
+        {
+            "src/aliases.py": b"""
+if condition:
+    from sqlalchemy import orm
+
+class Replacement:
+    pass
+
+orm = Replacement()
+""",
+            "src/models.py": b"""
+import aliases
+
+aliases.orm.DeclarativeBase = object
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+""",
+        }
+    )
+
+    assert result.applicability is SqlAlchemyApplicability.PRESENT
+    assert [table.name for table in result.snapshot.entities] == ["users"]
+    assert result.snapshot.diagnostics == ()
+    assert result.snapshot.partial_safe is False
+
+
 def test_repository_attribute_mutation_taints_importfrom_binding() -> None:
     result = _analyze(
         {

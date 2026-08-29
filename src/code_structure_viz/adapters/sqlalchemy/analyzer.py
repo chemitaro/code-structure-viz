@@ -95,6 +95,7 @@ class _ParsedModule:
     attribute_mutations: set[str] = field(default_factory=set)
     imported_module_aliases: dict[str, set[str]] = field(default_factory=dict)
     imported_module_alias_candidates: dict[str, set[str]] = field(default_factory=dict)
+    import_alias_definite_positions: dict[str, tuple[int, int]] = field(default_factory=dict)
     star_import_origins: set[str] = field(default_factory=set)
     repository_bindings: dict[str, str | None] = field(default_factory=dict)
     repository_ambiguous_bindings: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -1969,8 +1970,13 @@ def _bind_module_statement(
                 ambiguous=ambiguous,
             )
             if binding_owner is None:
-                module.imported_module_aliases.setdefault(f"{module.module}.{local}", set()).add(
-                    normalized_origin
+                _record_import_alias_provenance(
+                    module,
+                    local,
+                    normalized_origin,
+                    candidate=False,
+                    ambiguous=ambiguous,
+                    statement=statement,
                 )
     elif isinstance(statement, ast.ImportFrom):
         if any(alias.name == "*" for alias in statement.names):
@@ -1994,10 +2000,17 @@ def _bind_module_statement(
                 ambiguous=ambiguous,
             )
             if binding_owner is None:
-                module.imported_module_alias_candidates.setdefault(
-                    f"{module.module}.{local}", set()
-                ).add(normalized_origin)
+                _record_import_alias_provenance(
+                    module,
+                    local,
+                    normalized_origin,
+                    candidate=True,
+                    ambiguous=ambiguous,
+                    statement=statement,
+                )
     elif isinstance(statement, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        if binding_owner is None and not ambiguous:
+            _clear_import_alias_provenance(module, statement.name, statement)
         _bind(
             module.bindings,
             module.ambiguous_bindings,
@@ -2010,7 +2023,15 @@ def _bind_module_statement(
         if binding_owner is None:
             for target in targets:
                 _invalidate_attribute_target(module, target)
-        for name in _assignment_names(statement):
+        names = _assignment_names(statement)
+        if (
+            binding_owner is None
+            and not ambiguous
+            and (not isinstance(statement, ast.AnnAssign) or statement.value is not None)
+        ):
+            for name in names:
+                _clear_import_alias_provenance(module, name, statement)
+        for name in names:
             _bind(
                 module.bindings,
                 module.ambiguous_bindings,
@@ -2020,6 +2041,8 @@ def _bind_module_statement(
             )
     elif isinstance(statement, ast.TypeAlias):
         for name in _target_names(statement.name):
+            if binding_owner is None and not ambiguous:
+                _clear_import_alias_provenance(module, name, statement)
             _bind(
                 module.bindings,
                 module.ambiguous_bindings,
@@ -2048,7 +2071,51 @@ def _bind_module_statement(
         for target in statement.targets:
             if binding_owner is None:
                 _invalidate_attribute_target(module, target)
+                if not ambiguous:
+                    for name in _target_names(target):
+                        _clear_import_alias_provenance(module, name, statement)
             _bind_target(module, target, ambiguous=True, binding_owner=owner)
+
+
+def _record_import_alias_provenance(
+    module: _ParsedModule,
+    local: str,
+    origin: str,
+    *,
+    candidate: bool,
+    ambiguous: bool,
+    statement: ast.AST,
+) -> None:
+    symbol = f"{module.module}.{local}"
+    position = (
+        getattr(statement, "lineno", -1),
+        getattr(statement, "col_offset", -1),
+    )
+    definite_position = module.import_alias_definite_positions.get(symbol)
+    if ambiguous and definite_position is not None and position < definite_position:
+        return
+    if not ambiguous:
+        module.imported_module_aliases.pop(symbol, None)
+        module.imported_module_alias_candidates.pop(symbol, None)
+        module.import_alias_definite_positions[symbol] = position
+    target = (
+        module.imported_module_alias_candidates if candidate else module.imported_module_aliases
+    )
+    target.setdefault(symbol, set()).add(origin)
+
+
+def _clear_import_alias_provenance(
+    module: _ParsedModule,
+    local: str,
+    statement: ast.AST,
+) -> None:
+    symbol = f"{module.module}.{local}"
+    module.imported_module_aliases.pop(symbol, None)
+    module.imported_module_alias_candidates.pop(symbol, None)
+    module.import_alias_definite_positions[symbol] = (
+        getattr(statement, "lineno", -1),
+        getattr(statement, "col_offset", -1),
+    )
 
 
 def _invalidate_attribute_target(module: _ParsedModule, target: ast.expr) -> None:
@@ -2070,15 +2137,9 @@ def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set
     candidates: dict[str, set[str]] = {}
     for module in modules:
         for symbol, origins in module.imported_module_aliases.items():
-            local = symbol.rsplit(".", 1)[-1]
-            origin = module.bindings.get(local)
-            if origin is not None and origin in origins and local not in module.ambiguous_bindings:
-                aliases.setdefault(symbol, set()).add(origin)
+            aliases.setdefault(symbol, set()).update(origins)
         for symbol, origins in module.imported_module_alias_candidates.items():
-            local = symbol.rsplit(".", 1)[-1]
-            origin = module.bindings.get(local)
-            if origin is not None and origin in origins and local not in module.ambiguous_bindings:
-                candidates.setdefault(symbol, set()).add(origin)
+            candidates.setdefault(symbol, set()).update(origins)
 
     by_name = {module.module: module for module in modules}
     repository_module_origins: set[str] = set()
@@ -2095,11 +2156,7 @@ def _expand_imported_module_alias_mutations(modules: list[_ParsedModule]) -> set
         if name not in owner.bindings:
             repository_module_origins.add(symbol)
             continue
-        if (
-            owner.bindings[name] == symbol
-            and name not in owner.ambiguous_bindings
-            and symbol in owner.imported_module_alias_candidates.get(symbol, ())
-        ):
+        if symbol in owner.imported_module_alias_candidates.get(symbol, ()):
             repository_module_origins.add(symbol)
 
     repository_modules = set(by_name)
@@ -2210,6 +2267,7 @@ def _copy_parsed_module(module: _ParsedModule) -> _ParsedModule:
             symbol: set(origins)
             for symbol, origins in module.imported_module_alias_candidates.items()
         },
+        import_alias_definite_positions=dict(module.import_alias_definite_positions),
         star_import_origins=set(module.star_import_origins),
         repository_bindings=module.repository_bindings,
         repository_ambiguous_bindings=module.repository_ambiguous_bindings,
