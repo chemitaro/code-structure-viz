@@ -486,12 +486,28 @@ class SqlAlchemySnapshotAnalyzer:
         return sorted(parsed, key=lambda item: (_utf8(item.module), _utf8(item.path)))
 
     def _index_bindings(self, modules: list[_ParsedModule]) -> None:
+        repository_modules = frozenset(module.module for module in modules)
+        for module in modules:
+            module.repository_modules = repository_modules
         for module in modules:
             for statement in module.tree.body:
                 _bind_module_statement(module, statement)
+                if isinstance(statement, ast.ClassDef):
+                    _invalidate_executed_class_body_mutations(
+                        module,
+                        statement,
+                        f"{module.module}.{statement.name}",
+                    )
             for statement in module.tree.body:
                 for write in _nested_module_scope_writes(statement):
                     _bind_module_statement(module, write, ambiguous=True)
+                    if isinstance(write, ast.ClassDef):
+                        _invalidate_executed_class_body_mutations(
+                            module,
+                            write,
+                            f"{module.module}.{write.name}",
+                            ambiguous_execution=True,
+                        )
             for statement in module.tree.body:
                 for candidate in (statement, *_nested_module_scope_writes(statement)):
                     if isinstance(candidate, ast.ClassDef):
@@ -499,6 +515,8 @@ class SqlAlchemySnapshotAnalyzer:
                             module,
                             candidate,
                             f"{module.module}.{candidate.name}",
+                            ambiguous_execution=candidate is not statement,
+                            apply_global_bindings=False,
                         )
         attribute_mutations = _expand_imported_module_alias_mutations(modules)
         for module in modules:
@@ -2027,6 +2045,8 @@ def _bind_module_statement(
             ambiguous=ambiguous,
         )
     elif isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        if isinstance(statement, ast.AnnAssign) and statement.value is None:
+            return
         targets = statement.targets if isinstance(statement, ast.Assign) else (statement.target,)
         if binding_owner is None:
             for target in targets:
@@ -2148,6 +2168,12 @@ def _alias_preserving_assignment_provenance(
         target = statement.target
     else:
         return None
+    if isinstance(statement.value, ast.Attribute):
+        origin = _resolve_symbol(statement.value, module)
+        if not _proven_module_origin(module, origin):
+            return None
+        assert origin is not None
+        return target.id, {origin}, set()
     if not isinstance(statement.value, ast.Name):
         return None
 
@@ -2182,8 +2208,15 @@ def _invalidate_executed_class_body_mutations(
     module: _ParsedModule,
     node: ast.ClassDef,
     symbol: str,
+    *,
+    ambiguous_execution: bool = False,
+    apply_global_bindings: bool = True,
 ) -> None:
-    scopes = _class_mutation_scope_modules(_ClassDeclaration(module, node, symbol))
+    scopes = _class_mutation_scope_modules(
+        _ClassDeclaration(module, node, symbol),
+        ambiguous_execution=ambiguous_execution,
+        apply_global_bindings=apply_global_bindings,
+    )
     for statement in node.body:
         for write in (statement, *_nested_module_scope_writes(statement)):
             scope = scopes[id(write)]
@@ -2194,13 +2227,17 @@ def _invalidate_executed_class_body_mutations(
                     module,
                     write,
                     f"{symbol}.{write.name}",
+                    ambiguous_execution=(ambiguous_execution or write is not statement),
+                    apply_global_bindings=apply_global_bindings,
                 )
 
 
 def _attribute_write_targets(value: ast.AST) -> tuple[ast.expr, ...]:
     if isinstance(value, ast.Assign):
         return tuple(value.targets)
-    if isinstance(value, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+    if isinstance(value, ast.AnnAssign):
+        return (value.target,) if value.value is not None else ()
+    if isinstance(value, (ast.AugAssign, ast.NamedExpr)):
         return (value.target,)
     if isinstance(value, (ast.For, ast.AsyncFor)):
         return (value.target,)
@@ -2213,28 +2250,138 @@ def _attribute_write_targets(value: ast.AST) -> tuple[ast.expr, ...]:
 
 def _class_mutation_scope_modules(
     declaration: _ClassDeclaration,
+    *,
+    ambiguous_execution: bool = False,
+    apply_global_bindings: bool = True,
 ) -> dict[int, _ParsedModule]:
     scope = _copy_parsed_module(declaration.module)
     result: dict[int, _ParsedModule] = {}
+    global_names: set[str] = set()
     for statement in declaration.node.body:
-        result[id(statement)] = _copy_parsed_module(scope)
-        for name in _definite_class_binding_names(statement):
-            scope.bindings.pop(name, None)
-            scope.ambiguous_bindings.pop(name, None)
-        _bind_module_statement(
-            scope,
-            statement,
-            binding_owner=declaration.symbol,
-        )
-        for write in _nested_module_scope_writes(statement):
+        for write, nested in (
+            (statement, False),
+            *((candidate, True) for candidate in _nested_module_scope_writes(statement)),
+        ):
             result[id(write)] = _copy_parsed_module(scope)
+            if isinstance(write, ast.Global):
+                global_names.update(write.names)
+                continue
+            ambiguous = ambiguous_execution or nested
+            before = _copy_parsed_module(scope)
+            if not ambiguous:
+                for name in _definite_class_binding_names(write):
+                    if name not in global_names:
+                        scope.bindings.pop(name, None)
+                        scope.ambiguous_bindings.pop(name, None)
             _bind_module_statement(
                 scope,
                 write,
-                ambiguous=True,
+                ambiguous=ambiguous,
                 binding_owner=declaration.symbol,
             )
+            bound_globals = set(_statement_binding_names(write)) & global_names
+            if bound_globals:
+                _apply_class_global_write(
+                    declaration.module,
+                    scope,
+                    before,
+                    write,
+                    bound_globals,
+                    ambiguous=ambiguous,
+                    apply_outer=apply_global_bindings,
+                )
+            proven_module = _proven_sqlalchemy_module_assignment(before, write)
+            if proven_module is not None:
+                name, origin = proven_module
+                if ambiguous:
+                    scope.bindings[name] = None
+                    scope.ambiguous_bindings.setdefault(name, set()).add(origin)
+                else:
+                    scope.bindings[name] = origin
+                    scope.ambiguous_bindings.pop(name, None)
     return result
+
+
+def _apply_class_global_write(
+    module: _ParsedModule,
+    scope: _ParsedModule,
+    before: _ParsedModule,
+    statement: ast.AST,
+    names: set[str],
+    *,
+    ambiguous: bool,
+    apply_outer: bool,
+) -> None:
+    if apply_outer:
+        outer_result = _copy_parsed_module(module)
+        _bind_module_statement(outer_result, statement, ambiguous=ambiguous)
+        for name in names:
+            _copy_module_binding(name, outer_result, module)
+
+    scope_result = _copy_parsed_module(before)
+    if not ambiguous:
+        for name in names:
+            scope_result.bindings.pop(name, None)
+            scope_result.ambiguous_bindings.pop(name, None)
+    _bind_module_statement(scope_result, statement, ambiguous=ambiguous)
+    for name in names:
+        _copy_module_binding(name, scope_result, scope)
+
+
+def _copy_module_binding(
+    name: str,
+    source: _ParsedModule,
+    target: _ParsedModule,
+) -> None:
+    if name in source.bindings:
+        target.bindings[name] = source.bindings[name]
+    else:
+        target.bindings.pop(name, None)
+    if name in source.ambiguous_bindings:
+        target.ambiguous_bindings[name] = set(source.ambiguous_bindings[name])
+    else:
+        target.ambiguous_bindings.pop(name, None)
+
+    symbol = f"{target.module}.{name}"
+    for source_values, target_values in (
+        (source.imported_module_aliases, target.imported_module_aliases),
+        (source.imported_module_alias_candidates, target.imported_module_alias_candidates),
+    ):
+        if symbol in source_values:
+            target_values[symbol] = set(source_values[symbol])
+        else:
+            target_values.pop(symbol, None)
+    if symbol in source.import_alias_definite_positions:
+        target.import_alias_definite_positions[symbol] = source.import_alias_definite_positions[
+            symbol
+        ]
+    else:
+        target.import_alias_definite_positions.pop(symbol, None)
+
+
+def _proven_sqlalchemy_module_assignment(
+    module: _ParsedModule,
+    statement: ast.AST,
+) -> tuple[str, str] | None:
+    if isinstance(statement, ast.Assign):
+        if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            return None
+        target = statement.targets[0]
+        value = statement.value
+    elif isinstance(statement, (ast.AnnAssign, ast.NamedExpr)):
+        if not isinstance(statement.target, ast.Name) or statement.value is None:
+            return None
+        target = statement.target
+        value = statement.value
+    else:
+        return None
+    if not isinstance(value, (ast.Name, ast.Attribute)):
+        return None
+    origin = _resolve_symbol(value, module)
+    if not _proven_module_origin(module, origin):
+        return None
+    assert origin is not None
+    return target.id, origin
 
 
 def _definite_class_binding_names(value: ast.AST) -> tuple[str, ...]:
@@ -2341,6 +2488,7 @@ def _nested_module_scope_writes(value: ast.AST) -> tuple[ast.AST, ...]:
                 ast.ExceptHandler,
                 ast.Match,
                 ast.Delete,
+                ast.Global,
                 ast.TypeAlias,
             ),
         ):
@@ -2437,7 +2585,9 @@ def _statement_binding_names(value: ast.AST) -> tuple[str, ...]:
         return tuple(alias.asname or alias.name.split(".", 1)[0] for alias in value.names)
     if isinstance(value, ast.ImportFrom):
         return tuple(alias.asname or alias.name for alias in value.names if alias.name != "*")
-    if isinstance(value, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+    if isinstance(value, ast.AnnAssign):
+        return _assignment_names(value) if value.value is not None else ()
+    if isinstance(value, (ast.Assign, ast.AugAssign, ast.NamedExpr)):
         return _assignment_names(value)
     if isinstance(value, ast.TypeAlias):
         return _target_names(value.name)
@@ -2537,6 +2687,15 @@ def _binding_origin_is_sqlalchemy(module: _ParsedModule, origin: str | None) -> 
         return False
     assert origin is not None
     return not any(
+        origin == repository_module or origin.startswith(f"{repository_module}.")
+        for repository_module in module.repository_modules
+    )
+
+
+def _proven_module_origin(module: _ParsedModule, origin: str | None) -> bool:
+    if origin in module.repository_modules:
+        return True
+    return origin in _SQLALCHEMY_MODULE_SYMBOLS and not any(
         origin == repository_module or origin.startswith(f"{repository_module}.")
         for repository_module in module.repository_modules
     )
