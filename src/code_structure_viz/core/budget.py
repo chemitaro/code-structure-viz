@@ -4,6 +4,12 @@ from dataclasses import dataclass
 
 from code_structure_viz.core.config import ConfigSource
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
+from code_structure_viz.core.domains import DomainName
+
+_ENTITY_BUDGET_DIAGNOSTIC = {
+    "python": DiagnosticCode.PY_ENTITY_BUDGET,
+    "sqlalchemy": DiagnosticCode.SA_ENTITY_BUDGET,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +51,7 @@ class EntityBudgetGate:
     def admit(
         self,
         *,
+        domain: DomainName,
         actual: int,
         requested: int | None,
         resolved: int,
@@ -56,7 +63,7 @@ class EntityBudgetGate:
         return BudgetDecision(
             False,
             budget,
-            (diagnostic(DiagnosticCode.PY_ENTITY_BUDGET, domain="python"),),
+            (diagnostic(_ENTITY_BUDGET_DIAGNOSTIC[domain], domain=domain),),
         )
 
 

@@ -25,12 +25,11 @@ _FORBIDDEN_IMPORTS = frozenset(
     "arguments",
     [
         ("diff",),
-        ("snapshot", "--domain", "sqlalchemy"),
         ("snapshot", "--domain", "next"),
         ("snapshot", "--domain", "python", "--format", "html"),
     ],
 )
-def test_cli_registers_only_python_snapshot_and_v1_formats(arguments: tuple[str, ...]) -> None:
+def test_cli_rejects_incomplete_future_or_non_v1_surfaces(arguments: tuple[str, ...]) -> None:
     completed = subprocess.run(
         (sys.executable, "-m", "code_structure_viz", *arguments),
         stdin=subprocess.DEVNULL,
@@ -43,7 +42,7 @@ def test_cli_registers_only_python_snapshot_and_v1_formats(arguments: tuple[str,
     assert completed.stdout == b""
 
 
-def test_help_exposes_no_diff_database_next_or_html_surface() -> None:
+def test_help_exposes_both_snapshot_domains_but_no_diff_next_or_html_surface() -> None:
     completed = subprocess.run(
         (sys.executable, "-m", "code_structure_viz", "--help"),
         stdin=subprocess.DEVNULL,
@@ -54,7 +53,8 @@ def test_help_exposes_no_diff_database_next_or_html_surface() -> None:
     help_text = completed.stdout.decode("ascii").lower()
 
     assert "snapshot" in help_text
-    assert all(value not in help_text for value in ("diff", "sqlalchemy", "next", "html"))
+    assert "python|sqlalchemy" in help_text
+    assert all(value not in help_text for value in ("diff", "next", "html"))
 
 
 def test_runtime_dependency_import_and_package_surfaces_are_closed() -> None:
@@ -79,7 +79,7 @@ def test_runtime_dependency_import_and_package_surfaces_are_closed() -> None:
 
     assert forbidden == []
     assert not any(
-        path.is_dir() and path.name.lower() in {"diff", "sqlalchemy", "next", "html"}
+        path.is_dir() and path.name.lower() in {"diff", "next", "html"}
         for path in SOURCE_ROOT.rglob("*")
     )
     assert not any(path.suffix.lower() in {".html", ".htm"} for path in SOURCE_ROOT.rglob("*"))

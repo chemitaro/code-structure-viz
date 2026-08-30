@@ -13,6 +13,7 @@ from code_structure_viz.core.outcomes import (
     "kwargs",
     [
         {
+            "domain": "python",
             "status": DomainStatus.NOT_APPLICABLE,
             "incomplete_kind": None,
             "payload_available": True,
@@ -20,6 +21,7 @@ from code_structure_viz.core.outcomes import (
             "artifact_paths": (),
         },
         {
+            "domain": "python",
             "status": DomainStatus.INCOMPLETE,
             "incomplete_kind": None,
             "payload_available": False,
@@ -27,6 +29,7 @@ from code_structure_viz.core.outcomes import (
             "artifact_paths": (),
         },
         {
+            "domain": "python",
             "status": DomainStatus.INCOMPLETE,
             "incomplete_kind": IncompleteKind.PARTIAL_SAFE,
             "payload_available": False,
@@ -34,6 +37,7 @@ from code_structure_viz.core.outcomes import (
             "artifact_paths": (),
         },
         {
+            "domain": "python",
             "status": DomainStatus.INCOMPLETE,
             "incomplete_kind": IncompleteKind.PAYLOAD_UNAVAILABLE,
             "payload_available": False,
@@ -52,10 +56,10 @@ def test_domain_outcome_rejects_impossible_payload_combinations(
 def test_domain_outcome_constructors_create_closed_variants() -> None:
     payload = object()
 
-    complete = DomainOutcome.complete(payload)
-    not_applicable = DomainOutcome.not_applicable()
-    partial = DomainOutcome.partial_safe(payload)
-    unavailable = DomainOutcome.payload_unavailable()
+    complete = DomainOutcome.complete(payload, domain="python")
+    not_applicable = DomainOutcome.not_applicable(domain="python")
+    partial = DomainOutcome.partial_safe(payload, domain="python")
+    unavailable = DomainOutcome.payload_unavailable(domain="python")
 
     assert (complete.status, complete.payload_available) == (DomainStatus.COMPLETE, True)
     assert (not_applicable.status, not_applicable.payload_available) == (
@@ -66,12 +70,32 @@ def test_domain_outcome_constructors_create_closed_variants() -> None:
     assert unavailable.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE
 
 
+@pytest.mark.parametrize(
+    ("domain", "artifact_path"),
+    [
+        ("python", "sqlalchemy.snapshot.semantic.json"),
+        ("sqlalchemy", "python.snapshot.semantic.json"),
+    ],
+)
+def test_domain_outcome_rejects_cross_domain_artifact_paths(
+    domain: str, artifact_path: str
+) -> None:
+    with pytest.raises(ValueError):
+        DomainOutcome.complete(
+            object(),
+            domain=domain,  # type: ignore[arg-type]
+            artifact_paths=(artifact_path,),
+        )
+
+
 def test_run_outcome_maps_status_to_exact_exit_and_manifest_contract() -> None:
     complete = RunOutcome.completed(
-        (DomainOutcome.complete(object()),), manifest_relative_path="run-manifest.json"
+        (DomainOutcome.complete(object(), domain="python"),),
+        manifest_relative_path="run-manifest.json",
     )
     incomplete = RunOutcome.incomplete(
-        (DomainOutcome.payload_unavailable(),), manifest_relative_path="run-manifest.json"
+        (DomainOutcome.payload_unavailable(domain="python"),),
+        manifest_relative_path="run-manifest.json",
     )
     fatal = RunOutcome.fatal()
     usage = RunOutcome.usage()

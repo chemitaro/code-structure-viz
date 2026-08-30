@@ -24,9 +24,9 @@ from code_structure_viz.core.diagnostics import (
 from code_structure_viz.core.outcomes import RunOutcome
 
 _HELP = b"""usage: code-structure-viz snapshot \\
-  --repo PATH --output-dir PATH --domain python [options]
+  --repo PATH --output-dir PATH --domain python|sqlalchemy [options]
 
-Generate a static Python working-tree structure snapshot.
+Generate a static Python or SQLAlchemy working-tree structure snapshot.
 
 meta options:
   --help

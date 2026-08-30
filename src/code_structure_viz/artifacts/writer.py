@@ -7,6 +7,7 @@ import re
 import secrets
 import stat
 import sys
+import unicodedata
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -17,6 +18,7 @@ from code_structure_viz.artifacts.manifest import (
     ArtifactFormat,
 )
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
+from code_structure_viz.core.domains import DomainName
 from code_structure_viz.core.path_safety import has_symlink_component, lexical_absolute
 from code_structure_viz.semantic.canonical_json import encode_canonical_json, parse_json_integer
 
@@ -24,6 +26,8 @@ _FINAL_PATHS = frozenset(
     {
         "python.snapshot.semantic.json",
         "python.snapshot.puml",
+        "sqlalchemy.snapshot.semantic.json",
+        "sqlalchemy.snapshot.puml",
         "python.diff.semantic.json",
         "python.diff.puml",
         "file-changes.json",
@@ -33,6 +37,58 @@ _FINAL_PATHS = frozenset(
 _PLANTUML_RELATION = re.compile(
     r"(?:C|M)_[0-9a-f]{64} (?:<\|--|\*--|\.\.>) (?:C|M)_[0-9a-f]{64} : "
     r"(?:継承|合成|型依存|import依存)"
+)
+_SQLALCHEMY_ALIAS = r"T_[0-9a-f]{64}"
+_SQLALCHEMY_ENTITY = re.compile(rf'^entity "(.+)" as ({_SQLALCHEMY_ALIAS}) \{{$')
+_SQLALCHEMY_RELATION = re.compile(
+    "^("
+    + _SQLALCHEMY_ALIAS
+    + r") ((?:\|\||\|o|\}o|\}\|)(?:--|\.\.)(?:\|\||o\||o\{|\|\{)) ("
+    + _SQLALCHEMY_ALIAS
+    + r") : (foreign_key|relationship) (.+)$"
+)
+_SQLALCHEMY_UNKNOWN_RELATION = re.compile(
+    rf"^({_SQLALCHEMY_ALIAS}) (--|\.\.) ({_SQLALCHEMY_ALIAS}) : "
+    r"(foreign_key|relationship) (.+) \[source=(1|0\.\.1|0\.\.N|1\.\.N|\?) "
+    r"target=(1|0\.\.1|0\.\.N|1\.\.N|\?)\]$"
+)
+_SQLALCHEMY_INHERITANCE = re.compile(
+    rf"^({_SQLALCHEMY_ALIAS}) --\|> ({_SQLALCHEMY_ALIAS}) : inheritance$"
+)
+_SQLALCHEMY_ASSOCIATION = re.compile(
+    rf"^({_SQLALCHEMY_ALIAS}) \.\. ({_SQLALCHEMY_ALIAS}) : association "
+    r"(.+) \[source=\? target=\?\]$"
+)
+_SQLALCHEMY_ESCAPE = re.compile(r"_U([0-9A-F]{4,6})_")
+_SQLALCHEMY_REDACTED = re.compile(
+    r"\[redacted:(?:literal|callable|sql_expression|computed|identity|unknown)\]"
+)
+_SQLALCHEMY_BOOL = frozenset({"true", "false", "?"})
+_SQLALCHEMY_TYPE_CATEGORIES = (
+    "integer|string|text|boolean|date|datetime|time|decimal|float|json|binary|uuid|"
+    "enum|array|custom|unknown"
+)
+_SQLALCHEMY_HEADER = (
+    "@startuml",
+    "title SQLAlchemy ER snapshot",
+    "top to bottom direction",
+    "hide circle",
+    "skinparam linetype ortho",
+    "hide methods",
+)
+_SQLALCHEMY_LEGEND_TAIL = (
+    "  ||--|| exactly_one",
+    "  |o--o| zero_or_one",
+    "  }o--o{ zero_or_many",
+    "  }|--|{ one_or_many",
+    "  -- foreign_key (solid)",
+    "  .. relationship (dotted)",
+    "  --|> inheritance (not cardinality)",
+    "  .. association metadata (cardinality unknown)",
+    "  [?] evidence insufficient; plain line retained",
+    "  [redacted] literal/expression value omitted",
+    "endlegend",
+    "@enduml",
 )
 _PRIVATE_PATH_BOUNDARIES = frozenset(" \t\r\n\"'=:([]{<")
 
@@ -304,7 +360,11 @@ def _contains_private_paths(
         text = content.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         return False
-    if relative_path in {"python.snapshot.puml", "python.diff.puml"}:
+    if relative_path in {
+        "python.snapshot.puml",
+        "python.diff.puml",
+        "sqlalchemy.snapshot.puml",
+    }:
         return any(_contains_private_path_token(text, path) for path in private_paths)
     try:
         value = json.loads(text)
@@ -313,7 +373,7 @@ def _contains_private_paths(
     return _contains_private_path(value, private_paths)
 
 
-def _valid_plantuml(content: bytes) -> bool:
+def _valid_python_plantuml(content: bytes) -> bool:
     try:
         text = content.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
@@ -374,6 +434,256 @@ def _valid_plantuml(content: bytes) -> bool:
         or _PLANTUML_RELATION.fullmatch(line) is not None
         for line in lines
     )
+
+
+def _valid_sqlalchemy_escaped_component(value: str) -> bool:
+    if not value or unicodedata.normalize("NFC", value) != value:
+        return False
+    index = 0
+    while index < len(value):
+        escaped = _SQLALCHEMY_ESCAPE.match(value, index)
+        if escaped is not None:
+            scalar = int(escaped.group(1), 16)
+            if scalar > 0x10FFFF or 0xD800 <= scalar <= 0xDFFF:
+                return False
+            character = chr(scalar)
+            if unicodedata.category(character)[0] in {"L", "N"} or character in {
+                " ",
+                "-",
+                "/",
+                "$",
+            }:
+                return False
+            index = escaped.end()
+            continue
+        character = value[index]
+        if unicodedata.category(character)[0] not in {"L", "N"} and character not in {
+            " ",
+            "-",
+            "/",
+            "$",
+            "_",
+        }:
+            return False
+        index += 1
+    return True
+
+
+def _valid_sqlalchemy_display(value: str) -> bool:
+    if value == "<unknown>":
+        return True
+    components = value.split(".")
+    return len(components) in {1, 2} and all(
+        _valid_sqlalchemy_escaped_component(item) for item in components
+    )
+
+
+def _valid_sqlalchemy_name(value: str) -> bool:
+    return value == "<unnamed>" or _valid_sqlalchemy_escaped_component(value)
+
+
+def _valid_sqlalchemy_redacted(value: str) -> bool:
+    return value == "-" or _SQLALCHEMY_REDACTED.fullmatch(value) is not None
+
+
+def _valid_sqlalchemy_columns(value: str) -> bool:
+    return bool(value) and all(
+        _valid_sqlalchemy_escaped_component(item) for item in value.split(",")
+    )
+
+
+def _valid_sqlalchemy_row(line: str) -> bool:
+    if line == "  --":
+        return True
+
+    column = re.fullmatch(
+        rf"  (\* )?(.+?) : ({_SQLALCHEMY_TYPE_CATEGORIES})"
+        r"(?: \((.+?)\))? <<(.+)>>",
+        line,
+    )
+    if column is not None:
+        _mandatory, name, _category, type_name, markers = column.groups()
+        marker_values = tuple(value.strip() for value in markers.split(","))
+        allowed_markers = {"PK", "FK", "UQ", "IX", "NN", "NULL", "?NULL"}
+        return (
+            _valid_sqlalchemy_name(name)
+            and (type_name is None or _valid_sqlalchemy_escaped_component(type_name))
+            and bool(marker_values)
+            and all(value in allowed_markers for value in marker_values)
+            and len(set(marker_values)) == len(marker_values)
+        )
+
+    simple_columns = re.fullmatch(r"  (primary_key|unique) (.+?) columns=(.+)", line)
+    if simple_columns is not None:
+        _kind, name, columns = simple_columns.groups()
+        return (
+            _valid_sqlalchemy_name(name)
+            and columns.startswith("(")
+            and columns.endswith(")")
+            and _valid_sqlalchemy_columns(columns[1:-1])
+        )
+
+    check = re.fullmatch(r"  check (.+?) expression=(\S+)", line)
+    if check is not None:
+        name, expression = check.groups()
+        return _valid_sqlalchemy_name(name) and _valid_sqlalchemy_redacted(expression)
+
+    index = re.fullmatch(r"  index (.+?) unique=(true|false|\?) terms=(.+)", line)
+    if index is not None:
+        name, unique, terms_value = index.groups()
+        terms = terms_value.split(",")
+        return (
+            _valid_sqlalchemy_name(name)
+            and unique in _SQLALCHEMY_BOOL
+            and bool(terms)
+            and all(
+                (
+                    _valid_sqlalchemy_escaped_component(term.removeprefix("column:"))
+                    if term.startswith("column:")
+                    else _SQLALCHEMY_REDACTED.fullmatch(term) is not None
+                )
+                for term in terms
+            )
+        )
+
+    foreign_key = re.fullmatch(
+        r"  foreign_key (.+?) local=\((.+?)\) references=(.+?)\((.+?)\) "
+        r"ondelete=(\S+) onupdate=(\S+)",
+        line,
+    )
+    if foreign_key is not None:
+        name, local, target, remote, ondelete, onupdate = foreign_key.groups()
+        return (
+            _valid_sqlalchemy_name(name)
+            and _valid_sqlalchemy_columns(local)
+            and _valid_sqlalchemy_display(target)
+            and _valid_sqlalchemy_columns(remote)
+            and _valid_sqlalchemy_redacted(ondelete)
+            and _valid_sqlalchemy_redacted(onupdate)
+        )
+
+    relationship = re.fullmatch(
+        r"  relationship (.+?) : (scalar|many|unknown) target=(.+?) "
+        r"uselist=(true|false|\?) back_populates=(.+?) secondary=(\S+)",
+        line,
+    )
+    if relationship is not None:
+        name, _cardinality, target, uselist, back_populates, secondary = relationship.groups()
+        return (
+            _valid_sqlalchemy_name(name)
+            and _valid_sqlalchemy_display(target)
+            and uselist in _SQLALCHEMY_BOOL
+            and (back_populates == "-" or _valid_sqlalchemy_escaped_component(back_populates))
+            and (secondary == "-" or _valid_sqlalchemy_display(secondary))
+        )
+
+    inheritance = re.fullmatch(r"  inheritance target=(.+)", line)
+    if inheritance is not None:
+        return _valid_sqlalchemy_display(inheritance.group(1))
+
+    association = re.fullmatch(
+        r"  association_table (.+?) source=(.+?) target=(.+)",
+        line,
+    )
+    if association is not None:
+        name, source, target = association.groups()
+        return (
+            _valid_sqlalchemy_name(name)
+            and _valid_sqlalchemy_display(source)
+            and _valid_sqlalchemy_display(target)
+        )
+    return False
+
+
+def _valid_sqlalchemy_relation(line: str, aliases: set[str]) -> bool:
+    relation = _SQLALCHEMY_RELATION.fullmatch(line)
+    if relation is not None:
+        source, edge, target, kind, label = relation.groups()
+        left, style, right = edge[:2], edge[2:4], edge[4:]
+        return (
+            source in aliases
+            and target in aliases
+            and left in {"||", "|o", "}o", "}|"}
+            and style in {"--", ".."}
+            and right in {"||", "o|", "o{", "|{"}
+            and _valid_sqlalchemy_name(label)
+            and (
+                (kind == "foreign_key" and style == "--")
+                or (kind == "relationship" and style == "..")
+            )
+        )
+    unknown = _SQLALCHEMY_UNKNOWN_RELATION.fullmatch(line)
+    if unknown is not None:
+        source, style, target, kind, label, _source_multiplicity, _target_multiplicity = (
+            unknown.groups()
+        )
+        return (
+            source in aliases
+            and target in aliases
+            and kind in {"foreign_key", "relationship"}
+            and style in {"--", ".."}
+            and _valid_sqlalchemy_name(label)
+        )
+    inheritance = _SQLALCHEMY_INHERITANCE.fullmatch(line)
+    if inheritance is not None:
+        source, target = inheritance.groups()
+        return source in aliases and target in aliases
+    association = _SQLALCHEMY_ASSOCIATION.fullmatch(line)
+    if association is not None:
+        source, target, label = association.groups()
+        return source in aliases and target in aliases and _valid_sqlalchemy_name(label)
+    return False
+
+
+def _valid_sqlalchemy_plantuml(content: bytes) -> bool:
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return False
+    if not text.endswith("\n") or text.endswith("\n\n"):
+        return False
+    lines = text[:-1].split("\n")
+    if tuple(lines[: len(_SQLALCHEMY_HEADER)]) != _SQLALCHEMY_HEADER:
+        return False
+    if lines.count("legend right") != 1:
+        return False
+    legend = lines.index("legend right")
+    if lines[legend + 1 : legend + 2] != [
+        "  rule_version=code-structure-viz.sqlalchemy-redaction/v1"
+    ]:
+        return False
+    if (
+        legend + 2 >= len(lines)
+        or re.fullmatch(r"  redacted_values=(?:0|[1-9][0-9]*)", lines[legend + 2]) is None
+    ):
+        return False
+    if tuple(lines[legend + 3 :]) != _SQLALCHEMY_LEGEND_TAIL:
+        return False
+
+    aliases: set[str] = set()
+    in_entity = False
+    relations_started = False
+    for line in lines[len(_SQLALCHEMY_HEADER) : legend]:
+        if in_entity:
+            if line == "}":
+                in_entity = False
+            elif not _valid_sqlalchemy_row(line):
+                return False
+            continue
+        entity = _SQLALCHEMY_ENTITY.fullmatch(line)
+        if entity is not None:
+            if relations_started:
+                return False
+            display, alias = entity.groups()
+            if alias in aliases or not _valid_sqlalchemy_display(display):
+                return False
+            aliases.add(alias)
+            in_entity = True
+            continue
+        relations_started = True
+        if not _valid_sqlalchemy_relation(line, aliases):
+            return False
+    return not in_entity
 
 
 class OutputTransaction:
@@ -495,7 +805,15 @@ class OutputTransaction:
         return self._staging_root
 
     def stage_payload(self, format_value: ArtifactFormat, content: bytes) -> ArtifactDescriptor:
-        descriptor = ArtifactDescriptor.create(format_value, content)
+        return self.stage_snapshot_payload("python", format_value, content)
+
+    def stage_snapshot_payload(
+        self,
+        domain: DomainName,
+        format_value: ArtifactFormat,
+        content: bytes,
+    ) -> ArtifactDescriptor:
+        descriptor = ArtifactDescriptor.create_snapshot(domain, format_value, content)
         if descriptor.path in self._descriptors:
             raise _error(DiagnosticCode.INTERNAL_INVARIANT)
         self._validate_content(descriptor.path, content)
@@ -649,8 +967,10 @@ class OutputTransaction:
         if b"\0" in content or _contains_private_paths(relative_path, content, private_paths):
             raise _error(DiagnosticCode.INTERNAL_INVARIANT)
         valid = (
-            _valid_plantuml(content)
+            _valid_python_plantuml(content)
             if relative_path in {"python.snapshot.puml", "python.diff.puml"}
+            else _valid_sqlalchemy_plantuml(content)
+            if relative_path == "sqlalchemy.snapshot.puml"
             else _canonical_json_bytes(content)
         )
         if not valid:

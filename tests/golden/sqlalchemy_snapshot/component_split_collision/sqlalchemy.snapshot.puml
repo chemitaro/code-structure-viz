@@ -1,0 +1,25 @@
+@startuml
+title SQLAlchemy ER snapshot
+top to bottom direction
+hide circle
+skinparam linetype ortho
+hide methods
+entity "a.b_U002E_c" as T_c357f64acf0a863040621314954fbe7007e2f0f1edde1a4a506decffa033d3b4 {
+}
+entity "a_U002E_b.c" as T_e58d111591d38e758a460e512adad36793b4e86109cc674e01f76607d9924f43 {
+}
+legend right
+  rule_version=code-structure-viz.sqlalchemy-redaction/v1
+  redacted_values=0
+  ||--|| exactly_one
+  |o--o| zero_or_one
+  }o--o{ zero_or_many
+  }|--|{ one_or_many
+  -- foreign_key (solid)
+  .. relationship (dotted)
+  --|> inheritance (not cardinality)
+  .. association metadata (cardinality unknown)
+  [?] evidence insufficient; plain line retained
+  [redacted] literal/expression value omitted
+endlegend
+@enduml

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import keyword
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -16,11 +15,12 @@ from code_structure_viz.core.diagnostics import (
     canonical_diagnostics,
     diagnostic,
 )
-from code_structure_viz.source.source_view import (
-    AcquisitionStage,
-    SourceFile,
-    SourceView,
+from code_structure_viz.source.python_modules import (
+    PythonSourceFailure,
+    PythonSourceIndex,
+    PythonSourceStage,
 )
+from code_structure_viz.source.source_view import SourceFile, SourceView
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,32 +57,27 @@ class PythonModuleIndex:
 
     @classmethod
     def build(cls, source_view: SourceView, config: PythonConfig) -> PythonModuleIndex:
-        failures: list[FailedSourceFile] = []
+        language_index = PythonSourceIndex.build(source_view, config)
+        failures = tuple(
+            sorted(
+                (_python_failure(item) for item in language_index.failures),
+                key=failed_source_sort_key,
+            )
+        )
         diagnostics: list[Diagnostic] = []
-        collision_failure_paths: set[PurePosixPath] = set()
-        for source_failure in source_view.failures:
-            stage = (
-                FailedStage.READ
-                if source_failure.stage is AcquisitionStage.READ
-                else FailedStage.PATH_SAFETY
-            )
-            failures.append(
-                FailedSourceFile(
-                    source_failure.path,
-                    stage,
-                    source_failure.diagnostic_code,
-                )
-            )
-            if source_failure.diagnostic_code is DiagnosticCode.SOURCE_PATH_COLLISION:
-                collision_failure_paths.add(source_failure.path)
+        collision_failure_paths = {
+            item.path
+            for item in language_index.failures
+            if item.source_code is DiagnosticCode.SOURCE_PATH_COLLISION
+        }
+        for item in language_index.failures:
+            code = _python_failure_code(item)
+            if code is DiagnosticCode.SOURCE_PATH_COLLISION or (
+                item.stage is PythonSourceStage.MODULE_COLLISION
+            ):
                 continue
-            diagnostics.append(
-                diagnostic(
-                    source_failure.diagnostic_code,
-                    domain="python",
-                    path=source_failure.path.as_posix(),
-                )
-            )
+            diagnostics.append(diagnostic(code, domain="python", path=item.path.as_posix()))
+
         covered_collision_paths: set[PurePosixPath] = set()
         for collision_group in source_view.collision_groups:
             group_paths = tuple(
@@ -110,56 +105,45 @@ class PythonModuleIndex:
                 )
             )
 
-        candidates: dict[str, list[SourceFile]] = {}
-        for source in source_view.files:
-            module = _module_name(source.path, config.source_roots)
-            if module is None:
-                failures.append(
-                    FailedSourceFile(
-                        source.path,
-                        FailedStage.MODULE_IDENTITY,
-                        DiagnosticCode.PY_MODULE_IDENTITY,
-                    )
-                )
-                diagnostics.append(
-                    diagnostic(
-                        DiagnosticCode.PY_MODULE_IDENTITY,
-                        domain="python",
-                        path=source.path.as_posix(),
-                    )
-                )
-                continue
-            candidates.setdefault(module, []).append(source)
-
-        modules: list[IndexedModule] = []
-        collisions: list[ModuleCollision] = []
-        for module, sources in candidates.items():
-            if len(sources) == 1:
-                modules.append(IndexedModule(module, sources[0]))
-                continue
-            paths = tuple(sorted((source.path for source in sources), key=_path_key))
-            collisions.append(ModuleCollision(module, paths))
-            failures.extend(
-                FailedSourceFile(
-                    path, FailedStage.MODULE_COLLISION, DiagnosticCode.PY_MODULE_COLLISION
-                )
-                for path in paths
-            )
+        for collision in language_index.collisions:
             diagnostics.append(
                 diagnostic(
                     DiagnosticCode.PY_MODULE_COLLISION,
                     domain="python",
-                    symbol=f"python:module:{module}",
+                    symbol=f"python:module:{collision.module}",
                 )
             )
 
         return cls(
-            modules=tuple(sorted(modules, key=lambda item: _utf8(item.module))),
-            failures=tuple(sorted(failures, key=failed_source_sort_key)),
+            modules=tuple(
+                IndexedModule(item.module, item.source) for item in language_index.modules
+            ),
+            failures=failures,
             diagnostics=canonical_diagnostics(tuple(diagnostics)),
-            collisions=tuple(sorted(collisions, key=lambda item: _utf8(item.module))),
-            candidate_file_count=len(source_view.files) + len(source_view.failures),
+            collisions=tuple(
+                ModuleCollision(item.module, item.paths) for item in language_index.collisions
+            ),
+            candidate_file_count=language_index.candidate_file_count,
         )
+
+
+def _python_failure(value: PythonSourceFailure) -> FailedSourceFile:
+    stage = {
+        PythonSourceStage.READ: FailedStage.READ,
+        PythonSourceStage.PATH_SAFETY: FailedStage.PATH_SAFETY,
+        PythonSourceStage.MODULE_IDENTITY: FailedStage.MODULE_IDENTITY,
+        PythonSourceStage.MODULE_COLLISION: FailedStage.MODULE_COLLISION,
+    }[value.stage]
+    return FailedSourceFile(value.path, stage, _python_failure_code(value))
+
+
+def _python_failure_code(value: PythonSourceFailure) -> DiagnosticCode:
+    if value.source_code is not None:
+        return value.source_code
+    return {
+        PythonSourceStage.MODULE_IDENTITY: DiagnosticCode.PY_MODULE_IDENTITY,
+        PythonSourceStage.MODULE_COLLISION: DiagnosticCode.PY_MODULE_COLLISION,
+    }[value.stage]
 
 
 def _utf8(value: str) -> bytes:
@@ -168,31 +152,3 @@ def _utf8(value: str) -> bytes:
 
 def _path_key(value: PurePosixPath) -> bytes:
     return _utf8(value.as_posix())
-
-
-def _module_name(path: PurePosixPath, source_roots: tuple[str, ...]) -> str | None:
-    matches: list[tuple[int, int, PurePosixPath]] = []
-    for order, raw_root in enumerate(source_roots):
-        root = PurePosixPath(raw_root)
-        if raw_root == ".":
-            relative = path
-            depth = 0
-        elif path != root and root not in path.parents:
-            continue
-        else:
-            relative = path.relative_to(root)
-            depth = len(root.parts)
-        matches.append((depth, -order, relative))
-    if not matches:
-        return None
-    _, _, relative = max(matches, key=lambda item: (item[0], item[1]))
-    if relative.suffix != ".py":
-        return None
-    parts = [*relative.parts[:-1], relative.name.removesuffix(".py")]
-    if parts[-1] == "__init__":
-        parts.pop()
-    if not parts:
-        parts = ["__init__"]
-    if not all(part.isidentifier() and not keyword.iskeyword(part) for part in parts):
-        return None
-    return ".".join(parts)

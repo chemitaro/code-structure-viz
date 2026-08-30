@@ -80,7 +80,7 @@
       "additionalProperties": false,
       "required": ["domain", "status"],
       "properties": {
-        "domain": {"const": "python"},
+        "domain": {"enum": ["python", "sqlalchemy"]},
         "status": {"const": "complete"}
       }
     },
@@ -89,7 +89,7 @@
       "additionalProperties": false,
       "required": ["domain", "status"],
       "properties": {
-        "domain": {"const": "python"},
+        "domain": {"enum": ["python", "sqlalchemy"]},
         "status": {"const": "not_applicable"}
       }
     },
@@ -98,7 +98,7 @@
       "additionalProperties": false,
       "required": ["domain", "status", "incomplete_kind"],
       "properties": {
-        "domain": {"const": "python"},
+        "domain": {"enum": ["python", "sqlalchemy"]},
         "status": {"const": "incomplete"},
         "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]}
       }

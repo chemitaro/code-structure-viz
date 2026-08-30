@@ -1,0 +1,24 @@
+@startuml
+title SQLAlchemy ER snapshot
+top to bottom direction
+hide circle
+skinparam linetype ortho
+hide methods
+entity "items" as T_eef6af467d783cb824f428570042690ffd9567294e13e0c84c463dc4b049e875 {
+  id : integer (int) <<?NULL>>
+}
+legend right
+  rule_version=code-structure-viz.sqlalchemy-redaction/v1
+  redacted_values=0
+  ||--|| exactly_one
+  |o--o| zero_or_one
+  }o--o{ zero_or_many
+  }|--|{ one_or_many
+  -- foreign_key (solid)
+  .. relationship (dotted)
+  --|> inheritance (not cardinality)
+  .. association metadata (cardinality unknown)
+  [?] evidence insufficient; plain line retained
+  [redacted] literal/expression value omitted
+endlegend
+@enduml

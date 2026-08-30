@@ -4,6 +4,7 @@ from pathlib import PurePosixPath
 from code_structure_viz.adapters.python.module_index import PythonModuleIndex
 from code_structure_viz.core.config import PythonConfig
 from code_structure_viz.core.diagnostics import DiagnosticCode
+from code_structure_viz.source.python_modules import PythonSourceIndex, PythonSourceStage
 from code_structure_viz.source.source_view import (
     AcquisitionStage,
     SourceAcquisitionFailure,
@@ -51,6 +52,33 @@ def test_module_mapping_uses_longest_root_and_init_rules() -> None:
     )
     assert index.failures == ()
     assert index.diagnostics == ()
+
+
+def test_language_source_index_owns_mapping_failures_and_collisions_without_diagnostics() -> None:
+    view = _view(
+        _source("src/domain/order.py"),
+        _source("domain/order.py"),
+        _source("src/class.py"),
+    )
+
+    index = PythonSourceIndex.build(
+        view,
+        PythonConfig(("src", "."), ("**/*.py",), ()),
+    )
+
+    assert index.modules == ()
+    assert tuple((item.module, item.paths) for item in index.collisions) == (
+        (
+            "domain.order",
+            (PurePosixPath("domain/order.py"), PurePosixPath("src/domain/order.py")),
+        ),
+    )
+    assert tuple((item.path.as_posix(), item.stage) for item in index.failures) == (
+        ("domain/order.py", PythonSourceStage.MODULE_COLLISION),
+        ("src/class.py", PythonSourceStage.MODULE_IDENTITY),
+        ("src/domain/order.py", PythonSourceStage.MODULE_COLLISION),
+    )
+    assert index.candidate_file_count == 3
 
 
 def test_invalid_keyword_and_non_identifier_paths_are_file_local_failures() -> None:

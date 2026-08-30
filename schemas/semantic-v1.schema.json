@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "CodeStructureViz Python semantic snapshot v1",
+  "title": "CodeStructureViz semantic snapshot v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,30 +14,73 @@
   "properties": {
     "type": {"enum": ["semantic_snapshot", "semantic_diff"]},
     "schema": {"const": "code-structure-viz.semantic/v1"},
-    "domain": {"const": "python"},
+    "domain": {"enum": ["python", "sqlalchemy"]},
     "document_kind": {"enum": ["snapshot", "diff"]},
     "status": {"enum": ["complete", "incomplete", "not_applicable"]},
     "incomplete_kind": {"const": "partial_safe"},
     "source": {"$ref": "#/$defs/source"},
     "request": {"$ref": "#/$defs/request"},
-    "coverage": {"$ref": "#/$defs/coverage"},
+    "coverage": {
+      "oneOf": [
+        {"$ref": "#/$defs/coverage"},
+        {"$ref": "#/$defs/sqlalchemy_coverage"}
+      ]
+    },
     "before": {"$ref": "#/$defs/diff_side"},
     "after": {"$ref": "#/$defs/diff_side"},
     "before_snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "after_snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "file_change_set": {"$ref": "#/$defs/file_change_set"},
     "semantic_change_set": {"$ref": "#/$defs/semantic_change_set"},
-    "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}},
-    "members": {"type": "array", "items": {"$ref": "#/$defs/member"}},
-    "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
-    "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
+    "entities": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/entity"},
+          {"$ref": "#/$defs/sqlalchemy_table"}
+        ]
+      }
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/member"},
+          {"$ref": "#/$defs/sqlalchemy_row"}
+        ]
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/relation"},
+          {"$ref": "#/$defs/sqlalchemy_relation"}
+        ]
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/diagnostic"},
+          {"$ref": "#/$defs/sqlalchemy_diagnostic"}
+        ]
+      }
+    }
   },
   "oneOf": [
     {
       "properties": {
         "type": {"const": "semantic_snapshot"},
+        "domain": {"const": "python"},
         "document_kind": {"const": "snapshot"},
-        "status": {"const": "complete"}
+        "status": {"const": "complete"},
+        "coverage": {"$ref": "#/$defs/coverage"},
+        "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}},
+        "members": {"type": "array", "items": {"$ref": "#/$defs/member"}},
+        "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
+        "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
       },
       "required": ["source", "request", "coverage", "entities", "members", "relations"],
       "not": {"required": ["incomplete_kind"]}
@@ -45,9 +88,15 @@
     {
       "properties": {
         "type": {"const": "semantic_snapshot"},
+        "domain": {"const": "python"},
         "document_kind": {"const": "snapshot"},
         "status": {"const": "incomplete"},
-        "incomplete_kind": {"const": "partial_safe"}
+        "incomplete_kind": {"const": "partial_safe"},
+        "coverage": {"$ref": "#/$defs/coverage"},
+        "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}},
+        "members": {"type": "array", "items": {"$ref": "#/$defs/member"}},
+        "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
+        "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
       },
       "required": [
         "source",
@@ -62,6 +111,7 @@
     {
       "properties": {
         "type": {"const": "semantic_diff"},
+        "domain": {"const": "python"},
         "document_kind": {"const": "diff"},
         "status": {"enum": ["complete", "not_applicable"]}
       },
@@ -78,6 +128,7 @@
     {
       "properties": {
         "type": {"const": "semantic_diff"},
+        "domain": {"const": "python"},
         "document_kind": {"const": "diff"},
         "status": {"const": "incomplete"},
         "incomplete_kind": {"const": "partial_safe"}
@@ -91,6 +142,109 @@
         "semantic_change_set",
         "incomplete_kind"
       ]
+    },
+    {
+      "properties": {
+        "type": {"const": "semantic_snapshot"},
+        "domain": {"const": "sqlalchemy"},
+        "document_kind": {"const": "snapshot"},
+        "status": {"const": "complete"},
+        "entities": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sqlalchemy_table"}
+        },
+        "members": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sqlalchemy_complete_row"}
+        },
+        "relations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sqlalchemy_relation"}
+        },
+        "diagnostics": {"type": "array", "maxItems": 0},
+        "coverage": {
+          "allOf": [
+            {"$ref": "#/$defs/sqlalchemy_coverage"},
+            {
+              "properties": {
+                "failed_files": {"maxItems": 0},
+                "unknown_declarations": {"const": 0},
+                "frontier": {
+                  "items": {
+                    "allOf": [
+                      {"$ref": "#/$defs/sqlalchemy_frontier"},
+                      {
+                        "properties": {
+                          "direction": {"enum": ["upstream", "downstream"]},
+                          "reason": {"const": "depth_limit"}
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": ["source", "request", "coverage", "entities", "members", "relations"],
+      "allOf": [
+        {"not": {"required": ["incomplete_kind"]}},
+        {
+          "not": {
+            "anyOf": [
+              {"required": ["before"]},
+              {"required": ["after"]},
+              {"required": ["before_snapshot_sha256"]},
+              {"required": ["after_snapshot_sha256"]},
+              {"required": ["file_change_set"]},
+              {"required": ["semantic_change_set"]}
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "properties": {
+        "type": {"const": "semantic_snapshot"},
+        "domain": {"const": "sqlalchemy"},
+        "document_kind": {"const": "snapshot"},
+        "status": {"const": "incomplete"},
+        "incomplete_kind": {"const": "partial_safe"},
+        "coverage": {"$ref": "#/$defs/sqlalchemy_coverage"},
+        "entities": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sqlalchemy_table"}
+        },
+        "members": {"type": "array", "items": {"$ref": "#/$defs/sqlalchemy_row"}},
+        "relations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sqlalchemy_relation"}
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sqlalchemy_diagnostic"}
+        }
+      },
+      "required": [
+        "source",
+        "request",
+        "coverage",
+        "entities",
+        "members",
+        "relations",
+        "incomplete_kind"
+      ],
+      "not": {
+        "anyOf": [
+          {"required": ["before"]},
+          {"required": ["after"]},
+          {"required": ["before_snapshot_sha256"]},
+          {"required": ["after_snapshot_sha256"]},
+          {"required": ["file_change_set"]},
+          {"required": ["semantic_change_set"]}
+        ]
+      }
     }
   ],
   "$defs": {
@@ -567,6 +721,882 @@
             },
             "via_member_id": {"type": "null"},
             "annotation": {"type": "null"}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_table_id": {
+      "type": "string",
+      "pattern": "^sqlalchemy:table:[0-9a-f]{64}$"
+    },
+    "sqlalchemy_row_id": {
+      "type": "string",
+      "pattern": "^sqlalchemy:row:[0-9a-f]{64}$"
+    },
+    "sqlalchemy_relation_id": {
+      "type": "string",
+      "pattern": "^sqlalchemy:relation:[0-9a-f]{64}$"
+    },
+    "sqlalchemy_source_location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "range"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "range": {"$ref": "#/$defs/range"}
+      }
+    },
+    "sqlalchemy_redacted_expression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "category", "redacted"],
+      "properties": {
+        "present": {"type": "boolean"},
+        "category": {
+          "enum": [
+            "absent",
+            "literal",
+            "callable",
+            "sql_expression",
+            "computed",
+            "identity",
+            "unknown"
+          ]
+        },
+        "redacted": {"type": "boolean"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "present": {"const": false},
+            "category": {"const": "absent"},
+            "redacted": {"const": false}
+          }
+        },
+        {
+          "properties": {
+            "present": {"const": true},
+            "category": {
+              "enum": [
+                "literal",
+                "callable",
+                "sql_expression",
+                "computed",
+                "identity",
+                "unknown"
+              ]
+            },
+            "redacted": {"const": true}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_type": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "name", "parameters"],
+      "properties": {
+        "category": {
+          "enum": [
+            "integer",
+            "string",
+            "text",
+            "boolean",
+            "date",
+            "datetime",
+            "time",
+            "decimal",
+            "float",
+            "json",
+            "binary",
+            "uuid",
+            "enum",
+            "array",
+            "custom",
+            "unknown"
+          ]
+        },
+        "name": {"type": ["string", "null"], "minLength": 1},
+        "parameters": {"$ref": "#/$defs/sqlalchemy_redacted_expression"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "category": {"const": "unknown"},
+            "name": {"type": ["string", "null"], "minLength": 1}
+          }
+        },
+        {
+          "properties": {
+            "category": {
+              "enum": [
+                "integer",
+                "string",
+                "text",
+                "boolean",
+                "date",
+                "datetime",
+                "time",
+                "decimal",
+                "float",
+                "json",
+                "binary",
+                "uuid",
+                "enum",
+                "array",
+                "custom"
+              ]
+            },
+            "name": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_index_term": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "column_name", "expression"],
+      "properties": {
+        "kind": {"enum": ["column", "expression"]},
+        "column_name": {"type": ["string", "null"], "minLength": 1},
+        "expression": {"$ref": "#/$defs/sqlalchemy_redacted_expression"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {"const": "column"},
+            "column_name": {"type": "string", "minLength": 1},
+            "expression": {
+              "allOf": [
+                {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+                {
+                  "properties": {
+                    "present": {"const": false},
+                    "category": {"const": "absent"},
+                    "redacted": {"const": false}
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "kind": {"const": "expression"},
+            "column_name": {"type": "null"},
+            "expression": {
+              "allOf": [
+                {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+                {"properties": {"present": {"const": true}, "redacted": {"const": true}}}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "sqlalchemy_relation_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resolution",
+        "kind",
+        "id",
+        "schema_name",
+        "table_name",
+        "symbol",
+        "display_name"
+      ],
+      "properties": {
+        "resolution": {"enum": ["internal", "external", "unknown"]},
+        "kind": {"enum": ["table", "mapped_class", "unknown"]},
+        "id": {
+          "oneOf": [{"$ref": "#/$defs/sqlalchemy_table_id"}, {"type": "null"}]
+        },
+        "schema_name": {"type": ["string", "null"], "minLength": 1},
+        "table_name": {"type": ["string", "null"], "minLength": 1},
+        "symbol": {"type": ["string", "null"], "minLength": 1},
+        "display_name": {"type": "string", "minLength": 1}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "resolution": {"const": "internal"},
+            "kind": {"const": "table"},
+            "id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+            "schema_name": {"type": ["string", "null"], "minLength": 1},
+            "table_name": {"type": "string", "minLength": 1},
+            "symbol": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "resolution": {"const": "external"},
+            "kind": {"const": "table"},
+            "id": {"type": "null"},
+            "schema_name": {"type": ["string", "null"], "minLength": 1},
+            "table_name": {"type": "string", "minLength": 1},
+            "symbol": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "resolution": {"const": "external"},
+            "kind": {"const": "mapped_class"},
+            "id": {"type": "null"},
+            "schema_name": {"type": "null"},
+            "table_name": {"type": "null"},
+            "symbol": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "properties": {
+            "resolution": {"const": "unknown"},
+            "kind": {"const": "unknown"},
+            "id": {"type": "null"},
+            "schema_name": {"type": "null"},
+            "table_name": {"type": "null"},
+            "symbol": {"type": "null"},
+            "display_name": {"const": "<unknown>"}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_internal_table_target": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_relation_target"},
+        {
+          "properties": {
+            "resolution": {"const": "internal"},
+            "kind": {"const": "table"},
+            "id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+            "table_name": {"type": "string", "minLength": 1},
+            "symbol": {"type": "null"}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_mapping_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "module", "symbol", "source"],
+      "properties": {
+        "kind": {"enum": ["declarative_class", "table"]},
+        "module": {"type": "string", "minLength": 1},
+        "symbol": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"}
+      }
+    },
+    "sqlalchemy_table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "schema_name",
+        "name",
+        "display_name",
+        "mapping_kind",
+        "mapping_sources"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "table"},
+        "schema_name": {"type": ["string", "null"], "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "display_name": {"type": "string", "minLength": 1},
+        "mapping_kind": {"enum": ["declarative_class", "table", "mixed"]},
+        "mapping_sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/sqlalchemy_mapping_source"}
+        }
+      }
+    },
+    "sqlalchemy_column_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner_id",
+        "kind",
+        "name",
+        "source",
+        "type",
+        "nullable",
+        "primary_key",
+        "unique",
+        "index",
+        "default",
+        "server_default",
+        "onupdate",
+        "server_onupdate",
+        "computed",
+        "identity"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "owner_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "column"},
+        "name": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"},
+        "type": {"$ref": "#/$defs/sqlalchemy_type"},
+        "nullable": {"type": ["boolean", "null"]},
+        "primary_key": {"type": ["boolean", "null"]},
+        "unique": {"type": ["boolean", "null"]},
+        "index": {"type": ["boolean", "null"]},
+        "default": {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        "server_default": {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        "onupdate": {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        "server_onupdate": {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        "computed": {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        "identity": {"$ref": "#/$defs/sqlalchemy_redacted_expression"}
+      }
+    },
+    "sqlalchemy_primary_key_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner_id", "kind", "name", "source", "columns"],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "owner_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "primary_key"},
+        "name": {"type": ["string", "null"], "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"},
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "sqlalchemy_unique_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner_id", "kind", "name", "source", "columns"],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "owner_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "unique"},
+        "name": {"type": ["string", "null"], "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"},
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "sqlalchemy_check_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner_id", "kind", "name", "source", "expression"],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "owner_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "check"},
+        "name": {"type": ["string", "null"], "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"},
+        "expression": {
+          "allOf": [
+            {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+            {
+              "properties": {
+                "present": {"const": true},
+                "category": {"enum": ["literal", "sql_expression", "unknown"]},
+                "redacted": {"const": true}
+              }
+            }
+          ]
+        }
+      }
+    },
+    "sqlalchemy_index_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner_id", "kind", "name", "source", "unique", "terms"],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "owner_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "index"},
+        "name": {"type": ["string", "null"], "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"},
+        "unique": {"type": ["boolean", "null"]},
+        "terms": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/sqlalchemy_index_term"}
+        }
+      }
+    },
+    "sqlalchemy_foreign_key_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner_id",
+        "kind",
+        "name",
+        "source",
+        "local_columns",
+        "target",
+        "target_columns",
+        "ondelete",
+        "onupdate"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "owner_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "foreign_key"},
+        "name": {"type": ["string", "null"], "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"},
+        "local_columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "target": {"$ref": "#/$defs/sqlalchemy_relation_target"},
+        "target_columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "ondelete": {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        "onupdate": {"$ref": "#/$defs/sqlalchemy_redacted_expression"}
+      }
+    },
+    "sqlalchemy_relationship_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner_id",
+        "kind",
+        "name",
+        "source",
+        "target",
+        "cardinality",
+        "uselist",
+        "back_populates",
+        "secondary",
+        "primaryjoin",
+        "secondaryjoin",
+        "order_by",
+        "foreign_keys"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "owner_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "relationship"},
+        "name": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"},
+        "target": {"$ref": "#/$defs/sqlalchemy_relation_target"},
+        "cardinality": {"enum": ["scalar", "many", "unknown"]},
+        "uselist": {"type": ["boolean", "null"]},
+        "back_populates": {"type": ["string", "null"], "minLength": 1},
+        "secondary": {
+          "oneOf": [
+            {"$ref": "#/$defs/sqlalchemy_relation_target"},
+            {"type": "null"}
+          ]
+        },
+        "primaryjoin": {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        "secondaryjoin": {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        "order_by": {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        "foreign_keys": {"$ref": "#/$defs/sqlalchemy_redacted_expression"}
+      }
+    },
+    "sqlalchemy_inheritance_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner_id", "kind", "name", "source", "target"],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "owner_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "inheritance"},
+        "name": {"type": "null"},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"},
+        "target": {"$ref": "#/$defs/sqlalchemy_internal_table_target"}
+      }
+    },
+    "sqlalchemy_association_table_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner_id",
+        "kind",
+        "name",
+        "source",
+        "source_table",
+        "relationship_target",
+        "relationship_member_id"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "owner_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "kind": {"const": "association_table"},
+        "name": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"},
+        "source_table": {"$ref": "#/$defs/sqlalchemy_internal_table_target"},
+        "relationship_target": {"$ref": "#/$defs/sqlalchemy_relation_target"},
+        "relationship_member_id": {"$ref": "#/$defs/sqlalchemy_row_id"}
+      }
+    },
+    "sqlalchemy_row": {
+      "oneOf": [
+        {"$ref": "#/$defs/sqlalchemy_column_row"},
+        {"$ref": "#/$defs/sqlalchemy_primary_key_row"},
+        {"$ref": "#/$defs/sqlalchemy_unique_row"},
+        {"$ref": "#/$defs/sqlalchemy_check_row"},
+        {"$ref": "#/$defs/sqlalchemy_index_row"},
+        {"$ref": "#/$defs/sqlalchemy_foreign_key_row"},
+        {"$ref": "#/$defs/sqlalchemy_relationship_row"},
+        {"$ref": "#/$defs/sqlalchemy_inheritance_row"},
+        {"$ref": "#/$defs/sqlalchemy_association_table_row"}
+      ]
+    },
+    "sqlalchemy_complete_redacted_expression": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_redacted_expression"},
+        {"properties": {"category": {"not": {"const": "unknown"}}}}
+      ]
+    },
+    "sqlalchemy_complete_type": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_type"},
+        {
+          "properties": {
+            "category": {"not": {"const": "unknown"}},
+            "parameters": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_complete_relation_target": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_relation_target"},
+        {
+          "properties": {
+            "resolution": {"not": {"const": "unknown"}},
+            "kind": {"not": {"const": "unknown"}}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_complete_index_term": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_index_term"},
+        {
+          "properties": {
+            "expression": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_complete_row": {
+      "allOf": [
+        {"$ref": "#/$defs/sqlalchemy_row"},
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "kind": {"const": "column"},
+                "type": {"$ref": "#/$defs/sqlalchemy_complete_type"},
+                "default": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "server_default": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                },
+                "onupdate": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "server_onupdate": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                },
+                "computed": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "identity": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+              }
+            },
+            {"properties": {"kind": {"const": "primary_key"}}},
+            {"properties": {"kind": {"const": "unique"}}},
+            {
+              "properties": {
+                "kind": {"const": "check"},
+                "expression": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+              }
+            },
+            {
+              "properties": {
+                "kind": {"const": "index"},
+                "terms": {
+                  "items": {"$ref": "#/$defs/sqlalchemy_complete_index_term"}
+                }
+              }
+            },
+            {
+              "properties": {
+                "kind": {"const": "foreign_key"},
+                "target": {"$ref": "#/$defs/sqlalchemy_complete_relation_target"},
+                "ondelete": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "onupdate": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"}
+              }
+            },
+            {
+              "properties": {
+                "kind": {"const": "relationship"},
+                "target": {"$ref": "#/$defs/sqlalchemy_complete_relation_target"},
+                "cardinality": {"enum": ["scalar", "many"]},
+                "secondary": {
+                  "oneOf": [
+                    {"$ref": "#/$defs/sqlalchemy_complete_relation_target"},
+                    {"type": "null"}
+                  ]
+                },
+                "primaryjoin": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                },
+                "secondaryjoin": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                },
+                "order_by": {"$ref": "#/$defs/sqlalchemy_complete_redacted_expression"},
+                "foreign_keys": {
+                  "$ref": "#/$defs/sqlalchemy_complete_redacted_expression"
+                }
+              }
+            },
+            {"properties": {"kind": {"const": "inheritance"}}},
+            {
+              "properties": {
+                "kind": {"const": "association_table"},
+                "relationship_target": {
+                  "$ref": "#/$defs/sqlalchemy_complete_relation_target"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "sqlalchemy_relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "source_id",
+        "target",
+        "via_member_id",
+        "role",
+        "source"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/sqlalchemy_relation_id"},
+        "kind": {"enum": ["foreign_key", "relationship", "inheritance", "association"]},
+        "source_id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "target": {"$ref": "#/$defs/sqlalchemy_internal_table_target"},
+        "via_member_id": {
+          "oneOf": [{"$ref": "#/$defs/sqlalchemy_row_id"}, {"type": "null"}]
+        },
+        "role": {"type": ["string", "null"], "minLength": 1},
+        "source": {"$ref": "#/$defs/sqlalchemy_source_location"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {"const": "foreign_key"},
+            "via_member_id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+            "role": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "kind": {"const": "relationship"},
+            "via_member_id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+            "role": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "properties": {
+            "kind": {"const": "inheritance"},
+            "via_member_id": {"type": "null"},
+            "role": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "kind": {"const": "association"},
+            "via_member_id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+            "role": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_failed_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "stage", "diagnostic_code"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "stage": {
+          "enum": [
+            "read",
+            "path_safety",
+            "encoding",
+            "parse",
+            "module_identity",
+            "module_collision"
+          ]
+        },
+        "diagnostic_code": {
+          "enum": ["CSV-SA-001", "CSV-SA-002", "CSV-SA-003", "CSV-SA-004", "CSV-SA-005"]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "stage": {"enum": ["read", "path_safety"]},
+            "diagnostic_code": {"const": "CSV-SA-001"}
+          }
+        },
+        {
+          "properties": {
+            "stage": {"const": "encoding"},
+            "diagnostic_code": {"const": "CSV-SA-002"}
+          }
+        },
+        {
+          "properties": {
+            "stage": {"const": "parse"},
+            "diagnostic_code": {"const": "CSV-SA-003"}
+          }
+        },
+        {
+          "properties": {
+            "stage": {"const": "module_identity"},
+            "diagnostic_code": {"const": "CSV-SA-004"}
+          }
+        },
+        {
+          "properties": {
+            "stage": {"const": "module_collision"},
+            "diagnostic_code": {"const": "CSV-SA-005"}
+          }
+        }
+      ]
+    },
+    "sqlalchemy_frontier_reference": {
+      "type": "string",
+      "anyOf": [
+        {
+          "pattern": "^sqlalchemy:(?:table|row|relation|occurrence):[0-9a-f]{64}$"
+        },
+        {
+          "pattern": "^(?:module|class):[^\\W\\d]\\w*(?:\\.[^\\W\\d]\\w*)*$"
+        },
+        {"pattern": "^[^\\W\\d]\\w*(?:\\.[^\\W\\d]\\w*)*$"},
+        {
+          "pattern": "^(?!/)(?!~)(?![A-Za-z][A-Za-z0-9+.-]*:)(?!\\.{1,2}/)(?!.*(?:/\\.{1,2}/))(?!.*//)(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+\\.py$"
+        }
+      ]
+    },
+    "sqlalchemy_frontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "kind", "reference", "reason"],
+      "properties": {
+        "direction": {"enum": ["upstream", "downstream", "failure"]},
+        "kind": {"enum": ["file", "module", "class", "table", "row", "relation"]},
+        "reference": {"$ref": "#/$defs/sqlalchemy_frontier_reference"},
+        "reason": {
+          "enum": [
+            "depth_limit",
+            "failed_source",
+            "unsupported_pattern",
+            "unresolved_reference",
+            "identity_collision",
+            "target_missing",
+            "target_ambiguous"
+          ]
+        }
+      }
+    },
+    "sqlalchemy_redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_version", "redacted_values"],
+      "properties": {
+        "rule_version": {"const": "code-structure-viz.sqlalchemy-redaction/v1"},
+        "redacted_values": {"type": "integer", "minimum": 0}
+      }
+    },
+    "sqlalchemy_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_files",
+        "parsed_files",
+        "failed_files",
+        "evidence_files",
+        "selected_modules",
+        "mapped_classes",
+        "association_tables",
+        "selected_entities",
+        "unknown_declarations",
+        "frontier",
+        "redaction"
+      ],
+      "properties": {
+        "candidate_files": {"type": "integer", "minimum": 0},
+        "parsed_files": {"type": "integer", "minimum": 0},
+        "failed_files": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sqlalchemy_failed_file"}
+        },
+        "evidence_files": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "selected_modules": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "mapped_classes": {"type": "integer", "minimum": 0},
+        "association_tables": {"type": "integer", "minimum": 0},
+        "selected_entities": {"type": "integer", "minimum": 0},
+        "unknown_declarations": {"type": "integer", "minimum": 0},
+        "frontier": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/sqlalchemy_frontier"}
+        },
+        "redaction": {"$ref": "#/$defs/sqlalchemy_redaction"}
+      }
+    },
+    "sqlalchemy_diagnostic": {
+      "allOf": [
+        {"$ref": "urn:code-structure-viz:schema:diagnostic-v1"},
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "CSV-SA-001",
+                "CSV-SA-002",
+                "CSV-SA-003",
+                "CSV-SA-004",
+                "CSV-SA-005",
+                "CSV-SA-006",
+                "CSV-SA-007",
+                "CSV-SA-008",
+                "CSV-SA-009",
+                "CSV-SA-010",
+                "CSV-SA-011",
+                "CSV-SA-012",
+                "CSV-SA-013"
+              ]
+            },
+            "domain": {"const": "sqlalchemy"}
           }
         }
       ]

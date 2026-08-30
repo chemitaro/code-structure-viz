@@ -7,6 +7,29 @@ import pytest
 from code_structure_viz.artifacts.writer import OutputTransaction, OutputTransactionError
 from code_structure_viz.core.diagnostics import DiagnosticCode
 
+_SQLALCHEMY_EMPTY_PUML = b"""@startuml
+title SQLAlchemy ER snapshot
+top to bottom direction
+hide circle
+skinparam linetype ortho
+hide methods
+legend right
+  rule_version=code-structure-viz.sqlalchemy-redaction/v1
+  redacted_values=0
+  ||--|| exactly_one
+  |o--o| zero_or_one
+  }o--o{ zero_or_many
+  }|--|{ one_or_many
+  -- foreign_key (solid)
+  .. relationship (dotted)
+  --|> inheritance (not cardinality)
+  .. association metadata (cardinality unknown)
+  [?] evidence insufficient; plain line retained
+  [redacted] literal/expression value omitted
+endlegend
+@enduml
+"""
+
 
 def test_output_transaction_publishes_the_closed_file_set_by_directory_rename(
     tmp_path: Path,
@@ -29,6 +52,66 @@ def test_output_transaction_publishes_the_closed_file_set_by_directory_rename(
     ]
     assert (output / "python.snapshot.semantic.json").read_bytes() == b"{}\n"
     assert not staging_root.exists()
+
+
+def test_output_transaction_publishes_closed_sqlalchemy_snapshot_paths(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    output = tmp_path / "result"
+    transaction = OutputTransaction(repository, output)
+    transaction.begin()
+
+    semantic = transaction.stage_snapshot_payload("sqlalchemy", "semantic-json", b"{}\n")
+    plantuml = transaction.stage_snapshot_payload("sqlalchemy", "plantuml", _SQLALCHEMY_EMPTY_PUML)
+    transaction.stage_manifest(b'{"type":"run_manifest"}\n')
+    transaction.commit()
+
+    assert semantic.path == "sqlalchemy.snapshot.semantic.json"
+    assert plantuml.path == "sqlalchemy.snapshot.puml"
+    assert sorted(path.name for path in output.iterdir()) == [
+        "run-manifest.json",
+        "sqlalchemy.snapshot.puml",
+        "sqlalchemy.snapshot.semantic.json",
+    ]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        _SQLALCHEMY_EMPTY_PUML.replace(
+            b"  rule_version=code-structure-viz.sqlalchemy-redaction/v1\n", b""
+        ),
+        _SQLALCHEMY_EMPTY_PUML.replace(b"  redacted_values=0\n", b"  redacted_values=00\n"),
+        _SQLALCHEMY_EMPTY_PUML.replace(
+            b"  rule_version=code-structure-viz.sqlalchemy-redaction/v1\n  redacted_values=0\n",
+            b"  redacted_values=0\n  rule_version=code-structure-viz.sqlalchemy-redaction/v1\n",
+        ),
+        _SQLALCHEMY_EMPTY_PUML.replace(
+            b"legend right\n",
+            b'entity "users" as '
+            b"T_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa {\n"
+            b"  column id : integer type=sqlalchemy_U002E_Integer nullable=false "
+            b"primary_key=true unique=false index=false default=- server_default=- "
+            b"onupdate=- server_onupdate=- computed=- identity=-\n"
+            b"}\nlegend right\n",
+        ),
+    ],
+)
+def test_output_transaction_rejects_invalid_sqlalchemy_plantuml(
+    tmp_path: Path, content: bytes
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+
+    with pytest.raises(OutputTransactionError) as caught:
+        transaction.stage_snapshot_payload("sqlalchemy", "plantuml", content)
+
+    assert caught.value.diagnostic.code is DiagnosticCode.INTERNAL_INVARIANT
+    transaction.abort()
 
 
 def test_output_transaction_allows_relative_paths_containing_repository_spelling(

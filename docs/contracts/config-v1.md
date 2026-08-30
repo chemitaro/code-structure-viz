@@ -18,6 +18,12 @@ downstream_depth = 1
 max_entities = 500
 ```
 
+`[python]` はPython source inventoryの設定であり、`snapshot --domain python` と
+`snapshot --domain sqlalchemy` の両方が同じfrozen bytes、source roots、include/excludeを使う。
+SQLAlchemy snapshotはAST-onlyで解析し、runtime SQLAlchemy packageやDB設定を読まない。
+v1に `[sqlalchemy]` tableはなく、SQLAlchemy固有の接続URL、engine、metadata import設定は
+unknown keyとして拒否する。`diff` は引き続きPython domain専用である。
+
 `diff` で暗黙の比較候補を設定する場合だけ、任意の `comparison` table を追加できる。
 両方とも省略可能で、指定された値は解決済み設定の `resolved.comparison` に同じ
 NFC 正規化済み文字列として記録される。

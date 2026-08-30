@@ -56,12 +56,25 @@
         "CSV-PY-011",
         "CSV-PY-012",
         "CSV-PY-013",
+        "CSV-SA-001",
+        "CSV-SA-002",
+        "CSV-SA-003",
+        "CSV-SA-004",
+        "CSV-SA-005",
+        "CSV-SA-006",
+        "CSV-SA-007",
+        "CSV-SA-008",
+        "CSV-SA-009",
+        "CSV-SA-010",
+        "CSV-SA-011",
+        "CSV-SA-012",
+        "CSV-SA-013",
         "CSV-INTERNAL-001",
         "CSV-INTERRUPT-001"
       ]
     },
     "severity": {"enum": ["error", "warning", "info"]},
-    "domain": {"enum": ["python", null]},
+    "domain": {"enum": ["python", "sqlalchemy", null]},
     "path": {"type": ["string", "null"], "minLength": 1},
     "symbol": {"type": ["string", "null"], "minLength": 1},
     "line": {"type": ["integer", "null"], "minimum": 1},
@@ -316,6 +329,104 @@
         },
         {
           "properties": {
+            "code": {"const": "CSV-SA-001"},
+            "message": {"const": "SQLAlchemy source could not be read safely."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-002"},
+            "message": {"const": "SQLAlchemy source encoding could not be decoded safely."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-003"},
+            "message": {
+              "const": "SQLAlchemy source could not be parsed with the v1 Python 3.12 grammar."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-004"},
+            "message": {
+              "const": "SQLAlchemy source path does not map to a valid Python module identity."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-005"},
+            "message": {
+              "const": "More than one SQLAlchemy source file maps to the same Python module identity."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-006"},
+            "message": {
+              "const": "SQLAlchemy declarative binding could not be resolved statically."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-007"},
+            "message": {
+              "const": "SQLAlchemy table identity could not be resolved statically."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-008"},
+            "message": {
+              "const": "More than one unrelated declaration maps to the same SQLAlchemy table identity."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-009"},
+            "message": {
+              "const": "SQLAlchemy row declaration could not be represented safely."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-010"},
+            "message": {
+              "const": "SQLAlchemy relation target could not be resolved statically."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-011"},
+            "message": {
+              "const": "Requested SQLAlchemy target was not found in the safe source view."
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-012"},
+            "message": {"const": "Requested SQLAlchemy target is ambiguous."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-013"},
+            "message": {
+              "const": "SQLAlchemy table count exceeds the resolved max-entities limit."
+            }
+          }
+        },
+        {
+          "properties": {
             "code": {"const": "CSV-DIFF-001"},
             "message": {"const": "Comparison endpoint or implicit base could not be resolved safely."}
           }
@@ -379,6 +490,9 @@
                 "CSV-PY-006",
                 "CSV-PY-007",
                 "CSV-PY-010",
+                "CSV-SA-011",
+                "CSV-SA-012",
+                "CSV-SA-013",
                 "CSV-INTERNAL-001"
               ]
             },
@@ -395,7 +509,14 @@
                 "CSV-PY-003",
                 "CSV-PY-004",
                 "CSV-PY-005",
-                "CSV-PY-012"
+                "CSV-PY-012",
+                "CSV-SA-001",
+                "CSV-SA-002",
+                "CSV-SA-003",
+                "CSV-SA-004",
+                "CSV-SA-005",
+                "CSV-SA-007",
+                "CSV-SA-008"
               ]
             },
             "severity": {"const": "error"},
@@ -404,7 +525,16 @@
         },
         {
           "properties": {
-            "code": {"enum": ["CSV-PY-008", "CSV-PY-011", "CSV-PY-013"]},
+            "code": {
+              "enum": [
+                "CSV-PY-008",
+                "CSV-PY-011",
+                "CSV-PY-013",
+                "CSV-SA-006",
+                "CSV-SA-009",
+                "CSV-SA-010"
+              ]
+            },
             "severity": {"const": "warning"},
             "recoverable": {"const": true}
           }
@@ -531,6 +661,84 @@
           "properties": {
             "code": {"const": "CSV-PY-010"},
             "domain": {"const": "python"},
+            "path": {"type": "null"},
+            "symbol": {"type": "null"},
+            "line": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-SA-001", "CSV-SA-002", "CSV-SA-004"]},
+            "domain": {"const": "sqlalchemy"},
+            "path": {"type": "string", "minLength": 1},
+            "symbol": {"type": "null"},
+            "line": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-003"},
+            "domain": {"const": "sqlalchemy"},
+            "path": {"type": "string", "minLength": 1},
+            "symbol": {"type": "null"},
+            "line": {"type": ["integer", "null"], "minimum": 1}
+          }
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-SA-005", "CSV-SA-008"]},
+            "domain": {"const": "sqlalchemy"},
+            "path": {"type": "null"},
+            "symbol": {"type": "string", "minLength": 1},
+            "line": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-SA-006", "CSV-SA-007", "CSV-SA-010"]},
+            "domain": {"const": "sqlalchemy"},
+            "path": {"type": "string", "minLength": 1},
+            "symbol": {"type": "string", "minLength": 1},
+            "line": {"type": "integer", "minimum": 1}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-009"},
+            "domain": {"const": "sqlalchemy"},
+            "path": {"type": "string", "minLength": 1},
+            "symbol": {
+              "type": "string",
+              "pattern": "^sqlalchemy:occurrence:[0-9a-f]{64}$"
+            },
+            "line": {"type": "integer", "minimum": 1}
+          }
+        },
+        {
+          "properties": {
+            "code": {"enum": ["CSV-SA-011", "CSV-SA-012"]},
+            "domain": {"const": "sqlalchemy"},
+            "line": {"type": "null"}
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "symbol": {"type": "null"}
+              }
+            },
+            {
+              "properties": {
+                "path": {"type": "null"},
+                "symbol": {"type": "string", "minLength": 1}
+              }
+            }
+          ]
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-SA-013"},
+            "domain": {"const": "sqlalchemy"},
             "path": {"type": "null"},
             "symbol": {"type": "null"},
             "line": {"type": "null"}

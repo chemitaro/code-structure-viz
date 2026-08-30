@@ -74,3 +74,41 @@ def test_diagnostics_are_deduplicated_and_sorted_by_closed_key() -> None:
     )
 
     assert canonical_diagnostics((later, first, first)) == (first, later)
+
+
+def test_sqlalchemy_same_line_occurrences_preserve_distinct_symbols_only() -> None:
+    first = diagnostic(
+        DiagnosticCode.SA_ROW_UNREPRESENTABLE,
+        domain="sqlalchemy",
+        path="src/models.py",
+        symbol="sqlalchemy:occurrence:" + "1" * 64,
+        line=7,
+    )
+    sibling = diagnostic(
+        DiagnosticCode.SA_ROW_UNREPRESENTABLE,
+        domain="sqlalchemy",
+        path="src/models.py",
+        symbol="sqlalchemy:occurrence:" + "2" * 64,
+        line=7,
+    )
+
+    assert canonical_diagnostics((sibling, first, first)) == (first, sibling)
+
+
+def test_sqlalchemy_diagnostic_catalog_is_the_closed_thirteen_code_sequence() -> None:
+    assert tuple(
+        code.value for code in DiagnosticCode if code.value.startswith("CSV-SA-")
+    ) == tuple(f"CSV-SA-{number:03d}" for number in range(1, 14))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"domain": "python", "path": "src/models.py", "symbol": "row", "line": 7},
+        {"domain": "sqlalchemy", "path": "src/models.py", "line": 7},
+        {"domain": "sqlalchemy", "symbol": "row", "line": 7},
+    ],
+)
+def test_sqlalchemy_occurrence_context_is_closed(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        diagnostic(DiagnosticCode.SA_ROW_UNREPRESENTABLE, **kwargs)  # type: ignore[arg-type]

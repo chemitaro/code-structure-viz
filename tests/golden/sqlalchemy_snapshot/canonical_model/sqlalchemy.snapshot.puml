@@ -1,0 +1,48 @@
+@startuml
+title SQLAlchemy ER snapshot
+top to bottom direction
+hide circle
+skinparam linetype ortho
+hide methods
+entity "accounts" as T_5277b6a04817dfa03dc4513fb71e6b33dfc2450b2e0f308a262183de29915c5c {
+  * id : integer <<PK, NN>>
+  --
+  primary_key <unnamed> columns=(id)
+  relationship users : many target=users uselist=? back_populates=account secondary=-
+}
+entity "admins" as T_57faa9e90ee93a98e8877c096c4f14db031bbfd49031393dd61be85c559d8db6 {
+  --
+  inheritance target=users
+}
+entity "users" as T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 {
+  account_id : integer (int) <<FK, ?NULL>>
+  email : string <<UQ, IX, ?NULL>>
+  * id : integer <<PK, NN>>
+  --
+  primary_key <unnamed> columns=(id)
+  unique <unnamed> columns=(email)
+  unique uq_users_email columns=(email)
+  check ck_users_email expression=[redacted:literal]
+  index <unnamed> unique=? terms=column:email
+  index ix_users_email unique=? terms=column:email
+  foreign_key <unnamed> local=(account_id) references=accounts(id) ondelete=- onupdate=-
+  relationship account : scalar target=accounts uselist=? back_populates=users secondary=-
+}
+T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 -- T_5277b6a04817dfa03dc4513fb71e6b33dfc2450b2e0f308a262183de29915c5c : foreign_key <unnamed> [source=0..N target=?]
+T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 .. T_5277b6a04817dfa03dc4513fb71e6b33dfc2450b2e0f308a262183de29915c5c : relationship account / users [source=0..N target=?]
+T_57faa9e90ee93a98e8877c096c4f14db031bbfd49031393dd61be85c559d8db6 --|> T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 : inheritance
+legend right
+  rule_version=code-structure-viz.sqlalchemy-redaction/v1
+  redacted_values=3
+  ||--|| exactly_one
+  |o--o| zero_or_one
+  }o--o{ zero_or_many
+  }|--|{ one_or_many
+  -- foreign_key (solid)
+  .. relationship (dotted)
+  --|> inheritance (not cardinality)
+  .. association metadata (cardinality unknown)
+  [?] evidence insufficient; plain line retained
+  [redacted] literal/expression value omitted
+endlegend
+@enduml

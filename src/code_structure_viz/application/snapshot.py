@@ -3,14 +3,11 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 
-from code_structure_viz.adapters.python.analyzer import PythonSnapshotAnalyzer
-from code_structure_viz.adapters.python.module_index import PythonModuleIndex
-from code_structure_viz.adapters.python.plantuml import PythonPlantUmlRenderer
-from code_structure_viz.adapters.python.selection import (
-    PythonSelectionResult,
-    PythonTargetSelector,
+from code_structure_viz.application.snapshot_domain import (
+    SnapshotAdapterContract,
+    SnapshotAnalysis,
+    snapshot_adapter_for,
 )
-from code_structure_viz.adapters.python.semantic_json import PythonSemanticJsonRenderer
 from code_structure_viz.artifacts.manifest import RunManifestBuilder, artifact_format
 from code_structure_viz.artifacts.writer import (
     OutputTransaction,
@@ -33,11 +30,6 @@ from code_structure_viz.core.outcomes import (
 )
 from code_structure_viz.source.git_repository import GitReadError, GitRepositoryReader
 from code_structure_viz.source.source_view import SourceViewBuilder, SourceViewBuildError
-
-_ARTIFACT_PATHS = {
-    "semantic-json": "python.snapshot.semantic.json",
-    "plantuml": "python.snapshot.puml",
-}
 
 
 class SnapshotApplication:
@@ -80,35 +72,28 @@ class SnapshotApplication:
                 repository_descriptor=transaction.repository_descriptor,
             )
             source_view = source_builder.build(head_state, entries, config.python)
-            analysis = PythonSnapshotAnalyzer().analyze(
-                PythonModuleIndex.build(source_view, config.python)
-            )
-            selection = PythonTargetSelector().select(
-                analysis,
-                request.targets,
-                config.traversal.upstream_depth,
-                config.traversal.downstream_depth,
-            )
-            domain = self._domain_outcome(request, config, selection)
+            adapter = snapshot_adapter_for(request.domain)
+            analysis = adapter.analyze(source_view, request, config)
+            domain = self._domain_outcome(request, config, analysis, adapter.contract)
             self._checkpoint()
 
             if domain.payload_available:
-                snapshot = selection.snapshot
-                if snapshot is None:
-                    raise ValueError("available Python outcome lost its snapshot")
-                semantic_renderer = PythonSemanticJsonRenderer(
-                    source_view=source_view,
-                    targets=request.targets,
-                    upstream_depth=config.traversal.upstream_depth,
-                    downstream_depth=config.traversal.downstream_depth,
-                )
-                plantuml_renderer = PythonPlantUmlRenderer()
+                payload = analysis.payload
+                if payload is None:
+                    raise ValueError("available domain outcome lost its payload")
                 for format_value in request.formats:
-                    if format_value == "semantic-json":
-                        content = semantic_renderer.render(snapshot)
-                    else:
-                        content = plantuml_renderer.render(snapshot)
-                    transaction.stage_payload(artifact_format(format_value), content)
+                    content = adapter.render(
+                        format_value,
+                        payload,
+                        source_view,
+                        request,
+                        config,
+                    )
+                    transaction.stage_snapshot_payload(
+                        request.domain,
+                        artifact_format(format_value),
+                        content,
+                    )
 
             outcome = (
                 RunOutcome.incomplete((domain,), manifest_relative_path="run-manifest.json")
@@ -121,6 +106,8 @@ class SnapshotApplication:
                 config=config,
                 outcome=outcome,
                 artifacts=transaction.descriptors,
+                adapter_contract=adapter.contract,
+                coverage_encoder=adapter.coverage_value,
             )
             transaction.stage_manifest(manifest)
 
@@ -153,11 +140,14 @@ class SnapshotApplication:
     def _domain_outcome(
         request: SnapshotCliRequest,
         config: ResolvedConfig,
-        selection: PythonSelectionResult,
+        analysis: SnapshotAnalysis,
+        contract: SnapshotAdapterContract,
     ) -> DomainOutcome:
+        if request.domain != contract.domain:
+            raise ValueError("snapshot request and adapter domain do not match")
         source = config.value_sources.max_entities
         requested = request.max_entities_override
-        if selection.status is DomainStatus.NOT_APPLICABLE:
+        if analysis.status is DomainStatus.NOT_APPLICABLE:
             budget = EntityBudget(
                 "max_entities",
                 requested,
@@ -166,11 +156,12 @@ class SnapshotApplication:
                 source,
             )
             return DomainOutcome.not_applicable(
-                diagnostics=selection.diagnostics,
-                coverage=selection.coverage,
+                domain=contract.domain,
+                diagnostics=analysis.diagnostics,
+                coverage=analysis.coverage,
                 budget=budget,
             )
-        if selection.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE:
+        if analysis.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE:
             budget = EntityBudget(
                 "max_entities",
                 requested,
@@ -179,17 +170,19 @@ class SnapshotApplication:
                 source,
             )
             return DomainOutcome.payload_unavailable(
-                diagnostics=selection.diagnostics,
-                entity_count=None,
-                coverage=selection.coverage,
+                domain=contract.domain,
+                diagnostics=analysis.diagnostics,
+                entity_count=analysis.entity_count,
+                coverage=analysis.coverage,
                 budget=budget,
             )
 
-        snapshot = selection.snapshot
-        if snapshot is None:
-            raise ValueError("selected Python payload is unavailable")
-        actual = len(snapshot.entities)
+        payload = analysis.payload
+        actual = analysis.entity_count
+        if payload is None or actual is None:
+            raise ValueError("selected domain payload is unavailable")
         decision = EntityBudgetGate().admit(
+            domain=contract.domain,
             actual=actual,
             requested=requested,
             resolved=config.limits.max_entities,
@@ -197,27 +190,33 @@ class SnapshotApplication:
         )
         if not decision.admitted:
             return DomainOutcome.payload_unavailable(
-                diagnostics=canonical_diagnostics((*selection.diagnostics, *decision.diagnostics)),
+                domain=contract.domain,
+                diagnostics=canonical_diagnostics((*analysis.diagnostics, *decision.diagnostics)),
                 entity_count=actual,
-                coverage=selection.coverage,
+                coverage=analysis.coverage,
                 budget=decision.budget,
             )
 
-        artifact_paths = tuple(_ARTIFACT_PATHS[item] for item in request.formats)
-        if selection.incomplete_kind is IncompleteKind.PARTIAL_SAFE:
+        artifact_paths = tuple(
+            contract.semantic_path if item == "semantic-json" else contract.plantuml_path
+            for item in request.formats
+        )
+        if analysis.incomplete_kind is IncompleteKind.PARTIAL_SAFE:
             return DomainOutcome.partial_safe(
-                snapshot,
+                payload,
+                domain=contract.domain,
                 artifact_paths=artifact_paths,
-                diagnostics=selection.diagnostics,
+                diagnostics=analysis.diagnostics,
                 entity_count=actual,
-                coverage=selection.coverage,
+                coverage=analysis.coverage,
                 budget=decision.budget,
             )
         return DomainOutcome.complete(
-            snapshot,
+            payload,
+            domain=contract.domain,
             artifact_paths=artifact_paths,
-            diagnostics=selection.diagnostics,
+            diagnostics=analysis.diagnostics,
             entity_count=actual,
-            coverage=selection.coverage,
+            coverage=analysis.coverage,
             budget=decision.budget,
         )

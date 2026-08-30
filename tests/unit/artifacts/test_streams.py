@@ -8,7 +8,7 @@ from code_structure_viz.core.outcomes import DomainOutcome, RunOutcome
 
 def test_no_selector_emits_exact_committed_summary() -> None:
     outcome = RunOutcome.completed(
-        (DomainOutcome.complete(object()),),
+        (DomainOutcome.complete(object(), domain="python"),),
         manifest_relative_path="run-manifest.json",
     )
 
@@ -24,7 +24,11 @@ def test_available_selector_copies_final_artifact_exactly(tmp_path: Path) -> Non
     payload = b"@startuml\n@enduml\n"
     (tmp_path / "python.snapshot.puml").write_bytes(payload)
     outcome = RunOutcome.completed(
-        (DomainOutcome.complete(object(), artifact_paths=("python.snapshot.puml",)),),
+        (
+            DomainOutcome.complete(
+                object(), domain="python", artifact_paths=("python.snapshot.puml",)
+            ),
+        ),
         manifest_relative_path="run-manifest.json",
     )
 
@@ -44,7 +48,11 @@ def test_available_selector_uses_bytes_bound_before_publication_mutation(
     committed = b"@startuml\n@enduml\n"
     (tmp_path / "python.snapshot.puml").write_bytes(b"mutated after rename\n")
     outcome = RunOutcome.completed(
-        (DomainOutcome.complete(object(), artifact_paths=("python.snapshot.puml",)),),
+        (
+            DomainOutcome.complete(
+                object(), domain="python", artifact_paths=("python.snapshot.puml",)
+            ),
+        ),
         manifest_relative_path="run-manifest.json",
     )
 
@@ -63,7 +71,7 @@ def test_unavailable_domain_and_manifest_fatal_use_closed_result_variants(
     tmp_path: Path,
 ) -> None:
     unavailable = RunOutcome.incomplete(
-        (DomainOutcome.payload_unavailable(),),
+        (DomainOutcome.payload_unavailable(domain="python"),),
         manifest_relative_path="run-manifest.json",
     )
     fatal = RunOutcome.fatal((diagnostic(DiagnosticCode.REPO_HEAD),))
@@ -88,7 +96,7 @@ def test_unavailable_domain_and_manifest_fatal_use_closed_result_variants(
 def test_stderr_is_canonical_jsonl_for_domain_and_run_diagnostics() -> None:
     domain_diagnostic = diagnostic(DiagnosticCode.PY_ENTITY_BUDGET, domain="python")
     outcome = RunOutcome.incomplete(
-        (DomainOutcome.payload_unavailable(diagnostics=(domain_diagnostic,)),),
+        (DomainOutcome.payload_unavailable(domain="python", diagnostics=(domain_diagnostic,)),),
         manifest_relative_path="run-manifest.json",
     )
 
@@ -97,3 +105,84 @@ def test_stderr_is_canonical_jsonl_for_domain_and_run_diagnostics() -> None:
     assert rendered.count(b"\n") == 1
     assert b'"code":"CSV-PY-010"' in rendered
     assert b'"domain":"python"' in rendered
+
+
+def test_sqlalchemy_summary_uses_domain_outcome_as_authority() -> None:
+    outcome = RunOutcome.completed(
+        (DomainOutcome.complete(object(), domain="sqlalchemy"),),
+        manifest_relative_path="run-manifest.json",
+    )
+
+    assert StdoutEmitter().render(outcome, None, Path("/unused")) == (
+        b'{"type":"run_summary","schema":"code-structure-viz.run-summary/v1",'
+        b'"run_status":"complete","exit_code":0,"domains":'
+        b'[{"domain":"sqlalchemy","status":"complete"}],'
+        b'"manifest":"run-manifest.json"}\n'
+    )
+
+
+def test_sqlalchemy_selector_copies_exact_bound_artifact_bytes() -> None:
+    payload = b"@startuml\n@enduml\n"
+    outcome = RunOutcome.completed(
+        (
+            DomainOutcome.complete(
+                object(),
+                domain="sqlalchemy",
+                artifact_paths=("sqlalchemy.snapshot.puml",),
+            ),
+        ),
+        manifest_relative_path="run-manifest.json",
+    )
+
+    assert (
+        StdoutEmitter().render(
+            outcome,
+            DomainFormatSelector("sqlalchemy", "plantuml"),
+            Path("/unused"),
+            published_artifacts={"sqlalchemy.snapshot.puml": payload},
+        )
+        == payload
+    )
+
+
+def test_sqlalchemy_unavailable_selector_has_closed_domain_result() -> None:
+    outcome = RunOutcome.incomplete(
+        (DomainOutcome.payload_unavailable(domain="sqlalchemy"),),
+        manifest_relative_path="run-manifest.json",
+    )
+
+    assert StdoutEmitter().render(
+        outcome,
+        DomainFormatSelector("sqlalchemy", "semantic-json"),
+        Path("/unused"),
+    ) == (
+        b'{"type":"stdout_result","schema":"code-structure-viz.stdout-result/v1",'
+        b'"selector":"sqlalchemy:semantic-json","availability":false,'
+        b'"domain_status":"incomplete",'
+        b'"stable_reason":"domain_payload_unavailable","artifact":null}\n'
+    )
+
+
+def test_stdout_emitter_rejects_cross_domain_selector() -> None:
+    outcome = RunOutcome.completed(
+        (
+            DomainOutcome.complete(
+                object(),
+                domain="sqlalchemy",
+                artifact_paths=("sqlalchemy.snapshot.puml",),
+            ),
+        ),
+        manifest_relative_path="run-manifest.json",
+    )
+
+    try:
+        StdoutEmitter().render(
+            outcome,
+            DomainFormatSelector("python", "plantuml"),
+            Path("/unused"),
+            published_artifacts={"sqlalchemy.snapshot.puml": b"@startuml\n@enduml\n"},
+        )
+    except ValueError as error:
+        assert "domain" in str(error)
+    else:
+        raise AssertionError("cross-domain selector was accepted")

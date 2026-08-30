@@ -1,0 +1,46 @@
+@startuml
+title SQLAlchemy ER snapshot
+top to bottom direction
+hide circle
+skinparam linetype ortho
+hide methods
+entity "admins" as T_57faa9e90ee93a98e8877c096c4f14db031bbfd49031393dd61be85c559d8db6 {
+  --
+  inheritance target=users
+}
+entity "groups" as T_5d02309714b825412e9e807bb28666f29124761cdb410ea6a492faaa177859c6 {
+  * id : integer (int) <<PK, NN>>
+  --
+  primary_key <unnamed> columns=(id)
+  relationship users : many target=users uselist=? back_populates=groups secondary=-
+}
+entity "membership" as T_fa837719b503ae5e50dc1e77df2b09e0c4a60f1aa73d54eca249701c3cf4c6fb {
+  id : integer <<?NULL>>
+  --
+  association_table groups source=users target=groups
+}
+entity "users" as T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 {
+  * id : integer (int) <<PK, NN>>
+  --
+  primary_key <unnamed> columns=(id)
+  relationship groups : many target=groups uselist=? back_populates=users secondary=membership
+}
+T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 .. T_5d02309714b825412e9e807bb28666f29124761cdb410ea6a492faaa177859c6 : relationship groups [source=? target=0..N]
+T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 .. T_fa837719b503ae5e50dc1e77df2b09e0c4a60f1aa73d54eca249701c3cf4c6fb : association groups [source=? target=?]
+T_57faa9e90ee93a98e8877c096c4f14db031bbfd49031393dd61be85c559d8db6 --|> T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 : inheritance
+T_5d02309714b825412e9e807bb28666f29124761cdb410ea6a492faaa177859c6 .. T_4ab4c2460e66df4965592a3108f1ea39ef7ddfd4790dc63806d4830019270515 : relationship users [source=? target=0..N]
+legend right
+  rule_version=code-structure-viz.sqlalchemy-redaction/v1
+  redacted_values=2
+  ||--|| exactly_one
+  |o--o| zero_or_one
+  }o--o{ zero_or_many
+  }|--|{ one_or_many
+  -- foreign_key (solid)
+  .. relationship (dotted)
+  --|> inheritance (not cardinality)
+  .. association metadata (cardinality unknown)
+  [?] evidence insufficient; plain line retained
+  [redacted] literal/expression value omitted
+endlegend
+@enduml

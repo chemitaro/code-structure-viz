@@ -439,18 +439,21 @@ class DiffApplication:
         )
         if result.status == "not_applicable":
             return DomainOutcome.not_applicable(
+                domain="python",
                 diagnostics=diagnostics,
                 coverage=_diff_coverage(before_coverage, after_coverage),
                 budget=budget,
             )
         if result.status != "complete":
             return DomainOutcome.payload_unavailable(
+                domain="python",
                 diagnostics=diagnostics,
                 entity_count=None,
                 coverage=_diff_coverage(before_coverage, after_coverage),
                 budget=budget,
             )
         decision = EntityBudgetGate().admit(
+            domain="python",
             actual=result.entity_count,
             requested=request.max_entities_override,
             resolved=config.limits.max_entities,
@@ -458,6 +461,7 @@ class DiffApplication:
         )
         if not decision.admitted:
             return DomainOutcome.payload_unavailable(
+                domain="python",
                 diagnostics=canonical_diagnostics((*diagnostics, *decision.diagnostics)),
                 entity_count=result.entity_count,
                 coverage=_diff_coverage(before_coverage, after_coverage),
@@ -472,6 +476,7 @@ class DiffApplication:
         )
         return DomainOutcome.complete(
             result,
+            domain="python",
             artifact_paths=paths,
             diagnostics=diagnostics,
             entity_count=result.entity_count,
@@ -523,6 +528,7 @@ class DiffApplication:
             (*before_selection.diagnostics, diagnostic(DiagnosticCode.DIFF_FILE_CHANGE))
         )
         domain = DomainOutcome.payload_unavailable(
+            domain="python",
             diagnostics=diagnostics,
             entity_count=None,
             coverage=_diff_coverage(before_coverage, after_coverage),

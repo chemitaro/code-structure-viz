@@ -47,6 +47,10 @@ completionはfile作成数やparser単体ではなく、`I03-AC-001`〜`I03-AC-0
 - Design外のpublic contractが必要になった場合、code/schema/goldenを先に変更せずstop conditionとして返す。
 - 本Planは将来の実行手順であり、未実施のRED/GREEN、commit、test、CI結果を実施済みと主張しない。実績は完了後のcanonical `report.md`へ別途記録する。
 
+### current implementation checkpoint
+
+現行 branch では I03-PLAN-001〜007 に列挙した production、schema、contract、fixture、test、security、packaging の成果物が既に存在し、実装済みである。現在の実装者がこの branch から開始する場合、I03-PLAN-000 は不存在を検査する実装前 preflight ではなく、既存成果物・clean state・toolchain・full SHA を再検証する checkpoint として実行する。I03-PLAN-001〜007 の `Expectation first` と `expected initial failure` は当時の test-first 実行履歴を説明するもので、現行 branch で再び red を作る前提ではない。追加修正が必要な場合は列挙済み path の範囲に限定し、I03-PLAN-008 の final quality gate へ進む。
+
 ## I03-PLAN-000 — implementation preflight（tracked product/canonical writeなし）
 
 ### exact repository / branch / SHA
@@ -55,7 +59,7 @@ completionはfile作成数やparser単体ではなく、`I03-AC-001`〜`I03-AC-0
 2. branch不存在、connector failure、full SHA mismatch、別repositoryの場合はdefault branch、short SHA、attachment、public webへfallbackせず停止する。
 3. `git rev-parse --show-toplevel`と`git rev-parse HEAD`を確認し、task authorityと一致しないcheckoutへ変更を書かない。変更前full SHAをshell/session外の安全な作業メモへ`BASELINE_SHA`として記録し、final auditはcurrent HEADではなくこのbaselineとのtree diffを使う。
 4. configured upstreamは参考として記録できるが、HEAD authorityへ置き換えずfetchしない。
-5. repository rootから`AGENTS.md`を探索し、存在すれば最初に読む。verified baselineではroot `AGENTS.md`はないが実装開始時に再確認する。
+5. repository rootから`AGENTS.md`を探索し、存在すれば最初に読む。current checkpointではroot `AGENTS.md`はないが、実装・再検証開始時に毎回確認する。
 6. `git status --short`を確認する。既存変更、untracked fixture、generated outputを自分の変更として扱わない。
 
 ### canonical / baseline assertions
@@ -76,11 +80,14 @@ test -f src/code_structure_viz/artifacts/writer.py
 test -f schemas/semantic-v1.schema.json
 test -f tests/acceptance/python/test_snapshot_cli.py
 test -f tests/acceptance/python/test_diff_cli.py
-test ! -e src/code_structure_viz/adapters/sqlalchemy
+test -f src/code_structure_viz/adapters/sqlalchemy/analyzer.py
+test -f src/code_structure_viz/adapters/sqlalchemy/snapshot_adapter.py
+test -f tests/acceptance/sqlalchemy/test_snapshot_cli.py
+test -f tests/security/test_sqlalchemy_static_boundary.py
 ```
 
-- 最後のabsence assertionがfailした場合、partial implementationの所有者と実装状態を確認し、verified-baselineの`new`分類を黙って`existing`へ読み替えて重ねない。
-- Issue 4/5 reportとcurrent testsがgreenでない場合、SQLAlchemy implementationへ進む前にbaseline defectとして分離する。
+- SQLAlchemy path assertion が fail した場合は partial implementation または checkout mismatch として停止し、既存成果物を再実装しない。
+- Issue 4/5 regression と current SQLAlchemy tests が green でない場合は、対象 failure をこの Issue の修正か baseline defect かに切り分け、原因を確認するまで final gate へ進めない。
 
 ### toolchain / dependency preflight
 
@@ -105,8 +112,8 @@ rm -rf "$baseline_dist"
 
 各Plan stepは次の順序で実行する。
 
-1. **Expectation first**: step固有fixture/test/golden expectationを先に追加し、未実装または既存behaviorとの差により狙ったfailureになることを確認する。
-2. **Minimal implementation**: Designでverified baselineに対し`existing — modify`または`new — add`と分類したpathだけを変更する。
+1. **Expectation first**: step固有fixture/test/golden expectationを先に追加し、未実装または既存behaviorとの差により狙ったfailureになることを確認する。現行 checkpoint からの継続では、既に green の expectation を再び red に戻さない。
+2. **Minimal implementation**: Designでcurrent checkpointに対し`existing — modify`または実装着手時に`new — add`と分類したpathだけを変更する。実在する `new — add` path は既存成果物として検証し、同じ責務を重複実装しない。
 3. **Refactor under green**: duplicate/invariant/typeを整理するが、public bytesとtest expectationを都合よく同時変更しない。
 4. **Focused gate**: step commandを通す。
 5. **Python/shared regression**:そのstepが触れたexisting contractのPython regressionを通す。
@@ -140,7 +147,7 @@ RED/GREEN履歴は実行時に観測するものであり、本Planの記述自�
 
 ### owned paths
 
-**new**:
+**current checkpoint — existing or materialized by this step**:
 
 ```text
 tests/helpers/sqlalchemy_snapshot.py
@@ -189,7 +196,7 @@ tests/packaging/test_distribution.py
 
 fixture sourceは実行されるとsentinel file作成またはexceptionを起こすようにしてよいが、expected resultはsentinel未発火である。
 
-### expected initial failure
+### expected initial failure（historical test-first record）
 
 - `--domain sqlalchemy` usage error、module不存在、schema invalid、golden不存在のいずれかでfailする。
 - testをskip/xfailせず、false successをexpectedにしない。
@@ -220,7 +227,7 @@ uv run pytest tests/acceptance/sqlalchemy/test_snapshot_cli.py \
 
 ### owned paths
 
-**new**:
+**current checkpoint — existing or materialized by this step**:
 
 ```text
 src/code_structure_viz/core/domains.py
@@ -259,7 +266,7 @@ tests/unit/core/test_diagnostics.py
 
 1. `core/domains.py`へDesign exact closed domain vocabularyを追加し、`application/snapshot_domain.py`へDesign exact `SnapshotAdapterContract`、`SnapshotAnalysis`、`SnapshotDomainAdapter`、`snapshot_adapter_for`を追加する。
 2. existing Python analyzer/selector/renderersを`PythonSnapshotDomainAdapter`へwrapする。logicやoutput DTOをforkしない。
-3. `SnapshotApplication`へclosed adapter factoryを追加するが、SQLAlchemy adapterが未実装の間はtyped internal/unavailableを偽装せずtest boundary内で段階的に接続する。
+3. `SnapshotApplication`へclosed adapter factoryを追加する。実装着手時に SQLAlchemy adapter が未実装であっても typed internal/unavailable を偽装せず、test boundary 内で段階的に接続する。現行 checkpoint では adapter は実装済みなので、この項目は接続経路の再検証として扱う。
 4. parser domain、selector compatibility、helpをadditiveに更新する。diff parserはSQLAlchemyを拒否する。
 5. `DomainOutcome` factory全call siteへ`domain="python"`を明示する。`application/diff.py`はこのinternal argument追加だけに限定し、Python diff goldensでbytes/status/Git behaviorを固定する。shared summary/manifest testsを更新する。
 6. SA diagnostic enum/spec/contextとbudget mappingを追加する。`tests/unit/core/test_diagnostics.py`ではcurrent frozen `Diagnostic` equalityを利用し、occurrence symbolだけが異なるsame-line diagnosticsのcardinalityとsame-symbol dedupeを固定する。diagnostic field/schemaは増やさない。
@@ -295,7 +302,7 @@ uv run mypy src tests
 
 ### owned paths
 
-**new**:
+**current checkpoint — existing or materialized by this step**:
 
 ```text
 src/code_structure_viz/source/python_modules.py
@@ -374,14 +381,14 @@ uv run mypy src tests
 
 ### owned paths
 
-**new**:
+**current checkpoint — existing or materialized by this step**:
 
 ```text
 src/code_structure_viz/adapters/sqlalchemy/selection.py
 tests/unit/sqlalchemy/test_selection.py
 ```
 
-**new at verified baseline — continue modifying after I03-PLAN-001/003**:
+**current checkpoint — existing; continue modifying only within this responsibility**:
 
 ```text
 src/code_structure_viz/adapters/sqlalchemy/snapshot_adapter.py
@@ -436,7 +443,7 @@ uv run pytest tests/unit/core/test_budget.py tests/unit/core/test_outcomes.py -q
 
 ### owned paths
 
-**new**:
+**current checkpoint — existing or materialized by this step**:
 
 ```text
 src/code_structure_viz/adapters/sqlalchemy/semantic_json.py
@@ -477,7 +484,7 @@ tests/contracts/test_json_schemas.py
 
 1. semantic rendererはmodelのalready-sorted tupleをclosed DTOへ変換し、再解析/dedupeしない。
 2. PlantUML rendererはDesign skeletonとclosed line vocabularyだけを生成し、column `type_parameters`、legend先頭のrule/count metadataを`SqlAlchemySnapshot.coverage.redaction`から出す。
-3. `escape_plantuml_label`のpassthroughからunderscoreとdotを除き、input `_`を`_U005F_`、input `.`を`_U002E_`へencodeする。`_render_table_display`はschema/table componentを別々にescapeし、schemaありの場合だけrenderer-owned literal `.`で結ぶ。alias/keyword/metadata/placeholder/separator等のrenderer-owned syntaxはescape functionへ渡さない。
+3. `escape_plantuml_label`のpassthroughからunderscoreとdotを除き、input `_`を`_U005F_`、input `.`を`_U002E_`へencodeする。人間向けのrow/column値は別の`escape_plantuml_display_label`でunderscoreとdotを保持して読みやすくする。`_render_table_display`はschema/table componentを別々にescapeし、schemaありの場合だけrenderer-owned literal `.`で結ぶ。alias/keyword/metadata/placeholder/separator等のrenderer-owned syntaxはescape functionへ渡さない。
 4. `tests/unit/sqlalchemy/test_plantuml.py`とgoldenで`(a,b.c) -> a.b_U002E_c`、`(a.b,c) -> a_U002E_b.c`、literal `_U002E_`のnon-collisionを固定する。
 5. semantic schema rootをclosed Python existing branch + SQLAlchemy snapshot branchへ再構成する。Python branchのrequired/const/additionalPropertiesをcopyではなくexact testで保護する。
 6. diagnostic/manifest/summary/stdout schemaへSQLAlchemy closed variantsを追加する。diagnostic schemaへbyte column fieldは追加しない。
@@ -510,7 +517,7 @@ uv run pytest tests/unit/sqlalchemy/test_semantic_json.py \
 
 ### owned paths
 
-**existing at verified baseline — modify**:
+**existing at current checkpoint — modify**:
 
 ```text
 src/code_structure_viz/application/snapshot.py
@@ -523,7 +530,7 @@ tests/unit/artifacts/test_writer.py
 tests/unit/artifacts/test_streams.py
 ```
 
-**new at verified baseline — continue modifying after earlier steps**:
+**current checkpoint — existing; continue modifying only within this responsibility**:
 
 ```text
 src/code_structure_viz/adapters/sqlalchemy/snapshot_adapter.py
@@ -580,7 +587,7 @@ uv run pytest tests/acceptance/python \
 
 ### owned paths
 
-**existing at verified baseline — modify**:
+**existing at current checkpoint — modify**:
 
 ```text
 docs/contracts/cli-v1.md
@@ -591,13 +598,13 @@ tests/contracts/test_scope_exclusions.py
 tests/packaging/test_distribution.py
 ```
 
-**new at verified baseline — complete/modify after I03-PLAN-001**:
+**current checkpoint — existing; complete/modify only within this responsibility**:
 
 ```text
 tests/security/test_sqlalchemy_static_boundary.py
 ```
 
-**existing — verify unchanged**:
+**existing at current checkpoint — verify unchanged**:
 
 ```text
 pyproject.toml
