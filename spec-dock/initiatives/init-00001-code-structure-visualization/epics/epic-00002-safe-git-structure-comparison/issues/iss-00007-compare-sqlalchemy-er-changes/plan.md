@@ -57,6 +57,7 @@ tests/acceptance/sqlalchemy/test_diff_cli.py
 
 ```text
 tests/unit/cli/test_parser.py
+tests/unit/core/test_outcomes.py
 tests/unit/artifacts/test_manifest.py
 tests/unit/artifacts/test_writer.py
 tests/unit/artifacts/test_streams.py
@@ -67,7 +68,7 @@ tests/security/test_sqlalchemy_static_boundary.py
 
 最低限、次をREDで固定する。
 
-- exact IDによるtable/row/relation added/removed/modified。ID変更はremoved+added。
+- exact IDによるtable/rowのadded/removed/modifiedとrelationのadded/removed。relationのprovenance-only `source` changeはno-delta、ID変更はremoved+added。
 - provenance-only changeはsemantic deltaにしない。
 - before/after relation unionのimpactとdeleted relation edge。
 - both absent、one-side absent、one-side incomplete。
@@ -98,8 +99,8 @@ src/code_structure_viz/adapters/sqlalchemy/plantuml.py
 
 1. `SqlAlchemySnapshotAnalyzer` + `SqlAlchemyTargetSelector.select(..., targets=())` で各SourceViewのwhole snapshot resultを得る。
 2. complete/not-applicable/incompleteをDesignのreal/canonical-empty/analysis-failedへ写像する。
-3. table/row/relationをexisting IDで比較し、added/removed/modifiedだけを生成する。
-4. Issue #6 safe projectionからprovenance fieldだけを除いた値でmodified判定する。
+3. table/rowはexisting IDでadded/removed/modified、relationはadded/removedだけを生成する。
+4. table/rowのmodified判定ではIssue #6 safe projectionからprovenance fieldだけを除き、relationのsame-ID `source` provenance-only changeはno-deltaとする。
 5. changed table/row/relationからseedを作り、before/after internal relation unionをdepth指定で探索する。
 6. entity countをunique table ID数として返す。
 7. `semantic_json.py` と `plantuml.py` にdiff renderingを追加し、snapshot renderingの既存bytesは変えない。
@@ -122,6 +123,7 @@ stop:
 
 ```text
 src/code_structure_viz/core/domains.py
+src/code_structure_viz/core/outcomes.py
 src/code_structure_viz/cli/parser.py
 src/code_structure_viz/application/diff.py
 src/code_structure_viz/artifacts/manifest.py
@@ -139,7 +141,7 @@ docs/contracts/run-manifest-v1.md
 
 1. diff domainを`python|sqlalchemy`に拡張する。option setは変更しない。
 2. `DiffApplication` のendpoint/source/FileChangeSet/changed-path/transaction flowは維持し、analysis/comparison/renderingだけをdomain分岐する。
-3. SQLAlchemy resultをexisting `EntityBudgetGate` と `DomainOutcome`へ写像する。
+3. SQLAlchemy resultをexisting `EntityBudgetGate` と `DomainOutcome`へ写像し、`src/code_structure_viz/core/outcomes.py` のSQLAlchemy allowlistには `sqlalchemy.diff.semantic.json` と `sqlalchemy.diff.puml` の2 pathだけを追加する。
 4. diff Artifact registry/staging/manifest/stdout pathをdomain-awareにする。
 5. semantic/run-manifest schemaとcontract docsへSQLAlchemy diff variantを追加する。
 6. Python branchはexisting differ/rendererを使い続ける。
@@ -147,7 +149,7 @@ docs/contracts/run-manifest-v1.md
 focused:
 
 ```bash
-uv run pytest tests/unit/cli/test_parser.py tests/unit/artifacts/test_manifest.py tests/unit/artifacts/test_writer.py tests/unit/artifacts/test_streams.py tests/contracts/test_json_schemas.py tests/acceptance/sqlalchemy/test_diff_cli.py -q
+uv run pytest tests/unit/cli/test_parser.py tests/unit/core/test_outcomes.py tests/unit/artifacts/test_manifest.py tests/unit/artifacts/test_writer.py tests/unit/artifacts/test_streams.py tests/contracts/test_json_schemas.py tests/acceptance/sqlalchemy/test_diff_cli.py -q
 ```
 
 stop:

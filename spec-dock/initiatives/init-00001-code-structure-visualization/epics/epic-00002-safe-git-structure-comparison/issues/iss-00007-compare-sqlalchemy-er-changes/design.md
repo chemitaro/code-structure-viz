@@ -47,6 +47,7 @@ Python diff の `src/code_structure_viz/semantic/diff.py` は `PythonSnapshot` �
 | path | 変更 |
 | --- | --- |
 | `src/code_structure_viz/core/domains.py` | `DIFF_DOMAINS` を `python|sqlalchemy` に拡張する。 |
+| `src/code_structure_viz/core/outcomes.py` | SQLAlchemy domain の Artifact allowlist に `sqlalchemy.diff.semantic.json` と `sqlalchemy.diff.puml` の2 pathだけを追加する。`DomainOutcome` の構造は変更しない。 |
 | `src/code_structure_viz/cli/parser.py` | `DiffCliRequest.domain` と diff domain/stdout compatibilityを `python|sqlalchemy` にする。option setは変更しない。 |
 | `src/code_structure_viz/application/diff.py` | shared source/publication lifecycleはそのままに、Python existing path と SQLAlchemy path を domain で分岐する。 |
 | `src/code_structure_viz/adapters/sqlalchemy/semantic_json.py` | Issue #6 の safe table/row/relation projectionをdiffから再利用できる小さな内部 helper と SQLAlchemy diff JSON renderingを追加する。snapshot bytesは不変とする。 |
@@ -79,10 +80,10 @@ Python diff の `src/code_structure_viz/semantic/diff.py` は `PythonSnapshot` �
 - `src/code_structure_viz/adapters/sqlalchemy/selection.py`
 - `src/code_structure_viz/adapters/sqlalchemy/er_semantics.py`
 - `src/code_structure_viz/source/*`
-- `src/code_structure_viz/core/{budget,config,outcomes,diagnostics}.py`
+- `src/code_structure_viz/core/{budget,config,diagnostics}.py`
 - `pyproject.toml` / `uv.lock`
 
-既存 test では `tests/unit/cli/test_parser.py`、`tests/unit/artifacts/test_{manifest,writer,streams}.py`、`tests/contracts/test_json_schemas.py`、`tests/contracts/test_scope_exclusions.py`、`tests/security/test_sqlalchemy_static_boundary.py` を必要箇所だけ拡張する。
+既存 test では `tests/unit/cli/test_parser.py`、`tests/unit/core/test_outcomes.py`、`tests/unit/artifacts/test_{manifest,writer,streams}.py`、`tests/contracts/test_json_schemas.py`、`tests/contracts/test_scope_exclusions.py`、`tests/security/test_sqlalchemy_static_boundary.py` を必要箇所だけ拡張する。
 
 ## SQLAlchemy diff flow
 
@@ -118,8 +119,11 @@ diff sideが一つでもanalysis-failedなら comparisonを行わず、domain ou
 semantic collectionsは Issue #6 と同じ `entities` / `members` / `relations` とする。
 
 ```text
-delta:
+entity/member delta:
   status: added | removed | modified
+relation delta:
+  status: added | removed
+common:
   id
   before: safe value | null
   after: safe value | null
@@ -129,11 +133,12 @@ algorithm:
 
 1. before/after を既存 ID でmapする。
 2. 片側だけのIDはadded/removed。
-3. 両側に同じIDがあり、safe semantic valueが異なればmodified。
-4. IDが異なる候補を再対応付けしない。rename/table move/member moveはremoved+added。
-5. deltaはIDのUTF-8 byte orderで決定的に並べる。
+3. 両側に同じIDがあるtable/memberは、safe semantic valueが異なればmodified。
+4. relationはadded/removedだけを持つ。非provenance fieldは既存IDに含まれるため、同一IDで`source`だけが変わるprovenance-only changeはdeltaを出さない。
+5. IDが異なる候補を再対応付けしない。rename/table move/member moveはremoved+added。
+6. deltaはIDのUTF-8 byte orderで決定的に並べる。
 
-safe semantic equalityは Issue #6 semantic JSON projectionを基準にし、tableの`mapping_sources`とrow/relationの`source`だけをprovenanceとして比較対象から除く。before/after value自体にはそのsafe provenanceを残す。raw expression/sourceを新たに参照しない。
+safe semantic equalityは Issue #6 semantic JSON projectionを基準にし、tableの`mapping_sources`とそこから派生する`mapping_kind`、row/relationの`source`をprovenanceとして比較対象から除く。before/after value自体にはそのsafe provenanceを残し、Issue #6 snapshot bytesは変更しない。raw expression/sourceを新たに参照しない。
 
 side digestは Issue #6 のsafe `entities` / `members` / `relations` projectionをcanonical JSON化したSHA-256とする。canonical empty-sideのshape/digest ruleはparent contractをそのまま使う。
 
@@ -174,7 +179,7 @@ semantic_change_set:
 diagnostics
 ```
 
-`matching` は本 Issue では常に空配列である。SQLAlchemy branchのdelta statusはadded/removed/modifiedだけを許可する。
+`matching` は本 Issue では常に空配列である。SQLAlchemy branchはentities/membersにadded/removed/modified、relationsにadded/removedだけを許可する。
 
 ### PlantUML
 
