@@ -27,15 +27,17 @@ handled interruptが130である。
 
 ## diff command
 
-`diff` は `--repo PATH`、`--output-dir PATH`、`--domain python` を必須とし、
+`diff` は `--repo PATH`、`--output-dir PATH`、`--domain python|sqlalchemy` を必須とし、
 `--from REF`、`--to REF`、`--pr-target REF`、`--max-changed-paths POSITIVE_INT` を追加で受理する。
 `--from working-tree`、unsafe endpoint token、unresolved local object はそれぞれ usage または
 run-fatal として fail closed する。`--to working-tree` は run 開始時の frozen working tree、
 `--to head` は開始時 HEAD commit を使う。
-`diff --domain sqlalchemy` は受理せず、SQLAlchemy diffはv1の対象外である。
+SQLAlchemy diff は whole snapshot を比較するため `--target` を受理しない。domain固有optionは
+追加せず、endpoint、depth、format、budget、stdoutの意味はPython diffと共通である。
 
 diff の format 省略時も `semantic-json`、`plantuml` の順で生成する。公開される diff Artifact は
-`file-changes.json`、`python.diff.semantic.json`、`python.diff.puml`、`run-manifest.json` で、
+`file-changes.json`、選択domainの `python.diff.*` または `sqlalchemy.diff.*`、
+`run-manifest.json` で、
 entity/path budget または domain side failure 時は affected semantic Artifact を省略する。
-`--stdout` は `manifest`、`python:semantic-json`、`python:plantuml` の closed selector を一度だけ
+`--stdout` は `manifest`、選択domainの `DOMAIN:semantic-json|plantuml` selector を一度だけ
 受理し、available Artifact の exact bytes または `stdout-result/v1` を返す。

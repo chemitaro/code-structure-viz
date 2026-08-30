@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from code_structure_viz.adapters.sqlalchemy.model import (
     RedactedExpression,
     SqlAlchemyAssociationTableRow,
@@ -25,6 +27,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyUniqueRow,
 )
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
+from code_structure_viz.source.file_changes import FileChangeSet
 from code_structure_viz.source.source_view import SourceView
 from code_structure_viz.source.targets import (
     ClassTarget,
@@ -33,6 +36,9 @@ from code_structure_viz.source.targets import (
     TargetSpec,
     target_sort_key,
 )
+
+if TYPE_CHECKING:
+    from code_structure_viz.adapters.sqlalchemy.diff import SqlAlchemyDiffResult
 
 
 def render_semantic_snapshot(
@@ -74,6 +80,32 @@ def render_semantic_snapshot(
             "diagnostics": [item.to_json_value() for item in snapshot.diagnostics],
         }
     )
+    return encode_canonical_json(value)
+
+
+def render_sqlalchemy_diff(result: SqlAlchemyDiffResult, file_changes: FileChangeSet) -> bytes:
+    """Render one SQLAlchemy semantic diff using the existing safe projections."""
+    value = {
+        "type": "semantic_diff",
+        "schema": "code-structure-viz.semantic/v1",
+        "domain": "sqlalchemy",
+        "document_kind": "diff",
+        "status": result.status,
+        "before": result.before.to_json_value(),
+        "after": result.after.to_json_value(),
+        "before_snapshot_sha256": result.before.digest,
+        "after_snapshot_sha256": result.after.digest,
+        "file_change_set": file_changes.to_json_value(),
+        "semantic_change_set": {
+            "entities": [item.to_json_value() for item in result.entities],
+            "members": [item.to_json_value() for item in result.members],
+            "relations": [item.to_json_value() for item in result.relations],
+            "seeds": list(result.seeds),
+            "impact": result.impact.to_json_value(),
+            "matching": list(result.matching),
+        },
+        "diagnostics": [],
+    }
     return encode_canonical_json(value)
 
 

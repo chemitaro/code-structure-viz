@@ -27,8 +27,10 @@ _SNAPSHOT_DOMAIN_PATHS = {
     ("sqlalchemy", "plantuml"): "sqlalchemy.snapshot.puml",
 }
 _DIFF_DOMAIN_PATHS = {
-    "semantic-json": "python.diff.semantic.json",
-    "plantuml": "python.diff.puml",
+    ("python", "semantic-json"): "python.diff.semantic.json",
+    ("python", "plantuml"): "python.diff.puml",
+    ("sqlalchemy", "semantic-json"): "sqlalchemy.diff.semantic.json",
+    ("sqlalchemy", "plantuml"): "sqlalchemy.diff.puml",
 }
 
 
@@ -133,7 +135,7 @@ class StdoutEmitter:
         if domain.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE:
             return _domain_unavailable(selector, domain.status, "domain_payload_unavailable")
         candidates = (
-            *((_DIFF_DOMAIN_PATHS[selector.format],) if domain.domain == "python" else ()),
+            _DIFF_DOMAIN_PATHS[(domain.domain, selector.format)],
             _SNAPSHOT_DOMAIN_PATHS[(domain.domain, selector.format)],
         )
         relative_path: str | None = next(

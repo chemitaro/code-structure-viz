@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from typing import TYPE_CHECKING
 
 from code_structure_viz.adapters.sqlalchemy.er_semantics import (
     SqlAlchemyErMultiplicity,
@@ -29,6 +30,10 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyTargetResolution,
     SqlAlchemyUniqueRow,
 )
+from code_structure_viz.semantic.diff import SemanticDelta
+
+if TYPE_CHECKING:
+    from code_structure_viz.adapters.sqlalchemy.diff import SqlAlchemyDiffResult
 
 _HEADER = (
     "@startuml",
@@ -110,6 +115,142 @@ class SqlAlchemyPlantUmlRenderer:
 
     def render_view(self, view: SqlAlchemyErView) -> bytes:
         return _render_view(view)
+
+
+def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
+    """Render SQLAlchemy changes without source provenance."""
+    lines = [
+        "@startuml",
+        "title SQLAlchemy ER diff",
+        "top to bottom direction",
+        "hide circle",
+        "skinparam linetype ortho",
+        "hide methods",
+    ]
+    if result.status != "complete":
+        lines.append(f'note "status: {result.status}" as N_DIFF_STATUS')
+
+    entity_deltas = {item.identity: item for item in result.entities}
+    member_deltas: dict[str, list[SemanticDelta]] = {}
+    for member_delta in result.members:
+        value = member_delta.after if member_delta.after is not None else member_delta.before
+        if isinstance(value, dict) and isinstance(value.get("owner_id"), str):
+            member_deltas.setdefault(value["owner_id"], []).append(member_delta)
+
+    tables: dict[str, SqlAlchemyTable] = {}
+    for snapshot in (result.before.snapshot, result.after.snapshot):
+        if snapshot is not None:
+            tables.update({item.id: item for item in snapshot.entities})
+    rendered_ids = {
+        *entity_deltas,
+        *result.seeds,
+        *result.impact.upstream,
+        *result.impact.downstream,
+        *member_deltas,
+    }
+    for identity in sorted(rendered_ids, key=lambda value: value.encode("utf-8")):
+        table = tables.get(identity)
+        if table is None:
+            continue
+        entity_delta = entity_deltas.get(identity)
+        marker = (
+            "+"
+            if entity_delta is not None and entity_delta.status.value == "added"
+            else "-"
+            if entity_delta is not None and entity_delta.status.value == "removed"
+            else "~"
+            if identity in member_deltas
+            else "context"
+        )
+        color = {
+            "+": "#PaleGreen",
+            "-": "#MistyRose",
+            "~": "#LightYellow",
+            "context": "#LightGray",
+        }[marker]
+        label = f"{marker} {escape_plantuml_display_label(table.name)}"
+        lines.append(f'entity "{label}" as {_table_alias(table)} {color} {{')
+        for member in sorted(member_deltas.get(identity, ()), key=lambda item: item.identity):
+            value = member.after if member.after is not None else member.before
+            if not isinstance(value, dict):
+                continue
+            name = value.get("name") or "<unnamed>"
+            kind = value.get("kind") or "row"
+            if member.status.value == "modified":
+                detail = " ".join(_modified_tokens(member.before, member.after))
+                suffix = f" {detail}" if detail else ""
+                lines.append("  ~ " + escape_plantuml_display_label(f"{kind} {name}") + suffix)
+            else:
+                row_marker = "+" if member.status.value == "added" else "-"
+                lines.append(f"  {row_marker} " + escape_plantuml_display_label(f"{kind} {name}"))
+        lines.append("}")
+
+    relation_deltas = {item.identity: item for item in result.relations}
+    before_relations = _diff_er_relations(result.before.snapshot)
+    after_relations = _diff_er_relations(result.after.snapshot)
+    for identity in sorted(
+        set(before_relations) | set(after_relations),
+        key=lambda value: value.encode("utf-8"),
+    ):
+        relation, members = after_relations.get(identity) or before_relations[identity]
+        target_id = relation.relation.target.id
+        if relation.relation.source_id not in rendered_ids or target_id not in rendered_ids:
+            continue
+        line = _relation_line(relation, members)
+        if line is not None:
+            lines.append(line)
+        relation_delta = relation_deltas.get(identity)
+        if relation_delta is not None:
+            marker = "+" if relation_delta.status.value == "added" else "-"
+            label = f"{marker} relation {relation.relation.kind.value}"
+            alias = identity.removeprefix("sqlalchemy:relation:")
+            lines.append(f'note "{escape_plantuml_display_label(label)}" as N_{alias}')
+
+    lines.extend(
+        (
+            "legend right",
+            "  + added",
+            "  - removed (ghost)",
+            "  ~ modified (before/after)",
+            "  context impact context",
+            "endlegend",
+            "@enduml",
+        )
+    )
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _modified_tokens(before: object, after: object) -> tuple[str, ...]:
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return ()
+    excluded = {"id", "owner_id", "kind", "name", "source"}
+    values = [
+        f"before_{key}={_diff_value(before.get(key))} after_{key}={_diff_value(after.get(key))}"
+        for key in before.keys() | after.keys()
+        if key not in excluded and before.get(key) != after.get(key)
+    ]
+    return tuple(sorted(values, key=lambda value: value.encode("utf-8")))
+
+
+def _diff_er_relations(
+    snapshot: SqlAlchemySnapshot | None,
+) -> dict[str, tuple[SqlAlchemyErRelation, dict[str, SqlAlchemyRow]]]:
+    if snapshot is None:
+        return {}
+    members = {item.id: item for item in snapshot.members}
+    return {item.relation.id: (item, members) for item in build_er_view(snapshot).relations}
+
+
+def _diff_value(value: object) -> str:
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, (str, int, float)):
+        return escape_plantuml_display_label(str(value))
+    return "[changed]"
 
 
 def _render_view(view: SqlAlchemyErView) -> bytes:

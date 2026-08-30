@@ -102,6 +102,13 @@ without weakening PlantUML syntax safety. Display escaping does not change seman
 
 ## safety and compatibility
 
+SQLAlchemy diffも同じtable alias、display escaping、row vocabulary、`build_er_view`の
+relation/cardinality evidenceを再利用する。diff skeletonはtitleを
+`SQLAlchemy ER diff`とし、changed table/rowを `+` / `-` / `~`、impact-only tableを
+`context`で表示する。removed itemはbefore snapshotのsafe valueをghostとして残し、modified
+rowは変更fieldのsafe before/after tokenを併記する。relation線はbefore/after unionから描画し、
+removed relationのbefore evidenceも保持する。色だけをdelta識別の根拠にしない。
+
 external/unknown targetのsynthetic entity/edgeは生成しない。table aliasはhashed table idだけから
 作り、path、source range、row id、URL、token、raw expressionを出力しない。`redacted_values`は
 snapshot coverageを唯一のauthorityとする。PlantUML v1は旧exact skeletonの履歴として保持し、

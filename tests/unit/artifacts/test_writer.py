@@ -77,6 +77,18 @@ def test_output_transaction_publishes_closed_sqlalchemy_snapshot_paths(
     ]
 
 
+def test_output_transaction_stages_closed_sqlalchemy_diff_path(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+
+    descriptor = transaction.stage_diff_payload("sqlalchemy", "semantic-json", b"{}\n")
+
+    assert descriptor.path == "sqlalchemy.diff.semantic.json"
+    transaction.abort()
+
+
 @pytest.mark.parametrize(
     "content",
     [

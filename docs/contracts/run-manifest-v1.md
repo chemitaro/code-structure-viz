@@ -37,7 +37,8 @@ candidate/parsed/failed/evidence/selected module、full-analysis mapped class/as
 selected entity、unknown declaration、frontier、redaction rule/countのclosed shapeである。
 `not_applicable`と`payload_unavailable`はpayload descriptorを持たず、`partial_safe`だけが
 安全なSQLAlchemy payloadを列挙する。Python snapshotのadapter contract、Artifact path、
-run fingerprint preimageは変更しない。SQLAlchemy domainを持つ`diff` manifestは不正である。
+run fingerprint preimageは変更しない。SQLAlchemy diffは同じroot contractで
+`sqlalchemy-ast/1`と `code-structure-viz.plantuml/sqlalchemy/v2` を選択する。
 
 ## Diff run
 
@@ -53,7 +54,8 @@ run fingerprint preimageは変更しない。SQLAlchemy domainを持つ`diff` ma
 - `changed_path_budget`: requested/resolved/actual/source
 
 diff Artifact descriptors は `file-changes.json`（`file-change-set`）、requested format の
-`python.diff.semantic.json`、`python.diff.puml` の順に並ぶ。domain `artifact_paths` には semantic
+`python.diff.semantic.json` / `python.diff.puml` または
+`sqlalchemy.diff.semantic.json` / `sqlalchemy.diff.puml` の順に並ぶ。domain `artifact_paths` には semantic
 JSON/PlantUML のみを記録し、file-change descriptor は run-level `artifacts` に残す。analysis
 failure、entity budget overrun、unmerged path は `incomplete_kind: "payload_unavailable"`、
 `payload_available: false` とし、affected semantic payload を列挙しない。ただし diff の安全な

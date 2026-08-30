@@ -4,9 +4,11 @@ import ast
 import hashlib
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from tests.helpers.acceptance import initialize_repository
+from tests.helpers.diff import commit_current_changes
 from tests.helpers.sqlalchemy_snapshot import run_snapshot_cli
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -153,3 +155,78 @@ def test_sqlalchemy_cli_never_executes_target_and_redacts_every_public_channel(
         b"Traceback",
     ):
         assert private not in public_bytes
+
+
+def test_sqlalchemy_diff_never_executes_target_or_publishes_raw_values(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    source = repository / "src" / "models.py"
+    source.parent.mkdir(parents=True)
+    sentinel = repository / "DIFF_TARGET_EXECUTED"
+    secret = "DO_NOT_PUBLISH_SQLALCHEMY_DIFF_SECRET"
+    prefix = (
+        "from pathlib import Path\n"
+        "from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column\n"
+        f"Path({str(sentinel)!r}).write_text('executed', encoding='utf-8')\n"
+        "class Base(DeclarativeBase): pass\n"
+        "class User(Base):\n"
+        "    __tablename__ = 'users'\n"
+    )
+    source.write_text(
+        prefix + f"    value: Mapped[str] = mapped_column(default={secret!r}, nullable=True)\n",
+        encoding="utf-8",
+    )
+    initialize_repository(repository)
+    before_commit = subprocess.check_output(
+        ("git", "-C", str(repository), "rev-parse", "HEAD"), text=True
+    ).strip()
+    source.write_text(
+        prefix + f"    value: Mapped[str] = mapped_column(default={secret!r}, nullable=False)\n",
+        encoding="utf-8",
+    )
+    after_commit = commit_current_changes(repository, "after")
+    git = shutil.which("git")
+    assert git is not None
+    before_state = _repository_state(repository, git)
+    output = tmp_path / "output"
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            "-m",
+            "code_structure_viz",
+            "diff",
+            "--repo",
+            str(repository),
+            "--output-dir",
+            str(output),
+            "--domain",
+            "sqlalchemy",
+            "--from",
+            before_commit,
+            "--to",
+            after_commit,
+        ),
+        cwd=repository,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not sentinel.exists()
+    assert _repository_state(repository, git) == before_state
+    public = (
+        result.stdout
+        + result.stderr
+        + b"".join(path.read_bytes() for path in sorted(output.iterdir()))
+    )
+    for private in (
+        secret.encode(),
+        str(sentinel).encode(),
+        str(repository).encode(),
+        str(output).encode(),
+        b"DIFF_TARGET_EXECUTED",
+    ):
+        assert private not in public

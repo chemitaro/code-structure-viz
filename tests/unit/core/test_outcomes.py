@@ -70,6 +70,22 @@ def test_domain_outcome_constructors_create_closed_variants() -> None:
     assert unavailable.incomplete_kind is IncompleteKind.PAYLOAD_UNAVAILABLE
 
 
+def test_sqlalchemy_domain_accepts_only_its_snapshot_and_diff_paths() -> None:
+    outcome = DomainOutcome.complete(
+        object(),
+        domain="sqlalchemy",
+        artifact_paths=(
+            "sqlalchemy.diff.semantic.json",
+            "sqlalchemy.diff.puml",
+        ),
+    )
+
+    assert outcome.artifact_paths == (
+        "sqlalchemy.diff.semantic.json",
+        "sqlalchemy.diff.puml",
+    )
+
+
 @pytest.mark.parametrize(
     ("domain", "artifact_path"),
     [

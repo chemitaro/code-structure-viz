@@ -31,7 +31,12 @@
     "before_snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "after_snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "file_change_set": {"$ref": "#/$defs/file_change_set"},
-    "semantic_change_set": {"$ref": "#/$defs/semantic_change_set"},
+    "semantic_change_set": {
+      "oneOf": [
+        {"$ref": "#/$defs/semantic_change_set"},
+        {"$ref": "#/$defs/sqlalchemy_semantic_change_set"}
+      ]
+    },
     "entities": {
       "type": "array",
       "items": {
@@ -113,7 +118,19 @@
         "type": {"const": "semantic_diff"},
         "domain": {"const": "python"},
         "document_kind": {"const": "diff"},
-        "status": {"enum": ["complete", "not_applicable"]}
+        "status": {"enum": ["complete", "not_applicable"]},
+        "before": {
+          "allOf": [
+            {"$ref": "#/$defs/diff_side"},
+            {"properties": {"domain": {"const": "python"}}}
+          ]
+        },
+        "after": {
+          "allOf": [
+            {"$ref": "#/$defs/diff_side"},
+            {"properties": {"domain": {"const": "python"}}}
+          ]
+        }
       },
       "required": [
         "before",
@@ -131,7 +148,19 @@
         "domain": {"const": "python"},
         "document_kind": {"const": "diff"},
         "status": {"const": "incomplete"},
-        "incomplete_kind": {"const": "partial_safe"}
+        "incomplete_kind": {"const": "partial_safe"},
+        "before": {
+          "allOf": [
+            {"$ref": "#/$defs/diff_side"},
+            {"properties": {"domain": {"const": "python"}}}
+          ]
+        },
+        "after": {
+          "allOf": [
+            {"$ref": "#/$defs/diff_side"},
+            {"properties": {"domain": {"const": "python"}}}
+          ]
+        }
       },
       "required": [
         "before",
@@ -142,6 +171,37 @@
         "semantic_change_set",
         "incomplete_kind"
       ]
+    },
+    {
+      "properties": {
+        "type": {"const": "semantic_diff"},
+        "domain": {"const": "sqlalchemy"},
+        "document_kind": {"const": "diff"},
+        "status": {"const": "complete"},
+        "before": {
+          "allOf": [
+            {"$ref": "#/$defs/diff_side"},
+            {"properties": {"domain": {"const": "sqlalchemy"}}}
+          ]
+        },
+        "after": {
+          "allOf": [
+            {"$ref": "#/$defs/diff_side"},
+            {"properties": {"domain": {"const": "sqlalchemy"}}}
+          ]
+        },
+        "semantic_change_set": {"$ref": "#/$defs/sqlalchemy_semantic_change_set"},
+        "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/sqlalchemy_diagnostic"}}
+      },
+      "required": [
+        "before",
+        "after",
+        "before_snapshot_sha256",
+        "after_snapshot_sha256",
+        "file_change_set",
+        "semantic_change_set"
+      ],
+      "not": {"required": ["incomplete_kind"]}
     },
     {
       "properties": {
@@ -254,7 +314,7 @@
       "required": ["kind", "domain", "schema", "digest", "head_commit", "file_count"],
       "properties": {
         "kind": {"enum": ["real", "canonical-empty-side", "analysis-failed"]},
-        "domain": {"const": "python"},
+        "domain": {"enum": ["python", "sqlalchemy"]},
         "schema": {"type": "string", "minLength": 1},
         "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "head_commit": {
@@ -313,6 +373,62 @@
         "seeds": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "impact": {"$ref": "#/$defs/impact"},
         "matching": {"type": "array", "items": {"$ref": "#/$defs/matching_evidence"}}
+      }
+    },
+    "sqlalchemy_entity_delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "id", "before", "after"],
+      "properties": {
+        "status": {"enum": ["added", "removed"]},
+        "id": {"$ref": "#/$defs/sqlalchemy_table_id"},
+        "before": {"oneOf": [{"$ref": "#/$defs/sqlalchemy_table"}, {"type": "null"}]},
+        "after": {"oneOf": [{"$ref": "#/$defs/sqlalchemy_table"}, {"type": "null"}]}
+      }
+    },
+    "sqlalchemy_member_delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "id", "before", "after"],
+      "properties": {
+        "status": {"enum": ["added", "removed", "modified"]},
+        "id": {"$ref": "#/$defs/sqlalchemy_row_id"},
+        "before": {"oneOf": [{"$ref": "#/$defs/sqlalchemy_row"}, {"type": "null"}]},
+        "after": {"oneOf": [{"$ref": "#/$defs/sqlalchemy_row"}, {"type": "null"}]}
+      }
+    },
+    "sqlalchemy_relation_delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "id", "before", "after"],
+      "properties": {
+        "status": {"enum": ["added", "removed"]},
+        "id": {"$ref": "#/$defs/sqlalchemy_relation_id"},
+        "before": {"oneOf": [{"$ref": "#/$defs/sqlalchemy_relation"}, {"type": "null"}]},
+        "after": {"oneOf": [{"$ref": "#/$defs/sqlalchemy_relation"}, {"type": "null"}]}
+      }
+    },
+    "sqlalchemy_semantic_change_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entities", "members", "relations", "seeds", "impact", "matching"],
+      "properties": {
+        "entities": {"type": "array", "items": {"$ref": "#/$defs/sqlalchemy_entity_delta"}},
+        "members": {"type": "array", "items": {"$ref": "#/$defs/sqlalchemy_member_delta"}},
+        "relations": {"type": "array", "items": {"$ref": "#/$defs/sqlalchemy_relation_delta"}},
+        "seeds": {"type": "array", "items": {"$ref": "#/$defs/sqlalchemy_table_id"}},
+        "impact": {
+          "allOf": [
+            {"$ref": "#/$defs/impact"},
+            {
+              "properties": {
+                "upstream": {"items": {"$ref": "#/$defs/sqlalchemy_table_id"}},
+                "downstream": {"items": {"$ref": "#/$defs/sqlalchemy_table_id"}}
+              }
+            }
+          ]
+        },
+        "matching": {"type": "array", "maxItems": 0}
       }
     },
     "file_change_hunk": {

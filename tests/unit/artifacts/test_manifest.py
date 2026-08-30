@@ -238,3 +238,10 @@ def test_sqlalchemy_manifest_rejects_python_descriptor() -> None:
         assert "domain" in str(error) or "artifact" in str(error)
     else:
         raise AssertionError("cross-domain descriptor was accepted")
+
+
+def test_sqlalchemy_diff_descriptor_uses_closed_domain_path() -> None:
+    descriptor = ArtifactDescriptor.create_diff("sqlalchemy", "semantic-json", b"{}\n")
+
+    assert descriptor.path == "sqlalchemy.diff.semantic.json"
+    assert descriptor.domain == "sqlalchemy"

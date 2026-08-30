@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 from code_structure_viz.core.diagnostics import Diagnostic, DiagnosticCode, diagnostic
-from code_structure_viz.core.domains import SNAPSHOT_DOMAINS, DomainName
+from code_structure_viz.core.domains import DIFF_DOMAINS, SNAPSHOT_DOMAINS, DomainName
 from code_structure_viz.core.path_safety import lexical_absolute
 from code_structure_viz.source.targets import TargetSpec, parse_target, target_sort_key
 
@@ -47,7 +47,7 @@ class SnapshotCliRequest:
 class DiffCliRequest:
     repo: Path
     output_dir: Path
-    domain: Literal["python"]
+    domain: DomainName
     config_path: Path | None
     from_ref: str | None
     to_ref: str | None
@@ -399,7 +399,7 @@ def _validate_diff_argv(argv: Sequence[str]) -> dict[str, list[tuple[int, int, s
         if not occurrences.get(option):
             candidates.append(_UsageCandidate(0, len(argv), DiagnosticCode.USAGE_GRAMMAR))
     domain_values = occurrences.get("--domain", [])
-    if domain_values and domain_values[0][2] != "python":
+    if domain_values and domain_values[0][2] not in DIFF_DOMAINS:
         candidates.append(_UsageCandidate(0, domain_values[0][1], DiagnosticCode.USAGE_GRAMMAR))
     format_values = occurrences.get("--format", [])
     seen_formats: set[str] = set()
@@ -429,8 +429,9 @@ def _validate_diff_argv(argv: Sequence[str]) -> dict[str, list[tuple[int, int, s
                 "semantic-json",
                 "plantuml",
             }
+            selected_domain = domain_values[0][2] if domain_values else None
             if isinstance(selector, DomainFormatSelector) and (
-                selector.domain != "python" or selector.format not in resolved_formats
+                selector.domain != selected_domain or selector.format not in resolved_formats
             ):
                 candidates.append(
                     _UsageCandidate(4, option_index, DiagnosticCode.USAGE_STDOUT_COMPATIBILITY)
@@ -440,7 +441,7 @@ def _validate_diff_argv(argv: Sequence[str]) -> dict[str, list[tuple[int, int, s
 
 
 def parse_diff_cli(argv: Sequence[str]) -> DiffCliRequest:
-    """Parse the closed Python ``diff`` command grammar."""
+    """Parse the closed single-domain ``diff`` command grammar."""
     occurrences = _validate_diff_argv(argv)
     values = {option: entries[0][2] for option, entries in occurrences.items()}
     if values.get("--from") == "working-tree":
@@ -465,7 +466,7 @@ def parse_diff_cli(argv: Sequence[str]) -> DiffCliRequest:
     return DiffCliRequest(
         repo=resolve_path(values["--repo"]),
         output_dir=resolve_path(values["--output-dir"]),
-        domain="python",
+        domain=cast(DomainName, values["--domain"]),
         config_path=resolve_path(values["--config"]) if "--config" in values else None,
         from_ref=values.get("--from"),
         to_ref=values.get("--to"),

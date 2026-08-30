@@ -145,6 +145,30 @@ def test_sqlalchemy_selector_copies_exact_bound_artifact_bytes() -> None:
     )
 
 
+def test_sqlalchemy_diff_selector_uses_diff_artifact_path() -> None:
+    payload = b'{"type":"semantic_diff"}\n'
+    outcome = RunOutcome.completed(
+        (
+            DomainOutcome.complete(
+                object(),
+                domain="sqlalchemy",
+                artifact_paths=("sqlalchemy.diff.semantic.json",),
+            ),
+        ),
+        manifest_relative_path="run-manifest.json",
+    )
+
+    assert (
+        StdoutEmitter().render(
+            outcome,
+            DomainFormatSelector("sqlalchemy", "semantic-json"),
+            Path("/unused"),
+            published_artifacts={"sqlalchemy.diff.semantic.json": payload},
+        )
+        == payload
+    )
+
+
 def test_sqlalchemy_unavailable_selector_has_closed_domain_result() -> None:
     outcome = RunOutcome.incomplete(
         (DomainOutcome.payload_unavailable(domain="sqlalchemy"),),

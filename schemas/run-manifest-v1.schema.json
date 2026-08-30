@@ -248,6 +248,12 @@
               {"properties": {"domain": {"const": "python"}}}
             ]
           },
+          "semantic_sides": {
+            "properties": {
+              "before": {"properties": {"domain": {"const": "python"}}},
+              "after": {"properties": {"domain": {"const": "python"}}}
+            }
+          },
           "artifacts": {
             "items": {"properties": {"domain": {"const": "python"}}}
           }
@@ -281,6 +287,12 @@
             "prefixItems": [
               {"properties": {"domain": {"const": "sqlalchemy"}}}
             ]
+          },
+          "semantic_sides": {
+            "properties": {
+              "before": {"properties": {"domain": {"const": "sqlalchemy"}}},
+              "after": {"properties": {"domain": {"const": "sqlalchemy"}}}
+            }
           },
           "artifacts": {
             "items": {"properties": {"domain": {"const": "sqlalchemy"}}}
@@ -389,7 +401,6 @@
         },
         {
           "properties": {
-            "name": {"const": "snapshot"},
             "domain": {"const": "sqlalchemy"},
             "stdout_selector": {
               "enum": [
@@ -564,7 +575,7 @@
       "required": ["kind", "domain", "schema", "digest", "head_commit", "file_count"],
       "properties": {
         "kind": {"enum": ["real", "canonical-empty-side", "analysis-failed"]},
-        "domain": {"const": "python"},
+        "domain": {"enum": ["python", "sqlalchemy"]},
         "schema": {"type": "string", "minLength": 1},
         "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "head_commit": {
@@ -993,6 +1004,15 @@
         "after": {"$ref": "#/$defs/coverage"}
       }
     },
+    "sqlalchemy_diff_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after"],
+      "properties": {
+        "before": {"$ref": "#/$defs/sqlalchemy_coverage"},
+        "after": {"$ref": "#/$defs/sqlalchemy_coverage"}
+      }
+    },
     "budget": {
       "type": "object",
       "additionalProperties": false,
@@ -1232,7 +1252,12 @@
         "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]},
         "payload_available": {"type": "boolean"},
         "entity_count": {"type": ["integer", "null"], "minimum": 0},
-        "coverage": {"$ref": "#/$defs/sqlalchemy_coverage"},
+        "coverage": {
+          "oneOf": [
+            {"$ref": "#/$defs/sqlalchemy_coverage"},
+            {"$ref": "#/$defs/sqlalchemy_diff_coverage"}
+          ]
+        },
         "budget": {"$ref": "#/$defs/budget"},
         "artifact_paths": {
           "type": "array",
@@ -1241,7 +1266,9 @@
           "items": {
             "enum": [
               "sqlalchemy.snapshot.semantic.json",
-              "sqlalchemy.snapshot.puml"
+              "sqlalchemy.snapshot.puml",
+              "sqlalchemy.diff.semantic.json",
+              "sqlalchemy.diff.puml"
             ]
           }
         },
@@ -1346,6 +1373,8 @@
             "sqlalchemy.snapshot.puml",
             "python.diff.semantic.json",
             "python.diff.puml",
+            "sqlalchemy.diff.semantic.json",
+            "sqlalchemy.diff.puml",
             "file-changes.json"
           ]
         },
@@ -1408,8 +1437,32 @@
         },
         {
           "properties": {
+            "path": {"const": "sqlalchemy.diff.semantic.json"},
+            "domain": {"const": "sqlalchemy"},
+            "format": {"const": "semantic-json"},
+            "media_type": {"const": "application/json"}
+          }
+        },
+        {
+          "properties": {
+            "path": {"const": "sqlalchemy.diff.puml"},
+            "domain": {"const": "sqlalchemy"},
+            "format": {"const": "plantuml"},
+            "media_type": {"const": "text/vnd.plantuml; charset=utf-8"}
+          }
+        },
+        {
+          "properties": {
             "path": {"const": "file-changes.json"},
             "domain": {"const": "python"},
+            "format": {"const": "file-change-set"},
+            "media_type": {"const": "application/json"}
+          }
+        },
+        {
+          "properties": {
+            "path": {"const": "file-changes.json"},
+            "domain": {"const": "sqlalchemy"},
             "format": {"const": "file-change-set"},
             "media_type": {"const": "application/json"}
           }

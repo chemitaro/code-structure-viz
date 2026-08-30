@@ -14,6 +14,26 @@ from code_structure_viz.adapters.python.selection import (
     PythonSelectionResult,
     PythonTargetSelector,
 )
+from code_structure_viz.adapters.sqlalchemy.analyzer import SqlAlchemySnapshotAnalyzer
+from code_structure_viz.adapters.sqlalchemy.diff import (
+    SqlAlchemyDiffer,
+    SqlAlchemyDiffResult,
+)
+from code_structure_viz.adapters.sqlalchemy.model import (
+    SqlAlchemyCoverage,
+    SqlAlchemySnapshot,
+)
+from code_structure_viz.adapters.sqlalchemy.plantuml import render_sqlalchemy_diff
+from code_structure_viz.adapters.sqlalchemy.selection import (
+    SqlAlchemySelectionResult,
+    SqlAlchemyTargetSelector,
+)
+from code_structure_viz.adapters.sqlalchemy.semantic_json import (
+    coverage_value as sqlalchemy_coverage_value,
+)
+from code_structure_viz.adapters.sqlalchemy.semantic_json import (
+    render_sqlalchemy_diff as render_sqlalchemy_semantic_diff,
+)
 from code_structure_viz.artifacts.manifest import DiffManifestBuilder
 from code_structure_viz.artifacts.writer import (
     OutputTransaction,
@@ -73,6 +93,7 @@ from code_structure_viz.source.git_repository import (
     HeadState,
     UntrackedObservation,
 )
+from code_structure_viz.source.python_modules import PythonSourceIndex
 from code_structure_viz.source.source_view import (
     SourceDriftError,
     SourceInterruptedError,
@@ -106,7 +127,7 @@ class DiffApplication:
         initial_untracked_observation: UntrackedObservation | None = None
         unmerged_entries: tuple[GitPathIdentity, ...] = ()
         gitlink_states: tuple[GitlinkWorktreeState, ...] = ()
-        semantic_result: SemanticDiffResult | None = None
+        semantic_result: SemanticDiffResult | SqlAlchemyDiffResult | None = None
         try:
             self._checkpoint()
             if request.from_ref == "working-tree":
@@ -231,75 +252,138 @@ class DiffApplication:
             self._checkpoint()
             semantic_sides: dict[str, object]
             if has_unmerged:
-                before_selection = self._analyze(before_source, config)
-                domain, semantic_sides = self._unmerged_domain(
-                    request,
-                    config,
-                    before_source,
-                    after_source,
-                    before_selection,
-                )
+                if request.domain == "python":
+                    python_before_selection = self._analyze(before_source, config)
+                    domain, semantic_sides = self._unmerged_domain(
+                        request,
+                        config,
+                        before_source,
+                        after_source,
+                        python_before_selection,
+                    )
+                else:
+                    sqlalchemy_before_selection = self._analyze_sqlalchemy(before_source, config)
+                    domain, semantic_sides = self._unmerged_sqlalchemy_domain(
+                        request,
+                        config,
+                        before_source,
+                        after_source,
+                        sqlalchemy_before_selection,
+                    )
             else:
-                before_selection = self._analyze(before_source, config)
-                self._checkpoint()
-                after_selection = self._analyze(after_source, config)
-                self._checkpoint()
-                before_snapshot, before_failed, before_coverage = self._selection_snapshot(
-                    before_selection
-                )
-                after_snapshot, after_failed, after_coverage = self._selection_snapshot(
-                    after_selection
-                )
-                before_side = DomainPresenceResolver.side(
-                    before_snapshot,
-                    digest=before_source.fingerprint if before_failed else None,
-                    head_commit=before_source.head_commit,
-                    file_count=len(before_source.files),
-                    analysis_failed=before_failed,
-                )
-                after_side = DomainPresenceResolver.side(
-                    after_snapshot,
-                    digest=after_source.fingerprint if after_failed else None,
-                    head_commit=after_source.head_commit,
-                    file_count=len(after_source.files),
-                    analysis_failed=after_failed,
-                )
-                semantic_result = SemanticDiffer().compare(
-                    before_snapshot,
-                    after_snapshot,
-                    before_side=before_side,
-                    after_side=after_side,
-                    upstream_depth=config.traversal.upstream_depth,
-                    downstream_depth=config.traversal.downstream_depth,
-                )
-                diagnostics = canonical_diagnostics(
-                    (*before_selection.diagnostics, *after_selection.diagnostics)
-                )
-                semantic_result = _with_diagnostics(semantic_result, diagnostics)
+                if request.domain == "python":
+                    python_before_selection = self._analyze(before_source, config)
+                    self._checkpoint()
+                    python_after_selection = self._analyze(after_source, config)
+                    self._checkpoint()
+                    python_before_snapshot, before_failed, python_before_coverage = (
+                        self._selection_snapshot(python_before_selection)
+                    )
+                    python_after_snapshot, after_failed, python_after_coverage = (
+                        self._selection_snapshot(python_after_selection)
+                    )
+                    before_side = DomainPresenceResolver.side(
+                        python_before_snapshot,
+                        digest=before_source.fingerprint if before_failed else None,
+                        head_commit=before_source.head_commit,
+                        file_count=len(before_source.files),
+                        analysis_failed=before_failed,
+                    )
+                    after_side = DomainPresenceResolver.side(
+                        python_after_snapshot,
+                        digest=after_source.fingerprint if after_failed else None,
+                        head_commit=after_source.head_commit,
+                        file_count=len(after_source.files),
+                        analysis_failed=after_failed,
+                    )
+                    semantic_result = SemanticDiffer().compare(
+                        python_before_snapshot,
+                        python_after_snapshot,
+                        before_side=before_side,
+                        after_side=after_side,
+                        upstream_depth=config.traversal.upstream_depth,
+                        downstream_depth=config.traversal.downstream_depth,
+                    )
+                    diagnostics = canonical_diagnostics(
+                        (
+                            *python_before_selection.diagnostics,
+                            *python_after_selection.diagnostics,
+                        )
+                    )
+                    semantic_result = _with_diagnostics(semantic_result, diagnostics)
+                    domain = self._domain_outcome(
+                        request,
+                        config,
+                        semantic_result,
+                        diagnostics,
+                        python_before_coverage,
+                        python_after_coverage,
+                    )
+                else:
+                    sqlalchemy_before_selection = self._analyze_sqlalchemy(before_source, config)
+                    self._checkpoint()
+                    sqlalchemy_after_selection = self._analyze_sqlalchemy(after_source, config)
+                    self._checkpoint()
+                    sqlalchemy_before_snapshot, before_failed, sqlalchemy_before_coverage = (
+                        self._sqlalchemy_selection_snapshot(sqlalchemy_before_selection)
+                    )
+                    sqlalchemy_after_snapshot, after_failed, sqlalchemy_after_coverage = (
+                        self._sqlalchemy_selection_snapshot(sqlalchemy_after_selection)
+                    )
+                    semantic_result = SqlAlchemyDiffer().compare(
+                        sqlalchemy_before_snapshot,
+                        sqlalchemy_after_snapshot,
+                        before_analysis_failed=before_failed,
+                        after_analysis_failed=after_failed,
+                        upstream_depth=config.traversal.upstream_depth,
+                        downstream_depth=config.traversal.downstream_depth,
+                        before_head_commit=before_source.head_commit,
+                        after_head_commit=after_source.head_commit,
+                        before_file_count=len(before_source.files),
+                        after_file_count=len(after_source.files),
+                        before_failure_digest=before_source.fingerprint,
+                        after_failure_digest=after_source.fingerprint,
+                    )
+                    diagnostics = canonical_diagnostics(
+                        (
+                            *sqlalchemy_before_selection.diagnostics,
+                            *sqlalchemy_after_selection.diagnostics,
+                        )
+                    )
+                    domain = self._sqlalchemy_domain_outcome(
+                        request,
+                        config,
+                        semantic_result,
+                        diagnostics,
+                        sqlalchemy_before_coverage,
+                        sqlalchemy_after_coverage,
+                    )
                 semantic_sides = {
                     "before": semantic_result.before.to_json_value(),
                     "after": semantic_result.after.to_json_value(),
                 }
-                domain = self._domain_outcome(
-                    request,
-                    config,
-                    semantic_result,
-                    diagnostics,
-                    before_coverage,
-                    after_coverage,
-                )
 
             change_content = _file_change_content(file_changes)
-            transaction.stage_diff_payload("file-change-set", change_content)
+            transaction.stage_diff_payload(request.domain, "file-change-set", change_content)
             if domain.payload_available:
                 if semantic_result is None:
                     raise ValueError("available diff outcome lost its semantic result")
                 for format_value in request.formats:
-                    if format_value == "semantic-json":
-                        content = render_semantic_diff(semantic_result, file_changes)
+                    if request.domain == "python":
+                        assert isinstance(semantic_result, SemanticDiffResult)
+                        content = (
+                            render_semantic_diff(semantic_result, file_changes)
+                            if format_value == "semantic-json"
+                            else render_plantuml_diff(semantic_result)
+                        )
                     else:
-                        content = render_plantuml_diff(semantic_result)
-                    transaction.stage_diff_payload(format_value, content)
+                        assert isinstance(semantic_result, SqlAlchemyDiffResult)
+                        content = (
+                            render_sqlalchemy_semantic_diff(semantic_result, file_changes)
+                            if format_value == "semantic-json"
+                            else render_sqlalchemy_diff(semantic_result)
+                        )
+                    transaction.stage_diff_payload(request.domain, format_value, content)
 
             outcome = (
                 RunOutcome.incomplete((domain,), manifest_relative_path="run-manifest.json")
@@ -391,9 +475,34 @@ class DiffApplication:
         )
 
     @staticmethod
+    def _analyze_sqlalchemy(
+        source: SourceView,
+        config: ResolvedConfig,
+    ) -> SqlAlchemySelectionResult:
+        analysis = SqlAlchemySnapshotAnalyzer().analyze(
+            PythonSourceIndex.build(source, config.python)
+        )
+        return SqlAlchemyTargetSelector().select(
+            analysis,
+            (),
+            config.traversal.upstream_depth,
+            config.traversal.downstream_depth,
+        )
+
+    @staticmethod
     def _selection_snapshot(
         selection: PythonSelectionResult,
     ) -> tuple[PythonSnapshot | None, bool, PythonCoverage]:
+        if selection.status is DomainStatus.NOT_APPLICABLE:
+            return None, False, selection.coverage
+        if selection.status is DomainStatus.COMPLETE:
+            return selection.snapshot, False, selection.coverage
+        return None, True, selection.coverage
+
+    @staticmethod
+    def _sqlalchemy_selection_snapshot(
+        selection: SqlAlchemySelectionResult,
+    ) -> tuple[SqlAlchemySnapshot | None, bool, SqlAlchemyCoverage]:
         if selection.status is DomainStatus.NOT_APPLICABLE:
             return None, False, selection.coverage
         if selection.status is DomainStatus.COMPLETE:
@@ -485,6 +594,73 @@ class DiffApplication:
         )
 
     @staticmethod
+    def _sqlalchemy_domain_outcome(
+        request: DiffCliRequest,
+        config: ResolvedConfig,
+        result: SqlAlchemyDiffResult,
+        diagnostics: tuple[Diagnostic, ...],
+        before_coverage: SqlAlchemyCoverage,
+        after_coverage: SqlAlchemyCoverage,
+    ) -> DomainOutcome:
+        coverage = {
+            "before": sqlalchemy_coverage_value(before_coverage),
+            "after": sqlalchemy_coverage_value(after_coverage),
+        }
+        budget = EntityBudget(
+            "max_entities",
+            request.max_entities_override,
+            config.limits.max_entities,
+            0 if result.status == "not_applicable" else result.entity_count,
+            config.value_sources.max_entities,
+        )
+        if result.status == "not_applicable":
+            return DomainOutcome.not_applicable(
+                domain="sqlalchemy",
+                diagnostics=diagnostics,
+                coverage=coverage,
+                budget=budget,
+            )
+        if result.status != "complete":
+            return DomainOutcome.payload_unavailable(
+                domain="sqlalchemy",
+                diagnostics=diagnostics,
+                entity_count=None,
+                coverage=coverage,
+                budget=budget,
+            )
+        decision = EntityBudgetGate().admit(
+            domain="sqlalchemy",
+            actual=result.entity_count,
+            requested=request.max_entities_override,
+            resolved=config.limits.max_entities,
+            source=config.value_sources.max_entities,
+        )
+        if not decision.admitted:
+            return DomainOutcome.payload_unavailable(
+                domain="sqlalchemy",
+                diagnostics=canonical_diagnostics((*diagnostics, *decision.diagnostics)),
+                entity_count=result.entity_count,
+                coverage=coverage,
+                budget=decision.budget,
+            )
+        paths = tuple(
+            {
+                "semantic-json": "sqlalchemy.diff.semantic.json",
+                "plantuml": "sqlalchemy.diff.puml",
+            }[format_value]
+            for format_value in request.formats
+        )
+        return DomainOutcome.complete(
+            result,
+            domain="sqlalchemy",
+            artifact_paths=paths,
+            diagnostics=diagnostics,
+            entity_count=result.entity_count,
+            coverage=coverage,
+            budget=decision.budget,
+        )
+
+    @staticmethod
     def _unmerged_domain(
         request: DiffCliRequest,
         config: ResolvedConfig,
@@ -539,6 +715,60 @@ class DiffApplication:
             "after": after_side.to_json_value(),
         }
         return domain, semantic_sides
+
+    @staticmethod
+    def _unmerged_sqlalchemy_domain(
+        request: DiffCliRequest,
+        config: ResolvedConfig,
+        before_source: SourceView,
+        after_source: SourceView,
+        before_selection: SqlAlchemySelectionResult,
+    ) -> tuple[DomainOutcome, dict[str, object]]:
+        before_snapshot, before_failed, before_coverage = (
+            DiffApplication._sqlalchemy_selection_snapshot(before_selection)
+        )
+        result = SqlAlchemyDiffer().compare(
+            before_snapshot,
+            None,
+            before_analysis_failed=before_failed,
+            after_analysis_failed=True,
+            upstream_depth=config.traversal.upstream_depth,
+            downstream_depth=config.traversal.downstream_depth,
+            before_head_commit=before_source.head_commit,
+            after_head_commit=after_source.head_commit,
+            before_file_count=len(before_source.files),
+            after_file_count=len(after_source.files),
+            before_failure_digest=before_source.fingerprint,
+            after_failure_digest=after_source.fingerprint,
+        )
+        after_coverage = SqlAlchemyCoverage(
+            len(after_source.files),
+            0,
+            (),
+            (),
+            (),
+            0,
+            0,
+            0,
+            0,
+            (),
+            before_coverage.redaction.create(0),
+        )
+        diagnostics = canonical_diagnostics(
+            (*before_selection.diagnostics, diagnostic(DiagnosticCode.DIFF_FILE_CHANGE))
+        )
+        domain = DiffApplication._sqlalchemy_domain_outcome(
+            request,
+            config,
+            result,
+            diagnostics,
+            before_coverage,
+            after_coverage,
+        )
+        return domain, {
+            "before": result.before.to_json_value(),
+            "after": result.after.to_json_value(),
+        }
 
     def _checkpoint(self) -> None:
         if self._cancelled():
