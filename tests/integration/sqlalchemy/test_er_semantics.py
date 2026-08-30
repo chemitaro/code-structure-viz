@@ -175,6 +175,14 @@ def test_relationship_fixture_renders_only_selected_internal_er_graph() -> None:
     assert rendered.count(" : relationship ") == 2
     assert rendered.count(" : inheritance") == 1
     assert rendered.count(" : association ") == 1
+    assert "top to bottom direction" in rendered
+    relation_lines = tuple(
+        line for line in rendered.splitlines() if " : " in line and not line.startswith("  ")
+    )
+    assert "}o--o{" not in "\n".join(relation_lines)
+    assert " --> " not in "\n".join(relation_lines)
+    assert " ..> " not in "\n".join(relation_lines)
+    assert "[source=? target=0..N]" in rendered
     assert "  redacted_values=2\n" in rendered
     assert "this fixture must never execute" not in rendered
     assert "src/models.py" not in rendered

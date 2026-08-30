@@ -41,8 +41,23 @@ _PLANTUML_RELATION = re.compile(
 _SQLALCHEMY_ALIAS = r"T_[0-9a-f]{64}"
 _SQLALCHEMY_ENTITY = re.compile(rf'^entity "(.+)" as ({_SQLALCHEMY_ALIAS}) \{{$')
 _SQLALCHEMY_RELATION = re.compile(
-    rf"^({_SQLALCHEMY_ALIAS}) (--\|>|-->|\.\.>|--) ({_SQLALCHEMY_ALIAS}) : "
-    r"(foreign_key|relationship|inheritance|association)(?: (.+))?$"
+    "^("
+    + _SQLALCHEMY_ALIAS
+    + r") ((?:\|\||\|o|\}o|\}\|)(?:--|\.\.)(?:\|\||o\||o\{|\|\{)) ("
+    + _SQLALCHEMY_ALIAS
+    + r") : (foreign_key|relationship) (.+)$"
+)
+_SQLALCHEMY_UNKNOWN_RELATION = re.compile(
+    rf"^({_SQLALCHEMY_ALIAS}) (--|\.\.) ({_SQLALCHEMY_ALIAS}) : "
+    r"(foreign_key|relationship) (.+) \[source=(1|0\.\.1|0\.\.N|1\.\.N|\?) "
+    r"target=(1|0\.\.1|0\.\.N|1\.\.N|\?)\]$"
+)
+_SQLALCHEMY_INHERITANCE = re.compile(
+    rf"^({_SQLALCHEMY_ALIAS}) --\|> ({_SQLALCHEMY_ALIAS}) : inheritance$"
+)
+_SQLALCHEMY_ASSOCIATION = re.compile(
+    rf"^({_SQLALCHEMY_ALIAS}) \.\. ({_SQLALCHEMY_ALIAS}) : association "
+    r"(.+) \[source=\? target=\?\]$"
 )
 _SQLALCHEMY_ESCAPE = re.compile(r"_U([0-9A-F]{4,6})_")
 _SQLALCHEMY_REDACTED = re.compile(
@@ -56,15 +71,21 @@ _SQLALCHEMY_TYPE_CATEGORIES = (
 _SQLALCHEMY_HEADER = (
     "@startuml",
     "title SQLAlchemy ER snapshot",
-    "left to right direction",
+    "top to bottom direction",
+    "hide circle",
     "skinparam linetype ortho",
     "hide methods",
 )
 _SQLALCHEMY_LEGEND_TAIL = (
-    "  --> foreign_key",
-    "  ..> relationship",
-    "  --|> inheritance",
-    "  -- association table",
+    "  ||--|| exactly_one",
+    "  |o--o| zero_or_one",
+    "  }o--o{ zero_or_many",
+    "  }|--|{ one_or_many",
+    "  -- foreign_key (solid)",
+    "  .. relationship (dotted)",
+    "  --|> inheritance (not cardinality)",
+    "  .. association metadata (cardinality unknown)",
+    "  [?] evidence insufficient; plain line retained",
     "  [redacted] literal/expression value omitted",
     "endlegend",
     "@enduml",
@@ -471,30 +492,35 @@ def _valid_sqlalchemy_columns(value: str) -> bool:
 
 
 def _valid_sqlalchemy_row(line: str) -> bool:
+    if line == "  --":
+        return True
+
     column = re.fullmatch(
-        rf"  column (.+?) : ({_SQLALCHEMY_TYPE_CATEGORIES}) type=(.+?) "
-        r"type_parameters=(\S+) nullable=(true|false|\?) primary_key=(true|false|\?) "
-        r"unique=(true|false|\?) index=(true|false|\?) default=(\S+) "
-        r"server_default=(\S+) onupdate=(\S+) server_onupdate=(\S+) "
-        r"computed=(\S+) identity=(\S+)",
+        rf"  (\* )?(.+?) : ({_SQLALCHEMY_TYPE_CATEGORIES})"
+        r"(?: \((.+?)\))? <<(.+)>>",
         line,
     )
     if column is not None:
-        name, _category, type_name, parameters, *values = column.groups()
-        bools = values[:4]
-        redacted = values[4:]
+        _mandatory, name, _category, type_name, markers = column.groups()
+        marker_values = tuple(value.strip() for value in markers.split(","))
+        allowed_markers = {"PK", "FK", "UQ", "IX", "NN", "NULL", "?NULL"}
         return (
             _valid_sqlalchemy_name(name)
-            and (type_name == "-" or _valid_sqlalchemy_escaped_component(type_name))
-            and _valid_sqlalchemy_redacted(parameters)
-            and all(value in _SQLALCHEMY_BOOL for value in bools)
-            and all(_valid_sqlalchemy_redacted(value) for value in redacted)
+            and (type_name is None or _valid_sqlalchemy_escaped_component(type_name))
+            and bool(marker_values)
+            and all(value in allowed_markers for value in marker_values)
+            and len(set(marker_values)) == len(marker_values)
         )
 
     simple_columns = re.fullmatch(r"  (primary_key|unique) (.+?) columns=(.+)", line)
     if simple_columns is not None:
         _kind, name, columns = simple_columns.groups()
-        return _valid_sqlalchemy_name(name) and _valid_sqlalchemy_columns(columns)
+        return (
+            _valid_sqlalchemy_name(name)
+            and columns.startswith("(")
+            and columns.endswith(")")
+            and _valid_sqlalchemy_columns(columns[1:-1])
+        )
 
     check = re.fullmatch(r"  check (.+?) expression=(\S+)", line)
     if check is not None:
@@ -520,7 +546,7 @@ def _valid_sqlalchemy_row(line: str) -> bool:
         )
 
     foreign_key = re.fullmatch(
-        r"  foreign_key (.+?) local=(.+?) target=(.+?) remote=(.+?) "
+        r"  foreign_key (.+?) local=\((.+?)\) references=(.+?)\((.+?)\) "
         r"ondelete=(\S+) onupdate=(\S+)",
         line,
     )
@@ -536,34 +562,18 @@ def _valid_sqlalchemy_row(line: str) -> bool:
         )
 
     relationship = re.fullmatch(
-        r"  relationship (.+?) target=(.+?) cardinality=(scalar|many|unknown) "
-        r"uselist=(true|false|\?) back_populates=(.+?) secondary=(.+?) "
-        r"primaryjoin=(\S+) secondaryjoin=(\S+) order_by=(\S+) foreign_keys=(\S+)",
+        r"  relationship (.+?) : (scalar|many|unknown) target=(.+?) "
+        r"uselist=(true|false|\?) back_populates=(.+?) secondary=(\S+)",
         line,
     )
     if relationship is not None:
-        (
-            name,
-            target,
-            _cardinality,
-            uselist,
-            back_populates,
-            secondary,
-            primaryjoin,
-            secondaryjoin,
-            order_by,
-            foreign_keys,
-        ) = relationship.groups()
+        name, _cardinality, target, uselist, back_populates, secondary = relationship.groups()
         return (
             _valid_sqlalchemy_name(name)
             and _valid_sqlalchemy_display(target)
             and uselist in _SQLALCHEMY_BOOL
             and (back_populates == "-" or _valid_sqlalchemy_escaped_component(back_populates))
             and (secondary == "-" or _valid_sqlalchemy_display(secondary))
-            and all(
-                _valid_sqlalchemy_redacted(value)
-                for value in (primaryjoin, secondaryjoin, order_by, foreign_keys)
-            )
         )
 
     inheritance = re.fullmatch(r"  inheritance target=(.+)", line)
@@ -571,12 +581,11 @@ def _valid_sqlalchemy_row(line: str) -> bool:
         return _valid_sqlalchemy_display(inheritance.group(1))
 
     association = re.fullmatch(
-        r"  association_table (.+?) source=(.+?) target=(.+?) "
-        r"relationship_member=([0-9a-f]{64})",
+        r"  association_table (.+?) source=(.+?) target=(.+)",
         line,
     )
     if association is not None:
-        name, source, target, _member = association.groups()
+        name, source, target = association.groups()
         return (
             _valid_sqlalchemy_name(name)
             and _valid_sqlalchemy_display(source)
@@ -587,22 +596,42 @@ def _valid_sqlalchemy_row(line: str) -> bool:
 
 def _valid_sqlalchemy_relation(line: str, aliases: set[str]) -> bool:
     relation = _SQLALCHEMY_RELATION.fullmatch(line)
-    if relation is None:
-        return False
-    source, arrow, target, kind, name = relation.groups()
-    if source not in aliases or target not in aliases:
-        return False
-    expected_arrow = {
-        "foreign_key": "-->",
-        "relationship": "..>",
-        "inheritance": "--|>",
-        "association": "--",
-    }[kind]
-    if arrow != expected_arrow:
-        return False
-    if kind == "inheritance":
-        return name is None
-    return name is not None and _valid_sqlalchemy_name(name)
+    if relation is not None:
+        source, edge, target, kind, label = relation.groups()
+        left, style, right = edge[:2], edge[2:4], edge[4:]
+        return (
+            source in aliases
+            and target in aliases
+            and left in {"||", "|o", "}o", "}|"}
+            and style in {"--", ".."}
+            and right in {"||", "o|", "o{", "|{"}
+            and _valid_sqlalchemy_name(label)
+            and (
+                (kind == "foreign_key" and style == "--")
+                or (kind == "relationship" and style == "..")
+            )
+        )
+    unknown = _SQLALCHEMY_UNKNOWN_RELATION.fullmatch(line)
+    if unknown is not None:
+        source, style, target, kind, label, _source_multiplicity, _target_multiplicity = (
+            unknown.groups()
+        )
+        return (
+            source in aliases
+            and target in aliases
+            and kind in {"foreign_key", "relationship"}
+            and style in {"--", ".."}
+            and _valid_sqlalchemy_name(label)
+        )
+    inheritance = _SQLALCHEMY_INHERITANCE.fullmatch(line)
+    if inheritance is not None:
+        source, target = inheritance.groups()
+        return source in aliases and target in aliases
+    association = _SQLALCHEMY_ASSOCIATION.fullmatch(line)
+    if association is not None:
+        source, target, label = association.groups()
+        return source in aliases and target in aliases and _valid_sqlalchemy_name(label)
+    return False
 
 
 def _valid_sqlalchemy_plantuml(content: bytes) -> bool:

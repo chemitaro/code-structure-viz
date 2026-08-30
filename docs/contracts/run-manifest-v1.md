@@ -31,7 +31,7 @@ manifest.
 
 Snapshot domainは`python`または`sqlalchemy`の一件だけである。SQLAlchemy snapshotは
 adapter `sqlalchemy-ast/1`、PlantUML contract
-`code-structure-viz.plantuml/sqlalchemy/v1`、Artifact
+`code-structure-viz.plantuml/sqlalchemy/v2`、Artifact
 `sqlalchemy.snapshot.semantic.json` / `sqlalchemy.snapshot.puml` を使う。coverageは
 candidate/parsed/failed/evidence/selected module、full-analysis mapped class/association table、
 selected entity、unknown declaration、frontier、redaction rule/countのclosed shapeである。

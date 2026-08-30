@@ -170,7 +170,7 @@ def test_sqlalchemy_manifest_uses_selected_adapter_contract_and_closed_coverage(
     )
     value = json.loads(rendered)
 
-    assert value["contracts"]["plantuml"] == "code-structure-viz.plantuml/sqlalchemy/v1"
+    assert value["contracts"]["plantuml"] == "code-structure-viz.plantuml/sqlalchemy/v2"
     assert value["adapters"] == [{"domain": "sqlalchemy", "name": "sqlalchemy-ast", "version": "1"}]
     assert value["command"]["domain"] == "sqlalchemy"
     assert value["domains"][0]["domain"] == "sqlalchemy"

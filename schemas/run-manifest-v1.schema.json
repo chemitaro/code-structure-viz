@@ -264,7 +264,7 @@
         "properties": {
           "contracts": {
             "properties": {
-              "plantuml": {"const": "code-structure-viz.plantuml/sqlalchemy/v1"}
+              "plantuml": {"const": "code-structure-viz.plantuml/sqlalchemy/v2"}
             }
           },
           "adapters": {
@@ -323,7 +323,7 @@
         "plantuml": {
           "enum": [
             "code-structure-viz.plantuml/python/v1",
-            "code-structure-viz.plantuml/sqlalchemy/v1"
+            "code-structure-viz.plantuml/sqlalchemy/v2"
           ]
         },
         "file_change_set": {"const": "code-structure-viz.file-change-set/v1"}

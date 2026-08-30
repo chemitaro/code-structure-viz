@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from code_structure_viz.adapters.sqlalchemy.analyzer import SqlAlchemySnapshotAnalyzer
+from code_structure_viz.adapters.sqlalchemy.er_semantics import build_er_view
 from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyCoverage,
     SqlAlchemySnapshot,
@@ -31,7 +32,7 @@ class SqlAlchemySnapshotDomainAdapter:
         domain="sqlalchemy",
         adapter_name="sqlalchemy-ast",
         adapter_version="1",
-        plantuml_contract="code-structure-viz.plantuml/sqlalchemy/v1",
+        plantuml_contract="code-structure-viz.plantuml/sqlalchemy/v2",
         semantic_path="sqlalchemy.snapshot.semantic.json",
         plantuml_path="sqlalchemy.snapshot.puml",
     )
@@ -85,7 +86,7 @@ class SqlAlchemySnapshotDomainAdapter:
                 downstream_depth=config.traversal.downstream_depth,
             ).render(payload)
         if format_value == "plantuml":
-            return SqlAlchemyPlantUmlRenderer().render(payload)
+            return SqlAlchemyPlantUmlRenderer().render_view(build_er_view(payload))
         raise ValueError("SQLAlchemy snapshot adapter received an unsupported format")
 
     def coverage_value(self, coverage: object) -> Mapping[str, object]:

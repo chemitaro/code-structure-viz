@@ -35,7 +35,7 @@ class SnapshotAdapterContract:
             "sqlalchemy": (
                 "sqlalchemy-ast",
                 "1",
-                "code-structure-viz.plantuml/sqlalchemy/v1",
+                "code-structure-viz.plantuml/sqlalchemy/v2",
                 "sqlalchemy.snapshot.semantic.json",
                 "sqlalchemy.snapshot.puml",
             ),

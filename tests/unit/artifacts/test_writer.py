@@ -9,16 +9,22 @@ from code_structure_viz.core.diagnostics import DiagnosticCode
 
 _SQLALCHEMY_EMPTY_PUML = b"""@startuml
 title SQLAlchemy ER snapshot
-left to right direction
+top to bottom direction
+hide circle
 skinparam linetype ortho
 hide methods
 legend right
   rule_version=code-structure-viz.sqlalchemy-redaction/v1
   redacted_values=0
-  --> foreign_key
-  ..> relationship
-  --|> inheritance
-  -- association table
+  ||--|| exactly_one
+  |o--o| zero_or_one
+  }o--o{ zero_or_many
+  }|--|{ one_or_many
+  -- foreign_key (solid)
+  .. relationship (dotted)
+  --|> inheritance (not cardinality)
+  .. association metadata (cardinality unknown)
+  [?] evidence insufficient; plain line retained
   [redacted] literal/expression value omitted
 endlegend
 @enduml

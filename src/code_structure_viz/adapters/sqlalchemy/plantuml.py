@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import unicodedata
 
+from code_structure_viz.adapters.sqlalchemy.er_semantics import (
+    SqlAlchemyErMultiplicity,
+    SqlAlchemyErRelation,
+    SqlAlchemyErView,
+    build_er_view,
+)
 from code_structure_viz.adapters.sqlalchemy.model import (
     IndexTermKind,
     RedactedExpression,
@@ -12,7 +18,6 @@ from code_structure_viz.adapters.sqlalchemy.model import (
     SqlAlchemyIndexRow,
     SqlAlchemyInheritanceRow,
     SqlAlchemyPrimaryKeyRow,
-    SqlAlchemyRelation,
     SqlAlchemyRelationKind,
     SqlAlchemyRelationshipRow,
     SqlAlchemyRelationTarget,
@@ -27,15 +32,21 @@ from code_structure_viz.adapters.sqlalchemy.model import (
 _HEADER = (
     "@startuml",
     "title SQLAlchemy ER snapshot",
-    "left to right direction",
+    "top to bottom direction",
+    "hide circle",
     "skinparam linetype ortho",
     "hide methods",
 )
 _LEGEND_TAIL = (
-    "  --> foreign_key",
-    "  ..> relationship",
-    "  --|> inheritance",
-    "  -- association table",
+    "  ||--|| exactly_one",
+    "  |o--o| zero_or_one",
+    "  }o--o{ zero_or_many",
+    "  }|--|{ one_or_many",
+    "  -- foreign_key (solid)",
+    "  .. relationship (dotted)",
+    "  --|> inheritance (not cardinality)",
+    "  .. association metadata (cardinality unknown)",
+    "  [?] evidence insufficient; plain line retained",
     "  [redacted] literal/expression value omitted",
     "endlegend",
     "@enduml",
@@ -65,19 +76,44 @@ def _render_table_display(schema_name: str | None, table_name: str) -> str:
 
 
 def render_plantuml(snapshot: SqlAlchemySnapshot) -> bytes:
-    members_by_id = {member.id: member for member in snapshot.members}
+    return SqlAlchemyPlantUmlRenderer().render(snapshot)
+
+
+class SqlAlchemyPlantUmlRenderer:
+    """Render the SQLAlchemy PlantUML ER contract v2."""
+
+    def render(self, snapshot: SqlAlchemySnapshot) -> bytes:
+        return self.render_view(build_er_view(snapshot))
+
+    def render_view(self, view: SqlAlchemyErView) -> bytes:
+        return _render_view(view)
+
+
+def _render_view(view: SqlAlchemyErView) -> bytes:
+    snapshot = view.snapshot
     lines = list(_HEADER)
     for table in snapshot.entities:
         lines.append(
             f'entity "{_render_table_display(table.schema_name, table.name)}" '
             f"as {_table_alias(table)} {{"
         )
-        lines.extend(
-            _row_line(member) for member in snapshot.members if member.owner_id == table.id
+        owner_members = tuple(member for member in snapshot.members if member.owner_id == table.id)
+        foreign_key_columns = frozenset(
+            column
+            for member in owner_members
+            if isinstance(member, SqlAlchemyForeignKeyRow)
+            for column in member.local_columns
         )
+        saw_constraint = False
+        for member in owner_members:
+            if not saw_constraint and not isinstance(member, SqlAlchemyColumnRow):
+                lines.append("  --")
+                saw_constraint = True
+            lines.append(_row_line(member, foreign_key_columns=foreign_key_columns))
         lines.append("}")
-    for relation in snapshot.relations:
-        line = _relation_line(relation, members_by_id)
+    members_by_id = {member.id: member for member in snapshot.members}
+    for item in view.relations:
+        line = _relation_line(item, members_by_id)
         if line is not None:
             lines.append(line)
     lines.extend(
@@ -89,13 +125,6 @@ def render_plantuml(snapshot: SqlAlchemySnapshot) -> bytes:
         )
     )
     return ("\n".join(lines) + "\n").encode("utf-8")
-
-
-class SqlAlchemyPlantUmlRenderer:
-    """Render SQLAlchemy ER PlantUML v1 bytes."""
-
-    def render(self, snapshot: SqlAlchemySnapshot) -> bytes:
-        return render_plantuml(snapshot)
 
 
 def _table_alias(table: SqlAlchemyTable) -> str:
@@ -137,26 +166,46 @@ def _columns_token(values: tuple[str, ...]) -> str:
     return ",".join(escape_plantuml_label(value) for value in values)
 
 
-def _row_line(value: SqlAlchemyRow) -> str:
+def _short_type_name(value: SqlAlchemyColumnRow) -> str | None:
+    if value.type.name is None:
+        return None
+    return value.type.name.rsplit(".", 1)[-1]
+
+
+def _column_line(value: SqlAlchemyColumnRow, foreign_key_columns: frozenset[str]) -> str:
+    assert value.name is not None
+    markers: list[str] = []
+    if value.primary_key is True:
+        markers.append("PK")
+    if value.name in foreign_key_columns:
+        markers.append("FK")
+    if value.unique is True:
+        markers.append("UQ")
+    if value.index is True:
+        markers.append("IX")
+    mandatory = value.primary_key is True or value.nullable is False
+    if mandatory:
+        markers.append("NN")
+    elif value.nullable is True:
+        markers.append("NULL")
+    else:
+        markers.append("?NULL")
+    type_name = _short_type_name(value)
+    display_type = value.type.category.value
+    if type_name is not None and type_name.lower() != display_type.lower():
+        display_type = f"{display_type} ({escape_plantuml_label(type_name)})"
+    stereotype = f" <<{', '.join(markers)}>>" if markers else ""
+    prefix = "* " if mandatory else ""
+    return f"  {prefix}{escape_plantuml_label(value.name)} : {display_type}{stereotype}"
+
+
+def _row_line(value: SqlAlchemyRow, *, foreign_key_columns: frozenset[str] = frozenset()) -> str:
     if isinstance(value, SqlAlchemyColumnRow):
-        type_name = escape_plantuml_label(value.type.name) if value.type.name is not None else "-"
-        return (
-            f"  column {_name_token(value.name)} : {value.type.category.value} "
-            f"type={type_name} type_parameters={_redacted_token(value.type.parameters)} "
-            f"nullable={_bool_token(value.nullable)} "
-            f"primary_key={_bool_token(value.primary_key)} "
-            f"unique={_bool_token(value.unique)} index={_bool_token(value.index)} "
-            f"default={_redacted_token(value.default)} "
-            f"server_default={_redacted_token(value.server_default)} "
-            f"onupdate={_redacted_token(value.onupdate)} "
-            f"server_onupdate={_redacted_token(value.server_onupdate)} "
-            f"computed={_redacted_token(value.computed)} "
-            f"identity={_redacted_token(value.identity)}"
-        )
+        return _column_line(value, foreign_key_columns)
     if isinstance(value, SqlAlchemyPrimaryKeyRow):
-        return f"  primary_key {_name_token(value.name)} columns={_columns_token(value.columns)}"
+        return f"  primary_key {_name_token(value.name)} columns=({_columns_token(value.columns)})"
     if isinstance(value, SqlAlchemyUniqueRow):
-        return f"  unique {_name_token(value.name)} columns={_columns_token(value.columns)}"
+        return f"  unique {_name_token(value.name)} columns=({_columns_token(value.columns)})"
     if isinstance(value, SqlAlchemyCheckRow):
         return f"  check {_name_token(value.name)} expression={_redacted_token(value.expression)}"
     if isinstance(value, SqlAlchemyIndexRow):
@@ -172,10 +221,9 @@ def _row_line(value: SqlAlchemyRow) -> str:
     if isinstance(value, SqlAlchemyForeignKeyRow):
         return (
             f"  foreign_key {_name_token(value.name)} "
-            f"local={_columns_token(value.local_columns)} target={_target_token(value.target)} "
-            f"remote={_columns_token(value.target_columns)} "
-            f"ondelete={_redacted_token(value.ondelete)} "
-            f"onupdate={_redacted_token(value.onupdate)}"
+            f"local=({_columns_token(value.local_columns)}) "
+            f"references={_target_token(value.target)}({_columns_token(value.target_columns)}) "
+            f"ondelete={_redacted_token(value.ondelete)} onupdate={_redacted_token(value.onupdate)}"
         )
     if isinstance(value, SqlAlchemyRelationshipRow):
         secondary = _target_token(value.secondary) if value.secondary is not None else "-"
@@ -183,48 +231,89 @@ def _row_line(value: SqlAlchemyRow) -> str:
             escape_plantuml_label(value.back_populates) if value.back_populates is not None else "-"
         )
         return (
-            f"  relationship {_name_token(value.name)} target={_target_token(value.target)} "
-            f"cardinality={value.cardinality.value} uselist={_bool_token(value.uselist)} "
-            f"back_populates={back_populates} secondary={secondary} "
-            f"primaryjoin={_redacted_token(value.primaryjoin)} "
-            f"secondaryjoin={_redacted_token(value.secondaryjoin)} "
-            f"order_by={_redacted_token(value.order_by)} "
-            f"foreign_keys={_redacted_token(value.foreign_keys)}"
+            f"  relationship {_name_token(value.name)} : {value.cardinality.value} "
+            f"target={_target_token(value.target)} uselist={_bool_token(value.uselist)} "
+            f"back_populates={back_populates} secondary={secondary}"
         )
     if isinstance(value, SqlAlchemyInheritanceRow):
         return f"  inheritance target={_target_token(value.target)}"
     if isinstance(value, SqlAlchemyAssociationTableRow):
-        member_id = value.relationship_member_id.removeprefix("sqlalchemy:row:")
         return (
             f"  association_table {_name_token(value.name)} "
             f"source={_target_token(value.source_table)} "
-            f"target={_target_token(value.relationship_target)} "
-            f"relationship_member={member_id}"
+            f"target={_target_token(value.relationship_target)}"
         )
     raise TypeError("unknown SQLAlchemy row DTO")
 
 
+_LEFT_ENDPOINT = {
+    SqlAlchemyErMultiplicity.EXACTLY_ONE: "||",
+    SqlAlchemyErMultiplicity.ZERO_OR_ONE: "|o",
+    SqlAlchemyErMultiplicity.ZERO_OR_MANY: "}o",
+    SqlAlchemyErMultiplicity.ONE_OR_MANY: "}|",
+}
+_RIGHT_ENDPOINT = {
+    SqlAlchemyErMultiplicity.EXACTLY_ONE: "||",
+    SqlAlchemyErMultiplicity.ZERO_OR_ONE: "o|",
+    SqlAlchemyErMultiplicity.ZERO_OR_MANY: "o{",
+    SqlAlchemyErMultiplicity.ONE_OR_MANY: "|{",
+}
+
+
+def _multiplicity_label(value: SqlAlchemyErMultiplicity | None) -> str:
+    return {
+        SqlAlchemyErMultiplicity.EXACTLY_ONE: "1",
+        SqlAlchemyErMultiplicity.ZERO_OR_ONE: "0..1",
+        SqlAlchemyErMultiplicity.ZERO_OR_MANY: "0..N",
+        SqlAlchemyErMultiplicity.ONE_OR_MANY: "1..N",
+        SqlAlchemyErMultiplicity.UNKNOWN: "?",
+        None: "?",
+    }[value]
+
+
 def _relation_line(
-    value: SqlAlchemyRelation,
+    value: SqlAlchemyErRelation,
     members_by_id: dict[str, SqlAlchemyRow],
 ) -> str | None:
-    if value.target.resolution is not SqlAlchemyTargetResolution.INTERNAL:
+    relation = value.relation
+    if relation.target.resolution is not SqlAlchemyTargetResolution.INTERNAL:
         return None
-    assert value.target.id is not None
-    source = _table_alias_from_id(value.source_id)
-    target = _table_alias_from_id(value.target.id)
-    if value.kind is SqlAlchemyRelationKind.INHERITANCE:
+    assert relation.target.id is not None
+    source = _table_alias_from_id(relation.source_id)
+    target = _table_alias_from_id(relation.target.id)
+    if relation.kind is SqlAlchemyRelationKind.INHERITANCE:
         return f"{source} --|> {target} : inheritance"
-    assert value.via_member_id is not None
-    member = members_by_id[value.via_member_id]
-    if value.kind is SqlAlchemyRelationKind.FOREIGN_KEY:
+    assert relation.via_member_id is not None
+    member = members_by_id[relation.via_member_id]
+    if relation.kind is SqlAlchemyRelationKind.FOREIGN_KEY:
         if not isinstance(member, SqlAlchemyForeignKeyRow):
             raise ValueError("foreign-key relation member is invalid")
-        return f"{source} --> {target} : foreign_key {_name_token(member.name)}"
-    if value.kind is SqlAlchemyRelationKind.RELATIONSHIP:
+        label = f"foreign_key {_name_token(member.name)}"
+        style = "--"
+    elif relation.kind is SqlAlchemyRelationKind.RELATIONSHIP:
         if not isinstance(member, SqlAlchemyRelationshipRow):
             raise ValueError("relationship relation member is invalid")
-        return f"{source} ..> {target} : relationship {_name_token(member.name)}"
-    if not isinstance(member, SqlAlchemyAssociationTableRow):
-        raise ValueError("association relation member is invalid")
-    return f"{source} -- {target} : association {_name_token(member.name)}"
+        label = f"relationship {_name_token(value.role or member.name)}"
+        style = ".."
+    else:
+        if not isinstance(member, SqlAlchemyAssociationTableRow):
+            raise ValueError("association relation member is invalid")
+        return f"{source} .. {target} : association {_name_token(member.name)} [source=? target=?]"
+
+    left = (
+        _LEFT_ENDPOINT.get(value.source_multiplicity)
+        if value.source_multiplicity is not None
+        else None
+    )
+    right = (
+        _RIGHT_ENDPOINT.get(value.target_multiplicity)
+        if value.target_multiplicity is not None
+        else None
+    )
+    if left is not None and right is not None:
+        return f"{source} {left}{style}{right} {target} : {label}"
+    return (
+        f"{source} {style} {target} : {label} "
+        f"[source={_multiplicity_label(value.source_multiplicity)} "
+        f"target={_multiplicity_label(value.target_multiplicity)}]"
+    )

@@ -155,16 +155,22 @@ def test_zero_table_snapshot_has_the_exact_skeleton_and_metadata() -> None:
     expected = (
         b"@startuml\n"
         b"title SQLAlchemy ER snapshot\n"
-        b"left to right direction\n"
+        b"top to bottom direction\n"
+        b"hide circle\n"
         b"skinparam linetype ortho\n"
         b"hide methods\n"
         b"legend right\n"
         b"  rule_version=code-structure-viz.sqlalchemy-redaction/v1\n"
         b"  redacted_values=0\n"
-        b"  --> foreign_key\n"
-        b"  ..> relationship\n"
-        b"  --|> inheritance\n"
-        b"  -- association table\n"
+        b"  ||--|| exactly_one\n"
+        b"  |o--o| zero_or_one\n"
+        b"  }o--o{ zero_or_many\n"
+        b"  }|--|{ one_or_many\n"
+        b"  -- foreign_key (solid)\n"
+        b"  .. relationship (dotted)\n"
+        b"  --|> inheritance (not cardinality)\n"
+        b"  .. association metadata (cardinality unknown)\n"
+        b"  [?] evidence insufficient; plain line retained\n"
         b"  [redacted] literal/expression value omitted\n"
         b"endlegend\n"
         b"@enduml\n"
@@ -344,34 +350,25 @@ def test_renderer_uses_all_closed_row_templates_and_four_relation_arrows() -> No
     expected_lines = {
         'entity "a.b_U002E_c" as ' + _alias(source) + " {",
         'entity "a_U002E_b.c" as ' + _alias(target) + " {",
-        "  column user_U005F_name : string type=sqlalchemy_U002E_String "
-        "type_parameters=[redacted:literal] nullable=false primary_key=true "
-        "unique=? index=true default=[redacted:literal] server_default=- onupdate=- "
-        "server_onupdate=- computed=[redacted:computed] identity=[redacted:identity]",
-        "  primary_key <unnamed> columns=id,user_U005F_name",
-        "  unique uq_U005F_user_U005F_name columns=user_U005F_name",
+        "  * user_U005F_name : string <<PK, IX, NN>>",
+        "  primary_key <unnamed> columns=(id,user_U005F_name)",
+        "  unique uq_U005F_user_U005F_name columns=(user_U005F_name)",
         "  check ck_U005F_user_U005F_active expression=[redacted:sql_expression]",
         "  index ix_U005F_user_U005F_name unique=? "
         "terms=column:user_U005F_name,[redacted:sql_expression]",
-        "  foreign_key <unnamed> local=group_U005F_id target=a_U002E_b.c "
-        "remote=id ondelete=[redacted:literal] onupdate=-",
-        "  relationship groups target=a_U002E_b.c cardinality=many uselist=true "
-        "back_populates=users secondary=membership primaryjoin=[redacted:sql_expression] "
-        "secondaryjoin=[redacted:sql_expression] order_by=[redacted:callable] "
-        "foreign_keys=[redacted:sql_expression]",
-        "  relationship external_U005F_items target=external_U002E_Service "
-        "cardinality=unknown uselist=? back_populates=- secondary=- primaryjoin=- "
-        "secondaryjoin=- order_by=- foreign_keys=-",
-        "  relationship mystery target=<unknown> cardinality=unknown uselist=? "
-        "back_populates=- secondary=- primaryjoin=- secondaryjoin=- order_by=- "
-        "foreign_keys=-",
+        "  foreign_key <unnamed> local=(group_U005F_id) references=a_U002E_b.c(id) "
+        "ondelete=[redacted:literal] onupdate=-",
+        "  relationship groups : many target=a_U002E_b.c uselist=true "
+        "back_populates=users secondary=membership",
+        "  relationship external_U005F_items : unknown target=external_U002E_Service "
+        "uselist=? back_populates=- secondary=-",
+        "  relationship mystery : unknown target=<unknown> uselist=? back_populates=- secondary=-",
         "  inheritance target=a_U002E_b.c",
-        "  association_table groups source=a.b_U002E_c target=a_U002E_b.c "
-        f"relationship_member={relationship.id.removeprefix('sqlalchemy:row:')}",
-        f"{_alias(source)} --> {_alias(target)} : foreign_key <unnamed>",
-        f"{_alias(source)} ..> {_alias(target)} : relationship groups",
+        "  association_table groups source=a.b_U002E_c target=a_U002E_b.c",
+        f"{_alias(source)} -- {_alias(target)} : foreign_key <unnamed> [source=? target=?]",
+        f"{_alias(source)} .. {_alias(target)} : relationship groups [source=? target=0..N]",
         f"{_alias(source)} --|> {_alias(target)} : inheritance",
-        f"{_alias(source)} -- {_alias(secondary)} : association groups",
+        f"{_alias(source)} .. {_alias(secondary)} : association groups [source=? target=?]",
     }
     assert expected_lines <= set(rendered.splitlines())
     assert snapshot.coverage.redaction.redacted_values == 11

@@ -42,7 +42,7 @@ def test_default_sqlalchemy_snapshot_publishes_both_payloads_and_manifest(
     assert manifest["adapters"] == [
         {"domain": "sqlalchemy", "name": "sqlalchemy-ast", "version": "1"}
     ]
-    assert manifest["contracts"]["plantuml"] == ("code-structure-viz.plantuml/sqlalchemy/v1")
+    assert manifest["contracts"]["plantuml"] == ("code-structure-viz.plantuml/sqlalchemy/v2")
     assert manifest["domains"][0]["coverage"] == semantic["coverage"]
     assert [item["path"] for item in manifest["artifacts"]] == [
         "sqlalchemy.snapshot.semantic.json",
