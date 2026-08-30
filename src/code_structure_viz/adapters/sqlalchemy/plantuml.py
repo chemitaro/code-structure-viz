@@ -268,7 +268,7 @@ def _hidden_safe_change_supplements(
     before: SqlAlchemyRow,
     after: SqlAlchemyRow,
 ) -> tuple[str, str]:
-    changes: list[tuple[str, RedactedExpression, RedactedExpression]] = []
+    changes: list[tuple[str, str, str]] = []
     candidates: tuple[tuple[str, RedactedExpression, RedactedExpression], ...]
     if isinstance(before, SqlAlchemyColumnRow) and isinstance(after, SqlAlchemyColumnRow):
         candidates = (
@@ -280,7 +280,45 @@ def _hidden_safe_change_supplements(
             ("server_onupdate", before.server_onupdate, after.server_onupdate),
             ("type.parameters", before.type.parameters, after.type.parameters),
         )
-        changes.extend(item for item in candidates if item[1] != item[2])
+        changes.extend(
+            (name, _redacted_token(before_value), _redacted_token(after_value))
+            for name, before_value, after_value in candidates
+            if before_value != after_value
+        )
+        if before.type.name != after.type.name and _short_type_name(before) == _short_type_name(
+            after
+        ):
+            assert before.type.name is not None and after.type.name is not None
+            changes.append(
+                (
+                    "type.name",
+                    escape_plantuml_display_label(before.type.name),
+                    escape_plantuml_display_label(after.type.name),
+                )
+            )
+        compact_candidates = (
+            ("index", before.index, after.index, before.index is True, after.index is True),
+            (
+                "nullable",
+                before.nullable,
+                after.nullable,
+                _nullable_marker(before),
+                _nullable_marker(after),
+            ),
+            (
+                "primary_key",
+                before.primary_key,
+                after.primary_key,
+                before.primary_key is True,
+                after.primary_key is True,
+            ),
+            ("unique", before.unique, after.unique, before.unique is True, after.unique is True),
+        )
+        changes.extend(
+            (name, _safe_bool_token(before_value), _safe_bool_token(after_value))
+            for name, before_value, after_value, before_marker, after_marker in compact_candidates
+            if before_value != after_value and before_marker == after_marker
+        )
     elif isinstance(before, SqlAlchemyRelationshipRow) and isinstance(
         after, SqlAlchemyRelationshipRow
     ):
@@ -290,13 +328,113 @@ def _hidden_safe_change_supplements(
             ("primaryjoin", before.primaryjoin, after.primaryjoin),
             ("secondaryjoin", before.secondaryjoin, after.secondaryjoin),
         )
-        changes.extend(item for item in candidates if item[1] != item[2])
+        changes.extend(
+            (name, _redacted_token(before_value), _redacted_token(after_value))
+            for name, before_value, after_value in candidates
+            if before_value != after_value
+        )
+        before_back_populates = (
+            escape_plantuml_display_label(before.back_populates)
+            if before.back_populates is not None
+            else "-"
+        )
+        after_back_populates = (
+            escape_plantuml_display_label(after.back_populates)
+            if after.back_populates is not None
+            else "-"
+        )
+        if (
+            before.back_populates != after.back_populates
+            and before_back_populates == after_back_populates
+        ):
+            changes.append(
+                (
+                    "back_populates.presence",
+                    "present" if before.back_populates is not None else "absent",
+                    "present" if after.back_populates is not None else "absent",
+                )
+            )
+        changes.extend(_collapsed_target_changes("target", before.target, after.target))
+        changes.extend(
+            _collapsed_optional_target_changes("secondary", before.secondary, after.secondary)
+        )
+    elif isinstance(before, SqlAlchemyForeignKeyRow) and isinstance(after, SqlAlchemyForeignKeyRow):
+        changes.extend(_collapsed_target_changes("target", before.target, after.target))
+    elif isinstance(before, SqlAlchemyAssociationTableRow) and isinstance(
+        after, SqlAlchemyAssociationTableRow
+    ):
+        changes.extend(
+            _collapsed_target_changes(
+                "relationship_target",
+                before.relationship_target,
+                after.relationship_target,
+            )
+        )
     if not changes:
         return "", ""
     changes.sort(key=lambda item: item[0].encode("utf-8"))
-    before_tokens = " ".join(f"{name}={_redacted_token(value)}" for name, value, _ in changes)
-    after_tokens = " ".join(f"{name}={_redacted_token(value)}" for name, _, value in changes)
+    before_tokens = " ".join(f"{name}={value}" for name, value, _ in changes)
+    after_tokens = " ".join(f"{name}={value}" for name, _, value in changes)
     return f" | {before_tokens}", f" | {after_tokens}"
+
+
+def _collapsed_target_changes(
+    prefix: str,
+    before: SqlAlchemyRelationTarget,
+    after: SqlAlchemyRelationTarget,
+) -> tuple[tuple[str, str, str], ...]:
+    if _target_token(before) != _target_token(after):
+        return ()
+    candidates = (
+        ("resolution", before.resolution.value, after.resolution.value),
+        ("kind", before.kind.value, after.kind.value),
+        ("id", before.id, after.id),
+        ("schema_name", before.schema_name, after.schema_name),
+        ("table_name", before.table_name, after.table_name),
+        ("symbol", before.symbol, after.symbol),
+        ("display_name", before.display_name, after.display_name),
+    )
+    return tuple(
+        (f"{prefix}.{name}", _safe_optional_token(before_value), _safe_optional_token(after_value))
+        for name, before_value, after_value in candidates
+        if before_value != after_value
+    )
+
+
+def _collapsed_optional_target_changes(
+    prefix: str,
+    before: SqlAlchemyRelationTarget | None,
+    after: SqlAlchemyRelationTarget | None,
+) -> tuple[tuple[str, str, str], ...]:
+    if before is not None and after is not None:
+        return _collapsed_target_changes(prefix, before, after)
+    before_token = _target_token(before) if before is not None else "-"
+    after_token = _target_token(after) if after is not None else "-"
+    if before_token != after_token or before is after:
+        return ()
+    return (
+        (
+            f"{prefix}.presence",
+            "present" if before is not None else "absent",
+            "present" if after is not None else "absent",
+        ),
+    )
+
+
+def _safe_optional_token(value: str | None) -> str:
+    return "-" if value is None else escape_plantuml_display_label(value)
+
+
+def _safe_bool_token(value: bool | None) -> str:
+    if value is None:
+        return "null"
+    return "true" if value else "false"
+
+
+def _nullable_marker(value: SqlAlchemyColumnRow) -> str:
+    if value.primary_key is True or value.nullable is False:
+        return "NN"
+    return "NULL" if value.nullable is True else "?NULL"
 
 
 def _foreign_key_columns(

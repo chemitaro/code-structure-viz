@@ -328,6 +328,65 @@ class User(Base):
     assert b"255" not in plantuml
 
 
+def test_modified_column_plantuml_supplements_collapsed_full_type_name_change() -> None:
+    before = _snapshot(
+        b"""
+import pkg_a
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    value: Mapped[object] = mapped_column(pkg_a.CustomType)
+"""
+    )
+    after = _snapshot(
+        b"""
+import pkg_b
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    value: Mapped[object] = mapped_column(pkg_b.CustomType)
+"""
+    )
+
+    plantuml = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
+
+    assert b"| type.name=pkg_a.CustomType" in plantuml
+    assert b"| type.name=pkg_b.CustomType" in plantuml
+
+
+def test_modified_column_plantuml_supplements_collapsed_compact_marker_changes() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    value: Mapped[int] = mapped_column(
+        primary_key=True,
+        nullable=True,
+        unique=False,
+        index=False,
+    )
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    value: Mapped[int] = mapped_column(primary_key=True, nullable=False)
+"""
+    )
+
+    plantuml = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
+
+    assert b"| index=false nullable=true unique=false" in plantuml
+    assert b"| index=null nullable=false unique=null" in plantuml
+
+
 def test_modified_relationship_plantuml_supplements_join_and_order_only_safe_changes() -> None:
     before = _snapshot(
         b"""
@@ -360,6 +419,105 @@ class Parent(Base):
     assert b"| order_by=[redacted:literal] primaryjoin=[redacted:literal]" in plantuml
     assert b"Parent.id == Child.parent_id" not in plantuml
     assert b"Child.id" not in plantuml
+
+
+def test_modified_relationship_plantuml_distinguishes_absent_back_populates_from_dash() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+class Base(DeclarativeBase): pass
+class Child(Base): __tablename__ = "children"
+class Parent(Base):
+    __tablename__ = "parents"
+    children: Mapped[list["Child"]] = relationship("Child")
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+class Base(DeclarativeBase): pass
+class Child(Base): __tablename__ = "children"
+class Parent(Base):
+    __tablename__ = "parents"
+    children: Mapped[list["Child"]] = relationship("Child", back_populates="-")
+"""
+    )
+
+    result = SqlAlchemyDiffer().compare(before, after)
+    plantuml = render_sqlalchemy_diff(result)
+
+    assert [item.status.value for item in result.members] == ["modified"]
+    assert b"back_populates.presence=absent" in plantuml
+    assert b"back_populates.presence=present" in plantuml
+
+
+def test_modified_relationship_plantuml_distinguishes_absent_secondary_from_dash_table() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+class Base(DeclarativeBase): pass
+class Child(Base): __tablename__ = "children"
+class Parent(Base):
+    __tablename__ = "parents"
+    children: Mapped[list["Child"]] = relationship("Child")
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+class Base(DeclarativeBase): pass
+class Child(Base): __tablename__ = "children"
+class Parent(Base):
+    __tablename__ = "parents"
+    children: Mapped[list["Child"]] = relationship("Child", secondary="-")
+"""
+    )
+
+    result = SqlAlchemyDiffer().compare(before, after)
+    plantuml = render_sqlalchemy_diff(result)
+
+    assert [item.status.value for item in result.members] == ["modified"]
+    assert b"secondary.presence=absent" in plantuml
+    assert b"secondary.presence=present" in plantuml
+
+
+def test_named_foreign_key_plantuml_supplements_collapsed_target_resolution_change() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class Account(Base):
+    __tablename__ = "accounts"
+    __table_args__ = {"schema": "audit"}
+class User(Base):
+    __tablename__ = "users"
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("audit.accounts.id", name="fk_user_account")
+    )
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("audit.accounts.id", name="fk_user_account")
+    )
+"""
+    )
+
+    result = SqlAlchemyDiffer().compare(before, after)
+    plantuml = render_sqlalchemy_diff(result)
+
+    assert [item.status.value for item in result.members] == ["modified"]
+    assert b"target.resolution=internal" in plantuml
+    assert b"target.resolution=external" in plantuml
+    assert b"target.id=sqlalchemy_U003A_table_U003A_" in plantuml
+    assert b"target.id=-" in plantuml
 
 
 def test_removed_row_plantuml_keeps_typed_before_ghost() -> None:
