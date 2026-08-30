@@ -4,8 +4,8 @@ ID: "iss-00007"
 タイトル: "Compare SQLAlchemy ER Changes"
 関連GitHub: ["#7"]
 package_sequence_key: "ISSUE-04"
-状態: "draft"
-最終更新: "2026-08-24"
+状態: "ready"
+最終更新: "2026-08-30"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -17,154 +17,191 @@ package_sequence_key: "ISSUE-04"
 ## Planning Level
 
 - **selected level: `strict`**
-- 理由: schema review に用いる row-level public contract、redaction、moved matching、intermediate release boundary を導入し、誤判定からの回復コストが高いため strict を選ぶ。
-- risk factor: public CLI/schema、static-analysis safety、Artifact integrity、adapter compatibility、誤比較時の広い説明影響。
-- `critical` ではない理由: target repository と persistent user data を変更せず、release/commit 単位で戻せる設計である。
-- 再評価条件: secret/PII exposure、target mutation、不可逆 data loss、incident response が必要な rollout を追加する場合。
+- 理由: existing Python diff のshared publication pathへ新しいdomainを追加し、public semantic JSON/PlantUML/schemaを増やすため、回帰・redaction・failure publicationを明示的に固定する必要がある。
+- 主なriskは、side failureをremovalと誤認すること、SQLAlchemy diffでsecret/raw sourceを漏らすこと、shared artifact変更でPython diffを壊すことである。
+- persistent dataやtarget repositoryを変更しないため`critical`ではない。source/DB実行、secret incident、不可逆変更が必要になった場合は`critical`へ再評価する。
 
-## 目標
+## 実装前提
 
-coding agent が before/after declarative ORM semantics を比較し、table と column/constraint/index/relationship の row-level delta、ghost removal、影響 context を説明できる。
-
-completion は file/technical layer の完成ではなく、次の observable chain で判定する。
-
-```text
-CLI request -> safe source acquisition -> domain semantic analysis
-  -> versioned semantic JSON + domain PlantUML -> diagnostic/manifest
-  -> acceptance command and exit evidence
-```
-
-## 順序・依存
-
-- declared dependency: ISSUE-02, ISSUE-03。
-- execution order: I04-PLAN-001 → 002 → 003 → 005 → 004 → 007 → 006。shared endpoint/hunk/budget contractを再実装せずconsumer contract testで固定する。
-- truth-table fixture、row golden、matching、security scanはdependency contract verification後に並行できる。
-- stop condition: row deltas/ghosts、domain presence、start-HEAD anchor、metadata-only hunk、two-level budget、union impactが成立するまでintermediate releaseを宣言しない。
-
-| Plan ID | implementation/verification step | Design trace |
-| --- | --- | --- |
-| I04-PLAN-001 | I04-AT-001〜010のrow/truth/endpoint/hunk/budget fixturesを先に固定する。 | I04-DES-001 |
-| I04-PLAN-002 | ISSUE-02 comparison source contractをconsumeし、ER adapterへimmutable sidesを渡す。 | I04-DES-002 |
-| I04-PLAN-003 | canonical empty-side、table/row differ、matching、union impactを実装する。 | I04-DES-003 |
-| I04-PLAN-004 | side/table/row/matching/hunkを分離したJSON、ghost PlantUML、manifest publicationを接続する。 | I04-DES-004 |
-| I04-PLAN-005 | side failure、changed-path/entity budgets、ambiguityをstatus/exit/publicationへ写像する。 | I04-DES-005 |
-| I04-PLAN-006 | DB/import/Git/redaction/determinism/atomicity regressionとintermediate release gateを完了する。 | I04-DES-006 |
-| I04-PLAN-007 | stdout selector grammar、stream routing、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを実装・検証する。 | I04-DES-007 |
-
-## 実装step
-
-### I04-PLAN-001 acceptance-first contract
-
-- table/row deltas、ghost before values、matching、side failure、redaction、impact、five-row presence、working-tree anchor、hunk safety、entity budgetをplanned testsで先に固定する。
-
-### I04-PLAN-002 shared comparison source
-
-planned domain modules（canonical specification 時点では未実装。実装開始時に HEAD と configured upstream を再検証し、実在 path/symbol と差異があれば Design/Plan を先に更新する）:
-
-- `src/code_structure_viz/adapters/sqlalchemy/differ.py::SqlAlchemySemanticDiffer`
-- `matcher.py::SqlAlchemyMoveMatcher`
-- `diff_model.py`
-- `diff_renderer.py`
-- `semantic/impact.py` domain graph extension
-
-ISSUE-02のendpoint/freezer/FileChangeSet/changed-path gateをcontract fixturesでconsumeし、`--to working-tree` onlyのrequested endpoint、frozen digest、start HEAD anchor、selected candidate、merge-base、resolution methodをそのままprovenanceへ記録する。
-
-### I04-PLAN-003 ER presence and semantic diff
-
-- `code-structure-viz.empty-side/v1` domain `sqlalchemy` canonical bytes/digestをgolden固定する。
-- before-only/after-onlyは全removed/added、both-absentはnot_applicable、analysis failureはincomplete no affected payload。
-- table/typed-row delta、ghost、matching、before/after union impactを実装する。
-
-### I04-PLAN-005 failure and budgets
-
-- run-level changed-path overrunはexit 1/final manifestなし。ER entity overrunはexit 3/affected payloadなし/safe manifest countあり。
-- default literalに依存するmatchingを禁止し、ambiguous moveはremoved+added。
-
-### I04-PLAN-004 Artifact publication
-
-- side descriptors/digests、metadata-only FileChangeSet、table/row deltas、redacted before/after、matching、impactをseparate fieldsへserializeする。
-- ghost visual vocabulary、no overwrite、fingerprint/integrity gate、final SHA-256を実装する。
-
-### I04-PLAN-007 stdout selector and stream contract
-
-- CLI parserは`--stdout`を高々1回だけ受理し、`manifest | DOMAIN:FORMAT`のclosed grammar、selected domain、requested formatをsource acquisition前に検証する。invalid/duplicate/unselected/unrequestedはexit 2、stdout空、Artifactなしとする。
-- publication後はavailable selectorの公開fileをexact bytesで複製する。unavailable selectorは`stdout-result/v1` 1行、selectorなしは`run-summary/v1` 1行をcanonical key orderで出す。diagnosticはstderrだけへ出し、`--output-dir` publicationを維持する。
-- complete、not_applicable、payload_unavailable、run fatal、handled interrupt、manifest unavailableをtable-driven fixtureで固定し、side failureが`partial_safe`にならないこととsource/secret/absolute pathがstdoutへ漏れないことをnegative scanする。
-
-### I04-PLAN-006 hardening and intermediate handoff
-
-- DB/import/Git mutation traps、raw patch lines/default/source/secret/path scans、determinism、ISSUE-01〜04 full suite、offline/license/minimum/latest gatesを通し、Python+SQLAlchemy intermediate release evidenceを作る。
-
-## 検証
-
-| Test ID | acceptance behavior | planned file | command |
-| --- | --- | --- | --- |
-| I04-AT-001 | table/row delta | tests/acceptance/sqlalchemy/test_diff_cli.py | uv run pytest tests/acceptance/sqlalchemy/test_diff_cli.py -q |
-| I04-AT-002 | ghost visuals | tests/golden/sqlalchemy/test_row_visuals.py | uv run pytest tests/golden/sqlalchemy/test_row_visuals.py -q |
-| I04-AT-003 | matching | tests/integration/sqlalchemy/test_er_matching.py | uv run pytest tests/integration/sqlalchemy/test_er_matching.py -q |
-| I04-AT-004 | side failure | tests/acceptance/sqlalchemy/test_diff_failures.py | uv run pytest tests/acceptance/sqlalchemy/test_diff_failures.py -q |
-| I04-AT-005 | redaction | tests/security/test_sqlalchemy_diff_redaction.py | uv run pytest tests/security/test_sqlalchemy_diff_redaction.py -q |
-| I04-AT-006 | union impact | tests/integration/sqlalchemy/test_er_impact.py | uv run pytest tests/integration/sqlalchemy/test_er_impact.py -q |
-| I04-AT-007 | domain presence | tests/acceptance/sqlalchemy/test_diff_domain_presence.py | uv run pytest tests/acceptance/sqlalchemy/test_diff_domain_presence.py -q |
-| I04-AT-008 | working-tree anchor | tests/acceptance/sqlalchemy/test_working_tree_anchor.py | uv run pytest tests/acceptance/sqlalchemy/test_working_tree_anchor.py -q |
-| I04-AT-009 | hunk safety | tests/security/test_sqlalchemy_diff_hunk_redaction.py | uv run pytest tests/security/test_sqlalchemy_diff_hunk_redaction.py -q |
-| I04-AT-010 | entity budget publication | tests/acceptance/sqlalchemy/test_diff_entity_budget.py | uv run pytest tests/acceptance/sqlalchemy/test_diff_entity_budget.py -q |
-| I04-AT-011 | sqlalchemy diff 1,001-path fatal and valid override provenance | tests/acceptance/sqlalchemy/test_diff_changed_path_admission.py | uv run pytest tests/acceptance/sqlalchemy/test_diff_changed_path_admission.py -q |
-| I04-AT-012 | stdout selector matrix | tests/acceptance/sqlalchemy/test_stdout_selector.py | uv run pytest tests/acceptance/sqlalchemy/test_stdout_selector.py -q |
-
-### issue gate commands
+1. taskで指定されたrepository/branch/full SHAをGitHub connectorで再検証し、root `AGENTS.md` が存在すれば読む。verification failure時は実装しない。
+2. `requirement.md` / `design.md` / 本Planと親Epic、`iss-00005`、`iss-00006`のcurrent contractを確認する。
+3. baselineとして次を通す。
 
 ```bash
-uv run pytest tests/acceptance/sqlalchemy/test_diff_cli.py -q
-uv run pytest tests/golden/sqlalchemy/test_row_visuals.py -q
-uv run pytest tests/integration/sqlalchemy/test_er_matching.py -q
-uv run pytest tests/acceptance/sqlalchemy/test_diff_failures.py -q
-uv run pytest tests/security/test_sqlalchemy_diff_redaction.py -q
-uv run pytest tests/integration/sqlalchemy/test_er_impact.py -q
-uv run pytest tests/acceptance/sqlalchemy/test_diff_domain_presence.py -q
-uv run pytest tests/acceptance/sqlalchemy/test_working_tree_anchor.py -q
-uv run pytest tests/security/test_sqlalchemy_diff_hunk_redaction.py -q
-uv run pytest tests/acceptance/sqlalchemy/test_diff_entity_budget.py -q
-uv run pytest tests/acceptance/sqlalchemy/test_diff_changed_path_admission.py -q
-uv run pytest tests/acceptance/sqlalchemy/test_stdout_selector.py -q
-uv run ruff check .
-uv run mypy src tests
-uv run pytest
+python3 ./spec-dock/scripts/spec-dock validate
+uv sync --frozen --all-groups
+uv run pytest tests/acceptance/python/test_diff_cli.py tests/acceptance/sqlalchemy/test_snapshot_cli.py -q
 ```
 
-### Requirement → Design → Plan → acceptance → test trace
+baseline failureやDesign記載のplanned-new pathが既に存在する場合は、推測で上書きせずDesign/Planをcurrent codeへ同期してから進む。
 
-| Requirement | Design | Plan | acceptance | test |
-| --- | --- | --- | --- | --- |
-| I04-REQ-001 | I04-DES-001 | I04-PLAN-001 | I04-AC-001, I04-AC-002 | I04-AT-001, I04-AT-002 |
-| I04-REQ-002 | I04-DES-002 | I04-PLAN-002 | I04-AC-008, I04-AC-009, I04-AC-011 | I04-AT-008, I04-AT-009, I04-AT-011 |
-| I04-REQ-003 | I04-DES-003 | I04-PLAN-003 | I04-AC-001, I04-AC-002, I04-AC-003, I04-AC-006, I04-AC-007 | I04-AT-001, I04-AT-002, I04-AT-003, I04-AT-006, I04-AT-007 |
-| I04-REQ-004 | I04-DES-004 | I04-PLAN-004 | I04-AC-001, I04-AC-002, I04-AC-005, I04-AC-009 | I04-AT-001, I04-AT-002, I04-AT-005, I04-AT-009 |
-| I04-REQ-005 | I04-DES-005 | I04-PLAN-005 | I04-AC-003, I04-AC-004, I04-AC-007, I04-AC-010 | I04-AT-003, I04-AT-004, I04-AT-007, I04-AT-010 |
-| I04-REQ-006 | I04-DES-006 | I04-PLAN-006 | I04-AC-005, I04-AC-009, I04-AC-010 | I04-AT-005, I04-AT-009, I04-AT-010 |
-| I04-REQ-007 | I04-DES-007 | I04-PLAN-007 | I04-AC-012 | I04-AT-012 |
+## 実装順序
 
-### regression boundary
+| Plan ID | 内容 | Trace |
+| --- | --- | --- |
+| I04-PLAN-001 | SQLAlchemy diffのpure behaviorとCLI acceptanceをtest-firstで固定する。 | I04-DES-002,003,005 |
+| I04-PLAN-002 | SQLAlchemy exact-ID diff、impact、JSON/PlantUML renderingを実装する。 | I04-DES-002,003 |
+| I04-PLAN-003 | `DiffApplication`、CLI、artifact/manifest/stream/schemaへSQLAlchemy branchを接続する。 | I04-DES-001,004 |
+| I04-PLAN-004 | safety、Python diff/SQLAlchemy snapshot regression、repository-wide quality gateを完了する。 | I04-DES-005 |
 
-- dependency Issueのacceptance suiteを再実行し、public endpoint/source/schema/manifest/exit contractを破っていないことを確認する。
-- target repositoryのHEAD、branch、refs、index、status、tracked/untracked bytesがcommand前後で一致する。
-- same-input deterministic rerun、output collision、invalid override、interrupt cleanupを確認する。
-- Artifact、diagnostic、stdout/stderr/logをsource body、raw patch lines、comment、literal、secret、absolute pathでnegative scanする。
-- visual vocabularyはcolorだけでなく記号、line style、legendをgolden/semantic testで検査する。
+## I04-PLAN-001 — tests first
 
-## rollback
+新規:
 
-- DB migration は実行しないため N/A。誤った row kind/matching は affected analysis を incomplete に狭める forward fix を優先する。intermediate release 後の schema break は version up と compatibility fixture で回復する。
-- rollback trigger: acceptance regression、source execution/mutation、secret/absolute path leak、incorrect successful exit、ambiguous moved の誤採用。
-- rollback unit: Issue の production code、tests、schema/doc additionsを一体で revert する。dependency Issue の accepted contract は戻さない。
-- forward recovery: unsafe pattern を `incomplete`/`unknown` へ狭め、誤った success を継続しない。既存 Artifact を自動 rewrite しない。
-- output migration は N/A。Artifact は immutable run output であり、既存 output を上書きしない。
+```text
+tests/unit/sqlalchemy/test_diff.py
+tests/acceptance/sqlalchemy/test_diff_cli.py
+```
 
-## exit / handoff
+既存testは必要なassertだけ追加する。
 
-- I04-AC-001〜I04-AC-012 の acceptance evidence が揃う。
-- Requirement→Design→Plan→test trace に gap がない。
-- planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
-- residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。
-- downstream handoff: ISSUE-01〜04 で Python class と SQLAlchemy ER の snapshot/diff が利用可能となる intermediate release milestone。
-- completion 後も implementation/report の実績は canonical Report に別途記録し、本 Plan を実行ログにしない。
+```text
+tests/unit/cli/test_parser.py
+tests/unit/artifacts/test_manifest.py
+tests/unit/artifacts/test_writer.py
+tests/unit/artifacts/test_streams.py
+tests/contracts/test_json_schemas.py
+tests/contracts/test_scope_exclusions.py
+tests/security/test_sqlalchemy_static_boundary.py
+```
+
+最低限、次をREDで固定する。
+
+- exact IDによるtable/row/relation added/removed/modified。ID変更はremoved+added。
+- provenance-only changeはsemantic deltaにしない。
+- before/after relation unionのimpactとdeleted relation edge。
+- both absent、one-side absent、one-side incomplete。
+- removed ghost、modified before/after、impact contextを持つPlantUML。
+- `diff --domain sqlalchemy`、SQLAlchemy stdout selector、expected published paths。
+- entity budget / changed-path budget / payload-unavailable publication。
+- raw source/literal/secret/absolute pathなし、target import/DB/Git mutationなし。
+- existing Python diff と SQLAlchemy snapshotの回帰。
+
+expected REDはSQLAlchemy diffが未接続であることに由来するものだけとする。別のbaseline failureは先に解消する。
+
+## I04-PLAN-002 — local SQLAlchemy diff
+
+追加:
+
+```text
+src/code_structure_viz/adapters/sqlalchemy/diff.py
+```
+
+変更:
+
+```text
+src/code_structure_viz/adapters/sqlalchemy/semantic_json.py
+src/code_structure_viz/adapters/sqlalchemy/plantuml.py
+```
+
+実装する順序:
+
+1. `SqlAlchemySnapshotAnalyzer` + `SqlAlchemyTargetSelector.select(..., targets=())` で各SourceViewのwhole snapshot resultを得る。
+2. complete/not-applicable/incompleteをDesignのreal/canonical-empty/analysis-failedへ写像する。
+3. table/row/relationをexisting IDで比較し、added/removed/modifiedだけを生成する。
+4. Issue #6 safe projectionからprovenance fieldだけを除いた値でmodified判定する。
+5. changed table/row/relationからseedを作り、before/after internal relation unionをdepth指定で探索する。
+6. entity countをunique table ID数として返す。
+7. `semantic_json.py` と `plantuml.py` にdiff renderingを追加し、snapshot renderingの既存bytesは変えない。
+
+focused:
+
+```bash
+uv run pytest tests/unit/sqlalchemy/test_diff.py -q
+uv run pytest tests/unit/sqlalchemy/test_semantic_json.py tests/unit/sqlalchemy/test_plantuml.py tests/acceptance/sqlalchemy/test_snapshot_determinism.py -q
+```
+
+stop:
+
+- heuristic rename/move、raw source/literal、runtime SQLAlchemy/DBが必要になる。
+- Issue #6 IDまたはsnapshot public bytesを変更しなければ実装できない。
+
+## I04-PLAN-003 — existing diff machineryへ接続
+
+変更:
+
+```text
+src/code_structure_viz/core/domains.py
+src/code_structure_viz/cli/parser.py
+src/code_structure_viz/application/diff.py
+src/code_structure_viz/artifacts/manifest.py
+src/code_structure_viz/artifacts/writer.py
+src/code_structure_viz/artifacts/streams.py
+schemas/semantic-v1.schema.json
+schemas/run-manifest-v1.schema.json
+docs/contracts/cli-v1.md
+docs/contracts/sqlalchemy-semantic-v1.md
+docs/contracts/sqlalchemy-plantuml-v2.md
+docs/contracts/run-manifest-v1.md
+```
+
+実装する順序:
+
+1. diff domainを`python|sqlalchemy`に拡張する。option setは変更しない。
+2. `DiffApplication` のendpoint/source/FileChangeSet/changed-path/transaction flowは維持し、analysis/comparison/renderingだけをdomain分岐する。
+3. SQLAlchemy resultをexisting `EntityBudgetGate` と `DomainOutcome`へ写像する。
+4. diff Artifact registry/staging/manifest/stdout pathをdomain-awareにする。
+5. semantic/run-manifest schemaとcontract docsへSQLAlchemy diff variantを追加する。
+6. Python branchはexisting differ/rendererを使い続ける。
+
+focused:
+
+```bash
+uv run pytest tests/unit/cli/test_parser.py tests/unit/artifacts/test_manifest.py tests/unit/artifacts/test_writer.py tests/unit/artifacts/test_streams.py tests/contracts/test_json_schemas.py tests/acceptance/sqlalchemy/test_diff_cli.py -q
+```
+
+stop:
+
+- SQLAlchemy用にsecond Git/source/publication lifecycleや汎用plugin frameworkが必要になる。
+- `run-summary/v1` / `stdout-result/v1` の既存SQLAlchemy supportを壊す変更が必要になる。
+
+## I04-PLAN-004 — safety / regression / quality gate
+
+SQLAlchemy diff safety assertionは既存 `tests/security/test_sqlalchemy_static_boundary.py` に追加し、runtime dependency、import/execute、DB、Git mutation、raw source/literal/private pathを検査する。`tests/contracts/test_scope_exclusions.py` はSQLAlchemy diffを許可する一方、Next/all/HTML/runtime SQLAlchemy importを拒否し続ける。
+
+focused regression:
+
+```bash
+uv run pytest tests/acceptance/sqlalchemy/test_diff_cli.py tests/acceptance/python/test_diff_cli.py tests/acceptance/sqlalchemy/test_snapshot_cli.py tests/acceptance/sqlalchemy/test_snapshot_determinism.py tests/security/test_sqlalchemy_static_boundary.py tests/contracts/test_scope_exclusions.py -q
+```
+
+repository-wide gate:
+
+```bash
+uv run pytest -q
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src tests
+dist_dir="$(mktemp -d)"
+uv build --offline --out-dir "$dist_dir"
+rm -rf "$dist_dir"
+python3 ./spec-dock/scripts/spec-dock validate
+```
+
+`pyproject.toml` / `uv.lock` にruntime dependency差分を残さない。
+
+## trace
+
+| Requirement | Design | Plan | Acceptance |
+| --- | --- | --- | --- |
+| I04-REQ-001 | I04-DES-001,004 | I04-PLAN-001,003 | I04-AC-001,004 |
+| I04-REQ-002 | I04-DES-002 | I04-PLAN-001,002 | I04-AC-001 |
+| I04-REQ-003 | I04-DES-003 | I04-PLAN-001,002 | I04-AC-001,003 |
+| I04-REQ-004 | I04-DES-001,004 | I04-PLAN-001,003 | I04-AC-002,004 |
+| I04-REQ-005 | I04-DES-005 | I04-PLAN-004 | I04-AC-003,004,005 |
+
+## rollback / handoff
+
+migrationはN/A。persistent dataや既存Artifactを更新しない。
+
+rollback triggerは false successful diff、secret/raw source leak、target/DB execution、Git mutation、Python diffまたはSQLAlchemy snapshot regressionである。rollback時はIssue #7のSQLAlchemy diff追加とshared registry/schema接続を一体で戻し、Issue #5/#6のcompleted implementationは戻さない。
+
+matchingが安全に成立しない変更はremoved+added、side analysisが安全に成立しない場合はpayload-unavailableへ狭めることをforward recoveryとする。
+
+handoff条件:
+
+- I04-AC-001〜I04-AC-005を満たす。
+- focused testとrepository-wide gateが成功する。
+- Python diffとSQLAlchemy snapshotのpublic regressionがない。
+- runtime dependency、Next/all/HTML/target-query、heuristic moveを追加していない。
+- `report.md`、`.meta.json`、parent scopeは本Issue implementationで変更していない。
