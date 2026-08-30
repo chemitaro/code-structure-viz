@@ -283,6 +283,34 @@ class Child(Base):
     assert "never-publish-join" not in repr(result.snapshot)
 
 
+def test_relationship_keyword_target_is_unresolved_and_partial() -> None:
+    result = _analyze(
+        {
+            "src/models.py": b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+
+class Base(DeclarativeBase): pass
+
+class User(Base):
+    __tablename__ = "users"
+    invalid: Mapped["pkg.class"] = relationship("pkg.class", uselist=False)
+"""
+        }
+    )
+
+    relationship = next(
+        row for row in result.snapshot.members if isinstance(row, SqlAlchemyRelationshipRow)
+    )
+    assert relationship.target.resolution is SqlAlchemyTargetResolution.UNKNOWN
+    assert relationship.target.symbol is None
+    assert [item.code.value for item in result.snapshot.diagnostics] == [
+        "CSV-SA-009",
+        "CSV-SA-010",
+    ]
+    assert result.snapshot.coverage.unknown_declarations == 1
+    assert result.snapshot.partial_safe is True
+
+
 def test_relationship_unknown_values_are_partial_and_closed_keywords_are_rejected() -> None:
     result = _analyze(
         {

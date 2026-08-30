@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import keyword
 import re
 import unicodedata
 from dataclasses import dataclass, fields
@@ -190,7 +191,9 @@ def safe_structural_string(value: str, *, field: str = "structural string") -> s
 
 def safe_dotted_symbol(value: str, *, field: str = "symbol") -> str:
     normalized = _nfc(value, field=field)
-    if not all(part.isidentifier() for part in normalized.split(".")):
+    if not all(
+        part.isidentifier() and not keyword.iskeyword(part) for part in normalized.split(".")
+    ):
         raise ValueError(f"{field} must be a dotted identifier")
     return normalized
 
