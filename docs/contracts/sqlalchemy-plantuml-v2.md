@@ -93,13 +93,12 @@ snapshot member orderを維持し、columnとconstraintの境界に`  --`を一�
 
 ## display escaping
 
-The entity/table display projection and all human-facing row values use
-`escape_plantuml_display_label`. It preserves common identifier punctuation, including `_`
-and `.`, while still encoding quotes, braces, control characters, and other syntax-sensitive
-code points. This keeps names such as `auth.sa_email_login_address` and
-`authentication_identity_id` readable without weakening PlantUML syntax safety. Stable
-hashed aliases remain the identity used by edges, so display-label ambiguity does not affect
-relationships. Display escaping does not change semantic JSON.
+PlantUML entity/table components use `escape_plantuml_label` so schema/table components and
+their owned separator remain injective. Human-facing row values use the separate
+`escape_plantuml_display_label` projection. It preserves common identifier punctuation,
+including `_` and `.`, while still encoding quotes, braces, control characters, and other
+syntax-sensitive code points. This keeps names such as `authentication_identity_id` readable
+without weakening PlantUML syntax safety. Display escaping does not change semantic JSON.
 
 ## safety and compatibility
 

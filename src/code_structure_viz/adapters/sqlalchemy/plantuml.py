@@ -92,10 +92,10 @@ def escape_plantuml_display_label(value: str) -> str:
 
 
 def _render_table_display(schema_name: str | None, table_name: str) -> str:
-    table = escape_plantuml_display_label(table_name)
+    table = escape_plantuml_label(table_name)
     if schema_name is None:
         return table
-    return f"{escape_plantuml_display_label(schema_name)}.{table}"
+    return f"{escape_plantuml_label(schema_name)}.{table}"
 
 
 def render_plantuml(snapshot: SqlAlchemySnapshot) -> bytes:

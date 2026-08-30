@@ -462,6 +462,7 @@ def _valid_sqlalchemy_escaped_component(value: str) -> bool:
             "-",
             "/",
             "$",
+            "_",
         }:
             return False
         index += 1

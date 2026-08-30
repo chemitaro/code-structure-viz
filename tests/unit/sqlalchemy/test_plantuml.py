@@ -146,17 +146,16 @@ def test_escape_plantuml_label_is_injective_and_component_safe() -> None:
 
 def test_display_label_keeps_common_identifier_punctuation_readable() -> None:
     assert (
-        escape_plantuml_display_label("authentication_identity_id")
-        == "authentication_identity_id"
+        escape_plantuml_display_label("authentication_identity_id") == "authentication_identity_id"
     )
     assert escape_plantuml_display_label("schema.table-name") == "schema.table-name"
     assert escape_plantuml_display_label('unsafe"name') == "unsafe_U0022_name"
 
 
 def test_table_display_escapes_components_before_the_owned_separator() -> None:
-    assert _render_table_display(None, "b.c") == "b.c"
-    assert _render_table_display("a", "b.c") == "a.b.c"
-    assert _render_table_display("a.b", "c") == "a.b.c"
+    assert _render_table_display(None, "b.c") == "b_U002E_c"
+    assert _render_table_display("a", "b.c") == "a.b_U002E_c"
+    assert _render_table_display("a.b", "c") == "a_U002E_b.c"
 
 
 def test_zero_table_snapshot_has_the_exact_skeleton_and_metadata() -> None:
@@ -358,23 +357,22 @@ def test_renderer_uses_all_closed_row_templates_and_four_relation_arrows() -> No
     rendered = render_plantuml(snapshot).decode()
 
     expected_lines = {
-        'entity "a.b.c" as ' + _alias(source) + " {",
-        'entity "a.b.c" as ' + _alias(target) + " {",
+        'entity "a.b_U002E_c" as ' + _alias(source) + " {",
+        'entity "a_U002E_b.c" as ' + _alias(target) + " {",
         "  * user_name : string <<PK, IX, NN>>",
         "  primary_key <unnamed> columns=(id,user_name)",
         "  unique uq_user_name columns=(user_name)",
         "  check ck_user_active expression=[redacted:sql_expression]",
-        "  index ix_user_name unique=? "
-        "terms=column:user_name,[redacted:sql_expression]",
-        "  foreign_key <unnamed> local=(group_id) references=a.b.c(id) "
+        "  index ix_user_name unique=? terms=column:user_name,[redacted:sql_expression]",
+        "  foreign_key <unnamed> local=(group_id) references=a_U002E_b.c(id) "
         "ondelete=[redacted:literal] onupdate=-",
-            "  relationship groups : many target=a.b.c uselist=true "
+        "  relationship groups : many target=a_U002E_b.c uselist=true "
         "back_populates=users secondary=membership",
         "  relationship external_items : unknown target=external.Service "
         "uselist=? back_populates=- secondary=-",
         "  relationship mystery : unknown target=<unknown> uselist=? back_populates=- secondary=-",
-            "  inheritance target=a.b.c",
-            "  association_table groups source=a.b.c target=a.b.c",
+        "  inheritance target=a_U002E_b.c",
+        "  association_table groups source=a.b_U002E_c target=a_U002E_b.c",
         f"{_alias(source)} -- {_alias(target)} : foreign_key <unnamed> [source=? target=?]",
         f"{_alias(source)} .. {_alias(target)} : relationship groups [source=? target=0..N]",
         f"{_alias(source)} --|> {_alias(target)} : inheritance",
@@ -404,5 +402,5 @@ def test_renderer_keeps_quote_and_literal_escape_token_labels_distinct() -> None
     rendered = render_plantuml(_snapshot((quote, token))).decode()
 
     assert f'entity "_U0022_" as {_alias(quote)} {{' in rendered
-    assert f'entity "_U005F_U0022_" as {_alias(token)} {{' in rendered
+    assert f'entity "_U005F_U0022_U005F_" as {_alias(token)} {{' in rendered
     assert rendered.count('entity "') == 2
