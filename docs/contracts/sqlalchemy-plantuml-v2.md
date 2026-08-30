@@ -109,6 +109,10 @@ relation/cardinality evidenceを再利用する。diff skeletonはtitleを
 rowは変更fieldのsafe before/after tokenを併記する。relation線はbefore/after unionから描画し、
 removed relationのbefore evidenceも保持する。色だけをdelta識別の根拠にしない。
 
+diff skeletonはrow markerを可視文字として保持するため、snapshot skeletonの`hide methods`を
+含めず、`skinparam linetype ortho`の直後に`skinparam classAttributeIconSize 0`を置く。
+snapshot skeletonとsnapshot bytesは変更しない。
+
 external/unknown targetのsynthetic entity/edgeは生成しない。table aliasはhashed table idだけから
 作り、path、source range、row id、URL、token、raw expressionを出力しない。`redacted_values`は
 snapshot coverageを唯一のauthorityとする。PlantUML v1は旧exact skeletonの履歴として保持し、

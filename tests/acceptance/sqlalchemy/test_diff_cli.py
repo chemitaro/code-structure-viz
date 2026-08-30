@@ -84,12 +84,17 @@ def test_complete_sqlalchemy_diff_publishes_closed_payloads_and_manifest(
         "sqlalchemy.diff.semantic.json",
     ]
     semantic = json.loads((output / "sqlalchemy.diff.semantic.json").read_bytes())
+    plantuml = (output / "sqlalchemy.diff.puml").read_bytes()
     manifest = json.loads((output / "run-manifest.json").read_bytes())
     assert semantic["domain"] == "sqlalchemy"
     assert semantic["before"]["head_commit"] == before
     assert semantic["after"]["head_commit"] == after
     assert semantic["before"]["file_count"] == 1
     assert semantic["semantic_change_set"]["members"][0]["status"] == "modified"
+    assert b"skinparam classAttributeIconSize 0\n" in plantuml
+    assert b"\nhide methods\n" not in plantuml
+    assert b"~ before name : string (str) <<NULL>>" in plantuml
+    assert b"~ after * name : string (str) <<NN>>" in plantuml
     assert manifest["adapters"] == [
         {"domain": "sqlalchemy", "name": "sqlalchemy-ast", "version": "1"}
     ]

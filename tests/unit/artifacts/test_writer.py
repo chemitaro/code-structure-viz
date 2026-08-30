@@ -30,6 +30,24 @@ endlegend
 @enduml
 """
 
+_SQLALCHEMY_VISIBLE_DIFF_PUML = b"""@startuml
+title SQLAlchemy ER diff
+top to bottom direction
+hide circle
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+entity "+ users" as T_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa #PaleGreen {
+  + * id : integer (int) <<PK, NN>>
+}
+legend right
+  + added
+  - removed (ghost)
+  ~ modified (before/after)
+  context impact context
+endlegend
+@enduml
+"""
+
 
 def test_output_transaction_publishes_the_closed_file_set_by_directory_rename(
     tmp_path: Path,
@@ -86,6 +104,36 @@ def test_output_transaction_stages_closed_sqlalchemy_diff_path(tmp_path: Path) -
     descriptor = transaction.stage_diff_payload("sqlalchemy", "semantic-json", b"{}\n")
 
     assert descriptor.path == "sqlalchemy.diff.semantic.json"
+    transaction.abort()
+
+
+def test_output_transaction_accepts_visible_sqlalchemy_diff_fields(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+
+    descriptor = transaction.stage_diff_payload(
+        "sqlalchemy", "plantuml", _SQLALCHEMY_VISIBLE_DIFF_PUML
+    )
+
+    assert descriptor.path == "sqlalchemy.diff.puml"
+    transaction.abort()
+
+
+def test_output_transaction_rejects_hidden_sqlalchemy_diff_fields(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+    hidden = _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(
+        b"skinparam classAttributeIconSize 0\n", b"hide methods\n"
+    )
+
+    with pytest.raises(OutputTransactionError) as caught:
+        transaction.stage_diff_payload("sqlalchemy", "plantuml", hidden)
+
+    assert caught.value.diagnostic.code is DiagnosticCode.INTERNAL_INVARIANT
     transaction.abort()
 
 

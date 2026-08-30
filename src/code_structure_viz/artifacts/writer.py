@@ -703,7 +703,7 @@ def _valid_sqlalchemy_diff_plantuml(content: bytes) -> bool:
         "top to bottom direction",
         "hide circle",
         "skinparam linetype ortho",
-        "hide methods",
+        "skinparam classAttributeIconSize 0",
     ]
     tail = [
         "legend right",

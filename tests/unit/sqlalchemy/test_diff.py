@@ -239,6 +239,8 @@ class Team(Base): __tablename__ = "teams"
     assert value["semantic_change_set"]["entities"][0]["status"] == "added"
     assert value["semantic_change_set"]["members"][0]["status"] == "modified"
     assert b"title SQLAlchemy ER diff" in plantuml
+    assert b"skinparam classAttributeIconSize 0\n" in plantuml
+    assert b"\nhide methods\n" not in plantuml
     assert b"+ teams" in plantuml
     assert b"~ before name : string (str) <<NULL>>" in plantuml
     assert b"~ after * name : string (str) <<NN>>" in plantuml

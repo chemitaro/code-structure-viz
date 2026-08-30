@@ -125,7 +125,7 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
         "top to bottom direction",
         "hide circle",
         "skinparam linetype ortho",
-        "hide methods",
+        "skinparam classAttributeIconSize 0",
     ]
     if result.status != "complete":
         lines.append(f'note "status: {result.status}" as N_DIFF_STATUS')
