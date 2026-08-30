@@ -68,11 +68,11 @@ tests/security/test_sqlalchemy_static_boundary.py
 
 最低限、次をREDで固定する。
 
-- exact IDによるtable/rowのadded/removed/modifiedとrelationのadded/removed。relationのprovenance-only `source` changeはno-delta、ID変更はremoved+added。
+- exact IDによるtable/relationのadded/removedとrowのadded/removed/modified。table mappingとrelation `source`のprovenance-only changeはno-delta、ID変更はremoved+added。
 - provenance-only changeはsemantic deltaにしない。
 - before/after relation unionのimpactとdeleted relation edge。
 - both absent、one-side absent、one-side incomplete。
-- removed ghost、modified before/after、impact contextを持つPlantUML。
+- removed table/row ghost、modified row before/after、impact contextを持つPlantUML。
 - `diff --domain sqlalchemy`、SQLAlchemy stdout selector、expected published paths。
 - entity budget / changed-path budget / payload-unavailable publication。
 - raw source/literal/secret/absolute pathなし、target import/DB/Git mutationなし。
@@ -99,8 +99,8 @@ src/code_structure_viz/adapters/sqlalchemy/plantuml.py
 
 1. `SqlAlchemySnapshotAnalyzer` + `SqlAlchemyTargetSelector.select(..., targets=())` で各SourceViewのwhole snapshot resultを得る。
 2. complete/not-applicable/incompleteをDesignのreal/canonical-empty/analysis-failedへ写像する。
-3. table/rowはexisting IDでadded/removed/modified、relationはadded/removedだけを生成する。
-4. table/rowのmodified判定ではIssue #6 safe projectionからprovenance fieldだけを除き、relationのsame-ID `source` provenance-only changeはno-deltaとする。
+3. table/relationはexisting IDでadded/removedだけ、rowはadded/removed/modifiedを生成する。
+4. tableのsame-ID `mapping_sources` / `mapping_kind` とrelationのsame-ID `source` はprovenance-only no-deltaとし、rowのmodified判定だけIssue #6 safe projectionからprovenance fieldを除いて行う。
 5. changed table/row/relationからseedを作り、before/after internal relation unionをdepth指定で探索する。
 6. entity countをunique table ID数として返す。
 7. `semantic_json.py` と `plantuml.py` にdiff renderingを追加し、snapshot renderingの既存bytesは変えない。

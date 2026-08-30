@@ -31,7 +31,7 @@ coding agent が、Issue #5 の安全な Git comparison と Issue #6 の SQLAlch
 | ID | 要件 |
 | --- | --- |
 | I04-REQ-001 | `code-structure-viz diff --domain sqlalchemy` が既存の diff CLI/source/publication lifecycle で実行でき、requested format の `sqlalchemy.diff.semantic.json` と `sqlalchemy.diff.puml` を生成できる。 |
-| I04-REQ-002 | SQLAlchemy snapshot の既存 ID を基準に table・row は `added` / `removed` / `modified`、relation は `added` / `removed` を safe before/after value とともに出力する。provenance-only の relation `source` 変更は delta を出さない。ID が変わった定義を rename/move と推測せず `removed + added` とする。 |
+| I04-REQ-002 | SQLAlchemy snapshot の既存 ID を基準に table・relation は `added` / `removed`、row は `added` / `removed` / `modified` を safe before/after value とともに出力する。provenance-only の table mapping と relation `source` 変更は delta を出さない。ID が変わった定義を rename/move と推測せず `removed + added` とする。 |
 | I04-REQ-003 | changed table と changed row/relation の owner/source/内部 target を seed とし、before/after の内部 ER relation union を既存 upstream/downstream depth で探索して影響 context を出力する。 |
 | I04-REQ-004 | parent diff truth table と Issue #5 の failure/publication contract を維持する。片側の SQLAlchemy domain が安全に absent と証明できる場合だけ canonical empty-side と比較し、片側の SQLAlchemy analysis が incomplete の場合は diff payload を生成せず `payload_unavailable` とする。 |
 | I04-REQ-005 | Issue #5/#6 の安全境界を維持する。対象 source を import/executeせず、DBへ接続せず、Gitを変更せず、raw source・raw hunk・literal・secret・absolute pathを公開せず、同一入力では deterministic な結果を返す。 |
@@ -53,7 +53,8 @@ SQLAlchemy diff に `--target` や SQLAlchemy 専用 config は追加しない�
 - whole SQLAlchemy snapshot 同士を比較する。
 - `entities` は table、`members` は Issue #6 の全 row kind、`relations` は Issue #6 の relation を表す。
 - 同一 ID が片側だけにある場合は `added` / `removed`。
-- 同一 ID の table/member で safe semantic value が変わった場合は `modified`。
+- table は `added` / `removed` のみとし、同一 ID の table で mapping provenance だけが変わる場合は delta を出さない。
+- 同一 ID の member で safe semantic value が変わった場合は `modified`。
 - relation は `added` / `removed` のみとし、同一 ID の relation で `source` だけが変わる provenance-only change は delta を出さない。
 - source path/range や mapping provenance だけの変化は semantic `modified` にしない。
 - delta の before/after representation は Issue #6 の redacted semantic projection を再利用する。
@@ -77,7 +78,7 @@ SQLAlchemy diff に `--target` や SQLAlchemy 専用 config は追加しない�
 
 ### PlantUML
 
-- changed table/row を `+` / `-` / `~` で識別できる。
+- changed table は `+` / `-`、changed row は `+` / `-` / `~` で識別できる。
 - removed table/row は before value を ghost として残す。
 - modified row は safe before/after の差が読める。
 - impact context の table を変更対象と区別して表示する。
@@ -98,7 +99,7 @@ SQLAlchemy diff に `--target` や SQLAlchemy 専用 config は追加しない�
 
 | ID | 完了条件 |
 | --- | --- |
-| I04-AC-001 | complete before/after で table・Issue #6 row の added/removed/modified、relation の added/removed と impact context が正しく出力され、relation の provenance-only source change は no-delta、ID変更はremoved+addedになる。 |
+| I04-AC-001 | complete before/after で table・relation の added/removed、Issue #6 row の added/removed/modified と impact context が正しく出力され、table mapping と relation source の provenance-only change は no-delta、ID変更はremoved+addedになる。 |
 | I04-AC-002 | both-absent、before-only、after-only、side-incomplete が parent truth tableどおりの status、publication、exit になり、failure sideからadded/removedを捏造しない。 |
 | I04-AC-003 | PlantUML が added/removed ghost/modified/impact context を判別でき、Issue #6 のER relation semanticsとredactionを維持する。 |
 | I04-AC-004 | changed-path/entity budget、stdout selector、atomic/no-overwrite publication が SQLAlchemy diff でも既存 contractどおり動作し、source/literal/secret/absolute pathを漏らさない。 |

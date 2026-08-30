@@ -119,10 +119,10 @@ diff sideが一つでもanalysis-failedなら comparisonを行わず、domain ou
 semantic collectionsは Issue #6 と同じ `entities` / `members` / `relations` とする。
 
 ```text
-entity/member delta:
-  status: added | removed | modified
-relation delta:
+entity/relation delta:
   status: added | removed
+member delta:
+  status: added | removed | modified
 common:
   id
   before: safe value | null
@@ -133,10 +133,11 @@ algorithm:
 
 1. before/after を既存 ID でmapする。
 2. 片側だけのIDはadded/removed。
-3. 両側に同じIDがあるtable/memberは、safe semantic valueが異なればmodified。
-4. relationはadded/removedだけを持つ。非provenance fieldは既存IDに含まれるため、同一IDで`source`だけが変わるprovenance-only changeはdeltaを出さない。
-5. IDが異なる候補を再対応付けしない。rename/table move/member moveはremoved+added。
-6. deltaはIDのUTF-8 byte orderで決定的に並べる。
+3. tableはadded/removedだけを持つ。同一IDで`mapping_sources`または派生`mapping_kind`だけが変わるprovenance-only changeはdeltaを出さない。
+4. 両側に同じIDがあるmemberは、safe semantic valueが異なればmodified。
+5. relationはadded/removedだけを持つ。非provenance fieldは既存IDに含まれるため、同一IDで`source`だけが変わるprovenance-only changeはdeltaを出さない。
+6. IDが異なる候補を再対応付けしない。rename/table move/member moveはremoved+added。
+7. deltaはIDのUTF-8 byte orderで決定的に並べる。
 
 safe semantic equalityは Issue #6 semantic JSON projectionを基準にし、tableの`mapping_sources`とそこから派生する`mapping_kind`、row/relationの`source`をprovenanceとして比較対象から除く。before/after value自体にはそのsafe provenanceを残し、Issue #6 snapshot bytesは変更しない。raw expression/sourceを新たに参照しない。
 
@@ -179,13 +180,13 @@ semantic_change_set:
 diagnostics
 ```
 
-`matching` は本 Issue では常に空配列である。SQLAlchemy branchはentities/membersにadded/removed/modified、relationsにadded/removedだけを許可する。
+`matching` は本 Issue では常に空配列である。SQLAlchemy branchはentities/relationsにadded/removed、membersにadded/removed/modifiedだけを許可する。
 
 ### PlantUML
 
 `code-structure-viz.plantuml/sqlalchemy/v2` のescape、table alias、row vocabulary、`build_er_view` のrelation/cardinality evidenceを再利用する。
 
-- changed row/tableは `+` / `-` / `~` markerを付ける。
+- changed tableは `+` / `-`、changed rowは `+` / `-` / `~` markerを付ける。
 - removed itemはbefore valueをghostとして表示する。
 - modified rowはsafe before/after差を表示する。
 - impact-only tableはcontextとしてmarkerなしまたは固定context markerで表示する。
