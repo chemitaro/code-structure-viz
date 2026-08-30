@@ -179,6 +179,9 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
             if member.status.value == "modified":
                 before_row = before_members[member.identity]
                 after_row = after_members[member.identity]
+                before_supplement, after_supplement = _hidden_safe_change_supplements(
+                    before_row, after_row
+                )
                 lines.append(
                     "  ~ before "
                     + _row_line(
@@ -187,6 +190,7 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
                             result.before.snapshot, before_row.owner_id
                         ),
                     ).removeprefix("  ")
+                    + before_supplement
                 )
                 lines.append(
                     "  ~ after "
@@ -196,6 +200,7 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
                             result.after.snapshot, after_row.owner_id
                         ),
                     ).removeprefix("  ")
+                    + after_supplement
                 )
             else:
                 row_marker = "+" if member.status.value == "added" else "-"
@@ -257,6 +262,41 @@ def _members_by_id(snapshot: SqlAlchemySnapshot | None) -> dict[str, SqlAlchemyR
     if snapshot is None:
         return {}
     return {item.id: item for item in snapshot.members}
+
+
+def _hidden_safe_change_supplements(
+    before: SqlAlchemyRow,
+    after: SqlAlchemyRow,
+) -> tuple[str, str]:
+    changes: list[tuple[str, RedactedExpression, RedactedExpression]] = []
+    candidates: tuple[tuple[str, RedactedExpression, RedactedExpression], ...]
+    if isinstance(before, SqlAlchemyColumnRow) and isinstance(after, SqlAlchemyColumnRow):
+        candidates = (
+            ("computed", before.computed, after.computed),
+            ("default", before.default, after.default),
+            ("identity", before.identity, after.identity),
+            ("onupdate", before.onupdate, after.onupdate),
+            ("server_default", before.server_default, after.server_default),
+            ("server_onupdate", before.server_onupdate, after.server_onupdate),
+            ("type.parameters", before.type.parameters, after.type.parameters),
+        )
+        changes.extend(item for item in candidates if item[1] != item[2])
+    elif isinstance(before, SqlAlchemyRelationshipRow) and isinstance(
+        after, SqlAlchemyRelationshipRow
+    ):
+        candidates = (
+            ("foreign_keys", before.foreign_keys, after.foreign_keys),
+            ("order_by", before.order_by, after.order_by),
+            ("primaryjoin", before.primaryjoin, after.primaryjoin),
+            ("secondaryjoin", before.secondaryjoin, after.secondaryjoin),
+        )
+        changes.extend(item for item in candidates if item[1] != item[2])
+    if not changes:
+        return "", ""
+    changes.sort(key=lambda item: item[0].encode("utf-8"))
+    before_tokens = " ".join(f"{name}={_redacted_token(value)}" for name, value, _ in changes)
+    after_tokens = " ".join(f"{name}={_redacted_token(value)}" for name, _, value in changes)
+    return f" | {before_tokens}", f" | {after_tokens}"
 
 
 def _foreign_key_columns(

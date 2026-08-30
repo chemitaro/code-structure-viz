@@ -272,6 +272,96 @@ class User(Base):
     assert b"[changed]" not in plantuml
 
 
+def test_modified_column_plantuml_supplements_default_only_safe_change() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    name: Mapped[str] = mapped_column()
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    name: Mapped[str] = mapped_column(default="DO_NOT_RENDER")
+"""
+    )
+
+    plantuml = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
+
+    assert b"| default=-" in plantuml
+    assert b"| default=[redacted:literal]" in plantuml
+    assert b"DO_NOT_RENDER" not in plantuml
+
+
+def test_modified_column_plantuml_supplements_type_parameter_only_safe_change() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy import String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    name: Mapped[str] = mapped_column(String)
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy import String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    name: Mapped[str] = mapped_column(String(255))
+"""
+    )
+
+    plantuml = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
+
+    assert b"| type.parameters=-" in plantuml
+    assert b"| type.parameters=[redacted:literal]" in plantuml
+    assert b"255" not in plantuml
+
+
+def test_modified_relationship_plantuml_supplements_join_and_order_only_safe_changes() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+class Base(DeclarativeBase): pass
+class Child(Base): __tablename__ = "children"
+class Parent(Base):
+    __tablename__ = "parents"
+    children: Mapped[list["Child"]] = relationship("Child")
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
+class Base(DeclarativeBase): pass
+class Child(Base): __tablename__ = "children"
+class Parent(Base):
+    __tablename__ = "parents"
+    children: Mapped[list["Child"]] = relationship(
+        "Child",
+        primaryjoin="Parent.id == Child.parent_id",
+        order_by="Child.id",
+    )
+"""
+    )
+
+    plantuml = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
+
+    assert b"| order_by=- primaryjoin=-" in plantuml
+    assert b"| order_by=[redacted:literal] primaryjoin=[redacted:literal]" in plantuml
+    assert b"Parent.id == Child.parent_id" not in plantuml
+    assert b"Child.id" not in plantuml
+
+
 def test_removed_row_plantuml_keeps_typed_before_ghost() -> None:
     before = _snapshot(
         b"""
