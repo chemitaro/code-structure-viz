@@ -484,7 +484,7 @@ tests/contracts/test_json_schemas.py
 
 1. semantic rendererはmodelのalready-sorted tupleをclosed DTOへ変換し、再解析/dedupeしない。
 2. PlantUML rendererはDesign skeletonとclosed line vocabularyだけを生成し、column `type_parameters`、legend先頭のrule/count metadataを`SqlAlchemySnapshot.coverage.redaction`から出す。
-3. `escape_plantuml_label`のpassthroughからunderscoreとdotを除き、input `_`を`_U005F_`、input `.`を`_U002E_`へencodeする。`_render_table_display`はschema/table componentを別々にescapeし、schemaありの場合だけrenderer-owned literal `.`で結ぶ。alias/keyword/metadata/placeholder/separator等のrenderer-owned syntaxはescape functionへ渡さない。
+3. `escape_plantuml_label`のpassthroughからunderscoreとdotを除き、input `_`を`_U005F_`、input `.`を`_U002E_`へencodeする。人間向けのrow/column値は別の`escape_plantuml_display_label`でunderscoreとdotを保持して読みやすくする。`_render_table_display`はschema/table componentを別々にescapeし、schemaありの場合だけrenderer-owned literal `.`で結ぶ。alias/keyword/metadata/placeholder/separator等のrenderer-owned syntaxはescape functionへ渡さない。
 4. `tests/unit/sqlalchemy/test_plantuml.py`とgoldenで`(a,b.c) -> a.b_U002E_c`、`(a.b,c) -> a_U002E_b.c`、literal `_U002E_`のnon-collisionを固定する。
 5. semantic schema rootをclosed Python existing branch + SQLAlchemy snapshot branchへ再構成する。Python branchのrequired/const/additionalPropertiesをcopyではなくexact testで保護する。
 6. diagnostic/manifest/summary/stdout schemaへSQLAlchemy closed variantsを追加する。diagnostic schemaへbyte column fieldは追加しない。

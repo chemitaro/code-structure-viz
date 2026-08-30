@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unicodedata
 
 from code_structure_viz.adapters.sqlalchemy.er_semantics import (
@@ -68,11 +69,33 @@ def escape_plantuml_label(value: str) -> str:
     return "".join(escaped)
 
 
+def escape_plantuml_display_label(value: str) -> str:
+    """Escape a user value while keeping common identifier punctuation readable."""
+    escaped: list[str] = []
+    normalized = unicodedata.normalize("NFC", value)
+    for index, character in enumerate(normalized):
+        if character == "_" and re.match(r"_U[0-9A-Fa-f]{4,6}_", normalized[index:]):
+            escaped.append("_U005F_")
+            continue
+        if unicodedata.category(character)[0] in {"L", "N"} or character in {
+            " ",
+            "-",
+            "/",
+            "$",
+            "_",
+            ".",
+        }:
+            escaped.append(character)
+        else:
+            escaped.append(f"_U{ord(character):04X}_")
+    return "".join(escaped)
+
+
 def _render_table_display(schema_name: str | None, table_name: str) -> str:
-    table = escape_plantuml_label(table_name)
+    table = escape_plantuml_display_label(table_name)
     if schema_name is None:
         return table
-    return f"{escape_plantuml_label(schema_name)}.{table}"
+    return f"{escape_plantuml_display_label(schema_name)}.{table}"
 
 
 def render_plantuml(snapshot: SqlAlchemySnapshot) -> bytes:
@@ -136,7 +159,7 @@ def _table_alias_from_id(table_id: str) -> str:
 
 
 def _name_token(name: str | None) -> str:
-    return escape_plantuml_label(name) if name is not None else "<unnamed>"
+    return escape_plantuml_display_label(name) if name is not None else "<unnamed>"
 
 
 def _bool_token(value: bool | None) -> str:
@@ -159,11 +182,11 @@ def _target_token(value: SqlAlchemyRelationTarget) -> str:
         return _render_table_display(value.schema_name, value.table_name)
     assert value.kind is SqlAlchemyTargetKind.MAPPED_CLASS
     assert value.symbol is not None
-    return escape_plantuml_label(value.symbol)
+    return escape_plantuml_display_label(value.symbol)
 
 
 def _columns_token(values: tuple[str, ...]) -> str:
-    return ",".join(escape_plantuml_label(value) for value in values)
+    return ",".join(escape_plantuml_display_label(value) for value in values)
 
 
 def _short_type_name(value: SqlAlchemyColumnRow) -> str | None:
@@ -193,10 +216,10 @@ def _column_line(value: SqlAlchemyColumnRow, foreign_key_columns: frozenset[str]
     type_name = _short_type_name(value)
     display_type = value.type.category.value
     if type_name is not None and type_name.lower() != display_type.lower():
-        display_type = f"{display_type} ({escape_plantuml_label(type_name)})"
+        display_type = f"{display_type} ({escape_plantuml_display_label(type_name)})"
     stereotype = f" <<{', '.join(markers)}>>" if markers else ""
     prefix = "* " if mandatory else ""
-    return f"  {prefix}{escape_plantuml_label(value.name)} : {display_type}{stereotype}"
+    return f"  {prefix}{escape_plantuml_display_label(value.name)} : {display_type}{stereotype}"
 
 
 def _row_line(value: SqlAlchemyRow, *, foreign_key_columns: frozenset[str] = frozenset()) -> str:
@@ -211,7 +234,7 @@ def _row_line(value: SqlAlchemyRow, *, foreign_key_columns: frozenset[str] = fro
     if isinstance(value, SqlAlchemyIndexRow):
         terms = ",".join(
             (
-                f"column:{escape_plantuml_label(term.column_name)}"
+                f"column:{escape_plantuml_display_label(term.column_name)}"
                 if term.kind is IndexTermKind.COLUMN and term.column_name is not None
                 else _redacted_token(term.expression)
             )
@@ -228,7 +251,9 @@ def _row_line(value: SqlAlchemyRow, *, foreign_key_columns: frozenset[str] = fro
     if isinstance(value, SqlAlchemyRelationshipRow):
         secondary = _target_token(value.secondary) if value.secondary is not None else "-"
         back_populates = (
-            escape_plantuml_label(value.back_populates) if value.back_populates is not None else "-"
+            escape_plantuml_display_label(value.back_populates)
+            if value.back_populates is not None
+            else "-"
         )
         return (
             f"  relationship {_name_token(value.name)} : {value.cardinality.value} "

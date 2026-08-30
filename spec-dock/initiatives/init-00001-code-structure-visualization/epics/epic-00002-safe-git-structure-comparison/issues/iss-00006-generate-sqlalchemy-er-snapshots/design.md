@@ -910,6 +910,11 @@ endlegend
 
 entity bodyはsemantic `members` orderで、各rowを次のexact single-line templateへ変換する。user-controlled structural valueは`escape_plantuml_label`後のsingle-line valueである。renderer-owned constantsの`<default>`、`<unnamed>`、`<unknown>`、`?`、`-`、`[redacted:<category>]`はescape対象ではなくclosed literalとして出す。table/target displayはprecomposed `display_name`をblind escapeせず、renderer-owned markerとescaped schema/table/symbol componentから組み立てる。`_render_table_display(schema_name, table_name)`はschemaがnullなら`escape_plantuml_label(table_name)`、schemaありなら`escape_plantuml_label(schema_name) + "." + escape_plantuml_label(table_name)`を返し、この中央のliteral `.`だけがrenderer-owned separatorである。null nameは`<unnamed>`、null boolは`?`、absent optional target/stringは`-`、present redacted descriptorは`[redacted:<category>]`とする。type parameter descriptorはcolumn lineの`type_parameters` fieldへ同じtoken ruleで出す。applicable zero-table snapshotはentity/edgeを0件とし、header、redaction metadataを含むlegend、`@enduml`だけを同じ順で出す。
 
+Human-facing row names and column identifiers use `escape_plantuml_display_label`, which keeps
+common `_` and `.` punctuation readable while encoding syntax-sensitive characters. Structural
+table components continue to use `escape_plantuml_label` so renderer-owned separators remain
+unambiguous.
+
 | row kind | exact body line template |
 | --- | --- |
 | `column` | `  column <name> : <type.category> type=<type.name|-> type_parameters=<token|-> nullable=<true|false|?> primary_key=<true|false|?> unique=<true|false|?> index=<true|false|?> default=<token|-> server_default=<token|-> onupdate=<token|-> server_onupdate=<token|-> computed=<token|-> identity=<token|->` |

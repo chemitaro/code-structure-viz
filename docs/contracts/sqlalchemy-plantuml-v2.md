@@ -91,6 +91,16 @@ check expressionなどの値は出力せず、descriptorは既存redaction summa
 `inheritance target=...`、`association_table ... source=... target=...`である。entity内の行は
 snapshot member orderを維持し、columnとconstraintの境界に`  --`を一度置く。
 
+## display escaping
+
+The entity/table display projection and all human-facing row values use
+`escape_plantuml_display_label`. It preserves common identifier punctuation, including `_`
+and `.`, while still encoding quotes, braces, control characters, and other syntax-sensitive
+code points. This keeps names such as `auth.sa_email_login_address` and
+`authentication_identity_id` readable without weakening PlantUML syntax safety. Stable
+hashed aliases remain the identity used by edges, so display-label ambiguity does not affect
+relationships. Display escaping does not change semantic JSON.
+
 ## safety and compatibility
 
 external/unknown targetのsynthetic entity/edgeは生成しない。table aliasはhashed table idだけから
