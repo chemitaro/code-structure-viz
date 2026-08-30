@@ -285,15 +285,14 @@ def _hidden_safe_change_supplements(
             for name, before_value, after_value in candidates
             if before_value != after_value
         )
-        if before.type.name != after.type.name and _short_type_name(before) == _short_type_name(
-            after
-        ):
-            assert before.type.name is not None and after.type.name is not None
+        if before.type.name != after.type.name and _compact_type_token(
+            before
+        ) == _compact_type_token(after):
             changes.append(
                 (
                     "type.name",
-                    escape_plantuml_display_label(before.type.name),
-                    escape_plantuml_display_label(after.type.name),
+                    _safe_optional_token(before.type.name),
+                    _safe_optional_token(after.type.name),
                 )
             )
         compact_candidates = (
@@ -538,6 +537,14 @@ def _short_type_name(value: SqlAlchemyColumnRow) -> str | None:
     return value.type.name.rsplit(".", 1)[-1]
 
 
+def _compact_type_token(value: SqlAlchemyColumnRow) -> str:
+    display_type = value.type.category.value
+    type_name = _short_type_name(value)
+    if type_name is not None and type_name.lower() != display_type.lower():
+        return f"{display_type} ({escape_plantuml_display_label(type_name)})"
+    return display_type
+
+
 def _column_line(value: SqlAlchemyColumnRow, foreign_key_columns: frozenset[str]) -> str:
     assert value.name is not None
     markers: list[str] = []
@@ -556,10 +563,7 @@ def _column_line(value: SqlAlchemyColumnRow, foreign_key_columns: frozenset[str]
         markers.append("NULL")
     else:
         markers.append("?NULL")
-    type_name = _short_type_name(value)
-    display_type = value.type.category.value
-    if type_name is not None and type_name.lower() != display_type.lower():
-        display_type = f"{display_type} ({escape_plantuml_display_label(type_name)})"
+    display_type = _compact_type_token(value)
     stereotype = f" <<{', '.join(markers)}>>" if markers else ""
     prefix = "* " if mandatory else ""
     return f"  {prefix}{escape_plantuml_display_label(value.name)} : {display_type}{stereotype}"

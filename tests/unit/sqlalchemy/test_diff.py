@@ -356,6 +356,35 @@ class User(Base):
     assert b"| type.name=pkg_b.CustomType" in plantuml
 
 
+def test_modified_column_plantuml_supplements_type_names_with_same_compact_display() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    value: Mapped[float] = mapped_column()
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy import Float
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    value: Mapped[float] = mapped_column(Float)
+"""
+    )
+
+    result = SqlAlchemyDiffer().compare(before, after)
+    plantuml = render_sqlalchemy_diff(result)
+
+    assert [item.status.value for item in result.members] == ["modified"]
+    assert b"| type.name=builtins.float" in plantuml
+    assert b"| type.name=sqlalchemy.Float" in plantuml
+
+
 def test_modified_column_plantuml_supplements_collapsed_compact_marker_changes() -> None:
     before = _snapshot(
         b"""
