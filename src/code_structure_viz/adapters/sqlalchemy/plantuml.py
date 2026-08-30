@@ -138,6 +138,8 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
             member_deltas.setdefault(value["owner_id"], []).append(member_delta)
 
     tables: dict[str, SqlAlchemyTable] = {}
+    before_members = _members_by_id(result.before.snapshot)
+    after_members = _members_by_id(result.after.snapshot)
     for snapshot in (result.before.snapshot, result.after.snapshot):
         if snapshot is not None:
             tables.update({item.id: item for item in snapshot.entities})
@@ -168,21 +170,52 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
             "~": "#LightYellow",
             "context": "#LightGray",
         }[marker]
-        label = f"{marker} {escape_plantuml_display_label(table.name)}"
+        label = f"{marker} {_render_table_display(table.schema_name, table.name)}"
         lines.append(f'entity "{label}" as {_table_alias(table)} {color} {{')
         for member in sorted(member_deltas.get(identity, ()), key=lambda item: item.identity):
             value = member.after if member.after is not None else member.before
             if not isinstance(value, dict):
                 continue
-            name = value.get("name") or "<unnamed>"
-            kind = value.get("kind") or "row"
             if member.status.value == "modified":
-                detail = " ".join(_modified_tokens(member.before, member.after))
-                suffix = f" {detail}" if detail else ""
-                lines.append("  ~ " + escape_plantuml_display_label(f"{kind} {name}") + suffix)
+                before_row = before_members[member.identity]
+                after_row = after_members[member.identity]
+                lines.append(
+                    "  ~ before "
+                    + _row_line(
+                        before_row,
+                        foreign_key_columns=_foreign_key_columns(
+                            result.before.snapshot, before_row.owner_id
+                        ),
+                    ).removeprefix("  ")
+                )
+                lines.append(
+                    "  ~ after "
+                    + _row_line(
+                        after_row,
+                        foreign_key_columns=_foreign_key_columns(
+                            result.after.snapshot, after_row.owner_id
+                        ),
+                    ).removeprefix("  ")
+                )
             else:
                 row_marker = "+" if member.status.value == "added" else "-"
-                lines.append(f"  {row_marker} " + escape_plantuml_display_label(f"{kind} {name}"))
+                row = (
+                    after_members[member.identity]
+                    if member.status.value == "added"
+                    else before_members[member.identity]
+                )
+                snapshot = (
+                    result.after.snapshot
+                    if member.status.value == "added"
+                    else result.before.snapshot
+                )
+                lines.append(
+                    f"  {row_marker} "
+                    + _row_line(
+                        row,
+                        foreign_key_columns=_foreign_key_columns(snapshot, row.owner_id),
+                    ).removeprefix("  ")
+                )
         lines.append("}")
 
     relation_deltas = {item.identity: item for item in result.relations}
@@ -220,16 +253,24 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def _modified_tokens(before: object, after: object) -> tuple[str, ...]:
-    if not isinstance(before, dict) or not isinstance(after, dict):
-        return ()
-    excluded = {"id", "owner_id", "kind", "name", "source"}
-    values = [
-        f"before_{key}={_diff_value(before.get(key))} after_{key}={_diff_value(after.get(key))}"
-        for key in before.keys() | after.keys()
-        if key not in excluded and before.get(key) != after.get(key)
-    ]
-    return tuple(sorted(values, key=lambda value: value.encode("utf-8")))
+def _members_by_id(snapshot: SqlAlchemySnapshot | None) -> dict[str, SqlAlchemyRow]:
+    if snapshot is None:
+        return {}
+    return {item.id: item for item in snapshot.members}
+
+
+def _foreign_key_columns(
+    snapshot: SqlAlchemySnapshot | None,
+    owner_id: str,
+) -> frozenset[str]:
+    if snapshot is None:
+        return frozenset()
+    return frozenset(
+        column
+        for member in snapshot.members
+        if member.owner_id == owner_id and isinstance(member, SqlAlchemyForeignKeyRow)
+        for column in member.local_columns
+    )
 
 
 def _diff_er_relations(
@@ -241,18 +282,6 @@ def _diff_er_relations(
     return {item.relation.id: (item, members) for item in build_er_view(snapshot).relations}
 
 
-def _diff_value(value: object) -> str:
-    if value is None:
-        return "null"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, (str, int, float)):
-        return escape_plantuml_display_label(str(value))
-    return "[changed]"
-
-
 def _render_view(view: SqlAlchemyErView) -> bytes:
     snapshot = view.snapshot
     lines = list(_HEADER)
@@ -262,12 +291,7 @@ def _render_view(view: SqlAlchemyErView) -> bytes:
             f"as {_table_alias(table)} {{"
         )
         owner_members = tuple(member for member in snapshot.members if member.owner_id == table.id)
-        foreign_key_columns = frozenset(
-            column
-            for member in owner_members
-            if isinstance(member, SqlAlchemyForeignKeyRow)
-            for column in member.local_columns
-        )
+        foreign_key_columns = _foreign_key_columns(snapshot, table.id)
         saw_constraint = False
         for member in owner_members:
             if not saw_constraint and not isinstance(member, SqlAlchemyColumnRow):

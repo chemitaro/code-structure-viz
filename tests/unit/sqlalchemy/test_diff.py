@@ -240,6 +240,126 @@ class Team(Base): __tablename__ = "teams"
     assert value["semantic_change_set"]["members"][0]["status"] == "modified"
     assert b"title SQLAlchemy ER diff" in plantuml
     assert b"+ teams" in plantuml
-    assert b"~ column name" in plantuml
-    assert b"before_nullable=true after_nullable=false" in plantuml
+    assert b"~ before name : string (str) <<NULL>>" in plantuml
+    assert b"~ after * name : string (str) <<NN>>" in plantuml
     assert b"src/models.py" not in plantuml
+
+
+def test_modified_row_plantuml_uses_typed_safe_before_and_after_lines() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    name: Mapped[int] = mapped_column()
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    name: Mapped[str] = mapped_column()
+"""
+    )
+
+    plantuml = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
+
+    assert b"~ before name : integer" in plantuml
+    assert b"~ after name : string" in plantuml
+    assert b"[changed]" not in plantuml
+
+
+def test_removed_row_plantuml_keeps_typed_before_ghost() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    legacy: Mapped[str] = mapped_column(nullable=False)
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase
+class Base(DeclarativeBase): pass
+class User(Base): __tablename__ = "users"
+"""
+    )
+
+    removed = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
+    added = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(after, before))
+
+    assert b"- * legacy : string" in removed
+    assert b"- column legacy" not in removed
+    assert b"+ * legacy : string" in added
+    assert b"+ column legacy" not in added
+
+
+def test_diff_plantuml_qualifies_same_name_tables_with_schema() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class AuditUser(Base):
+    __tablename__ = "users"
+    __table_args__ = {"schema": "audit"}
+    name: Mapped[str] = mapped_column(nullable=True)
+class PublicUser(Base):
+    __tablename__ = "users"
+    __table_args__ = {"schema": "public"}
+    name: Mapped[str] = mapped_column(nullable=True)
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class AuditUser(Base):
+    __tablename__ = "users"
+    __table_args__ = {"schema": "audit"}
+    name: Mapped[str] = mapped_column(nullable=False)
+class PublicUser(Base):
+    __tablename__ = "users"
+    __table_args__ = {"schema": "public"}
+    name: Mapped[str] = mapped_column(nullable=False)
+"""
+    )
+
+    plantuml = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
+
+    assert b'entity "~ audit.users"' in plantuml
+    assert b'entity "~ public.users"' in plantuml
+
+
+def test_removed_relation_plantuml_keeps_before_only_er_evidence() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class Account(Base): __tablename__ = "accounts"
+class User(Base):
+    __tablename__ = "users"
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase
+class Base(DeclarativeBase): pass
+class Account(Base): __tablename__ = "accounts"
+class User(Base): __tablename__ = "users"
+"""
+    )
+
+    result = SqlAlchemyDiffer().compare(before, after)
+    plantuml = render_sqlalchemy_diff(result)
+
+    assert result.after.snapshot is not None
+    assert result.after.snapshot.relations == ()
+    assert b": foreign_key <unnamed>" in plantuml
+    assert b'note "- relation foreign_key"' in plantuml

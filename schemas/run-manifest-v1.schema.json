@@ -299,6 +299,97 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "name": {"const": "snapshot"},
+              "domain": {"const": "sqlalchemy"}
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "domains": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "coverage": {"$ref": "#/$defs/sqlalchemy_coverage"},
+                  "artifact_paths": {
+                    "items": {
+                      "enum": [
+                        "sqlalchemy.snapshot.semantic.json",
+                        "sqlalchemy.snapshot.puml"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "artifacts": {
+            "items": {
+              "properties": {
+                "path": {
+                  "enum": [
+                    "sqlalchemy.snapshot.semantic.json",
+                    "sqlalchemy.snapshot.puml"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "name": {"const": "diff"},
+              "domain": {"const": "sqlalchemy"}
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "domains": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "coverage": {"$ref": "#/$defs/sqlalchemy_diff_coverage"},
+                  "artifact_paths": {
+                    "items": {
+                      "enum": [
+                        "sqlalchemy.diff.semantic.json",
+                        "sqlalchemy.diff.puml"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "artifacts": {
+            "items": {
+              "properties": {
+                "path": {
+                  "enum": [
+                    "file-changes.json",
+                    "sqlalchemy.diff.semantic.json",
+                    "sqlalchemy.diff.puml"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {

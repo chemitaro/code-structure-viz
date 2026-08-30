@@ -761,6 +761,25 @@ def test_manifest_and_stream_schemas_accept_closed_sqlalchemy_cli_output(
     validator = _validator("run-manifest-v1.schema.json")
     validator.validate(manifest)
 
+    diff_coverage = deepcopy(manifest)
+    snapshot_coverage = manifest["domains"][0]["coverage"]
+    diff_coverage["domains"][0]["coverage"] = {
+        "before": deepcopy(snapshot_coverage),
+        "after": deepcopy(snapshot_coverage),
+    }
+    with pytest.raises(ValidationError):
+        validator.validate(diff_coverage)
+
+    diff_path = deepcopy(manifest)
+    diff_path["domains"][0]["artifact_paths"] = ["sqlalchemy.diff.semantic.json"]
+    with pytest.raises(ValidationError):
+        validator.validate(diff_path)
+
+    diff_descriptor = deepcopy(manifest)
+    diff_descriptor["artifacts"][0]["path"] = "sqlalchemy.diff.semantic.json"
+    with pytest.raises(ValidationError):
+        validator.validate(diff_descriptor)
+
     depth_frontier = deepcopy(manifest)
     depth_frontier["domains"][0]["coverage"]["frontier"] = [
         {
@@ -935,6 +954,27 @@ def test_schemas_accept_captured_sqlalchemy_diff_json(tmp_path: Path) -> None:
     manifest = json.loads((output / "run-manifest.json").read_bytes())
     manifest_validator = _validator("run-manifest-v1.schema.json")
     manifest_validator.validate(manifest)
+
+    snapshot_coverage = deepcopy(manifest)
+    snapshot_coverage["domains"][0]["coverage"] = deepcopy(
+        manifest["domains"][0]["coverage"]["before"]
+    )
+    with pytest.raises(ValidationError):
+        manifest_validator.validate(snapshot_coverage)
+
+    snapshot_path = deepcopy(manifest)
+    snapshot_path["domains"][0]["artifact_paths"] = ["sqlalchemy.snapshot.semantic.json"]
+    with pytest.raises(ValidationError):
+        manifest_validator.validate(snapshot_path)
+
+    snapshot_descriptor = deepcopy(manifest)
+    semantic_descriptor = next(
+        item for item in snapshot_descriptor["artifacts"] if item["format"] == "semantic-json"
+    )
+    semantic_descriptor["path"] = "sqlalchemy.snapshot.semantic.json"
+    with pytest.raises(ValidationError):
+        manifest_validator.validate(snapshot_descriptor)
+
     cross_domain_manifest = deepcopy(manifest)
     cross_domain_manifest["semantic_sides"]["before"]["domain"] = "python"
     with pytest.raises(ValidationError):

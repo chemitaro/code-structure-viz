@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.helpers.diff import create_two_commit_repository_from_files
+from tests.helpers.diff import create_two_commit_repository_from_files, create_unmerged_repository
 
 
 def _run_diff(
@@ -251,3 +251,31 @@ def test_changed_path_budget_is_fatal_and_stdout_is_exact_payload(tmp_path: Path
 
     assert selected.returncode == 0, selected.stderr
     assert selected.stdout == (output / "sqlalchemy.diff.semantic.json").read_bytes()
+
+
+def test_working_tree_unmerged_side_fails_closed_without_sqlalchemy_payload(
+    tmp_path: Path,
+) -> None:
+    repository, before = create_unmerged_repository(
+        tmp_path,
+        base_text=(
+            "from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column\n"
+            "class Base(DeclarativeBase): pass\n"
+            "class Order(Base):\n"
+            "    __tablename__ = 'orders'\n"
+            "    amount: Mapped[int] = mapped_column()\n"
+        ),
+    )
+    output = tmp_path / "output"
+
+    result = _run_diff(repository, output, before, "working-tree")
+
+    assert result.returncode == 3, result.stderr
+    assert sorted(path.name for path in output.iterdir()) == [
+        "file-changes.json",
+        "run-manifest.json",
+    ]
+    manifest = json.loads((output / "run-manifest.json").read_bytes())
+    assert manifest["semantic_sides"]["before"]["kind"] == "real"
+    assert manifest["semantic_sides"]["after"]["kind"] == "analysis-failed"
+    assert manifest["domains"][0]["incomplete_kind"] == "payload_unavailable"
