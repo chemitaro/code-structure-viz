@@ -7,11 +7,35 @@ Member paths are confined to `src/code_structure_viz/_next_runtime/` and may
 not contain traversal segments. Each member and license carries a SHA-256
 digest, while the manifest has no untracked files.
 
+The v1 filesystem set is exact, not a minimum:
+
+| path | role |
+| --- | --- |
+| `src/code_structure_viz/_next_runtime/adapter.js` | `adapter` |
+| `src/code_structure_viz/_next_runtime/manifest.json` | `manifest` |
+| `src/code_structure_viz/_next_runtime/trusted.d.ts` | `trusted_declaration` |
+| `src/code_structure_viz/_next_runtime/typescript-lib.d.ts` | `typescript_lib` |
+
+The data-only validator requires exactly these four paths and four distinct
+roles. Removal, addition, duplicate path, role substitution, unsafe path, or
+filesystem-set drift is rejected. The trusted declaration files and certified
+symbols are the exact four-file/14-symbol profile described by
+`next-semantic-v1`; their per-file SHA-256 and license ID are checked before
+the environment digest is accepted.
+
+The v1 license inventory is exactly two rows: npm `typescript@5.9.2` under
+Apache-2.0 and the CodeStructureViz trusted-types resource under MIT. Source
+URLs are HTTPS, content/lock digests are 64 lowercase hex characters, and the
+ordered inventory digest is reused by the trusted environment and this
+runtime manifest. A missing, extra, reordered, or changed license row is a
+contract failure.
+
 The digest preimages are exact canonical JSON:
 
 ```text
 build_input_digest  = SHA-256(canonical-json({members, licenses}))
 build_output_digest = SHA-256(canonical-json({members}))
+manifest_sha256     = SHA-256(canonical-json(manifest without manifest_sha256))
 ```
 
 Canonical JSON is UTF-8, NFC-normalized, sorted object keys, compact

@@ -12,6 +12,10 @@
     "diagnostic-catalog",
     "trusted-known-answer",
     "runtime-known-answer",
+    "config-projection",
+    "status-cross-artifact",
+    "props-ir-limits",
+    "trusted-runtime-exact-set",
     "plantuml-control-escape",
     "plantuml-complete-non-empty",
     "plantuml-partial-safe",
@@ -29,9 +33,15 @@
     "taint-set-mismatch",
     "failed-proof-overlap",
     "diagnostic-ref-permission",
+    "diagnostic-catalog-mutation",
     "unsafe-trusted-path",
+    "trusted-runtime-set-mutation",
+    "props-ir-limit",
+    "taint-frontier-count",
+    "config-projection-mutation",
     "runtime-http-url",
     "compatibility-mismatch",
-    "plantuml-injection"
+    "plantuml-injection",
+    "plantuml-facet-mutation"
   ]
 }

@@ -30,6 +30,8 @@
     },
     "command": {"$ref": "#/$defs/command"},
     "request": {"$ref": "#/$defs/request"},
+    "next_request": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/snapshot_request"},
+    "next_config": {"$ref": "urn:code-structure-viz:schema:next-config-v1"},
     "source": {"$ref": "#/$defs/source"},
     "comparison": {"$ref": "#/$defs/comparison"},
     "sources": {"$ref": "#/$defs/sources"},
@@ -346,7 +348,7 @@
         }
       },
       "then": {
-        "required": ["source"],
+        "required": ["source", "next_request", "next_config"],
         "properties": {
           "request": {
             "required": ["projects", "formats"],
@@ -1349,7 +1351,9 @@
         "symbol": {"type": ["string", "null"]},
         "line": {"type": ["integer", "null"], "minimum": 1},
         "recoverable": {"type": "boolean"},
-        "message": {"type": "string", "minLength": 1}
+        "message": {"type": "string", "minLength": 1},
+        "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
+        "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
       },
       "allOf": [{"$ref": "urn:code-structure-viz:schema:diagnostic-v1"}]
     },

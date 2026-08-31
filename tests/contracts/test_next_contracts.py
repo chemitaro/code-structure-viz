@@ -2,22 +2,33 @@ import base64
 import copy
 import hashlib
 import json
-from typing import Any
+from itertools import combinations
+from typing import Any, cast
 
 import pytest
-from jsonschema import ValidationError
+from jsonschema import ValidationError  # type: ignore[import-untyped]
 
 from tests.contracts.next_reference_validation import (
     COLLECTIONS,
+    ROLE_ORDER,
+    ROLE_PRECEDENCE,
+    RUNTIME_REQUIRED_PATHS,
+    TRUSTED_PROFILE_LICENSE_DIGEST,
+    TRUSTED_PROFILE_LICENSES,
     VALIDATOR_SCHEMA,
+    assert_encoded_stdin_boundary,
     canonical_json_bytes,
     digest,
+    encoded_request_bytes,
+    project_config_digest,
     recompute_compatibility_id,
+    recompute_record_id,
     recompute_request_id,
     recompute_run_fingerprint,
     render_plantuml,
     validate_compatibility_descriptor,
     validate_domain_manifest,
+    validate_encoded_stdin_size,
     validate_limits,
     validate_limits_consistency,
     validate_model,
@@ -27,8 +38,14 @@ from tests.contracts.next_reference_validation import (
     validate_request_envelope,
     validate_request_files,
     validate_response_envelope,
+    validate_run_manifest,
+    validate_run_status_vector,
     validate_runtime_manifest,
+    validate_semantic_snapshot,
     validate_trusted_environment,
+)
+from tests.contracts.next_reference_validation import (
+    source_plan_digest as recompute_source_plan_digest,
 )
 from tests.contracts.test_json_schemas import (
     ROOT,
@@ -43,7 +60,196 @@ from tests.contracts.test_json_schemas import (
 
 
 def _id(kind: str, digit: str) -> str:
-    return f"next:{kind}:{digit * 64}"
+    def raw(record_kind: str, identity: dict[str, Any]) -> str:
+        preimage = {"kind": record_kind, "version": 1, "identity": identity}
+        return f"next:{record_kind}:{digest(preimage)}"
+
+    project_id = "next:project:" + digest(
+        {"kind": "project", "version": 1, "identity": {"root": "."}}
+    )
+    known: dict[tuple[str, str], dict[str, Any]] = {
+        ("project", "0"): {"root": "."},
+        ("file", "1"): {"project_id": project_id, "path": "src/Button.tsx"},
+        ("file", "2"): {"project_id": project_id, "path": "src/types.d.ts"},
+        ("file", "e"): {"project_id": project_id, "path": "src/Unused.tsx"},
+        ("module", "3"): {"project_id": project_id, "path": "src/Button.tsx"},
+        ("module", "4"): {"project_id": project_id, "path": "src/types.d.ts"},
+        ("module", "f"): {"project_id": project_id, "path": "src/Unused.tsx"},
+        (
+            "component",
+            "5",
+        ): {
+            "module_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
+            "declaration_key": "Button",
+        },
+        (
+            "component",
+            "6",
+        ): {
+            "module_id": raw("module", {"project_id": project_id, "path": "src/types.d.ts"}),
+            "declaration_key": "PropsView",
+        },
+        (
+            "member",
+            "7",
+        ): {
+            "owner_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
+            "exported_name": "default",
+            "role": "value",
+        },
+        (
+            "member",
+            "8",
+        ): {
+            "owner_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
+            "imported_name": "PropsView",
+            "role": "value",
+            "source": {
+                "kind": "internal",
+                "module_id": raw("module", {"project_id": project_id, "path": "src/types.d.ts"}),
+            },
+        },
+        (
+            "member",
+            "9",
+        ): {
+            "owner_id": raw(
+                "component",
+                {
+                    "module_id": raw(
+                        "module", {"project_id": project_id, "path": "src/Button.tsx"}
+                    ),
+                    "declaration_key": "Button",
+                },
+            ),
+            "name": "props",
+        },
+        (
+            "relation",
+            "a",
+        ): {
+            "kind": "static_import",
+            "source_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
+            "target": {
+                "kind": "internal",
+                "module_id": raw("module", {"project_id": project_id, "path": "src/types.d.ts"}),
+            },
+            "role": "value",
+            "reexport": False,
+            "boundary_effect": "none",
+        },
+        (
+            "relation",
+            "b",
+        ): {
+            "kind": "jsx_render",
+            "source_id": raw(
+                "component",
+                {
+                    "module_id": raw(
+                        "module", {"project_id": project_id, "path": "src/Button.tsx"}
+                    ),
+                    "declaration_key": "Button",
+                },
+            ),
+            "target": {
+                "kind": "internal",
+                "component_id": raw(
+                    "component",
+                    {
+                        "module_id": raw(
+                            "module", {"project_id": project_id, "path": "src/types.d.ts"}
+                        ),
+                        "declaration_key": "PropsView",
+                    },
+                ),
+            },
+        },
+        (
+            "relation",
+            "c",
+        ): {
+            "kind": "component_wrap",
+            "source_id": raw(
+                "component",
+                {
+                    "module_id": raw(
+                        "module", {"project_id": project_id, "path": "src/types.d.ts"}
+                    ),
+                    "declaration_key": "PropsView",
+                },
+            ),
+            "target_component_id": raw(
+                "component",
+                {
+                    "module_id": raw(
+                        "module", {"project_id": project_id, "path": "src/Button.tsx"}
+                    ),
+                    "declaration_key": "Button",
+                },
+            ),
+        },
+        (
+            "relation",
+            "1",
+        ): {
+            "kind": "literal_dynamic_import",
+            "source_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
+            "target": {
+                "kind": "external",
+                "safe_specifier": "react",
+                "exported_name": "lazy",
+            },
+            "role": "value",
+            "reexport": False,
+            "boundary_effect": "none",
+        },
+        ("fact", "d"): {
+            "kind": "client_entry",
+            "owner_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
+            "value": True,
+        },
+        (
+            "fact",
+            "e",
+        ): {
+            "kind": "router_context",
+            "owner_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
+            "value": "app_ui",
+        },
+        (
+            "fact",
+            "f",
+        ): {
+            "kind": "router_context",
+            "owner_id": raw("module", {"project_id": project_id, "path": "src/types.d.ts"}),
+            "value": "none",
+        },
+    }
+    identity = known.get((kind, digit))
+    if identity is None:
+        fallback = digest({"kind": kind, "fixture": digit})
+        return f"next:{kind}:{fallback}"
+    if kind in {"static_import", "literal_dynamic_import", "jsx_render", "component_wrap"}:
+        identity = {**identity}
+    semantic_kind = {
+        ("member", "7"): "export_binding",
+        ("member", "8"): "import_binding",
+        ("member", "9"): "prop",
+        ("relation", "a"): "static_import",
+        ("relation", "1"): "literal_dynamic_import",
+        ("relation", "b"): "jsx_render",
+        ("relation", "c"): "component_wrap",
+        ("fact", "d"): "client_entry",
+        ("fact", "e"): "router_context",
+        ("fact", "f"): "router_context",
+    }.get((kind, digit), kind)
+    preimage = {
+        "kind": semantic_kind,
+        "version": 1,
+        "identity": identity,
+    }
+    return f"next:{kind}:{digest(preimage)}"
 
 
 def _descriptor() -> dict[str, Any]:
@@ -56,7 +262,76 @@ def _project() -> dict[str, Any]:
     project = _next_project()
     project["id"] = _id("project", "0")
     project["file_ids"] = [_id("file", "1"), _id("file", "2")]
+    project["config_digest"] = project_config_digest(project)
     return project
+
+
+def _config_project(project: dict[str, Any] | None = None) -> dict[str, Any]:
+    source = project or _project()
+    return {
+        "root": source["root"],
+        "source_roots": source["source_roots"],
+        "config_path": source["config_path"],
+        "compiler_options": copy.deepcopy(source["compiler_options"]),
+    }
+
+
+def _config_projection(
+    *,
+    projects: list[dict[str, Any]] | None = None,
+    targets: list[str] | None = None,
+    formats: list[str] | None = None,
+    source_plan_digest_value: str | None = None,
+) -> dict[str, Any]:
+    config_projects = [_config_project(project) for project in (projects or [_project()])]
+    projection: dict[str, Any] = {
+        "schema": "code-structure-viz.domain-config/next/v1",
+        "projects": config_projects,
+        "targets": list(targets or []),
+        "upstream_depth": 1,
+        "downstream_depth": 1,
+        "formats": list(formats or ["semantic-json", "plantuml"]),
+        "limits": _next_limits(),
+        "trusted_environment_digest": _trusted_environment()["sha256"],
+        "source_plan_digest": "0" * 64,
+        "domain_config_digest": "0" * 64,
+    }
+    projection["source_plan_digest"] = source_plan_digest_value or recompute_source_plan_digest(
+        projection
+    )
+    projection["domain_config_digest"] = digest(
+        {key: value for key, value in projection.items() if key != "domain_config_digest"}
+    )
+    return projection
+
+
+def _snapshot_request(
+    *,
+    projects: list[dict[str, Any]] | None = None,
+    targets: list[str] | None = None,
+    formats: list[str] | None = None,
+    source_plan_digest: str | None = None,
+    run_fingerprint: str = "e" * 64,
+) -> dict[str, Any]:
+    projection = _config_projection(
+        projects=projects,
+        targets=targets,
+        formats=formats,
+        source_plan_digest_value=source_plan_digest,
+    )
+    return {
+        "schema": "code-structure-viz.next-snapshot-request/v1",
+        "projects": projection["projects"],
+        "targets": projection["targets"],
+        "upstream_depth": projection["upstream_depth"],
+        "downstream_depth": projection["downstream_depth"],
+        "formats": projection["formats"],
+        "limits": projection["limits"],
+        "trusted_environment_digest": projection["trusted_environment_digest"],
+        "source_plan_digest": projection["source_plan_digest"],
+        "domain_config_digest": projection["domain_config_digest"],
+        "run_fingerprint": run_fingerprint,
+    }
 
 
 def _file(file_id: str, path: str, role: str, content: bytes) -> dict[str, Any]:
@@ -187,7 +462,7 @@ def _model() -> dict[str, Any]:
             "id": _id("member", "9"),
             "owner_id": component_one["id"],
             "name": "props",
-            "type_node": _type_ir(module_one["id"]),
+            "type_node": _type_ir(cast(str, module_one["id"])),
             "optional": False,
             "readonly": False,
             "default_evidence": "none",
@@ -233,8 +508,14 @@ def _model() -> dict[str, Any]:
             "owner_id": module_one["id"],
             "value": "app_ui",
         },
+        {
+            "kind": "router_context",
+            "id": _id("fact", "f"),
+            "owner_id": module_two["id"],
+            "value": "none",
+        },
     ]
-    model = {
+    model: dict[str, Any] = {
         "schema": "code-structure-viz.next-model/v1",
         "projects": [_project()],
         "files": [file_one, file_two],
@@ -251,6 +532,10 @@ def _model() -> dict[str, Any]:
         counts[collection] = len(model[collection])
     counts["published"] = sum(len(model[collection]) for collection in COLLECTIONS)
     counts["discovered"] = counts["published"]
+    for collection in COLLECTIONS:
+        model[collection].sort(key=lambda record: record["id"])
+    for project in model["projects"]:
+        project["file_ids"].sort()
     return model
 
 
@@ -286,18 +571,7 @@ def _semantic(model: dict[str, Any], status: str = "complete") -> dict[str, Any]
             "fingerprint": "b" * 64,
             "file_count": len(model["files"]),
         },
-        "request": {
-            "projects": ["."],
-            "targets": [],
-            "upstream_depth": 1,
-            "downstream_depth": 1,
-            "formats": ["semantic-json", "plantuml"],
-            "limits": _next_limits(),
-            "source_plan_digest": "c" * 64,
-            "domain_config_digest": "d" * 64,
-            "run_fingerprint": "e" * 64,
-            "trusted_environment_digest": trusted_environment_digest,
-        },
+        "request": _snapshot_request(),
         "coverage": copy.deepcopy(model["coverage"]),
         "projects": model["projects"],
         "files": model["files"],
@@ -315,10 +589,10 @@ def _semantic(model: dict[str, Any], status: str = "complete") -> dict[str, Any]
                 "severity": "warning",
                 "recoverable": True,
                 "count": 1,
-                "path_ref": "src/Button.tsx",
-                "symbol_ref": None,
+                "path_ref": None,
+                "symbol_ref": _id("component", "5"),
                 "outcome": "partial_safe",
-                "ref_permission": "path_or_symbol",
+                "ref_permission": "symbol",
             }
         ]
     value["request"]["run_fingerprint"] = recompute_run_fingerprint(
@@ -413,9 +687,8 @@ def _trusted_environment() -> dict[str, Any]:
 def _public_diagnostic(
     code: str, *, path: str | None = None, symbol: str | None = None
 ) -> dict[str, Any]:
-    catalog = {
-        entry["code"]: entry for entry in _schema("next-diagnostic-catalog-v1.json")["entries"]
-    }
+    entries = cast(list[dict[str, Any]], _schema("next-diagnostic-catalog-v1.json")["entries"])
+    catalog = {entry["code"]: entry for entry in entries}
     entry = catalog[code]
     if entry["ref_permission"] == "path" and path is None:
         path = "src/Button.tsx"
@@ -445,6 +718,14 @@ def _domain(
     model = _model()
     descriptor = _descriptor()
     environment = _trusted_environment()
+    config = _config_projection(projects=model["projects"])
+    snapshot_request = _snapshot_request(projects=model["projects"])
+    entity_count: int | None
+    payload_available: bool
+    incomplete_kind: str | None
+    artifact_paths: list[str]
+    diagnostics: list[dict[str, Any]]
+    actual: int | None
     if runtime_unavailable:
         assert status == "incomplete"
         assert not overrun
@@ -455,11 +736,11 @@ def _domain(
         diagnostics = [_public_diagnostic("CSV-NEXT-NODE-001")]
         actual = None
     elif status == "complete":
-        entity_count: int | None = 4
+        entity_count = 4
         payload_available = True
         incomplete_kind = None
         artifact_paths = ["next.snapshot.semantic.json", "next.snapshot.puml"]
-        diagnostics: list[dict[str, Any]] = []
+        diagnostics = []
         actual = 4
     elif status == "not_applicable":
         entity_count = 0
@@ -495,8 +776,8 @@ def _domain(
         "semantic_compatibility_id": descriptor["compatibility_id"],
         "compatibility_descriptor": descriptor,
         "identity_versions": descriptor["identity_versions"],
-        "source_plan_digest": "c" * 64,
-        "domain_config_digest": "d" * 64,
+        "source_plan_digest": config["source_plan_digest"],
+        "domain_config_digest": config["domain_config_digest"],
         "run_fingerprint": "e" * 64,
         "source": {
             "schema": "code-structure-viz.source-view/v1",
@@ -505,25 +786,32 @@ def _domain(
             "fingerprint": "b" * 64,
             "file_count": 2,
         },
-        "request": {
-            "projects": ["."],
-            "targets": [],
-            "upstream_depth": 1,
-            "downstream_depth": 1,
-            "formats": ["semantic-json", "plantuml"],
-        },
-        "config": {
-            "schema": "code-structure-viz.domain-config/next/v1",
-            "sha256": "8" * 64,
-            "projects": [copy.deepcopy(model["projects"][0])],
-            "limits": _next_limits(),
-            "trusted_environment_digest": environment["sha256"],
-        },
+        "request": snapshot_request,
+        "config": config,
         "projects": [copy.deepcopy(model["projects"][0])],
         "targets": [],
         "formats": ["semantic-json", "plantuml"],
         "toolchain": {
-            "node_version": "22.14.0",
+            "node": {
+                "status": (
+                    "not_applicable"
+                    if status == "not_applicable"
+                    else "unavailable"
+                    if runtime_unavailable
+                    else "available"
+                ),
+                "version": None if status == "not_applicable" or runtime_unavailable else "22.14.0",
+                "failure_kind": (
+                    None
+                    if status == "not_applicable"
+                    else "missing"
+                    if runtime_unavailable
+                    else None
+                ),
+            },
+            "node_version": None
+            if status == "not_applicable" or runtime_unavailable
+            else "22.14.0",
             "typescript_version": "5.9.2",
             "adapter_version": "1.0.0",
             "protocol": "code-structure-viz.next-adapter/v1",
@@ -549,14 +837,18 @@ def _domain(
         protocol=value["toolchain"]["protocol"],
         trusted_environment_digest=value["trusted_environment"]["sha256"],
     )
+    value["request"]["run_fingerprint"] = value["run_fingerprint"]
     return value
 
 
 def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
-    base = json.loads(
-        (ROOT / "tests" / "golden" / "python_snapshot" / "whole" / "run-manifest.json").read_text(
-            encoding="utf-8"
-        )
+    base = cast(
+        dict[str, Any],
+        json.loads(
+            (
+                ROOT / "tests" / "golden" / "python_snapshot" / "whole" / "run-manifest.json"
+            ).read_text(encoding="utf-8")
+        ),
     )
     status = domain["status"]
     base["contracts"]["plantuml"] = "code-structure-viz.plantuml/next/v1"
@@ -574,6 +866,8 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
         "upstream_depth": 1,
         "downstream_depth": 1,
     }
+    base["next_request"] = copy.deepcopy(domain["request"])
+    base["next_config"] = copy.deepcopy(domain["config"])
     base["source"] = domain["source"]
     base["config"] = {
         "schema": "code-structure-viz.config/v1",
@@ -599,10 +893,13 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
             "trusted_environment": "builtin",
         },
     }
+    base["config"]["sha256"] = digest(
+        {key: value for key, value in base["config"].items() if key != "sha256"}
+    )
     base["run"] = {
         "status": status,
         "exit_code": 0 if status in {"complete", "not_applicable"} else 3,
-        "fingerprint": "e" * 64,
+        "fingerprint": domain["run_fingerprint"],
     }
     base["domains"] = [domain]
     base["artifacts"] = []
@@ -617,12 +914,81 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
                 "domain": "next",
                 "format": fmt,
                 "media_type": media_type,
-                "size_bytes": 1,
-                "sha256": "a" * 64,
+                "size_bytes": len(_published_bytes(domain)[path]),
+                "sha256": hashlib.sha256(_published_bytes(domain)[path]).hexdigest(),
             }
         )
-    base["diagnostics"] = []
+    base["diagnostics"] = copy.deepcopy(domain["diagnostics"])
     return base
+
+
+def _published_bytes(domain: dict[str, Any]) -> dict[str, bytes]:
+    return {
+        path: (
+            b'{"schema":"code-structure-viz.semantic/v1"}\n'
+            if path.endswith(".json")
+            else b"@startuml\n@enduml\n"
+        )
+        for path in domain["artifact_paths"]
+    }
+
+
+def _stdout_result_for_domain(
+    domain: dict[str, Any],
+    manifest: dict[str, Any],
+    selector: str = "next:semantic-json",
+) -> dict[str, Any]:
+    if domain["payload_available"]:
+        format_name = selector.removeprefix("next:")
+        artifact = next(item for item in manifest["artifacts"] if item["format"] == format_name)
+        result: dict[str, Any] = {
+            "type": "stdout_result",
+            "schema": "code-structure-viz.stdout-result/v1",
+            "selector": selector,
+            "availability": True,
+            "stable_reason": "published_artifact",
+            "artifact": artifact,
+            "domain_status": domain["status"],
+        }
+        if domain["status"] == "incomplete":
+            result["incomplete_kind"] = "partial_safe"
+        return result
+    return {
+        "type": "stdout_result",
+        "schema": "code-structure-viz.stdout-result/v1",
+        "selector": selector,
+        "availability": False,
+        "domain_status": domain["status"],
+        "stable_reason": (
+            "domain_not_applicable"
+            if domain["status"] == "not_applicable"
+            else "domain_payload_unavailable"
+        ),
+        "artifact": None,
+    }
+
+
+def _runtime_manifest() -> dict[str, Any]:
+    members = [
+        {
+            "path": path,
+            "size_bytes": index + 1,
+            "sha256": chr(ord("a") + index) * 64,
+            "role": role,
+        }
+        for index, (path, role) in enumerate(sorted(RUNTIME_REQUIRED_PATHS.items()))
+    ]
+    licenses = copy.deepcopy(list(TRUSTED_PROFILE_LICENSES))
+    manifest: dict[str, Any] = {
+        "schema": "code-structure-viz.next-runtime-manifest/v1",
+        "members": members,
+        "licenses": licenses,
+        "license_inventory_digest": TRUSTED_PROFILE_LICENSE_DIGEST,
+    }
+    manifest["build_input_digest"] = digest({"members": members, "licenses": licenses})
+    manifest["build_output_digest"] = digest({"members": members})
+    manifest["manifest_sha256"] = digest(manifest)
+    return manifest
 
 
 def test_public_next_semantic_variants_are_closed() -> None:
@@ -632,13 +998,14 @@ def test_public_next_semantic_variants_are_closed() -> None:
     partial = _semantic(_model(), "incomplete")
     for value in (empty, non_empty, partial):
         validator.validate(value)
+        validate_semantic_snapshot(value)
 
     wrong_domain = copy.deepcopy(non_empty)
     wrong_domain["domain"] = "python"
     with pytest.raises(ValidationError):
         validator.validate(wrong_domain)
     wrong_shape = copy.deepcopy(non_empty)
-    wrong_shape["facts"][0]["value"] = False
+    next(fact for fact in wrong_shape["facts"] if fact["kind"] == "client_entry")["value"] = False
     with pytest.raises(ValidationError):
         validator.validate(wrong_shape)
     wrong_entity_shape = copy.deepcopy(non_empty)
@@ -665,9 +1032,8 @@ def test_props_ir_matches_design_variants_and_rejects_old_shapes() -> None:
 
     mutations = []
     redacted_old = copy.deepcopy(value)
-    redacted_props = {
-        item["name"]: item for item in redacted_old["members"][2]["type_node"]["properties"]
-    }
+    redacted_member = next(item for item in redacted_old["members"] if item["kind"] == "prop")
+    redacted_props = {item["name"]: item for item in redacted_member["type_node"]["properties"]}
     redacted_props["title"]["type"] = {
         "kind": "redacted_literal",
         "value_kind": "string",
@@ -675,21 +1041,18 @@ def test_props_ir_matches_design_variants_and_rejects_old_shapes() -> None:
     }
     mutations.append(redacted_old)
     tuple_old = copy.deepcopy(value)
-    tuple_props = {
-        item["name"]: item for item in tuple_old["members"][2]["type_node"]["properties"]
-    }
+    tuple_member = next(item for item in tuple_old["members"] if item["kind"] == "prop")
+    tuple_props = {item["name"]: item for item in tuple_member["type_node"]["properties"]}
     tuple_props["values"]["type"]["elements"][0]["rest"] = False
     mutations.append(tuple_old)
     function_old = copy.deepcopy(value)
-    function_props = {
-        item["name"]: item for item in function_old["members"][2]["type_node"]["properties"]
-    }
+    function_member = next(item for item in function_old["members"] if item["kind"] == "prop")
+    function_props = {item["name"]: item for item in function_member["type_node"]["properties"]}
     function_props["render"]["type"]["generic_ordinals"] = []
     mutations.append(function_old)
     repository_path = copy.deepcopy(value)
-    repository_props = {
-        item["name"]: item for item in repository_path["members"][2]["type_node"]["properties"]
-    }
+    repository_member = next(item for item in repository_path["members"] if item["kind"] == "prop")
+    repository_props = {item["name"]: item for item in repository_member["type_node"]["properties"]}
     repository_props["render"]["type"]["return_type"]["module"] = "src/Button.tsx"
     mutations.append(repository_path)
     for mutation in mutations:
@@ -727,7 +1090,7 @@ def test_props_ir_matches_design_variants_and_rejects_old_shapes() -> None:
     ]
     for node in variants:
         variant = _semantic(_model())
-        variant["members"][2]["type_node"] = node
+        next(item for item in variant["members"] if item["kind"] == "prop")["type_node"] = node
         validator.validate(variant)
 
     invalid_variants = [
@@ -756,9 +1119,200 @@ def test_props_ir_matches_design_variants_and_rejects_old_shapes() -> None:
     ]
     for node in invalid_variants:
         variant = _semantic(_model())
-        variant["members"][2]["type_node"] = node
+        next(item for item in variant["members"] if item["kind"] == "prop")["type_node"] = node
         with pytest.raises(ValidationError):
             validator.validate(variant)
+
+
+def test_props_ir_limits_and_canonical_rules_are_reference_enforced() -> None:
+    validator = _validator("semantic-v1.schema.json")
+
+    def semantic_with_type(node: dict[str, Any]) -> dict[str, Any]:
+        value = _semantic(_model())
+        prop = next(item for item in value["members"] if item["kind"] == "prop")
+        prop["type_node"] = copy.deepcopy(node)
+        return value
+
+    depth_16: dict[str, Any] = {"kind": "primitive", "name": "string"}
+    for _ in range(15):
+        depth_16 = {"kind": "array", "element": depth_16, "readonly": False}
+    depth_value = semantic_with_type(depth_16)
+    validator.validate(depth_value)
+    validate_semantic_snapshot(depth_value)
+
+    depth_17 = {"kind": "array", "element": depth_16, "readonly": False}
+    depth_value = semantic_with_type(depth_17)
+    validator.validate(depth_value)
+    with pytest.raises(AssertionError):
+        validate_semantic_snapshot(depth_value)
+
+    node_512_properties: list[dict[str, Any]] = [
+        {
+            "name": f"p{index:03d}",
+            "type": (
+                {
+                    "kind": "array",
+                    "element": {"kind": "primitive", "name": "string"},
+                    "readonly": False,
+                }
+                if index < 255
+                else {"kind": "primitive", "name": "string"}
+            ),
+            "optional": False,
+            "readonly": False,
+        }
+        for index in range(256)
+    ]
+    node_512: dict[str, Any] = {
+        "kind": "object",
+        "properties": node_512_properties,
+        "index_signatures": [],
+        "call_signatures": [],
+    }
+    value_512 = semantic_with_type(node_512)
+    validator.validate(value_512)
+    validate_semantic_snapshot(value_512)
+    node_513 = copy.deepcopy(node_512)
+    node_513["properties"][-1]["type"] = {
+        "kind": "array",
+        "element": {"kind": "primitive", "name": "string"},
+        "readonly": False,
+    }
+    value_513 = semantic_with_type(node_513)
+    validator.validate(value_513)
+    with pytest.raises(AssertionError):
+        validate_semantic_snapshot(value_513)
+
+    union_64: dict[str, Any] = {
+        "kind": "union",
+        "members": [
+            {"kind": "redacted_literals", "base": "string", "count": count}
+            for count in range(1, 65)
+        ],
+    }
+    union_64["members"].sort(key=canonical_json_bytes)
+    union_value = semantic_with_type(union_64)
+    validator.validate(union_value)
+    validate_semantic_snapshot(union_value)
+    union_65: dict[str, Any] = copy.deepcopy(union_64)
+    union_65["members"].append({"kind": "redacted_literals", "base": "string", "count": 65})
+    union_65["members"].sort(key=canonical_json_bytes)
+    with pytest.raises(ValidationError):
+        validator.validate(semantic_with_type(union_65))
+
+    unsorted_union: dict[str, Any] = copy.deepcopy(union_64)
+    unsorted_union["members"].reverse()
+    with pytest.raises(AssertionError):
+        validate_semantic_snapshot(semantic_with_type(unsorted_union))
+    duplicate_union: dict[str, Any] = copy.deepcopy(union_64)
+    duplicate_union["members"][-1] = copy.deepcopy(duplicate_union["members"][-2])
+    with pytest.raises(AssertionError):
+        validate_semantic_snapshot(semantic_with_type(duplicate_union))
+
+    object_256: dict[str, Any] = {
+        "kind": "object",
+        "properties": [
+            {
+                "name": f"p{index:03d}",
+                "type": {"kind": "primitive", "name": "string"},
+                "optional": False,
+                "readonly": False,
+            }
+            for index in range(256)
+        ],
+        "index_signatures": [],
+        "call_signatures": [],
+    }
+    validator.validate(semantic_with_type(object_256))
+    object_257 = copy.deepcopy(object_256)
+    object_257["properties"].append(
+        {
+            "name": "p256",
+            "type": {"kind": "primitive", "name": "string"},
+            "optional": False,
+            "readonly": False,
+        }
+    )
+    with pytest.raises(ValidationError):
+        validator.validate(semantic_with_type(object_257))
+
+    nested_257 = {
+        "kind": "object",
+        "properties": [
+            {
+                "name": "nested",
+                "type": object_256,
+                "optional": False,
+                "readonly": False,
+            }
+        ],
+        "index_signatures": [],
+        "call_signatures": [],
+    }
+    with pytest.raises(AssertionError):
+        validate_semantic_snapshot(semantic_with_type(nested_257))
+
+    bad_ordinal = {
+        "kind": "function",
+        "type_parameter_count": 1,
+        "this_type": None,
+        "parameters": [],
+        "return_type": {"kind": "type_parameter", "ordinal": 1},
+    }
+    with pytest.raises(AssertionError):
+        validate_semantic_snapshot(semantic_with_type(bad_ordinal))
+    bad_rest = {
+        "kind": "function",
+        "type_parameter_count": 0,
+        "this_type": None,
+        "parameters": [
+            {"type": {"kind": "primitive", "name": "string"}, "optional": False, "rest": True},
+            {"type": {"kind": "primitive", "name": "string"}, "optional": False, "rest": False},
+        ],
+        "return_type": {"kind": "primitive", "name": "undefined"},
+    }
+    with pytest.raises(AssertionError):
+        validate_semantic_snapshot(semantic_with_type(bad_rest))
+
+    def add_signature_props(model: dict[str, Any], count: int) -> None:
+        component_id = _id("component", "5")
+        for index in range(count):
+            prop: dict[str, Any] = {
+                "kind": "prop",
+                "id": "",
+                "owner_id": component_id,
+                "name": f"signature{index:02d}",
+                "type_node": {
+                    "kind": "object",
+                    "properties": [],
+                    "index_signatures": [],
+                    "call_signatures": [
+                        {
+                            "type_parameter_count": 0,
+                            "this_type": None,
+                            "parameters": [],
+                            "return_type": {"kind": "primitive", "name": "undefined"},
+                        }
+                    ],
+                },
+                "optional": False,
+                "readonly": False,
+                "default_evidence": "none",
+            }
+            prop["id"] = recompute_record_id(prop)
+            model["members"].append(prop)
+        model["members"].sort(key=lambda item: item["id"])
+        model["coverage"]["counts"]["members"] = len(model["members"])
+        model["coverage"]["counts"]["published"] += count
+        model["coverage"]["counts"]["discovered"] += count
+
+    signatures_14 = _model()
+    add_signature_props(signatures_14, 14)
+    validate_semantic_snapshot(_semantic(signatures_14))
+    signatures_15 = _model()
+    add_signature_props(signatures_15, 15)
+    with pytest.raises(AssertionError):
+        validate_semantic_snapshot(_semantic(signatures_15))
 
 
 def test_reference_validator_closes_ownership_order_and_fact_invariants() -> None:
@@ -782,13 +1336,27 @@ def test_reference_validator_closes_ownership_order_and_fact_invariants() -> Non
     wrong_diagnostic["diagnostics"][0]["severity"] = "error"
     with pytest.raises(AssertionError):
         validate_model(wrong_diagnostic)
+    unknown_diagnostic = copy.deepcopy(diagnostic_model)
+    unknown_diagnostic["diagnostics"][0]["code"] = "CSV-NEXT-UNKNOWN-999"
+    with pytest.raises(AssertionError):
+        validate_model(unknown_diagnostic)
+    wrong_reference = copy.deepcopy(diagnostic_model)
+    wrong_reference["diagnostics"][0]["path_ref"] = "src/Button.tsx"
+    with pytest.raises(AssertionError):
+        validate_model(wrong_reference)
+    wrong_status = copy.deepcopy(_semantic(_model(), "incomplete"))
+    wrong_status["diagnostics"][0]["outcome"] = "complete"
+    with pytest.raises(AssertionError):
+        validate_semantic_snapshot(wrong_status)
     mutations = []
 
     duplicate = copy.deepcopy(model)
     duplicate["files"].append(copy.deepcopy(duplicate["files"][0]))
     mutations.append(duplicate)
     wrong_owner = copy.deepcopy(model)
-    wrong_owner["members"][2]["owner_id"] = _id("module", "4")
+    next(member for member in wrong_owner["members"] if member["kind"] == "prop")["owner_id"] = _id(
+        "module", "4"
+    )
     mutations.append(wrong_owner)
     wrong_roles = copy.deepcopy(model)
     wrong_roles["files"][0]["roles"] = ["program", "control"]
@@ -797,18 +1365,57 @@ def test_reference_validator_closes_ownership_order_and_fact_invariants() -> Non
     wrong_project["files"][0]["project_id"] = _id("project", "9")
     mutations.append(wrong_project)
     wrong_fact = copy.deepcopy(model)
-    wrong_fact["facts"][0]["value"] = False
+    next(fact for fact in wrong_fact["facts"] if fact["kind"] == "client_entry")["value"] = False
     mutations.append(wrong_fact)
     dangling = copy.deepcopy(model)
-    dangling["relations"][0]["target"]["module_id"] = _id("module", "f")
+    next(relation for relation in dangling["relations"] if relation["kind"] == "static_import")[
+        "target"
+    ]["module_id"] = _id("module", "f")
     mutations.append(dangling)
     wrong_count = copy.deepcopy(model)
     wrong_count["coverage"]["counts"]["components"] += 1
     mutations.append(wrong_count)
 
+    dynamic_wrong_role = copy.deepcopy(model)
+    dynamic_wrong_role["relations"].append(
+        {
+            "kind": "literal_dynamic_import",
+            "id": _id("relation", "1"),
+            "source_id": _id("module", "3"),
+            "target": {"kind": "external", "safe_specifier": "react", "exported_name": "lazy"},
+            "role": "type",
+            "reexport": False,
+            "boundary_effect": "none",
+        }
+    )
+    dynamic_wrong_role["coverage"]["counts"]["relations"] += 1
+    dynamic_wrong_role["coverage"]["counts"]["published"] += 1
+    dynamic_wrong_role["coverage"]["counts"]["discovered"] += 1
+    dynamic_wrong_role["relations"].sort(key=lambda record: record["id"])
+    mutations.append(dynamic_wrong_role)
+
+    missing_fact = copy.deepcopy(model)
+    missing_fact["facts"] = [
+        fact for fact in missing_fact["facts"] if fact["kind"] != "router_context"
+    ]
+    missing_fact["coverage"]["counts"]["facts"] -= 2
+    missing_fact["coverage"]["counts"]["published"] -= 2
+    missing_fact["coverage"]["counts"]["discovered"] -= 2
+    mutations.append(missing_fact)
+
     for mutation in mutations:
         with pytest.raises(AssertionError):
             validate_model(mutation)
+
+    stale_identity = copy.deepcopy(model)
+    prop = next(item for item in stale_identity["members"] if item["kind"] == "prop")
+    prop["name"] = "renamed"
+    with pytest.raises(AssertionError):
+        validate_model(stale_identity)
+    payload_only = copy.deepcopy(model)
+    payload_prop = next(item for item in payload_only["members"] if item["kind"] == "prop")
+    payload_prop["optional"] = True
+    validate_model(payload_only)
 
 
 def test_adapter_request_response_and_partial_safe_proof_are_reference_validated() -> None:
@@ -826,6 +1433,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     partial_model["coverage"]["counts"]["discovered"] += 2
     partial_model["coverage"]["counts"]["excluded"] = 1
     partial_model["coverage"]["counts"]["failed"] = 1
+    partial_model["coverage"]["affected_ids"] = sorted([_id("file", "e"), _id("module", "f")])
     extra_file = _file("e", "src/Unused.tsx", "program", b"export const unused = 1;\n")
     extra_module = {
         "kind": "module",
@@ -862,7 +1470,12 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
             "source_id": "next:failure:" + "0" * 64,
             "record_id": extra_file["id"],
             "rule": "file_all_records",
-        }
+        },
+        {
+            "source_id": "next:failure:" + "0" * 64,
+            "record_id": extra_module["id"],
+            "rule": "file_all_records",
+        },
     ]
     partial_proof["target_resolutions"] = [
         {
@@ -905,6 +1518,92 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
             {"component:src/Button.tsx#Button": (_id("component", "5"),)},
         )
 
+    missing_taint = copy.deepcopy(partial_response["proof"])
+    next(
+        item
+        for item in missing_taint["discovered_records"]
+        if item["record"]["id"] == extra_module["id"]
+    )["taints"] = []
+    with pytest.raises(AssertionError):
+        validate_proof(missing_taint, partial_response["model"])
+
+    excess_taint = copy.deepcopy(partial_response["proof"])
+    next(
+        item
+        for item in excess_taint["discovered_records"]
+        if item["record"]["id"] == extra_module["id"]
+    )["taints"] = ["parse_file", "read_file"]
+    with pytest.raises(AssertionError):
+        validate_proof(excess_taint, partial_response["model"])
+
+    illegal_root_edge = copy.deepcopy(partial_response["proof"])
+    illegal_root_edge["causal_edges"].append(
+        {
+            "source_id": "next:failure:" + "0" * 64,
+            "record_id": _id("component", "5"),
+            "rule": "type_subtree",
+        }
+    )
+    illegal_root_edge["causal_edges"].sort(key=canonical_json_bytes)
+    with pytest.raises(AssertionError):
+        validate_proof(illegal_root_edge, partial_response["model"])
+
+    illegal_type_root = copy.deepcopy(partial_response["proof"])
+    illegal_type_root["failure_roots"].append(
+        {
+            "id": "next:failure:" + "2" * 64,
+            "collection": "members",
+            "kind": "type_symbol",
+            "path_ref": "src/Unused.tsx",
+        }
+    )
+    illegal_type_root["causal_edges"].append(
+        {
+            "source_id": "next:failure:" + "2" * 64,
+            "record_id": extra_module["id"],
+            "rule": "identity_dependency",
+        }
+    )
+    illegal_type_root["failure_roots"].sort(key=canonical_json_bytes)
+    illegal_type_root["causal_edges"].sort(key=canonical_json_bytes)
+    with pytest.raises(AssertionError):
+        validate_proof(illegal_type_root, partial_response["model"])
+
+    disconnected_edge = copy.deepcopy(partial_response["proof"])
+    disconnected_edge["causal_edges"].append(
+        {
+            "source_id": _id("module", "3"),
+            "record_id": _id("file", "1"),
+            "rule": "file_all_records",
+        }
+    )
+    disconnected_edge["causal_edges"].sort(key=canonical_json_bytes)
+    with pytest.raises(AssertionError):
+        validate_proof(disconnected_edge, partial_response["model"])
+
+    vacuous_root = copy.deepcopy(partial_response["proof"])
+    vacuous_root["failure_roots"].append(
+        {
+            "id": "next:failure:" + "1" * 64,
+            "collection": "files",
+            "kind": "read_file",
+            "path_ref": "src/Unused.tsx",
+        }
+    )
+    vacuous_root["failure_roots"].sort(key=canonical_json_bytes)
+    with pytest.raises(AssertionError):
+        validate_proof(vacuous_root, partial_response["model"])
+
+    wrong_frontier = copy.deepcopy(partial_response["model"])
+    wrong_frontier["coverage"]["taint_frontier"] = [_id("module", "3")]
+    with pytest.raises(AssertionError):
+        validate_proof(partial_response["proof"], wrong_frontier)
+
+    wrong_count = copy.deepcopy(partial_response["model"])
+    wrong_count["coverage"]["counts"]["failed"] += 1
+    with pytest.raises(AssertionError):
+        validate_proof(partial_response["proof"], wrong_count)
+
     broken_request = copy.deepcopy(request)
     broken_request["files"][0]["content_base64"] = "not-base64"
     with pytest.raises((AssertionError, ValueError)):
@@ -939,6 +1638,33 @@ def test_limits_are_one_resolved_record_across_all_projections() -> None:
     mutated["max_flow_visits"] += 1
     with pytest.raises(AssertionError):
         validate_limits_consistency(limits, mutated)
+
+
+def test_role_precedence_and_exact_encoded_request_boundaries_cover_every_subset() -> None:
+    request = _request()
+    assert encoded_request_bytes(request) == canonical_json_bytes(request)
+    measured = len(encoded_request_bytes(request))
+    assert validate_encoded_stdin_size(request) == measured
+    limit = request["limits"]["max_encoded_stdin_bytes"]
+    assert_encoded_stdin_boundary(limit - 1, limit, True)
+    assert_encoded_stdin_boundary(limit, limit, True)
+    assert_encoded_stdin_boundary(limit + 1, limit, False)
+
+    for size in range(1, len(ROLE_ORDER) + 1):
+        for subset in combinations(ROLE_ORDER, size):
+            candidate = copy.deepcopy(request)
+            roles = sorted(subset, key=ROLE_ORDER.__getitem__)
+            candidate["files"][0]["roles"] = roles
+            candidate["files"][0]["effective_role"] = max(roles, key=ROLE_PRECEDENCE.__getitem__)
+            candidate["request_id"] = recompute_request_id(candidate)
+            validate_request_envelope(candidate)
+
+    wrong = copy.deepcopy(request)
+    wrong["files"][0]["roles"] = ["control", "program"]
+    wrong["files"][0]["effective_role"] = "program"
+    wrong["request_id"] = recompute_request_id(wrong)
+    with pytest.raises(AssertionError):
+        validate_request_envelope(wrong)
 
 
 def test_run_fingerprint_preimage_includes_limits_and_toolchain() -> None:
@@ -980,7 +1706,7 @@ def test_run_fingerprint_preimage_includes_limits_and_toolchain() -> None:
 def test_next_diagnostic_catalog_is_the_public_and_manifest_authority() -> None:
     catalog = _schema("next-diagnostic-catalog-v1.json")
     assert catalog["domain"] == "next"
-    entries = catalog["entries"]
+    entries = cast(list[dict[str, Any]], catalog["entries"])
     assert len(entries) == 26
     assert len({entry["code"] for entry in entries}) == len(entries)
     validator = _validator("diagnostic-v1.schema.json")
@@ -1033,9 +1759,10 @@ def test_next_run_manifest_status_matrix_and_public_stream_extensions(status: st
     domain = _domain(status)
     validate_domain_manifest(domain)
     manifest = _run_manifest(domain)
+    validate_run_manifest(manifest, domain, _published_bytes(domain))
     _validator("next-domain-manifest-v1.schema.json").validate(domain)
     _validator("run-manifest-v1.schema.json").validate(manifest)
-    summary = {
+    summary: dict[str, Any] = {
         "type": "run_summary",
         "schema": "code-structure-viz.run-summary/v1",
         "run_status": status,
@@ -1051,20 +1778,28 @@ def test_next_run_manifest_status_matrix_and_public_stream_extensions(status: st
         ],
         "manifest": "run-manifest.json",
     }
-    _validator("run-summary-v1.schema.json").validate(summary)
-    if status != "complete":
-        stream = {
-            "type": "stdout_result",
-            "schema": "code-structure-viz.stdout-result/v1",
-            "selector": "next:semantic-json",
-            "availability": False,
-            "domain_status": status,
-            "stable_reason": "domain_not_applicable"
-            if status == "not_applicable"
-            else "domain_payload_unavailable",
-            "artifact": None,
-        }
+    published = _published_bytes(domain)
+    for selector in ("next:semantic-json", "next:plantuml"):
+        _validator("run-summary-v1.schema.json").validate(summary)
+        stream = _stdout_result_for_domain(domain, manifest, selector)
         _validator("stdout-result-v1.schema.json").validate(stream)
+        stream_bytes = (
+            published[
+                "next.snapshot.semantic.json"
+                if selector.endswith("semantic-json")
+                else "next.snapshot.puml"
+            ]
+            if stream["availability"]
+            else canonical_json_bytes(stream) + b"\n"
+        )
+        validate_run_status_vector(
+            manifest,
+            summary,
+            stream,
+            published,
+            stream_bytes,
+            manifest["diagnostics"],
+        )
 
 
 def test_entity_budget_overrun_is_payload_unavailable_without_artifacts() -> None:
@@ -1072,10 +1807,96 @@ def test_entity_budget_overrun_is_payload_unavailable_without_artifacts() -> Non
     validate_domain_manifest(domain)
     _validator("next-domain-manifest-v1.schema.json").validate(domain)
     manifest = _run_manifest(domain)
+    validate_run_manifest(manifest, domain, _published_bytes(domain))
     _validator("run-manifest-v1.schema.json").validate(manifest)
     assert domain["budget"]["actual"] > domain["budget"]["resolved"]
     assert domain["artifact_paths"] == []
     assert domain["payload_available"] is False
+    summary: dict[str, Any] = {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": "incomplete",
+        "exit_code": 3,
+        "domains": [
+            {
+                "domain": "next",
+                "status": "incomplete",
+                "incomplete_kind": "payload_unavailable",
+            }
+        ],
+        "manifest": "run-manifest.json",
+    }
+    stream = _stdout_result_for_domain(domain, manifest)
+    _validator("run-summary-v1.schema.json").validate(summary)
+    _validator("stdout-result-v1.schema.json").validate(stream)
+    validate_run_status_vector(
+        manifest,
+        summary,
+        stream,
+        _published_bytes(domain),
+        canonical_json_bytes(stream) + b"\n",
+        manifest["diagnostics"],
+    )
+
+
+def test_whole_run_validator_rejects_projection_and_artifact_mutations() -> None:
+    domain = _domain()
+    manifest = _run_manifest(domain)
+    published = _published_bytes(domain)
+    validate_run_manifest(manifest, domain, published)
+
+    wrong_config = copy.deepcopy(manifest)
+    wrong_config["next_config"]["limits"]["max_flow_visits"] += 1
+    with pytest.raises(AssertionError):
+        validate_run_manifest(wrong_config, domain, published)
+
+    wrong_request = copy.deepcopy(manifest)
+    wrong_request["request"]["formats"] = ["plantuml"]
+    with pytest.raises(AssertionError):
+        validate_run_manifest(wrong_request, domain, published)
+
+    wrong_artifact = copy.deepcopy(manifest)
+    wrong_artifact["artifacts"][0]["sha256"] = "0" * 64
+    with pytest.raises(AssertionError):
+        validate_run_manifest(wrong_artifact, domain, published)
+
+    wrong_diagnostic = copy.deepcopy(manifest)
+    wrong_diagnostic["diagnostics"] = [_public_diagnostic("CSV-NEXT-FLOW-001")]
+    with pytest.raises(AssertionError):
+        validate_run_manifest(wrong_diagnostic, domain, published)
+
+
+@pytest.mark.parametrize(
+    ("run_status", "selector", "stable_reason"),
+    [
+        ("fatal", "next:semantic-json", "run_fatal"),
+        ("fatal", "manifest", "final_manifest_unavailable"),
+        ("interrupted", "next:plantuml", "run_interrupted"),
+    ],
+)
+def test_fatal_and_interrupt_status_vectors_are_manifest_free(
+    run_status: str, selector: str, stable_reason: str
+) -> None:
+    summary: dict[str, Any] = {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": run_status,
+        "exit_code": 1 if run_status == "fatal" else 130,
+        "domains": [],
+        "manifest": None,
+    }
+    stream: dict[str, Any] = {
+        "type": "stdout_result",
+        "schema": "code-structure-viz.stdout-result/v1",
+        "selector": selector,
+        "availability": False,
+        "run_status": run_status,
+        "stable_reason": stable_reason,
+        "artifact": None,
+    }
+    _validator("run-summary-v1.schema.json").validate(summary)
+    _validator("stdout-result-v1.schema.json").validate(stream)
+    validate_run_status_vector(None, summary, stream, {}, canonical_json_bytes(stream) + b"\n", [])
 
 
 def test_runtime_unavailable_is_a_manifest_only_payload_unavailable_vector() -> None:
@@ -1083,17 +1904,43 @@ def test_runtime_unavailable_is_a_manifest_only_payload_unavailable_vector() -> 
     validate_domain_manifest(domain)
     _validator("next-domain-manifest-v1.schema.json").validate(domain)
     manifest = _run_manifest(domain)
+    validate_run_manifest(manifest, domain, _published_bytes(domain))
     _validator("run-manifest-v1.schema.json").validate(manifest)
     assert domain["incomplete_kind"] == "payload_unavailable"
     assert domain["diagnostics"][0]["code"] == "CSV-NEXT-NODE-001"
     assert domain["artifact_paths"] == []
     assert domain["payload_available"] is False
+    summary: dict[str, Any] = {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": "incomplete",
+        "exit_code": 3,
+        "domains": [
+            {
+                "domain": "next",
+                "status": "incomplete",
+                "incomplete_kind": "payload_unavailable",
+            }
+        ],
+        "manifest": "run-manifest.json",
+    }
+    stream = _stdout_result_for_domain(domain, manifest)
+    _validator("run-summary-v1.schema.json").validate(summary)
+    _validator("stdout-result-v1.schema.json").validate(stream)
+    validate_run_status_vector(
+        manifest,
+        summary,
+        stream,
+        _published_bytes(domain),
+        canonical_json_bytes(stream) + b"\n",
+        manifest["diagnostics"],
+    )
 
 
 def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests() -> None:
     environment = _trusted_environment()
     assert environment["sha256"] == (
-        "940c693665536e0acc578b9f14551e4c23e031e916a3bfc6c92adc09e4386218"
+        "d6355bba7aaab204f0472c5995ed7596e5df917b0e13b987bb974bd7e221a22f"
     )
     validate_trusted_environment(environment)
     validate_trusted_environment(environment, ["src/Button.tsx"])
@@ -1108,42 +1955,22 @@ def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests()
         )
     _validator("next-trusted-type-environment-v1.schema.json").validate(environment)
 
-    runtime = {
-        "schema": "code-structure-viz.next-runtime-manifest/v1",
-        "members": [
-            {
-                "path": "src/code_structure_viz/_next_runtime/adapter.js",
-                "size_bytes": 1,
-                "sha256": "a" * 64,
-                "role": "adapter",
-            },
-            {
-                "path": "src/code_structure_viz/_next_runtime/trusted.d.ts",
-                "size_bytes": 1,
-                "sha256": "b" * 64,
-                "role": "trusted_declaration",
-            },
-        ],
-        "licenses": [
-            {
-                "ecosystem": "npm",
-                "name": "typescript",
-                "version": "5.9.2",
-                "license_id": "Apache-2.0",
-                "source_url": "https://www.npmjs.com/package/typescript",
-                "content_or_lock_digest": "c" * 64,
-            }
-        ],
-    }
-    runtime["build_input_digest"] = digest(
-        {"members": runtime["members"], "licenses": runtime["licenses"]}
-    )
-    runtime["build_output_digest"] = digest({"members": runtime["members"]})
+    runtime = _runtime_manifest()
     assert runtime["build_input_digest"] == (
-        "0b8038c5aeb4b5e31fb58bc7f9c43a30a136b71fb903daf0b6e3fe3e83f0d0c5"
+        "42a0a845694ca16df72dcea376126507cf5deec96a6ec2270b6f3196c18f5a9c"
     )
     assert runtime["build_output_digest"] == (
-        "be7bb162b13397ec6cf9a977a3a2da86e64599a2ee5a1c15238931639cb61eaf"
+        "042996ed2951442d76c950dd900be9bb890e9eb18ae3d05b23ebfe2685595b3e"
+    )
+    assert runtime["manifest_sha256"] == (
+        "c1851c21cef3680ae9b728a9b934e0fc64d73628ee0161ce3ed7d07d32928f00"
+    )
+    assert runtime["build_input_digest"] == digest(
+        {"members": runtime["members"], "licenses": runtime["licenses"]}
+    )
+    assert runtime["build_output_digest"] == digest({"members": runtime["members"]})
+    assert runtime["manifest_sha256"] == digest(
+        {key: value for key, value in runtime.items() if key != "manifest_sha256"}
     )
     validate_runtime_manifest(runtime)
     _validator("next-runtime-manifest-v1.schema.json").validate(runtime)
@@ -1160,10 +1987,51 @@ def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests()
         validate_runtime_manifest(unsafe_url)
     with pytest.raises(ValidationError):
         _validator("next-runtime-manifest-v1.schema.json").validate(unsafe_url)
+    missing_member = copy.deepcopy(runtime)
+    missing_member["members"].pop()
+    with pytest.raises(AssertionError):
+        validate_runtime_manifest(missing_member)
+    extra_member = copy.deepcopy(runtime)
+    extra_member["members"].append(
+        {
+            "path": "src/code_structure_viz/_next_runtime/extra.js",
+            "size_bytes": 1,
+            "sha256": "e" * 64,
+            "role": "adapter",
+        }
+    )
+    with pytest.raises(AssertionError):
+        validate_runtime_manifest(extra_member)
+    changed_license = copy.deepcopy(runtime)
+    changed_license["licenses"][0]["license_id"] = "MIT"
+    with pytest.raises(AssertionError):
+        validate_runtime_manifest(changed_license)
+    missing_license = copy.deepcopy(runtime)
+    missing_license["licenses"].pop()
+    with pytest.raises(AssertionError):
+        validate_runtime_manifest(missing_license)
     wrong_digest = copy.deepcopy(environment)
     wrong_digest["sha256"] = "0" * 64
     with pytest.raises(AssertionError):
         validate_trusted_environment(wrong_digest)
+    missing_file = copy.deepcopy(environment)
+    missing_file["files"].pop()
+    with pytest.raises(AssertionError):
+        validate_trusted_environment(missing_file)
+    extra_file = copy.deepcopy(environment)
+    extra_file["files"].append(
+        {
+            "virtual_path": "/.code-structure-viz/trusted/v1/extra.d.ts",
+            "sha256": "5" * 64,
+            "license_id": "MIT",
+        }
+    )
+    with pytest.raises(AssertionError):
+        validate_trusted_environment(extra_file)
+    changed_symbol = copy.deepcopy(environment)
+    changed_symbol["certified_symbols"][0]["signature_digest"] = "0" * 64
+    with pytest.raises(AssertionError):
+        validate_trusted_environment(changed_symbol)
     unsafe_environment_path = copy.deepcopy(environment)
     unsafe_environment_path["files"][0]["virtual_path"] = (
         "/.code-structure-viz/trusted/v1/../escape.d.ts"
@@ -1185,15 +2053,20 @@ def test_plantuml_exact_bytes_and_control_character_golden() -> None:
         b"N_P project\n"
         b"N_M module\n"
         b"N_C component\n"
-        b".. prop/import/export member\n"
+        b"<<export_binding>> export member\n"
+        b"<<import_binding>> import member\n"
+        b"<<prop>> prop member\n"
         b"--> static_import|literal_dynamic_import\n"
         b"..> jsx_render|component_wrap\n"
+        b"facet=role:<value|type>|reexport=<true|false>|boundary=<none|server_to_client_entry>\n"
         b"marker=client_entry|router_context=<context>|client_dependency|server_candidate|unknown\n"
         b"marker=partial_safe\n"
+        b"external=cloud-after-components-before-members\n"
+        b"sort=kind-prefixed-id-utf8\n"
         b"endlegend\n"
         b'package "P:next:project:'
-        b'0000000000000000000000000000000000000000000000000000000000000000" '
-        b"as N_P_0000000000000000000000000000000000000000000000000000000000000000 {\n"
+        b'530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25" '
+        b"as N_P_530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25 {\n"
         b"}\n"
         b"@enduml\n"
     )
@@ -1225,10 +2098,43 @@ def test_plantuml_exact_bytes_and_control_character_golden() -> None:
             "boundary_effect": "none",
         }
     )
+    rich["modules"][1]["derived_roles"] = ["server_candidate"]
+    boundary_relation: dict[str, Any] = {
+        "kind": "static_import",
+        "id": "",
+        "source_id": rich["modules"][1]["id"],
+        "target": {"kind": "internal", "module_id": rich["modules"][0]["id"]},
+        "role": "value",
+        "reexport": False,
+        "boundary_effect": "server_to_client_entry",
+    }
+    boundary_relation["id"] = recompute_record_id(boundary_relation)
+    rich["relations"].append(boundary_relation)
+    rich["relations"].sort(key=lambda record: record["id"])
+    rich["coverage"]["counts"]["relations"] = len(rich["relations"])
+    rich["coverage"]["counts"]["published"] += 2
+    rich["coverage"]["counts"]["discovered"] += 2
+    validate_model(rich)
     rich_output = render_plantuml(rich)
     validate_plantuml_contract(rich_output, rich)
     assert b"literal_dynamic_import" in rich_output
+    assert b"boundary=server_to_client_entry" in rich_output
     assert b'cloud "external:react#lazy" as X_' in rich_output
+
+    external_import = next(
+        member for member in rich["members"] if member["kind"] == "import_binding"
+    )
+    external_import["source"] = {
+        "kind": "external",
+        "safe_specifier": "react",
+        "exported_name": "memo",
+    }
+    external_import["id"] = recompute_record_id(external_import)
+    rich["members"].sort(key=lambda record: record["id"])
+    validate_model(rich)
+    rich_with_external_member = render_plantuml(rich)
+    validate_plantuml_contract(rich_with_external_member, rich)
+    assert b'cloud "external:react#memo" as X_' in rich_with_external_member
 
 
 def test_compatibility_descriptor_known_answer_is_content_independent() -> None:
@@ -1276,6 +2182,10 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "diagnostic-catalog",
         "trusted-known-answer",
         "runtime-known-answer",
+        "config-projection",
+        "status-cross-artifact",
+        "props-ir-limits",
+        "trusted-runtime-exact-set",
         "plantuml-control-escape",
         "plantuml-complete-non-empty",
         "plantuml-partial-safe",
@@ -1293,8 +2203,14 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "taint-set-mismatch",
         "failed-proof-overlap",
         "diagnostic-ref-permission",
+        "diagnostic-catalog-mutation",
         "unsafe-trusted-path",
+        "trusted-runtime-set-mutation",
+        "props-ir-limit",
+        "taint-frontier-count",
+        "config-projection-mutation",
         "runtime-http-url",
         "compatibility-mismatch",
         "plantuml-injection",
+        "plantuml-facet-mutation",
     } <= set(fixture["negative"])

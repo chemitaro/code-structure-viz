@@ -88,21 +88,10 @@
       }
     },
     "request": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["projects", "targets", "upstream_depth", "downstream_depth", "formats", "limits", "source_plan_digest", "domain_config_digest", "run_fingerprint", "trusted_environment_digest"],
-      "properties": {
-        "projects": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/path"}},
-        "targets": {"type": "array", "maxItems": 10000, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
-        "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
-        "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
-        "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},
-        "limits": {"$ref": "urn:code-structure-viz:schema:next-limits-v1"},
-        "source_plan_digest": {"$ref": "#/$defs/digest"},
-        "domain_config_digest": {"$ref": "#/$defs/digest"},
-        "run_fingerprint": {"$ref": "#/$defs/digest"},
-        "trusted_environment_digest": {"$ref": "#/$defs/digest"}
-      }
+      "allOf": [
+        {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/snapshot_request"},
+        {"type": "object", "required": ["run_fingerprint"], "properties": {"run_fingerprint": {"$ref": "#/$defs/digest"}}}
+      ]
     },
     "compiler_options": {
       "type": "object",
@@ -234,16 +223,16 @@
     "type_node": {
       "oneOf": [
         {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"const": "primitive"}, "name": {"enum": ["boolean", "bigint", "number", "string", "symbol", "null", "undefined", "void", "never", "unknown"]}}},
-        {"type": "object", "additionalProperties": false, "required": ["kind", "ordinal"], "properties": {"kind": {"const": "type_parameter"}, "ordinal": {"type": "integer", "minimum": 0}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "ordinal"], "properties": {"kind": {"const": "type_parameter"}, "ordinal": {"type": "integer", "minimum": 0, "maximum": 15}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "base", "count"], "properties": {"kind": {"const": "redacted_literals"}, "base": {"enum": ["boolean", "bigint", "number", "string"]}, "count": {"type": "integer", "minimum": 1}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "scope", "module", "exported_name", "type_arguments"], "properties": {"kind": {"const": "reference"}, "scope": {"const": "repository"}, "module": {"$ref": "#/$defs/module_id"}, "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]}, "type_arguments": {"type": "array", "items": {"$ref": "#/$defs/type_node"}}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "scope", "module", "exported_name", "type_arguments"], "properties": {"kind": {"const": "reference"}, "scope": {"const": "external"}, "module": {"type": "string", "pattern": "^(@[a-z0-9._-]+/)?[a-z0-9._-]+(?:/[a-z0-9._-]+)*$"}, "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]}, "type_arguments": {"type": "array", "items": {"$ref": "#/$defs/type_node"}}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "scope", "module", "exported_name", "type_arguments"], "properties": {"kind": {"const": "reference"}, "scope": {"const": "trusted"}, "module": {"enum": ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "next/dynamic", "typescript/lib"]}, "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"type": "null"}]}, "type_arguments": {"type": "array", "items": {"$ref": "#/$defs/type_node"}}}, "oneOf": [{"properties": {"module": {"enum": ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "next/dynamic"]}, "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]} }}, {"properties": {"module": {"const": "typescript/lib"}}}]},
         {"type": "object", "additionalProperties": false, "required": ["kind", "element", "readonly"], "properties": {"kind": {"const": "array"}, "element": {"$ref": "#/$defs/type_node"}, "readonly": {"type": "boolean"}}},
-        {"type": "object", "additionalProperties": false, "required": ["kind", "elements", "rest", "readonly"], "properties": {"kind": {"const": "tuple"}, "elements": {"type": "array", "items": {"$ref": "#/$defs/tuple_element"}}, "rest": {"anyOf": [{"$ref": "#/$defs/type_node"}, {"type": "null"}]}, "readonly": {"type": "boolean"}}},
-        {"type": "object", "additionalProperties": false, "required": ["kind", "type_parameter_count", "this_type", "parameters", "return_type"], "properties": {"kind": {"const": "function"}, "type_parameter_count": {"type": "integer", "minimum": 0}, "this_type": {"anyOf": [{"$ref": "#/$defs/type_node"}, {"type": "null"}]}, "parameters": {"type": "array", "items": {"$ref": "#/$defs/function_parameter"}}, "return_type": {"$ref": "#/$defs/type_node"}}},
-        {"type": "object", "additionalProperties": false, "required": ["kind", "members"], "properties": {"kind": {"enum": ["union", "intersection"]}, "members": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/type_node"}}}},
-        {"type": "object", "additionalProperties": false, "required": ["kind", "properties", "index_signatures", "call_signatures"], "properties": {"kind": {"const": "object"}, "properties": {"type": "array", "items": {"$ref": "#/$defs/object_property"}}, "index_signatures": {"type": "array", "items": {"$ref": "#/$defs/index_signature"}}, "call_signatures": {"type": "array", "items": {"$ref": "#/$defs/call_signature"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "elements", "rest", "readonly"], "properties": {"kind": {"const": "tuple"}, "elements": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/tuple_element"}}, "rest": {"anyOf": [{"$ref": "#/$defs/type_node"}, {"type": "null"}]}, "readonly": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "type_parameter_count", "this_type", "parameters", "return_type"], "properties": {"kind": {"const": "function"}, "type_parameter_count": {"type": "integer", "minimum": 0, "maximum": 16}, "this_type": {"anyOf": [{"$ref": "#/$defs/type_node"}, {"type": "null"}]}, "parameters": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/function_parameter"}}, "return_type": {"$ref": "#/$defs/type_node"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "members"], "properties": {"kind": {"enum": ["union", "intersection"]}, "members": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/type_node"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "properties", "index_signatures", "call_signatures"], "properties": {"kind": {"const": "object"}, "properties": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/object_property"}}, "index_signatures": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/index_signature"}}, "call_signatures": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/call_signature"}}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "reason"], "properties": {"kind": {"const": "opaque"}, "reason": {"enum": ["any_open_world", "external_unresolved", "unsupported_syntax", "recursive_type", "type_complexity_limit", "ambiguous_signature", "trusted_type_mismatch"]}}}
       ]
     },
@@ -251,19 +240,39 @@
     "function_parameter": {"type": "object", "additionalProperties": false, "required": ["type", "optional", "rest"], "properties": {"type": {"$ref": "#/$defs/type_node"}, "optional": {"type": "boolean"}, "rest": {"type": "boolean"}}},
     "object_property": {"type": "object", "additionalProperties": false, "required": ["name", "type", "optional", "readonly"], "properties": {"name": {"type": "string", "minLength": 1}, "type": {"$ref": "#/$defs/type_node"}, "optional": {"type": "boolean"}, "readonly": {"type": "boolean"}}},
     "index_signature": {"type": "object", "additionalProperties": false, "required": ["key_type", "value_type", "readonly"], "properties": {"key_type": {"enum": ["string", "number", "symbol"]}, "value_type": {"$ref": "#/$defs/type_node"}, "readonly": {"type": "boolean"}}},
-    "call_signature": {"type": "object", "additionalProperties": false, "required": ["type_parameter_count", "this_type", "parameters", "return_type"], "properties": {"type_parameter_count": {"type": "integer", "minimum": 0}, "this_type": {"anyOf": [{"$ref": "#/$defs/type_node"}, {"type": "null"}]}, "parameters": {"type": "array", "items": {"$ref": "#/$defs/function_parameter"}}, "return_type": {"$ref": "#/$defs/type_node"}}},
+    "call_signature": {"type": "object", "additionalProperties": false, "required": ["type_parameter_count", "this_type", "parameters", "return_type"], "properties": {"type_parameter_count": {"type": "integer", "minimum": 0, "maximum": 16}, "this_type": {"anyOf": [{"$ref": "#/$defs/type_node"}, {"type": "null"}]}, "parameters": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/function_parameter"}}, "return_type": {"$ref": "#/$defs/type_node"}}},
     "module_relation": {
+      "oneOf": [
+        {"$ref": "#/$defs/static_import_relation"},
+        {"$ref": "#/$defs/dynamic_import_relation"}
+      ]
+    },
+    "static_import_relation": {
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "id", "source_id", "target", "role", "reexport", "boundary_effect"],
       "properties": {
-        "kind": {"enum": ["static_import", "literal_dynamic_import"]},
+        "kind": {"const": "static_import"},
         "id": {"$ref": "#/$defs/relation_id"},
         "source_id": {"$ref": "#/$defs/module_id"},
         "target": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["kind", "module_id"], "properties": {"kind": {"const": "internal"}, "module_id": {"$ref": "#/$defs/module_id"}}}, {"$ref": "#/$defs/external_target"}]},
         "role": {"enum": ["value", "type"]},
         "reexport": {"type": "boolean"},
         "boundary_effect": {"enum": ["none", "server_to_client_entry"]}
+      }
+    },
+    "dynamic_import_relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "source_id", "target", "role", "reexport", "boundary_effect"],
+      "properties": {
+        "kind": {"const": "literal_dynamic_import"},
+        "id": {"$ref": "#/$defs/relation_id"},
+        "source_id": {"$ref": "#/$defs/module_id"},
+        "target": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["kind", "module_id"], "properties": {"kind": {"const": "internal"}, "module_id": {"$ref": "#/$defs/module_id"}}}, {"$ref": "#/$defs/external_target"}]},
+        "role": {"const": "value"},
+        "reexport": {"const": false},
+        "boundary_effect": {"const": "none"}
       }
     },
     "render_relation": {

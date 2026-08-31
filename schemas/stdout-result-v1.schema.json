@@ -1,127 +1,114 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "CodeStructureViz unavailable stdout result v1",
+  "$id": "urn:code-structure-viz:schema:stdout-result-v1",
+  "title": "CodeStructureViz stdout selector result v1",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "type",
-    "schema",
-    "selector",
-    "availability",
-    "stable_reason",
-    "artifact"
-  ],
+  "required": ["type", "schema", "selector", "availability", "stable_reason", "artifact"],
   "properties": {
     "type": {"const": "stdout_result"},
     "schema": {"const": "code-structure-viz.stdout-result/v1"},
-    "selector": {
-      "enum": [
-        "manifest",
-        "python:semantic-json",
-        "python:plantuml",
-        "sqlalchemy:semantic-json",
-        "sqlalchemy:plantuml",
-        "next:semantic-json",
-        "next:plantuml"
-      ]
-    },
-    "availability": {"const": false},
-    "domain_status": {"enum": ["not_applicable", "incomplete"]},
+    "selector": {"enum": ["manifest", "python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+    "availability": {"type": "boolean"},
+    "domain_status": {"enum": ["complete", "not_applicable", "incomplete"]},
+    "incomplete_kind": {"const": "partial_safe"},
     "run_status": {"enum": ["fatal", "interrupted"]},
-    "stable_reason": {
-      "enum": [
-        "domain_not_applicable",
-        "domain_payload_unavailable",
-        "run_fatal",
-        "final_manifest_unavailable",
-        "run_interrupted"
-      ]
-    },
-    "artifact": {"type": "null"}
+    "stable_reason": {"enum": ["published_artifact", "domain_not_applicable", "domain_payload_unavailable", "run_fatal", "final_manifest_unavailable", "run_interrupted"]},
+    "artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifact"}]}
   },
   "oneOf": [
     {
-      "required": ["domain_status"],
-      "not": {"required": ["run_status"]},
+      "required": ["domain_status", "artifact"],
+      "not": {"required": ["run_status", "incomplete_kind"]},
       "properties": {
-        "selector": {
-          "enum": [
-            "python:semantic-json",
-            "python:plantuml",
-            "sqlalchemy:semantic-json",
-            "sqlalchemy:plantuml"
-          ]
-        },
-        "domain_status": {"const": "not_applicable"},
-        "stable_reason": {"const": "domain_not_applicable"}
+        "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+        "availability": {"const": true},
+        "domain_status": {"const": "complete"},
+        "stable_reason": {"const": "published_artifact"},
+        "artifact": {"type": "object"}
       }
     },
     {
-      "required": ["domain_status"],
+      "required": ["domain_status", "artifact", "incomplete_kind"],
       "not": {"required": ["run_status"]},
       "properties": {
-        "selector": {
-          "enum": [
-            "python:semantic-json",
-            "python:plantuml",
-            "sqlalchemy:semantic-json",
-            "sqlalchemy:plantuml"
-          ]
-        },
+        "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+        "availability": {"const": true},
         "domain_status": {"const": "incomplete"},
-        "stable_reason": {"const": "domain_payload_unavailable"}
+        "incomplete_kind": {"const": "partial_safe"},
+        "stable_reason": {"const": "published_artifact"},
+        "artifact": {"type": "object"}
       }
     },
     {
-      "required": ["run_status"],
-      "not": {"required": ["domain_status"]},
+      "required": ["domain_status"],
+      "not": {"required": ["run_status", "incomplete_kind"]},
       "properties": {
-        "selector": {
-          "enum": [
-            "python:semantic-json",
-            "python:plantuml",
-            "sqlalchemy:semantic-json",
-            "sqlalchemy:plantuml"
-          ]
-        },
-        "run_status": {"const": "fatal"},
-        "stable_reason": {"const": "run_fatal"}
+        "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+        "availability": {"const": false},
+        "domain_status": {"const": "not_applicable"},
+        "stable_reason": {"const": "domain_not_applicable"},
+        "artifact": {"type": "null"}
+      }
+    },
+    {
+      "required": ["domain_status"],
+      "not": {"required": ["run_status", "incomplete_kind"]},
+      "properties": {
+        "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+        "availability": {"const": false},
+        "domain_status": {"const": "incomplete"},
+        "stable_reason": {"const": "domain_payload_unavailable"},
+        "artifact": {"type": "null"}
       }
     },
     {
       "required": ["run_status"],
-      "not": {"required": ["domain_status"]},
+      "not": {"required": ["domain_status", "incomplete_kind"]},
+      "properties": {
+        "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+        "availability": {"const": false},
+        "run_status": {"const": "fatal"},
+        "stable_reason": {"const": "run_fatal"},
+        "artifact": {"type": "null"}
+      }
+    },
+    {
+      "required": ["run_status"],
+      "not": {"required": ["domain_status", "incomplete_kind"]},
       "properties": {
         "selector": {"const": "manifest"},
+        "availability": {"const": false},
         "run_status": {"const": "fatal"},
-        "stable_reason": {"const": "final_manifest_unavailable"}
+        "stable_reason": {"const": "final_manifest_unavailable"},
+        "artifact": {"type": "null"}
       }
     },
     {
       "required": ["run_status"],
-      "not": {"required": ["domain_status"]},
+      "not": {"required": ["domain_status", "incomplete_kind"]},
       "properties": {
+        "selector": {"enum": ["manifest", "python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+        "availability": {"const": false},
         "run_status": {"const": "interrupted"},
-        "stable_reason": {"const": "run_interrupted"}
-      }
-    },
-    {
-      "required": ["domain_status"],
-      "not": {"required": ["run_status"]},
-      "properties": {
-        "selector": {"enum": ["next:semantic-json", "next:plantuml"]},
-        "domain_status": {"const": "not_applicable"},
-        "stable_reason": {"const": "domain_not_applicable"}
-      }
-    },
-    {
-      "required": ["domain_status"],
-      "not": {"required": ["run_status"]},
-      "properties": {
-        "selector": {"enum": ["next:semantic-json", "next:plantuml"]},
-        "domain_status": {"const": "incomplete"},
-        "stable_reason": {"const": "domain_payload_unavailable"}
+        "stable_reason": {"const": "run_interrupted"},
+        "artifact": {"type": "null"}
       }
     }
-  ]
+  ],
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "domain", "format", "media_type", "size_bytes", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "domain": {"enum": ["python", "sqlalchemy", "next"]},
+        "format": {"enum": ["semantic-json", "plantuml"]},
+        "media_type": {"type": "string", "minLength": 1},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
 }

@@ -22,6 +22,13 @@ CATALOG_PATH = Path(__file__).resolve().parents[2] / "schemas" / "next-diagnosti
 COLLECTIONS = ("projects", "files", "modules", "components", "members", "relations", "facts")
 ROLES = ("control", "context", "program")
 ROLE_ORDER = {role: index for index, role in enumerate(ROLES)}
+# The tuple above is the canonical wire order.  Precedence is intentionally a
+# separate mapping: a lower sort index is the stronger role, while the
+# effective role is selected by precedence rather than by whichever role was
+# appended last.
+ROLE_PRECEDENCE = {"control": 3, "context": 2, "program": 1}
+FORMAT_ORDER = ("semantic-json", "plantuml")
+FORMAT_ORDER_INDEX = {format_name: index for index, format_name in enumerate(FORMAT_ORDER)}
 TAINTS = {
     "parse_file",
     "read_file",
@@ -31,6 +38,31 @@ TAINTS = {
     "component_flow",
     "module_relation",
     "boundary_derivation",
+}
+TAINT_ORDER = (
+    "parse_file",
+    "read_file",
+    "type_symbol",
+    "export_binding",
+    "props_subtree",
+    "component_flow",
+    "module_relation",
+    "boundary_derivation",
+)
+TAINT_ORDER_INDEX = {taint: index for index, taint in enumerate(TAINT_ORDER)}
+ROOT_EDGE_TARGET_KINDS = {
+    "type_symbol": {"component", "prop"},
+    "props_subtree": {"component", "prop"},
+    "export_binding": {"module", "component", "export_binding", "import_binding"},
+    "component_flow": {"component", "jsx_render", "component_wrap"},
+    "module_relation": {"module", "static_import", "literal_dynamic_import"},
+    "boundary_derivation": {
+        "module",
+        "static_import",
+        "literal_dynamic_import",
+        "client_entry",
+        "router_context",
+    },
 }
 ID_RE = re.compile(r"^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$")
 PATH_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))(?!.*\\)(?!.*[\x00-\x1f\x7f]).+$")
@@ -61,6 +93,221 @@ LIMIT_DEFAULTS = {
     "max_flow_visits": 10000,
     "max_alias_edges": 64,
 }
+
+IDENTITY_VERSIONS = {
+    "project": 1,
+    "file": 1,
+    "module": 1,
+    "component": 1,
+    "member": 1,
+    "relation": 1,
+    "fact": 1,
+}
+RECORD_ID_PREFIX = {
+    "project": "project",
+    "file": "file",
+    "module": "module",
+    "component": "component",
+    "export_binding": "member",
+    "import_binding": "member",
+    "prop": "member",
+    "static_import": "relation",
+    "literal_dynamic_import": "relation",
+    "jsx_render": "relation",
+    "component_wrap": "relation",
+    "client_entry": "fact",
+    "router_context": "fact",
+}
+
+# The v1 trusted profile is deliberately small and closed.  These values are
+# the exact profile inventory used by the data-only vectors below; production
+# code will replace the fixture with checked-in resources at implementation
+# time.
+TRUSTED_PROFILE_LICENSES: tuple[dict[str, str], ...] = (
+    {
+        "ecosystem": "npm",
+        "name": "typescript",
+        "version": "5.9.2",
+        "license_id": "Apache-2.0",
+        "source_url": "https://www.npmjs.com/package/typescript",
+        "content_or_lock_digest": "b" * 64,
+    },
+    {
+        "ecosystem": "resource",
+        "name": "code-structure-viz-next-trusted-types",
+        "version": "1",
+        "license_id": "MIT",
+        "source_url": "https://github.com/chemitaro/code-structure-viz",
+        "content_or_lock_digest": "a" * 64,
+    },
+)
+TRUSTED_PROFILE_FILES = (
+    "/.code-structure-viz/trusted/v1/jsx-runtime.d.ts",
+    "/.code-structure-viz/trusted/v1/lib.d.ts",
+    "/.code-structure-viz/trusted/v1/next-dynamic.d.ts",
+    "/.code-structure-viz/trusted/v1/react.d.ts",
+)
+TRUSTED_PROFILE_FILE_LICENSES = {
+    TRUSTED_PROFILE_FILES[0]: "MIT",
+    TRUSTED_PROFILE_FILES[1]: "Apache-2.0",
+    TRUSTED_PROFILE_FILES[2]: "MIT",
+    TRUSTED_PROFILE_FILES[3]: "MIT",
+}
+TRUSTED_PROFILE_FILE_SHA256 = {
+    TRUSTED_PROFILE_FILES[0]: "1" * 64,
+    TRUSTED_PROFILE_FILES[1]: "2" * 64,
+    TRUSTED_PROFILE_FILES[2]: "3" * 64,
+    TRUSTED_PROFILE_FILES[3]: "4" * 64,
+}
+TRUSTED_PROFILE_MODULE_SYMBOLS = (
+    ("next/dynamic", ("default",)),
+    ("react", ("Component",)),
+    ("react", ("createElement",)),
+    ("react", ("forwardRef",)),
+    ("react", ("lazy",)),
+    ("react", ("memo",)),
+    ("react/jsx-runtime", ("Fragment",)),
+    ("react/jsx-runtime", ("jsx",)),
+    ("react/jsx-runtime", ("jsxs",)),
+)
+TRUSTED_PROFILE_GLOBAL_SYMBOLS = (
+    ("Array", ("flatMap",)),
+    ("Array", ("map",)),
+    ("JSX", ("Element",)),
+    ("ReadonlyArray", ("flatMap",)),
+    ("ReadonlyArray", ("map",)),
+)
+TRUSTED_PROFILE_CERTIFIED_SYMBOLS: tuple[dict[str, Any], ...] = (
+    {
+        "source_kind": "global",
+        "source_name": "Array",
+        "export_path": ["flatMap"],
+        "declaration_sha256": "2" * 64,
+        "symbol_kind": "method",
+        "signature_digest": "5" * 64,
+    },
+    {
+        "source_kind": "global",
+        "source_name": "Array",
+        "export_path": ["map"],
+        "declaration_sha256": "2" * 64,
+        "symbol_kind": "method",
+        "signature_digest": "6" * 64,
+    },
+    {
+        "source_kind": "global",
+        "source_name": "JSX",
+        "export_path": ["Element"],
+        "declaration_sha256": "1" * 64,
+        "symbol_kind": "interface",
+        "signature_digest": "7" * 64,
+    },
+    {
+        "source_kind": "global",
+        "source_name": "ReadonlyArray",
+        "export_path": ["flatMap"],
+        "declaration_sha256": "2" * 64,
+        "symbol_kind": "method",
+        "signature_digest": "8" * 64,
+    },
+    {
+        "source_kind": "global",
+        "source_name": "ReadonlyArray",
+        "export_path": ["map"],
+        "declaration_sha256": "2" * 64,
+        "symbol_kind": "method",
+        "signature_digest": "9" * 64,
+    },
+    {
+        "source_kind": "module",
+        "source_name": "next/dynamic",
+        "export_path": ["default"],
+        "declaration_sha256": "3" * 64,
+        "symbol_kind": "function",
+        "signature_digest": "3" * 64,
+    },
+    {
+        "source_kind": "module",
+        "source_name": "react",
+        "export_path": ["Component"],
+        "declaration_sha256": "4" * 64,
+        "symbol_kind": "class",
+        "signature_digest": "a" * 64,
+    },
+    {
+        "source_kind": "module",
+        "source_name": "react",
+        "export_path": ["createElement"],
+        "declaration_sha256": "4" * 64,
+        "symbol_kind": "function",
+        "signature_digest": "b" * 64,
+    },
+    {
+        "source_kind": "module",
+        "source_name": "react",
+        "export_path": ["forwardRef"],
+        "declaration_sha256": "4" * 64,
+        "symbol_kind": "function",
+        "signature_digest": "c" * 64,
+    },
+    {
+        "source_kind": "module",
+        "source_name": "react",
+        "export_path": ["lazy"],
+        "declaration_sha256": "4" * 64,
+        "symbol_kind": "function",
+        "signature_digest": "d" * 64,
+    },
+    {
+        "source_kind": "module",
+        "source_name": "react",
+        "export_path": ["memo"],
+        "declaration_sha256": "4" * 64,
+        "symbol_kind": "function",
+        "signature_digest": "e" * 64,
+    },
+    {
+        "source_kind": "module",
+        "source_name": "react/jsx-runtime",
+        "export_path": ["Fragment"],
+        "declaration_sha256": "1" * 64,
+        "symbol_kind": "interface",
+        "signature_digest": "f" * 64,
+    },
+    {
+        "source_kind": "module",
+        "source_name": "react/jsx-runtime",
+        "export_path": ["jsx"],
+        "declaration_sha256": "1" * 64,
+        "symbol_kind": "function",
+        "signature_digest": "1" * 64,
+    },
+    {
+        "source_kind": "module",
+        "source_name": "react/jsx-runtime",
+        "export_path": ["jsxs"],
+        "declaration_sha256": "1" * 64,
+        "symbol_kind": "function",
+        "signature_digest": "2" * 64,
+    },
+)
+RUNTIME_REQUIRED_MEMBER_ROLES = {
+    "adapter",
+    "manifest",
+    "trusted_declaration",
+    "typescript_lib",
+}
+RUNTIME_REQUIRED_PATHS = {
+    "src/code_structure_viz/_next_runtime/adapter.js": "adapter",
+    "src/code_structure_viz/_next_runtime/manifest.json": "manifest",
+    "src/code_structure_viz/_next_runtime/trusted.d.ts": "trusted_declaration",
+    "src/code_structure_viz/_next_runtime/typescript-lib.d.ts": "typescript_lib",
+}
+SOURCE_PLAN_PROGRAM_SUFFIXES = (".js", ".jsx", ".ts", ".tsx")
+SOURCE_PLAN_CONTEXT_SUFFIXES = (".d.ts",)
+SOURCE_PLAN_HARD_EXCLUSIONS = (".git", "node_modules", ".next", "out", "dist", "build", "coverage")
+SOURCE_PLAN_CONTROL_PATHS = ("package.json", "tsconfig.json", "jsconfig.json")
+SOURCE_PLAN_VERSION = "1"
 
 
 def _canonicalize(value: Any) -> Any:
@@ -95,10 +342,115 @@ def digest(value: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
 
 
+TRUSTED_PROFILE_LICENSE_DIGEST = digest(list(TRUSTED_PROFILE_LICENSES))
+
+
+def resolved_config_digest(config: dict[str, Any]) -> str:
+    return digest({key: value for key, value in config.items() if key != "domain_config_digest"})
+
+
+def project_config_digest(project: dict[str, Any]) -> str:
+    return digest(
+        {
+            "root": project["root"],
+            "source_roots": project["source_roots"],
+            "config_path": project["config_path"],
+            "compiler_options": project["compiler_options"],
+        }
+    )
+
+
+def source_plan_digest(config_or_request: dict[str, Any]) -> str:
+    """Recompute the source-plan digest from the closed config projection."""
+
+    projects = config_or_request["projects"]
+    return digest(
+        {
+            "schema": "code-structure-viz.source-acquisition-plan/next/v1",
+            "version": SOURCE_PLAN_VERSION,
+            "projects": projects,
+            "program_suffixes": SOURCE_PLAN_PROGRAM_SUFFIXES,
+            "context_suffixes": SOURCE_PLAN_CONTEXT_SUFFIXES,
+            "control_paths": SOURCE_PLAN_CONTROL_PATHS,
+            "hard_exclusions": SOURCE_PLAN_HARD_EXCLUSIONS,
+            "limits": config_or_request["limits"],
+            "trusted_type_environment_digest": config_or_request["trusted_environment_digest"],
+        }
+    )
+
+
 def _without(value: dict[str, Any], key: str) -> dict[str, Any]:
     result = copy.deepcopy(value)
     result.pop(key, None)
     return result
+
+
+def identity_preimage(record: dict[str, Any]) -> dict[str, Any]:
+    """Return the closed, content-independent identity preimage for a record.
+
+    The preimage is intentionally made from semantic identity fields only;
+    ranges, ordering, aliases, source text and other payload fields cannot
+    change an entity's identity.  A caller must still validate ownership and
+    cross-record references separately.
+    """
+
+    kind = record["kind"]
+    if kind == "project":
+        identity: dict[str, Any] = {"root": record["root"]}
+    elif kind in {"file", "module"}:
+        identity = {"project_id": record["project_id"], "path": record["path"]}
+    elif kind == "component":
+        identity = {"module_id": record["module_id"], "declaration_key": record["declaration_key"]}
+    elif kind == "export_binding":
+        identity = {
+            "owner_id": record["owner_id"],
+            "exported_name": record["exported_name"],
+            "role": record["role"],
+        }
+    elif kind == "import_binding":
+        identity = {
+            "owner_id": record["owner_id"],
+            "imported_name": record["imported_name"],
+            "role": record["role"],
+            "source": record["source"],
+        }
+    elif kind == "prop":
+        identity = {"owner_id": record["owner_id"], "name": record["name"]}
+    elif kind in {"static_import", "literal_dynamic_import"}:
+        identity = {
+            "kind": kind,
+            "source_id": record["source_id"],
+            "target": record["target"],
+            "role": record["role"],
+            "reexport": record["reexport"],
+            "boundary_effect": record["boundary_effect"],
+        }
+    elif kind == "jsx_render":
+        identity = {"kind": kind, "source_id": record["source_id"], "target": record["target"]}
+    elif kind == "component_wrap":
+        identity = {
+            "kind": kind,
+            "source_id": record["source_id"],
+            "target_component_id": record["target_component_id"],
+        }
+    elif kind in {"client_entry", "router_context"}:
+        # Fact values are semantic: a router context mutation must not retain
+        # a stale ID even though the owner remains the same.
+        identity = {"kind": kind, "owner_id": record["owner_id"], "value": record["value"]}
+    else:
+        raise AssertionError(f"unknown Next record kind: {kind}")
+    return {
+        "kind": kind,
+        "version": IDENTITY_VERSIONS[RECORD_ID_PREFIX[kind]],
+        "identity": identity,
+    }
+
+
+def recompute_record_id(record: dict[str, Any]) -> str:
+    """Compute the kind-prefixed SHA-256 ID mandated by Next semantic v1."""
+
+    kind = record["kind"]
+    return f"next:{RECORD_ID_PREFIX[kind]}:{digest(identity_preimage(record))}"
 
 
 def recompute_compatibility_id(descriptor: dict[str, Any]) -> str:
@@ -119,9 +471,17 @@ def recompute_request_id(request: dict[str, Any]) -> str:
 
 
 def validate_request_envelope(request: dict[str, Any]) -> None:
+    trusted = request["trusted_type_environment"]
+    assert set(trusted) == {"schema", "environment_version", "semantic_profile_id", "sha256"}
+    assert trusted["schema"] == "code-structure-viz.next-trusted-types/v1"
+    assert trusted["environment_version"] == "1"
+    assert trusted["semantic_profile_id"] == "next-trusted-profile-v1"
+    assert re.fullmatch(r"[0-9a-f]{64}", trusted["sha256"])
     assert request["request_id"] == recompute_request_id(request)
     validate_limits(request["limits"])
     validate_request_files(request)
+    assert canonical_json_bytes(request) == canonical_json_bytes(_canonicalize(request))
+    validate_encoded_stdin_size(request)
 
 
 def validate_response_envelope(response: dict[str, Any], request: dict[str, Any]) -> None:
@@ -141,6 +501,14 @@ def validate_response_envelope(response: dict[str, Any], request: dict[str, Any]
         response["trusted_type_environment_digest"] == request["trusted_type_environment"]["sha256"]
     )
     validate_limits_consistency(request["limits"], response["limits"])
+    model = response["model"]
+    assert model["projects"] == request["projects"]
+    request_files = [
+        {key: item for key, item in file_record.items() if key != "content_base64"}
+        for file_record in request["files"]
+    ]
+    assert model["files"] == request_files
+    validate_model(model)
 
 
 def recompute_run_fingerprint(
@@ -151,7 +519,7 @@ def recompute_run_fingerprint(
     projects: list[dict[str, Any]],
     targets: list[str],
     limits: dict[str, Any],
-    node_version: str,
+    node_version: str | None,
     typescript_version: str,
     adapter_version: str,
     protocol: str,
@@ -183,11 +551,47 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
     validate_limits_consistency(value["limits"], value["config"]["limits"])
     validate_trusted_environment(value["trusted_environment"])
     _validate_public_diagnostics(value["diagnostics"])
+    node = value["toolchain"]["node"]
+    if value["status"] == "not_applicable":
+        assert node == {"status": "not_applicable", "version": None, "failure_kind": None}
+        assert value["toolchain"]["node_version"] is None
+    elif value["status"] == "incomplete" and value["incomplete_kind"] == "payload_unavailable":
+        if node["status"] == "unavailable":
+            assert node["version"] is None
+            assert node["failure_kind"] in {
+                "missing",
+                "unsupported_version",
+                "spawn_failed",
+                "timeout",
+                "process_failed",
+            }
+            assert value["toolchain"]["node_version"] is None
+        else:
+            assert node["status"] == "available"
+            assert node["version"] == value["toolchain"]["node_version"]
+            assert node["failure_kind"] is None
+    else:
+        assert node["status"] == "available"
+        assert node["version"] == value["toolchain"]["node_version"]
+        assert node["failure_kind"] is None
+        assert value["toolchain"]["node_version"] is not None
+    if value["status"] == "complete":
+        allowed_outcomes = {"complete"}
+    elif value["status"] == "not_applicable":
+        allowed_outcomes = {"not_applicable"}
+    else:
+        allowed_outcomes = {value["incomplete_kind"]}
+    assert {diagnostic["outcome"] for diagnostic in value["diagnostics"]} <= allowed_outcomes
     assert value["config"]["trusted_environment_digest"] == value["trusted_environment"]["sha256"]
+    assert value["config"]["domain_config_digest"] == resolved_config_digest(value["config"])
+    assert value["config"]["domain_config_digest"] == value["domain_config_digest"]
+    assert value["config"]["source_plan_digest"] == value["source_plan_digest"]
+    assert value["config"]["source_plan_digest"] == source_plan_digest(value["config"])
     project_records = _assert_sorted_unique(value["projects"], "projects")
     roots: list[tuple[str, str]] = []
     for project in project_records.values():
         assert project["kind"] == "project"
+        assert project["config_digest"] == project_config_digest(project)
         _assert_path(project["root"])
         for other_root, other_id in roots:
             assert not _under(project["root"], other_root)
@@ -195,6 +599,7 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             assert project["id"] != other_id
         roots.append((project["root"], project["id"]))
         assert project["source_roots"] == sorted(project["source_roots"])
+        assert len(project["source_roots"]) == len(set(project["source_roots"]))
         for source_root in project["source_roots"]:
             _assert_path(source_root)
             assert _under(source_root, project["root"])
@@ -203,11 +608,33 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             assert _under(project["config_path"], project["root"])
         assert project["file_ids"] == sorted(set(project["file_ids"]))
         assert all(_id_kind(file_id) == "file" for file_id in project["file_ids"])
-    assert value["config"]["projects"] == value["projects"]
-    assert value["request"]["projects"] == [project["root"] for project in value["projects"]]
+    assert value["source"]["file_count"] == sum(
+        len(project["file_ids"]) for project in value["projects"]
+    )
+    expected_config_projects = [
+        {
+            "root": project["root"],
+            "source_roots": project["source_roots"],
+            "config_path": project["config_path"],
+            "compiler_options": project["compiler_options"],
+        }
+        for project in value["projects"]
+    ]
+    assert value["config"]["projects"] == expected_config_projects
+    assert value["request"]["projects"] == expected_config_projects
     assert value["request"]["targets"] == value["targets"]
+    assert value["config"]["targets"] == value["targets"]
+    assert value["config"]["formats"] == value["formats"]
+    assert value["config"]["upstream_depth"] == value["request"]["upstream_depth"]
+    assert value["config"]["downstream_depth"] == value["request"]["downstream_depth"]
     _assert_target_keys(value["targets"])
+    _assert_formats(value["formats"])
     assert value["request"]["formats"] == value["formats"]
+    assert value["request"]["limits"] == value["limits"]
+    assert value["request"]["trusted_environment_digest"] == value["trusted_environment"]["sha256"]
+    assert value["request"]["source_plan_digest"] == value["source_plan_digest"]
+    assert value["request"]["domain_config_digest"] == value["domain_config_digest"]
+    assert value["request"]["run_fingerprint"] == value["run_fingerprint"]
     expected_artifacts = {
         "semantic-json": "next.snapshot.semantic.json",
         "plantuml": "next.snapshot.puml",
@@ -277,6 +704,36 @@ def validate_limits_consistency(*projections: dict[str, Any]) -> None:
     assert all(projection == first for projection in projections[1:])
 
 
+def encoded_request_bytes(request: dict[str, Any]) -> bytes:
+    """Return the exact UTF-8 bytes sent to the adapter's stdin."""
+
+    return canonical_json_bytes(request)
+
+
+def validate_encoded_stdin_size(request: dict[str, Any], encoded: bytes | None = None) -> int:
+    """Validate the request byte cap and return the measured size.
+
+    The boundary helper accepts precomputed bytes so tests can exercise
+    limit-1/limit/limit+1 without allocating a 96 MiB payload.
+    """
+
+    measured = len(encoded if encoded is not None else encoded_request_bytes(request))
+    limit = request["limits"]["max_encoded_stdin_bytes"]
+    assert encoded_stdin_allowed(measured, limit)
+    return measured
+
+
+def encoded_stdin_allowed(measured: int, limit: int) -> bool:
+    return 0 <= measured <= limit
+
+
+def assert_encoded_stdin_boundary(measured: int, limit: int, expected: bool) -> None:
+    """Model the exact inclusive byte boundary without constructing bytes."""
+
+    assert measured >= 0
+    assert encoded_stdin_allowed(measured, limit) is expected
+
+
 def _id_kind(record_id: str) -> str:
     match = ID_RE.fullmatch(record_id)
     assert match, record_id
@@ -299,6 +756,8 @@ def _assert_sorted_unique(
     assert ids == sorted(ids), collection
     assert len(ids) == len(set(ids)), collection
     assert all(_id_kind(record_id) == collection.removesuffix("s") for record_id in ids)
+    for record in records:
+        assert recompute_record_id(record) == record["id"]
     return {record_id: record for record_id, record in zip(ids, records, strict=True)}
 
 
@@ -320,6 +779,13 @@ def _assert_target_keys(targets: list[str]) -> None:
     assert all(1 <= len(target) <= 4096 for target in targets)
 
 
+def _assert_formats(formats: list[str]) -> None:
+    assert formats
+    assert len(formats) == len(set(formats))
+    assert all(format_name in FORMAT_ORDER_INDEX for format_name in formats)
+    assert formats == sorted(formats, key=FORMAT_ORDER_INDEX.__getitem__)
+
+
 def _assert_external_target(target: dict[str, Any]) -> None:
     assert target["kind"] in {"external", "unresolved"}
     assert PACKAGE_RE.fullmatch(target["safe_specifier"]), target
@@ -331,28 +797,56 @@ def _assert_external_target(target: dict[str, Any]) -> None:
     )
 
 
-def _validate_type_node(node: dict[str, Any], module_ids: set[str]) -> None:
+def _validate_type_node(
+    node: dict[str, Any],
+    module_ids: set[str],
+    *,
+    _depth: int = 1,
+    _type_parameter_scope: int | None = None,
+    _state: dict[str, int] | None = None,
+) -> None:
+    """Validate the complete PropsTypeIR grammar and its finite limits."""
+
+    state = (
+        _state
+        if _state is not None
+        else {
+            "nodes": 0,
+            "properties": 0,
+            "union_members": 0,
+            "intersection_members": 0,
+            "signatures": 0,
+        }
+    )
+    assert 1 <= _depth <= LIMIT_DEFAULTS["max_type_depth"]
+    state["nodes"] += 1
+    assert state["nodes"] <= LIMIT_DEFAULTS["max_type_nodes_per_prop"]
     kind = node["kind"]
     if kind == "primitive":
         assert set(node) == {"kind", "name"}
     elif kind == "type_parameter":
         assert set(node) == {"kind", "ordinal"}
+        assert _type_parameter_scope is not None
+        assert 0 <= node["ordinal"] < _type_parameter_scope
     elif kind == "redacted_literals":
         assert set(node) == {"kind", "base", "count"}
         assert node["base"] in {"boolean", "bigint", "number", "string"}
         assert node["count"] >= 1
     elif kind == "reference":
         assert set(node) == {"kind", "scope", "module", "exported_name", "type_arguments"}
-        if node["scope"] == "repository":
+        scope = node["scope"]
+        if scope == "repository":
             assert node["module"] in module_ids
             assert node["exported_name"] == "default" or re.fullmatch(
                 r"[A-Za-z_$][A-Za-z0-9_$]*", node["exported_name"]
             )
-        elif node["scope"] == "external":
+        elif scope == "external":
             assert PACKAGE_RE.fullmatch(node["module"])
-            assert node["exported_name"] != "" and node["exported_name"] is not None
+            assert node["exported_name"] == "default" or re.fullmatch(
+                r"[A-Za-z_$][A-Za-z0-9_$]*", node["exported_name"]
+            )
         else:
-            assert node["scope"] == "trusted"
+            assert scope == "trusted"
             assert node["module"] in TRUSTED_REFERENCE_MODULES
             if node["module"] != "typescript/lib":
                 assert node["exported_name"] is not None
@@ -362,17 +856,46 @@ def _validate_type_node(node: dict[str, Any], module_ids: set[str]) -> None:
                 or re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", node["exported_name"])
             )
         for child in node["type_arguments"]:
-            _validate_type_node(child, module_ids)
+            _validate_type_node(
+                child,
+                module_ids,
+                _depth=_depth + 1,
+                _type_parameter_scope=_type_parameter_scope,
+                _state=state,
+            )
     elif kind == "array":
         assert set(node) == {"kind", "element", "readonly"}
-        _validate_type_node(node["element"], module_ids)
+        _validate_type_node(
+            node["element"],
+            module_ids,
+            _depth=_depth + 1,
+            _type_parameter_scope=_type_parameter_scope,
+            _state=state,
+        )
     elif kind == "tuple":
         assert set(node) == {"kind", "elements", "rest", "readonly"}
+        optional_seen = False
         for element in node["elements"]:
             assert set(element) == {"type", "optional"}
-            _validate_type_node(element["type"], module_ids)
+            if element["optional"]:
+                optional_seen = True
+            elif optional_seen:
+                raise AssertionError("required tuple element follows optional element")
+            _validate_type_node(
+                element["type"],
+                module_ids,
+                _depth=_depth + 1,
+                _type_parameter_scope=_type_parameter_scope,
+                _state=state,
+            )
         if node["rest"] is not None:
-            _validate_type_node(node["rest"], module_ids)
+            _validate_type_node(
+                node["rest"],
+                module_ids,
+                _depth=_depth + 1,
+                _type_parameter_scope=_type_parameter_scope,
+                _state=state,
+            )
     elif kind == "function":
         assert set(node) == {
             "kind",
@@ -381,30 +904,86 @@ def _validate_type_node(node: dict[str, Any], module_ids: set[str]) -> None:
             "parameters",
             "return_type",
         }
+        parameter_scope = node["type_parameter_count"]
+        assert 0 <= parameter_scope <= LIMIT_DEFAULTS["max_signatures_per_component"]
+        state["signatures"] += 1
+        assert state["signatures"] <= LIMIT_DEFAULTS["max_signatures_per_component"]
         if node["this_type"] is not None:
-            _validate_type_node(node["this_type"], module_ids)
+            _validate_type_node(
+                node["this_type"],
+                module_ids,
+                _depth=_depth + 1,
+                _type_parameter_scope=parameter_scope,
+                _state=state,
+            )
+        optional_seen = False
+        rest_seen = False
         for parameter in node["parameters"]:
             assert set(parameter) == {"type", "optional", "rest"}
-            _validate_type_node(parameter["type"], module_ids)
-        _validate_type_node(node["return_type"], module_ids)
+            assert not rest_seen
+            if parameter["rest"]:
+                assert not parameter["optional"]
+                rest_seen = True
+            elif parameter["optional"]:
+                optional_seen = True
+            else:
+                assert not optional_seen
+            _validate_type_node(
+                parameter["type"],
+                module_ids,
+                _depth=_depth + 1,
+                _type_parameter_scope=parameter_scope,
+                _state=state,
+            )
+        _validate_type_node(
+            node["return_type"],
+            module_ids,
+            _depth=_depth + 1,
+            _type_parameter_scope=parameter_scope,
+            _state=state,
+        )
     elif kind in {"union", "intersection"}:
         assert set(node) == {"kind", "members"}
         assert node["members"]
+        assert len(node["members"]) <= LIMIT_DEFAULTS[f"max_{kind}_members"]
+        assert all(child["kind"] != kind for child in node["members"])
         _assert_canonical(node["members"])
         for child in node["members"]:
-            _validate_type_node(child, module_ids)
+            _validate_type_node(
+                child,
+                module_ids,
+                _depth=_depth + 1,
+                _type_parameter_scope=_type_parameter_scope,
+                _state=state,
+            )
     elif kind == "object":
         assert set(node) == {"kind", "properties", "index_signatures", "call_signatures"}
+        assert len(node["properties"]) <= LIMIT_DEFAULTS["max_nested_properties"]
         _assert_canonical([prop["name"] for prop in node["properties"]])
         _assert_canonical([item["key_type"] for item in node["index_signatures"]])
+        assert len(node["call_signatures"]) <= LIMIT_DEFAULTS["max_signatures_per_component"]
         _assert_canonical(node["call_signatures"])
         for prop in node["properties"]:
             assert set(prop) == {"name", "type", "optional", "readonly"}
             assert unicodedata.normalize("NFC", prop["name"]) == prop["name"]
-            _validate_type_node(prop["type"], module_ids)
+            state["properties"] += 1
+            assert state["properties"] <= LIMIT_DEFAULTS["max_nested_properties"]
+            _validate_type_node(
+                prop["type"],
+                module_ids,
+                _depth=_depth + 1,
+                _type_parameter_scope=_type_parameter_scope,
+                _state=state,
+            )
         for signature in node["index_signatures"]:
             assert set(signature) == {"key_type", "value_type", "readonly"}
-            _validate_type_node(signature["value_type"], module_ids)
+            _validate_type_node(
+                signature["value_type"],
+                module_ids,
+                _depth=_depth + 1,
+                _type_parameter_scope=_type_parameter_scope,
+                _state=state,
+            )
         for signature in node["call_signatures"]:
             assert set(signature) == {
                 "type_parameter_count",
@@ -412,15 +991,81 @@ def _validate_type_node(node: dict[str, Any], module_ids: set[str]) -> None:
                 "parameters",
                 "return_type",
             }
+            signature_scope = signature["type_parameter_count"]
+            assert 0 <= signature_scope <= LIMIT_DEFAULTS["max_signatures_per_component"]
+            state["signatures"] += 1
+            assert state["signatures"] <= LIMIT_DEFAULTS["max_signatures_per_component"]
             if signature["this_type"] is not None:
-                _validate_type_node(signature["this_type"], module_ids)
+                _validate_type_node(
+                    signature["this_type"],
+                    module_ids,
+                    _depth=_depth + 1,
+                    _type_parameter_scope=signature_scope,
+                    _state=state,
+                )
+            optional_seen = False
+            rest_seen = False
             for parameter in signature["parameters"]:
                 assert set(parameter) == {"type", "optional", "rest"}
-                _validate_type_node(parameter["type"], module_ids)
-            _validate_type_node(signature["return_type"], module_ids)
+                assert not rest_seen
+                if parameter["rest"]:
+                    assert not parameter["optional"]
+                    rest_seen = True
+                elif parameter["optional"]:
+                    optional_seen = True
+                else:
+                    assert not optional_seen
+                _validate_type_node(
+                    parameter["type"],
+                    module_ids,
+                    _depth=_depth + 1,
+                    _type_parameter_scope=signature_scope,
+                    _state=state,
+                )
+            _validate_type_node(
+                signature["return_type"],
+                module_ids,
+                _depth=_depth + 1,
+                _type_parameter_scope=signature_scope,
+                _state=state,
+            )
     else:
         assert kind == "opaque"
         assert set(node) == {"kind", "reason"}
+
+
+def _opaque_reason_counts(node: dict[str, Any]) -> dict[str, int]:
+    """Project every opaque TypeIR reason without trusting adapter counts."""
+
+    if node["kind"] == "opaque":
+        return {node["reason"]: 1}
+    children: list[dict[str, Any]] = []
+    if node["kind"] == "array":
+        children = [node["element"]]
+    elif node["kind"] == "tuple":
+        children = [element["type"] for element in node["elements"]]
+        if node["rest"] is not None:
+            children.append(node["rest"])
+    elif node["kind"] == "function":
+        children = [parameter["type"] for parameter in node["parameters"]]
+        children.append(node["return_type"])
+        if node["this_type"] is not None:
+            children.append(node["this_type"])
+    elif node["kind"] in {"union", "intersection"}:
+        children = list(node["members"])
+    elif node["kind"] == "object":
+        children = [prop["type"] for prop in node["properties"]]
+        children.extend(signature["value_type"] for signature in node["index_signatures"])
+        for signature in node["call_signatures"]:
+            children.extend(parameter["type"] for parameter in signature["parameters"])
+            children.append(signature["return_type"])
+            if signature["this_type"] is not None:
+                children.append(signature["this_type"])
+    result: dict[str, int] = {}
+    for child in children:
+        for reason, count in _opaque_reason_counts(child).items():
+            result[reason] = result.get(reason, 0) + count
+    return result
 
 
 def _validate_model_collections(model: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
@@ -440,7 +1085,8 @@ def _diagnostic_catalog() -> dict[str, dict[str, Any]]:
 def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
     catalog = _diagnostic_catalog()
     for diagnostic in diagnostics:
-        entry = catalog[diagnostic["code"]]
+        entry = catalog.get(diagnostic["code"])
+        assert entry is not None
         for field in ("severity", "recoverable", "outcome", "ref_permission"):
             assert diagnostic[field] == entry[field]
         assert diagnostic["count"] >= 1
@@ -467,7 +1113,8 @@ def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
 def _validate_public_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
     catalog = _diagnostic_catalog()
     for diagnostic in diagnostics:
-        entry = catalog[diagnostic["code"]]
+        entry = catalog.get(diagnostic["code"])
+        assert entry is not None
         assert diagnostic["type"] == "diagnostic"
         assert diagnostic["schema"] == "code-structure-viz.diagnostic/v1"
         assert diagnostic["domain"] == "next"
@@ -493,6 +1140,52 @@ def _validate_public_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
                 _assert_path(path)
             if symbol is not None:
                 _id_kind(symbol)
+
+
+def validate_semantic_snapshot(value: dict[str, Any]) -> None:
+    """Validate public Next projection and its status/diagnostic agreement."""
+
+    assert value["type"] == "semantic_snapshot"
+    assert value["schema"] == "code-structure-viz.semantic/v1"
+    assert value["domain"] == "next"
+    assert value["document_kind"] == "snapshot"
+    status = value["status"]
+    if status == "complete":
+        assert "incomplete_kind" not in value
+        allowed_outcomes = {"complete"}
+    else:
+        assert status == "incomplete"
+        assert value["incomplete_kind"] == "partial_safe"
+        allowed_outcomes = {"partial_safe"}
+    _validate_model_diagnostics(value["diagnostics"])
+    assert {item["outcome"] for item in value["diagnostics"]} <= allowed_outcomes
+    entities = value["entities"]
+    model = {
+        "schema": "code-structure-viz.next-model/v1",
+        "projects": value["projects"],
+        "files": value["files"],
+        "modules": [item for item in entities if item["kind"] == "module"],
+        "components": [item for item in entities if item["kind"] == "component"],
+        "members": value["members"],
+        "relations": value["relations"],
+        "facts": value["facts"],
+        "coverage": value["coverage"],
+        "diagnostics": value["diagnostics"],
+    }
+    validate_model(model)
+    expected_projects = [
+        {
+            "root": project["root"],
+            "source_roots": project["source_roots"],
+            "config_path": project["config_path"],
+            "compiler_options": project["compiler_options"],
+        }
+        for project in value["projects"]
+    ]
+    assert value["request"]["projects"] == expected_projects
+    _assert_target_keys(value["request"]["targets"])
+    _assert_formats(value["request"]["formats"])
+    assert value["source"]["file_count"] == len(value["files"])
 
 
 def _record_references(record: dict[str, Any]) -> set[str]:
@@ -579,6 +1272,225 @@ def _taint_dependency_closure(
     return closure
 
 
+def _record_index(discovered: dict[str, dict[str, dict[str, Any]]]) -> dict[str, dict[str, Any]]:
+    return {
+        record_id: item["record"]
+        for records in discovered.values()
+        for record_id, item in records.items()
+    }
+
+
+def _record_project_path(
+    record: dict[str, Any], records: dict[str, dict[str, Any]]
+) -> tuple[str, str] | None:
+    """Resolve the owning project/path used by ``file_all_records``."""
+
+    kind = record["kind"]
+    if kind == "project":
+        return None
+    if kind in {"file", "module"}:
+        return (record["project_id"], record["path"])
+    if kind == "component":
+        owner = records.get(record["module_id"])
+    elif kind in {"export_binding", "import_binding"}:
+        owner = records.get(record["owner_id"])
+    elif kind == "prop":
+        component = records.get(record["owner_id"])
+        owner = records.get(component["module_id"]) if component is not None else None
+    elif kind in {"static_import", "literal_dynamic_import"}:
+        owner = records.get(record["source_id"])
+    elif kind in {"jsx_render", "component_wrap"}:
+        component = records.get(record["source_id"])
+        owner = records.get(component["module_id"]) if component is not None else None
+    else:
+        assert kind in {"client_entry", "router_context"}
+        owner = records.get(record["owner_id"])
+    if owner is None:
+        return None
+    return (owner["project_id"], owner["path"])
+
+
+def _root_edge_is_allowed(root: dict[str, Any], target: dict[str, Any], rule: str) -> bool:
+    """Keep root-to-record edges in the closed v1 taint vocabulary."""
+
+    root_kind = root["kind"]
+    target_kind = target["kind"]
+    if root["collection"] == "files":
+        return (
+            root_kind in {"parse_file", "read_file"}
+            and rule == "file_all_records"
+            and target_kind
+            in {
+                "file",
+                "module",
+                "component",
+                "export_binding",
+                "import_binding",
+                "prop",
+                "static_import",
+                "literal_dynamic_import",
+                "jsx_render",
+                "component_wrap",
+                "client_entry",
+                "router_context",
+            }
+        )
+    allowed_rules = {
+        "type_symbol": {"type_subtree", "identity_dependency"},
+        "props_subtree": {"type_subtree", "identity_dependency"},
+        "export_binding": {"incoming_reexport", "identity_dependency"},
+        "component_flow": {"component_flow", "identity_dependency"},
+        "module_relation": {
+            "value_import_dependency",
+            "relation_dependency",
+            "identity_dependency",
+        },
+        "boundary_derivation": {"boundary_closure", "relation_dependency", "identity_dependency"},
+        "parse_file": {"file_all_records"},
+        "read_file": {"file_all_records"},
+    }
+    return rule in allowed_rules.get(
+        root_kind, set()
+    ) and target_kind in ROOT_EDGE_TARGET_KINDS.get(root_kind, set())
+
+
+def _causal_edge_is_allowed(
+    edge: dict[str, Any],
+    records: dict[str, dict[str, Any]],
+    failure_roots: dict[str, dict[str, Any]],
+) -> bool:
+    """Check a causal edge against the closed v1 propagation rules."""
+
+    source_id = edge["source_id"]
+    target_id = edge["record_id"]
+    target = records[target_id]
+    rule = edge["rule"]
+    if source_id in failure_roots:
+        root = failure_roots[source_id]
+        if not _root_edge_is_allowed(root, target, rule):
+            return False
+        if root["path_ref"] is not None:
+            target_path = _record_project_path(target, records)
+            if target_path is None or target_path[1] != root["path_ref"]:
+                return False
+        return True
+
+    if source_id not in records:
+        return False
+    source = records[source_id]
+    if source_id == target_id:
+        return False
+    if rule == "file_all_records":
+        if source["kind"] not in {"file", "module"} or target["kind"] == "project":
+            return False
+        source_path = _record_project_path(source, records)
+        target_path = _record_project_path(target, records)
+        return source_path is not None and source_path == target_path
+    if rule == "incoming_reexport":
+        return (
+            source["kind"] in {"module", "export_binding", "import_binding"}
+            and target["kind"] in {"module", "export_binding", "import_binding"}
+            and (source_id in _record_references(target) or target_id in _record_references(source))
+            and (
+                target.get("reexport") is True
+                or source.get("reexport") is True
+                or target["kind"] == "module"
+            )
+        )
+    if rule == "value_import_dependency":
+        return (
+            target["kind"] in {"import_binding", "static_import"}
+            and target.get("role") == "value"
+            and source_id in _record_references(target)
+        )
+    if rule == "component_flow":
+        return (
+            source["kind"] == "component"
+            and target["kind"] in {"jsx_render", "component_wrap"}
+            and target.get("source_id") == source_id
+        ) or (
+            target["kind"] == "component"
+            and source["kind"] in {"jsx_render", "component_wrap"}
+            and target_id in _record_references(source)
+        )
+    if rule == "boundary_closure":
+        return (
+            source["kind"] in {"module", "static_import"}
+            and target["kind"]
+            in {
+                "module",
+                "static_import",
+                "literal_dynamic_import",
+                "client_entry",
+                "router_context",
+            }
+            and (source_id in _record_references(target) or target_id in _record_references(source))
+        )
+    if rule == "type_subtree":
+        return (
+            source["kind"] in {"component", "prop"}
+            and target["kind"] in {"component", "prop"}
+            and _record_project_path(source, records) == _record_project_path(target, records)
+        )
+    if rule == "identity_dependency":
+        return source_id in _record_references(target)
+    if rule == "relation_dependency":
+        return source["kind"] in {
+            "static_import",
+            "literal_dynamic_import",
+            "jsx_render",
+            "component_wrap",
+        } and target_id in _record_references(source)
+    return False
+
+
+def _derived_taint_fixed_point(
+    proof: dict[str, Any],
+    discovered: dict[str, dict[str, dict[str, Any]]],
+) -> set[str]:
+    """Derive tainted records solely from roots and validated causal edges."""
+
+    records = _record_index(discovered)
+    roots = {root["id"]: root for root in proof["failure_roots"]}
+    assert len(roots) == len(proof["failure_roots"])
+    edges = proof["causal_edges"]
+    adjacency: dict[str, set[str]] = {}
+    for edge in edges:
+        assert edge["record_id"] in records
+        assert _causal_edge_is_allowed(edge, records, roots)
+        adjacency.setdefault(edge["source_id"], set()).add(edge["record_id"])
+
+    reachable: set[str] = set()
+    reachable_sources = set(roots)
+    pending = list(roots)
+    while pending:
+        source_id = pending.pop()
+        for target_id in adjacency.get(source_id, set()):
+            if target_id in reachable:
+                continue
+            reachable.add(target_id)
+            reachable_sources.add(target_id)
+            pending.append(target_id)
+    assert all(edge["source_id"] in reachable_sources for edge in edges)
+    expected_taints: dict[str, set[str]] = {}
+    pending_pairs = [(root_id, roots[root_id]["kind"]) for root_id in roots if root_id in adjacency]
+    while pending_pairs:
+        source_id, taint = pending_pairs.pop()
+        for target_id in adjacency.get(source_id, set()):
+            taints = expected_taints.setdefault(target_id, set())
+            if taint in taints:
+                continue
+            taints.add(taint)
+            pending_pairs.append((target_id, taint))
+    for record_id, item in (
+        (record_id, item)
+        for records_by_collection in discovered.values()
+        for record_id, item in records_by_collection.items()
+    ):
+        assert set(item["taints"]) == expected_taints.get(record_id, set())
+    return reachable
+
+
 def validate_model(model: dict[str, Any]) -> None:
     collections = _validate_model_collections(model)
     project_records = collections["projects"]
@@ -592,6 +1504,7 @@ def validate_model(model: dict[str, Any]) -> None:
     roots: list[tuple[str, str]] = []
     for project in project_records.values():
         assert project["kind"] == "project"
+        assert project["config_digest"] == project_config_digest(project)
         _assert_path(project["root"])
         for other_root, other_id in roots:
             assert not _under(project["root"], other_root)
@@ -599,6 +1512,7 @@ def validate_model(model: dict[str, Any]) -> None:
             assert project["id"] != other_id
         roots.append((project["root"], project["id"]))
         assert project["file_ids"] == sorted(project["file_ids"])
+        assert all(_id_kind(file_id) == "file" for file_id in project["file_ids"])
         assert project["source_roots"] == sorted(project["source_roots"])
         assert len(project["source_roots"]) == len(set(project["source_roots"]))
         for source_root in project["source_roots"]:
@@ -618,8 +1532,10 @@ def validate_model(model: dict[str, Any]) -> None:
         ]
         assert matching_roots == [file_record["project_id"]]
         roles = file_record["roles"]
+        assert roles and set(roles) <= set(ROLES)
+        assert len(roles) == len(set(roles))
         assert roles == sorted(roles, key=ROLE_ORDER.__getitem__)
-        assert file_record["effective_role"] == max(roles, key=ROLE_ORDER.__getitem__)
+        assert file_record["effective_role"] == max(roles, key=ROLE_PRECEDENCE.__getitem__)
         files_by_project[file_record["project_id"]].append(file_record["id"])
     for project_id, project in project_records.items():
         assert project["file_ids"] == sorted(files_by_project[project_id])
@@ -629,6 +1545,7 @@ def validate_model(model: dict[str, Any]) -> None:
         assert module["project_id"] in project_records
         _assert_path(module["path"])
         assert module["derived_roles"] == sorted(module["derived_roles"])
+        assert len(module["derived_roles"]) == len(set(module["derived_roles"]))
         assert any(
             file_record["project_id"] == module["project_id"]
             and file_record["path"] == module["path"]
@@ -647,6 +1564,7 @@ def validate_model(model: dict[str, Any]) -> None:
     )
 
     member_keys: list[Any] = []
+    component_signature_counts: dict[str, int] = {}
     for member in member_records.values():
         if member["kind"] == "export_binding":
             assert member["owner_id"] in module_records
@@ -673,7 +1591,21 @@ def validate_model(model: dict[str, Any]) -> None:
         else:
             assert member["kind"] == "prop"
             assert member["owner_id"] in component_records
-            _validate_type_node(member["type_node"], set(module_records))
+            type_state: dict[str, int] = {
+                "nodes": 0,
+                "properties": 0,
+                "union_members": 0,
+                "intersection_members": 0,
+                "signatures": 0,
+            }
+            _validate_type_node(member["type_node"], set(module_records), _state=type_state)
+            component_signature_counts[member["owner_id"]] = (
+                component_signature_counts.get(member["owner_id"], 0) + type_state["signatures"]
+            )
+            assert (
+                component_signature_counts[member["owner_id"]]
+                <= LIMIT_DEFAULTS["max_signatures_per_component"]
+            )
             member_keys.append((member["kind"], member["owner_id"], member["name"]))
     _assert_unique(member_keys)
 
@@ -686,6 +1618,20 @@ def validate_model(model: dict[str, Any]) -> None:
                 assert target["module_id"] in module_records
             else:
                 _assert_external_target(target)
+            if relation["kind"] == "literal_dynamic_import":
+                assert relation["role"] == "value"
+                assert relation["reexport"] is False
+                assert relation["boundary_effect"] == "none"
+            elif relation["boundary_effect"] == "server_to_client_entry":
+                assert relation["role"] == "value"
+                assert target["kind"] == "internal"
+                assert module_records[relation["source_id"]]["client_entry"] is False
+                assert "server_candidate" in module_records[relation["source_id"]]["derived_roles"]
+                assert module_records[target["module_id"]]["client_entry"] is True
+            else:
+                assert relation["boundary_effect"] == "none"
+            assert relation["role"] in {"value", "type"}
+            assert isinstance(relation["reexport"], bool)
             relation_keys.append(
                 (
                     relation["kind"],
@@ -703,6 +1649,8 @@ def validate_model(model: dict[str, Any]) -> None:
                 assert target["component_id"] in component_records
             else:
                 _assert_external_target(target)
+            assert relation["occurrence_count"] >= 1
+            assert relation["contexts"] == sorted(set(relation["contexts"]))
             relation_keys.append(
                 (
                     relation["kind"],
@@ -714,6 +1662,8 @@ def validate_model(model: dict[str, Any]) -> None:
             assert relation["kind"] == "component_wrap"
             assert relation["source_id"] in component_records
             assert relation["target_component_id"] in component_records
+            assert relation["occurrence_count"] >= 1
+            assert relation["contexts"] == ["direct"]
             relation_keys.append(
                 (
                     relation["kind"],
@@ -736,9 +1686,30 @@ def validate_model(model: dict[str, Any]) -> None:
         fact_keys.append((fact["kind"], fact["owner_id"]))
     _assert_unique(fact_keys)
 
+    expected_facts = {
+        ("client_entry", module_id, True)
+        for module_id, module in module_records.items()
+        if module["client_entry"]
+    }
+    expected_facts.update(
+        ("router_context", module_id, module["router_context"])
+        for module_id, module in module_records.items()
+    )
+    actual_facts = {
+        (fact["kind"], fact["owner_id"], fact["value"]) for fact in fact_records.values()
+    }
+    assert actual_facts == expected_facts
+
     _validate_model_diagnostics(model["diagnostics"])
 
     counts = model["coverage"]["counts"]
+    opaque_counts: dict[str, int] = {}
+    for member in member_records.values():
+        if member["kind"] != "prop":
+            continue
+        for reason, count in _opaque_reason_counts(member["type_node"]).items():
+            opaque_counts[reason] = opaque_counts.get(reason, 0) + count
+    assert model["coverage"]["opaque_reason_counts"] == opaque_counts
     for collection in COLLECTIONS:
         assert counts[collection] == len(collections[collection])
     assert counts["published"] == sum(len(collections[collection]) for collection in COLLECTIONS)
@@ -749,6 +1720,7 @@ def validate_model(model: dict[str, Any]) -> None:
 
 def validate_request_files(request: dict[str, Any]) -> None:
     _assert_target_keys(request["targets"])
+    assert len(request["files"]) <= LIMIT_DEFAULTS["max_files"]
     project_ids = [project["id"] for project in request["projects"]]
     assert project_ids == sorted(project_ids)
     assert len(project_ids) == len(set(project_ids))
@@ -756,6 +1728,10 @@ def validate_request_files(request: dict[str, Any]) -> None:
     roots = [(project["root"], project["id"]) for project in request["projects"]]
     for index, (root, project_id) in enumerate(roots):
         assert request["projects"][index]["kind"] == "project"
+        assert request["projects"][index]["config_digest"] == project_config_digest(
+            request["projects"][index]
+        )
+        assert recompute_record_id(request["projects"][index]) == project_id
         _assert_path(root)
         for source_root in request["projects"][index]["source_roots"]:
             _assert_path(source_root)
@@ -778,6 +1754,7 @@ def validate_request_files(request: dict[str, Any]) -> None:
     total_decoded_bytes = 0
     for file_record in request["files"]:
         assert file_record["kind"] == "file"
+        assert recompute_record_id(file_record) == file_record["id"]
         assert file_record["project_id"] in project_set
         _assert_path(file_record["path"])
         matching_roots = [
@@ -785,8 +1762,10 @@ def validate_request_files(request: dict[str, Any]) -> None:
         ]
         assert matching_roots == [file_record["project_id"]]
         roles = file_record["roles"]
+        assert roles and set(roles) <= set(ROLES)
+        assert len(roles) == len(set(roles))
         assert roles == sorted(roles, key=ROLE_ORDER.__getitem__)
-        assert file_record["effective_role"] == max(roles, key=ROLE_ORDER.__getitem__)
+        assert file_record["effective_role"] == max(roles, key=ROLE_PRECEDENCE.__getitem__)
         files_by_project[file_record["project_id"]].append(file_record["id"])
         file_keys.append((file_record["project_id"], file_record["path"]))
         encoded = file_record["content_base64"]
@@ -816,7 +1795,9 @@ def validate_proof(
         record_id = record["id"]
         assert record_id not in discovered[collection]
         assert _id_kind(record_id) == collection.removesuffix("s")
+        assert recompute_record_id(record) == record_id
         assert all(taint in TAINTS for taint in item["taints"])
+        assert item["taints"] == sorted(item["taints"], key=TAINT_ORDER_INDEX.__getitem__)
         discovered[collection][record_id] = item
 
     published = {collection: set(records) for collection, records in model_collections.items()}
@@ -833,7 +1814,30 @@ def validate_proof(
         for record_id, item in records.items()
         if item["taints"]
     }
-    taint_closure = _taint_dependency_closure(discovered, tainted_ids)
+
+    failure_ids = {root["id"] for root in proof["failure_roots"]}
+    assert len(failure_ids) == len(proof["failure_roots"])
+    for root in proof["failure_roots"]:
+        assert root["id"].startswith("next:failure:")
+        assert root["collection"] in COLLECTIONS
+        assert root["kind"] in TAINTS
+        expected_collections = {
+            "parse_file": {"files"},
+            "read_file": {"files"},
+            "type_symbol": {"components", "members"},
+            "props_subtree": {"components", "members"},
+            "export_binding": {"members", "modules"},
+            "component_flow": {"components", "relations"},
+            "module_relation": {"modules", "relations"},
+            "boundary_derivation": {"modules", "relations", "facts"},
+        }
+        assert root["collection"] in expected_collections[root["kind"]]
+        if root["collection"] == "files":
+            assert root["path_ref"] is not None
+        if root["path_ref"] is not None:
+            _assert_path(root["path_ref"])
+    taint_closure = _derived_taint_fixed_point(proof, discovered)
+    assert taint_closure == tainted_ids
     assert not any(
         record_id in taint_closure for record_ids in published.values() for record_id in record_ids
     )
@@ -890,13 +1894,8 @@ def validate_proof(
         for record_id in (excluded[collection] | failed[collection])
     }
 
-    failure_ids = {root["id"] for root in proof["failure_roots"]}
-    assert len(failure_ids) == len(proof["failure_roots"])
-    for root in proof["failure_roots"]:
-        assert root["id"].startswith("next:failure:")
-        if root["path_ref"] is not None:
-            _assert_path(root["path_ref"])
     all_discovered = set().union(*(set(records) for records in discovered.values()))
+    _assert_canonical(proof["causal_edges"])
     for edge in proof["causal_edges"]:
         assert edge["source_id"] in all_discovered | failure_ids
         assert edge["record_id"] in all_discovered
@@ -952,17 +1951,93 @@ def validate_proof(
     )
     assert model["coverage"]["counts"]["failed"] == sum(len(records) for records in failed.values())
 
+    coverage = model["coverage"]
+    assert coverage["affected_ids"] == sorted(taint_closure)
+    tainted_records = {
+        record_id: records[record_id]["record"]
+        for records in discovered.values()
+        for record_id in records
+        if record_id in taint_closure
+    }
+    expected_frontier = sorted(
+        referenced_id
+        for record in tainted_records.values()
+        for referenced_id in _record_references(record)
+        if referenced_id in all_discovered
+        and referenced_id not in taint_closure
+        and _id_kind(referenced_id) != "project"
+    )
+    assert coverage["taint_frontier"] == expected_frontier
+    expected_failed_files = sorted(
+        {
+            (discovered["files"][record_id]["record"]["path"], reason)
+            for (collection, record_id), reason in failed_reasons.items()
+            if collection == "files"
+        }
+    )
+    assert (
+        sorted((item["path"], item["reason"]) for item in coverage["failed_files"])
+        == expected_failed_files
+    )
+
+    opaque_counts: dict[str, int] = {}
+    for member in model["members"]:
+        if member["kind"] != "prop":
+            continue
+        for reason, count in _opaque_reason_counts(member["type_node"]).items():
+            opaque_counts[reason] = opaque_counts.get(reason, 0) + count
+    assert coverage["opaque_reason_counts"] == opaque_counts
+    losses = coverage["correlation_losses"]
+    _assert_canonical(losses)
+    component_ids = set(model_collections["components"])
+    prop_records = {member["id"]: member for member in model["members"] if member["kind"] == "prop"}
+    for loss in losses:
+        assert loss["component_id"] in component_ids
+        assert loss["prop_ids"] == sorted(loss["prop_ids"])
+        assert loss["prop_ids"]
+        assert loss["signature_count"] <= LIMIT_DEFAULTS["max_signatures_per_component"]
+        assert all(
+            prop_records[prop_id]["owner_id"] == loss["component_id"]
+            for prop_id in loss["prop_ids"]
+        )
+    assert coverage["unknown_relation_count"] == sum(
+        relation["target"]["kind"] == "unresolved"
+        for relation in model["relations"]
+        if "target" in relation
+    )
+    published_component_ids = {component["id"] for component in model["components"]}
+    assert coverage["non_component_value_export_count"] == sum(
+        member["target_component_id"] not in published_component_ids
+        for member in model["members"]
+        if member["kind"] == "export_binding" and member["role"] == "value"
+    )
+    assert coverage["type_only_export_count"] == sum(
+        member["role"] == "type"
+        for member in model["members"]
+        if member["kind"] == "export_binding"
+    )
+
 
 def validate_trusted_environment(
     environment: dict[str, Any], target_paths: list[str] | None = None
 ) -> None:
+    assert environment["environment_version"] == "1"
+    assert environment["semantic_profile_id"] == "next-trusted-profile-v1"
+    assert environment["typescript_version"] == "5.9.2"
+    assert environment["license_inventory_digest"] == TRUSTED_PROFILE_LICENSE_DIGEST
     assert environment["reserved_module_specifiers"] == list(TRUSTED_MODULES)
     assert environment["reserved_global_names"] == list(TRUSTED_GLOBALS)
     files = environment["files"]
-    assert [item["virtual_path"] for item in files] == sorted(
-        item["virtual_path"] for item in files
-    )
+    assert [item["virtual_path"] for item in files] == list(TRUSTED_PROFILE_FILES)
     assert len({item["virtual_path"] for item in files}) == len(files)
+    assert files == [
+        {
+            "virtual_path": path,
+            "sha256": TRUSTED_PROFILE_FILE_SHA256[path],
+            "license_id": TRUSTED_PROFILE_FILE_LICENSES[path],
+        }
+        for path in TRUSTED_PROFILE_FILES
+    ]
     file_digests = {item["sha256"] for item in files}
     for item in files:
         virtual_path = item["virtual_path"]
@@ -977,10 +2052,18 @@ def validate_trusted_environment(
         normalized = unicodedata.normalize("NFC", target_path)
         assert not any(normalized == item["virtual_path"] for item in files)
     symbols = environment["certified_symbols"]
+    assert symbols == list(TRUSTED_PROFILE_CERTIFIED_SYMBOLS)
     symbol_keys = [
         (item["source_kind"], item["source_name"], tuple(item["export_path"])) for item in symbols
     ]
-    assert symbol_keys == sorted(symbol_keys)
+    expected_symbol_keys = sorted(
+        [("global", source, export_path) for source, export_path in TRUSTED_PROFILE_GLOBAL_SYMBOLS]
+        + [
+            ("module", source, export_path)
+            for source, export_path in TRUSTED_PROFILE_MODULE_SYMBOLS
+        ]
+    )
+    assert symbol_keys == expected_symbol_keys
     assert len(symbol_keys) == len(set(symbol_keys))
     for symbol in symbols:
         assert symbol["declaration_sha256"] in file_digests
@@ -1012,6 +2095,8 @@ def validate_runtime_manifest(manifest: dict[str, Any]) -> None:
     members = manifest["members"]
     assert [item["path"] for item in members] == sorted(item["path"] for item in members)
     assert len({item["path"] for item in members}) == len(members)
+    assert {item["path"]: item["role"] for item in members} == RUNTIME_REQUIRED_PATHS
+    assert {item["role"] for item in members} == RUNTIME_REQUIRED_MEMBER_ROLES
     for item in members:
         _assert_path(item["path"])
         assert item["path"].startswith("src/code_structure_viz/_next_runtime/")
@@ -1026,8 +2111,160 @@ def validate_runtime_manifest(manifest: dict[str, Any]) -> None:
     for license_record in licenses:
         parsed = urlparse(license_record["source_url"])
         assert parsed.scheme == "https" and parsed.netloc
+    assert licenses == list(TRUSTED_PROFILE_LICENSES)
+    assert manifest["license_inventory_digest"] == TRUSTED_PROFILE_LICENSE_DIGEST
     assert manifest["build_input_digest"] == digest({"members": members, "licenses": licenses})
     assert manifest["build_output_digest"] == digest({"members": members})
+    assert manifest["manifest_sha256"] == digest(_without(manifest, "manifest_sha256"))
+
+
+def validate_run_status_vector(
+    manifest: dict[str, Any] | None,
+    summary: dict[str, Any],
+    stdout_result: dict[str, Any],
+    published_bytes: dict[str, bytes],
+    stdout_bytes: bytes | None,
+    stderr_diagnostics: list[dict[str, Any]],
+) -> None:
+    """Validate the cross-artifact status and exact-byte publication vector."""
+
+    run_status = summary["run_status"]
+    expected_exit = {
+        "complete": 0,
+        "not_applicable": 0,
+        "incomplete": 3,
+        "fatal": 1,
+        "interrupted": 130,
+    }[run_status]
+    assert summary["exit_code"] == expected_exit
+    if run_status in {"fatal", "interrupted"}:
+        assert manifest is None
+        assert summary["domains"] == []
+        assert summary["manifest"] is None
+        assert stdout_result["availability"] is False
+        assert stdout_result["run_status"] == run_status
+        assert stdout_result["artifact"] is None
+        assert stdout_bytes == canonical_json_bytes(stdout_result) + b"\n"
+        assert stderr_diagnostics == []
+        return
+
+    assert manifest is not None
+    assert manifest["run"]["status"] == run_status
+    assert manifest["run"]["exit_code"] == expected_exit
+    assert summary["manifest"] == "run-manifest.json"
+    assert len(summary["domains"]) == 1
+    summary_domain = summary["domains"][0]
+    domain = manifest["domains"][0]
+    assert summary_domain["domain"] == domain["domain"] == "next"
+    assert summary_domain["status"] == domain["status"] == run_status
+    if run_status == "incomplete":
+        assert summary_domain["incomplete_kind"] == domain["incomplete_kind"]
+    assert manifest["next_request"] == domain["request"]
+    assert manifest["next_config"] == domain["config"]
+    artifact_paths = set(domain["artifact_paths"])
+    assert set(published_bytes) == artifact_paths
+    artifact_records = {artifact["path"]: artifact for artifact in manifest["artifacts"]}
+    assert set(artifact_records) == artifact_paths
+    for path, payload in published_bytes.items():
+        descriptor = artifact_records[path]
+        assert descriptor["size_bytes"] == len(payload)
+        assert descriptor["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert stderr_diagnostics == manifest["diagnostics"]
+
+    selector = stdout_result["selector"]
+    assert selector in {"next:semantic-json", "next:plantuml"}
+    assert stdout_result["domain_status"] == run_status
+    format_name = selector.removeprefix("next:")
+    expected_path = (
+        "next.snapshot.semantic.json" if format_name == "semantic-json" else "next.snapshot.puml"
+    )
+    if run_status == "not_applicable" or domain.get("incomplete_kind") == "payload_unavailable":
+        assert stdout_result["availability"] is False
+        assert stdout_result["artifact"] is None
+        assert "incomplete_kind" not in stdout_result
+        assert stdout_result["stable_reason"] in {
+            "domain_not_applicable",
+            "domain_payload_unavailable",
+        }
+        assert stdout_bytes == canonical_json_bytes(stdout_result) + b"\n"
+    else:
+        assert expected_path in published_bytes
+        assert stdout_result["availability"] is True
+        assert stdout_result["stable_reason"] == "published_artifact"
+        assert stdout_result["artifact"] == artifact_records[expected_path]
+        if run_status == "incomplete":
+            assert stdout_result["incomplete_kind"] == "partial_safe"
+        assert stdout_bytes == published_bytes[expected_path]
+
+
+def validate_run_manifest(
+    manifest: dict[str, Any],
+    domain: dict[str, Any],
+    published_bytes: dict[str, bytes],
+) -> None:
+    """Validate the whole-run Next projection, not only its domain entry."""
+
+    validate_domain_manifest(domain)
+    assert manifest["type"] == "run_manifest"
+    assert manifest["schema"] == "code-structure-viz.run-manifest/v1"
+    assert manifest["contracts"]["plantuml"] == "code-structure-viz.plantuml/next/v1"
+    assert manifest["adapters"] == [{"domain": "next", "name": "next-typescript", "version": "1"}]
+    assert manifest["command"] == {
+        "name": "snapshot",
+        "domain": "next",
+        "formats": domain["formats"],
+        "stdout_selector": "next:semantic-json",
+    }
+    assert manifest["source"] == domain["source"]
+    assert manifest["next_request"] == domain["request"]
+    assert manifest["next_config"] == domain["config"]
+    assert manifest["domains"] == [domain]
+    assert manifest["diagnostics"] == domain["diagnostics"]
+    assert manifest["request"] == {
+        "projects": [project["root"] for project in domain["projects"]],
+        "targets": domain["targets"],
+        "formats": domain["formats"],
+        "upstream_depth": domain["request"]["upstream_depth"],
+        "downstream_depth": domain["request"]["downstream_depth"],
+    }
+    resolved_next = manifest["config"]["resolved"]["next"]
+    assert resolved_next == {
+        "projects": [project["root"] for project in domain["projects"]],
+        "targets": domain["targets"],
+        "formats": domain["formats"],
+        "trusted_environment_digest": domain["trusted_environment"]["sha256"],
+    }
+    assert manifest["config"]["resolved"]["traversal"] == {
+        "upstream_depth": domain["request"]["upstream_depth"],
+        "downstream_depth": domain["request"]["downstream_depth"],
+    }
+    assert manifest["config"]["resolved"]["limits"] == domain["limits"]
+    assert manifest["config"]["sha256"] == digest(_without(manifest["config"], "sha256"))
+    expected_exit = 0 if domain["status"] in {"complete", "not_applicable"} else 3
+    assert manifest["run"] == {
+        "status": domain["status"],
+        "exit_code": expected_exit,
+        "fingerprint": domain["run_fingerprint"],
+    }
+    expected_artifacts = []
+    for path in domain["artifact_paths"]:
+        payload = published_bytes[path]
+        format_name = "semantic-json" if path.endswith(".json") else "plantuml"
+        expected_artifacts.append(
+            {
+                "path": path,
+                "domain": "next",
+                "format": format_name,
+                "media_type": (
+                    "application/json"
+                    if format_name == "semantic-json"
+                    else "text/vnd.plantuml; charset=utf-8"
+                ),
+                "size_bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    assert manifest["artifacts"] == expected_artifacts
 
 
 def escape_plantuml_label(value: str) -> str:
@@ -1063,6 +2300,10 @@ def render_plantuml(model: dict[str, Any], status: str = "complete") -> bytes:
 
     assert status in {"complete", "partial_safe"}
     external_targets: dict[str, dict[str, Any]] = {}
+    for member in model["members"]:
+        source = member.get("source")
+        if source is not None and source["kind"] != "internal":
+            external_targets[external_target_digest(source)] = source
     for relation in model["relations"]:
         target = relation.get("target")
         if target is not None and target["kind"] != "internal":
@@ -1076,11 +2317,16 @@ def render_plantuml(model: dict[str, Any], status: str = "complete") -> bytes:
         "N_P project",
         "N_M module",
         "N_C component",
-        ".. prop/import/export member",
+        "<<export_binding>> export member",
+        "<<import_binding>> import member",
+        "<<prop>> prop member",
         "--> static_import|literal_dynamic_import",
         "..> jsx_render|component_wrap",
+        "facet=role:<value|type>|reexport=<true|false>|boundary=<none|server_to_client_entry>",
         "marker=client_entry|router_context=<context>|client_dependency|server_candidate|unknown",
         "marker=partial_safe",
+        "external=cloud-after-components-before-members",
+        "sort=kind-prefixed-id-utf8",
         "endlegend",
     ]
     for project in sorted(model["projects"], key=lambda item: item["id"]):
@@ -1100,6 +2346,15 @@ def render_plantuml(model: dict[str, Any], status: str = "complete") -> bytes:
         lines.append(
             f'rectangle "C:{escape_plantuml_label(component["declaration_key"])}" as N_C_{alias}'
         )
+    for module in sorted(model["modules"], key=lambda item: item["id"]):
+        module_alias = module["id"].split(":")[-1]
+        project = next(item for item in model["projects"] if item["id"] == module["project_id"])
+        project_alias = project["id"].split(":")[-1]
+        lines.append(f"N_P_{project_alias} .. N_M_{module_alias} : contains")
+    for component in sorted(model["components"], key=lambda item: item["id"]):
+        component_alias = component["id"].split(":")[-1]
+        module_alias = component["module_id"].split(":")[-1]
+        lines.append(f"N_M_{module_alias} .. N_C_{component_alias} : contains")
     for target_digest in sorted(external_targets):
         target = external_targets[target_digest]
         label = f"external:{target['safe_specifier']}"
@@ -1112,13 +2367,30 @@ def render_plantuml(model: dict[str, Any], status: str = "complete") -> bytes:
         if member["kind"] == "prop":
             owner = f"N_C_{member['owner_id'].split(':')[-1]}"
             label = f"prop {escape_plantuml_label(member['name'])}"
+            stereotype = "prop"
+            facets = (
+                f"optional={str(member['optional']).lower()}|readonly={str(member['readonly']).lower()}"
+                f"|default={member['default_evidence']}"
+            )
         elif member["kind"] == "export_binding":
             owner = f"N_M_{member['owner_id'].split(':')[-1]}"
             label = f"export {escape_plantuml_label(member['exported_name'])}"
+            stereotype = "export_binding"
+            facets = f"role={member['role']}|reexport={str(member['reexport']).lower()}"
         else:
             owner = f"N_M_{member['owner_id'].split(':')[-1]}"
             label = f"import {escape_plantuml_label(member['imported_name'])}"
-        lines.append(f'{owner} .. "{label}" : {member["id"]}')
+            stereotype = "import_binding"
+            source = member["source"]
+            source_descriptor = source["kind"]
+            if source["kind"] == "internal":
+                source_descriptor += f"#{source['module_id']}"
+            else:
+                source_descriptor += f"#{source['safe_specifier']}"
+                if source.get("exported_name") is not None:
+                    source_descriptor += f"#{source['exported_name']}"
+            facets = f"role={member['role']}|source={source_descriptor}"
+        lines.append(f'{owner} .. "{label}" <<{stereotype}>> : {member["id"]}|{facets}')
     for relation in sorted(model["relations"], key=lambda item: item["id"]):
         if relation["kind"] in {"static_import", "literal_dynamic_import"}:
             source = f"N_M_{relation['source_id'].split(':')[-1]}"
@@ -1128,7 +2400,10 @@ def render_plantuml(model: dict[str, Any], status: str = "complete") -> bytes:
                 if target["kind"] == "internal"
                 else f"X_{external_target_digest(target)}"
             )
-            lines.append(f"{source} --> {target_alias} : {relation['kind']}")
+            lines.append(
+                f"{source} --> {target_alias} : {relation['kind']}|role={relation['role']}"
+                f"|reexport={str(relation['reexport']).lower()}|boundary={relation['boundary_effect']}"
+            )
         elif relation["kind"] == "jsx_render":
             source = f"N_C_{relation['source_id'].split(':')[-1]}"
             target = relation["target"]
@@ -1137,11 +2412,18 @@ def render_plantuml(model: dict[str, Any], status: str = "complete") -> bytes:
                 if target["kind"] == "internal"
                 else f"X_{external_target_digest(target)}"
             )
-            lines.append(f"{source} ..> {target_alias} : jsx_render")
+            lines.append(
+                f"{source} ..> {target_alias} : jsx_render|occurrences="
+                f"{relation['occurrence_count']}"
+                f"|contexts={','.join(relation['contexts'])}"
+            )
         else:
             source = f"N_C_{relation['source_id'].split(':')[-1]}"
             target = f"N_C_{relation['target_component_id'].split(':')[-1]}"
-            lines.append(f"{source} ..> {target} : component_wrap")
+            lines.append(
+                f"{source} ..> {target} : component_wrap|occurrences={relation['occurrence_count']}"
+                f"|contexts={','.join(relation['contexts'])}"
+            )
     lines.append("@enduml")
     return ("\n".join(lines) + "\n").encode("utf-8")
 
@@ -1175,11 +2457,16 @@ def validate_plantuml_contract(
         "N_P project",
         "N_M module",
         "N_C component",
-        ".. prop/import/export member",
+        "<<export_binding>> export member",
+        "<<import_binding>> import member",
+        "<<prop>> prop member",
         "--> static_import|literal_dynamic_import",
         "..> jsx_render|component_wrap",
+        "facet=role:<value|type>|reexport=<true|false>|boundary=<none|server_to_client_entry>",
         "marker=client_entry|router_context=<context>|client_dependency|server_candidate|unknown",
         "marker=partial_safe",
+        "external=cloud-after-components-before-members",
+        "sort=kind-prefixed-id-utf8",
         "endlegend",
     ]
     prefix = [
@@ -1213,11 +2500,27 @@ def validate_plantuml_contract(
         assert lines[cursor] == f'rectangle "C:{expected_label}" as N_C_{suffix}'
         cursor += 1
 
-    external_targets = {
-        external_target_digest(relation["target"]): relation["target"]
-        for relation in model["relations"]
-        if relation.get("target") is not None and relation["target"]["kind"] != "internal"
-    }
+    for module in sorted(model["modules"], key=lambda item: item["id"]):
+        module_suffix = module["id"].split(":")[-1]
+        project = next(item for item in model["projects"] if item["id"] == module["project_id"])
+        project_suffix = project["id"].split(":")[-1]
+        assert lines[cursor] == f"N_P_{project_suffix} .. N_M_{module_suffix} : contains"
+        cursor += 1
+    for component in sorted(model["components"], key=lambda item: item["id"]):
+        component_suffix = component["id"].split(":")[-1]
+        module_suffix = component["module_id"].split(":")[-1]
+        assert lines[cursor] == f"N_M_{module_suffix} .. N_C_{component_suffix} : contains"
+        cursor += 1
+
+    external_targets: dict[str, dict[str, Any]] = {}
+    for member in model["members"]:
+        source = member.get("source")
+        if source is not None and source["kind"] != "internal":
+            external_targets[external_target_digest(source)] = source
+    for relation in model["relations"]:
+        target = relation.get("target")
+        if target is not None and target["kind"] != "internal":
+            external_targets[external_target_digest(target)] = target
     for target_digest in sorted(external_targets):
         target = external_targets[target_digest]
         label = f"external:{target['safe_specifier']}"
@@ -1234,11 +2537,31 @@ def validate_plantuml_contract(
         owner_prefix = "N_C" if member["kind"] == "prop" else "N_M"
         if member["kind"] == "prop":
             label = f"prop {escape_plantuml_label(member['name'])}"
+            stereotype = "prop"
+            facets = (
+                f"optional={str(member['optional']).lower()}|readonly={str(member['readonly']).lower()}"
+                f"|default={member['default_evidence']}"
+            )
         elif member["kind"] == "export_binding":
             label = f"export {escape_plantuml_label(member['exported_name'])}"
+            stereotype = "export_binding"
+            facets = f"role={member['role']}|reexport={str(member['reexport']).lower()}"
         else:
             label = f"import {escape_plantuml_label(member['imported_name'])}"
-        assert lines[cursor] == (f'{owner_prefix}_{suffix} .. "{label}" : {member["id"]}')
+            stereotype = "import_binding"
+            source = member["source"]
+            source_descriptor = source["kind"]
+            if source["kind"] == "internal":
+                source_descriptor += f"#{source['module_id']}"
+            else:
+                source_descriptor += f"#{source['safe_specifier']}"
+                if source.get("exported_name") is not None:
+                    source_descriptor += f"#{source['exported_name']}"
+            facets = f"role={member['role']}|source={source_descriptor}"
+        expected_member = (
+            f'{owner_prefix}_{suffix} .. "{label}" <<{stereotype}>> : {member["id"]}|{facets}'
+        )
+        assert lines[cursor] == expected_member
         cursor += 1
     for relation in sorted(model["relations"], key=lambda item: item["id"]):
         if relation["kind"] in {"static_import", "literal_dynamic_import"}:
@@ -1249,7 +2572,10 @@ def validate_plantuml_contract(
                 if target["kind"] == "internal"
                 else f"X_{external_target_digest(target)}"
             )
-            expected = f"{source} --> {target_alias} : {relation['kind']}"
+            expected = (
+                f"{source} --> {target_alias} : {relation['kind']}|role={relation['role']}"
+                f"|reexport={str(relation['reexport']).lower()}|boundary={relation['boundary_effect']}"
+            )
         elif relation["kind"] == "jsx_render":
             source = f"N_C_{relation['source_id'].split(':')[-1]}"
             target = relation["target"]
@@ -1258,11 +2584,16 @@ def validate_plantuml_contract(
                 if target["kind"] == "internal"
                 else f"X_{external_target_digest(target)}"
             )
-            expected = f"{source} ..> {target_alias} : jsx_render"
+            expected = (
+                f"{source} ..> {target_alias} : jsx_render|occurrences="
+                f"{relation['occurrence_count']}"
+                f"|contexts={','.join(relation['contexts'])}"
+            )
         else:
             expected = (
                 f"N_C_{relation['source_id'].split(':')[-1]} ..> "
                 f"N_C_{relation['target_component_id'].split(':')[-1]} : component_wrap"
+                f"|occurrences={relation['occurrence_count']}|contexts={','.join(relation['contexts'])}"
             )
         assert lines[cursor] == expected
         cursor += 1

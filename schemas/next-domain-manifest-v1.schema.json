@@ -43,8 +43,8 @@
     "domain_config_digest": {"$ref": "#/$defs/digest"},
     "run_fingerprint": {"$ref": "#/$defs/digest"},
     "source": {"$ref": "#/$defs/source"},
-    "request": {"$ref": "#/$defs/request"},
-    "config": {"$ref": "#/$defs/config"},
+    "request": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/snapshot_request"},
+    "config": {"$ref": "urn:code-structure-viz:schema:next-config-v1"},
     "projects": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/project"}},
     "targets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
     "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},
@@ -65,9 +65,37 @@
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"},
     "source": {"type": "object", "additionalProperties": false, "required": ["schema", "kind", "head_commit", "fingerprint", "file_count"], "properties": {"schema": {"const": "code-structure-viz.source-view/v1"}, "kind": {"enum": ["working-tree", "commit"]}, "head_commit": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{40,64}$"}, {"type": "null"}]}, "fingerprint": {"$ref": "#/$defs/digest"}, "file_count": {"type": "integer", "minimum": 0}}},
-    "request": {"type": "object", "additionalProperties": false, "required": ["projects", "targets", "upstream_depth", "downstream_depth", "formats"], "properties": {"projects": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/path"}}, "targets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64}, "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64}, "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}}}},
-    "config": {"type": "object", "additionalProperties": false, "required": ["schema", "sha256", "projects", "limits", "trusted_environment_digest"], "properties": {"schema": {"const": "code-structure-viz.domain-config/next/v1"}, "sha256": {"$ref": "#/$defs/digest"}, "projects": {"type": "array", "minItems": 1, "items": {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/project"}}, "limits": {"$ref": "urn:code-structure-viz:schema:next-limits-v1"}, "trusted_environment_digest": {"$ref": "#/$defs/digest"}}},
     "budget": {"type": "object", "additionalProperties": false, "required": ["name", "requested", "resolved", "actual", "source"], "properties": {"name": {"const": "max_entities"}, "requested": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 100000}, {"type": "null"}]}, "resolved": {"type": "integer", "minimum": 1, "maximum": 100000}, "actual": {"oneOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]}, "source": {"enum": ["builtin", "repository", "explicit", "cli"]}}},
-    "toolchain": {"type": "object", "additionalProperties": false, "required": ["node_version", "typescript_version", "adapter_version", "protocol"], "properties": {"node_version": {"type": "string", "pattern": "^(2[2-9]|[3-9][0-9])\\.[0-9]+\\.[0-9]+$"}, "typescript_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}, "adapter_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}, "protocol": {"const": "code-structure-viz.next-adapter/v1"}}}
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "node_version", "typescript_version", "adapter_version", "protocol"],
+      "properties": {
+        "node": {"$ref": "#/$defs/node_provenance"},
+        "node_version": {"anyOf": [{"type": "string", "pattern": "^(2[2-9]|[3-9][0-9])\\.[0-9]+\\.[0-9]+$"}, {"type": "null"}]},
+        "typescript_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "adapter_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "protocol": {"const": "code-structure-viz.next-adapter/v1"}
+      }
+    },
+    "node_provenance": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["status", "version", "failure_kind"],
+          "properties": {"status": {"const": "not_applicable"}, "version": {"const": null}, "failure_kind": {"const": null}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["status", "version", "failure_kind"],
+          "properties": {"status": {"const": "available"}, "version": {"type": "string", "pattern": "^(2[2-9]|[3-9][0-9])\\.[0-9]+\\.[0-9]+$"}, "failure_kind": {"const": null}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["status", "version", "failure_kind"],
+          "properties": {"status": {"const": "unavailable"}, "version": {"const": null}, "failure_kind": {"enum": ["missing", "unsupported_version", "spawn_failed", "timeout", "process_failed"]}}
+        }
+      ]
+    }
   }
 }

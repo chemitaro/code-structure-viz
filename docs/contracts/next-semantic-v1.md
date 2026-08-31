@@ -100,3 +100,106 @@ manifest SHA-256 over the descriptor without its `sha256` field. A target
 declaration, augmentation, or path redirect for one of those namespaces is a
 trust failure; target paths are also compared after NFC normalization against
 the trusted virtual paths.
+
+## Exact identity preimages
+
+An ID is `next:<kind>:<sha256>`, where the hash is over the following closed
+preimage, not over serialized source text or collection position:
+
+```text
+{kind, version: 1, identity: <tuple below>}
+```
+
+| record kind | identity fields |
+| --- | --- |
+| Project | `root` |
+| File | `project_id, path` |
+| Module | `project_id, path` |
+| Component | `module_id, declaration_key` |
+| ExportBinding | `owner_id, exported_name, role` |
+| ImportBinding | `owner_id, imported_name, role, source` |
+| Prop | `owner_id, name` |
+| static/dynamic relation | `kind, source_id, target, role, reexport, boundary_effect` |
+| JSX relation | `kind, source_id, target` |
+| wrapper relation | `kind, source_id, target_component_id` |
+| Fact | `kind, owner_id, value` |
+
+`range`, source spelling, local aliases, occurrence counts, type payload,
+optional/default evidence, and ordering are not identity. Python recomputes
+every ID and rejects a stale ID after any identity-field mutation. A request
+project/file projection is compared to the response model exactly: compiler
+options, role tuple, effective role, byte size, and SHA-256 are all included;
+only private `content_base64` is omitted from the public model projection.
+
+## Role, relation, and fact invariants
+
+The canonical role-array order is `control`, `context`, `program`; effective
+precedence is a separate `control > context > program` mapping. All eight
+non-empty role subsets are valid only with the matching effective role.
+
+`static_import` and `literal_dynamic_import` are independent discriminated
+branches. A literal dynamic import is always `role=value`,
+`reexport=false`, and `boundary_effect=none`. The only boundary effect is
+`server_to_client_entry` on an internal static value edge whose source is a
+`server_candidate` and whose target is a `client_entry`; no duplicate boundary
+edge is emitted. Every Module's `client_entry` and `router_context` attributes
+have an exact Fact-record mirror, with one owner per Fact kind/value.
+
+## PropsTypeIR canonical semantics
+
+The recursive validator applies the same rules as the schema: same-kind union
+or intersection nesting is rejected (the adapter must flatten first), members
+and object properties/signatures are canonical sorted and deduplicated, tuple
+and function rest parameters are final and non-optional, and type parameters
+use a zero-based ordinal scoped to their declaring signature. Repository
+references require an existing Module ID; external references use a safe
+package specifier; trusted references are limited to the certified profile.
+
+The limits are hard boundaries: depth 16, 512 TypeIR nodes per prop, 64 union
+members, 64 intersection members, 256 direct properties, 256 total nested
+properties, and 16 signatures per Component. Boundary vectors cover both the
+accepted limit and the first rejected value. Over-limit local type subtrees
+become `opaque` with a catalog reason; they are not silently truncated.
+
+## Independently proven partial-safe output
+
+The adapter response includes all discovered records, typed taints, failure
+roots, causal edges, target witnesses, and the published/excluded/failed
+decomposition. Python derives the taint fixed point from the roots and the
+closed rule/ownership table; adapter-provided `taints` and counts are not
+trusted. Disconnected causal edges, illegal source/target kinds, vacuous
+roots, missing/excess taints, overlaps, and stale target witnesses are
+rejected.
+
+Coverage is recomputed from that proof. `affected_ids` is the sorted taint
+closure; `taint_frontier` is the sorted untainted internal reference frontier;
+`failed_files` is the sorted failed file/path-reason projection;
+`opaque_reason_counts` is recursively derived from every Prop TypeIR;
+`unknown_relation_count` counts unresolved relation targets;
+`correlation_losses`, non-component value exports, and type-only exports are
+closed, sorted projections with owner/reference checks. A `partial_safe`
+semantic and PlantUML pair must use the same validated subset.
+
+## Diagnostics, config, and status cross-checks
+
+Compact semantic diagnostics are catalog projections keyed by code. Their
+severity, recoverability, outcome, count, and path/symbol permission must
+match `schemas/next-diagnostic-catalog-v1.json`; the fixed public message and
+domain are supplied by the public diagnostic projection. Complete snapshots
+may contain only `complete` diagnostics, while partial snapshots may contain
+only `partial_safe` diagnostics. Unknown codes, severity/ref/status mutations,
+and the historical FLOW fixture's wrong path reference are rejected.
+
+`ResolvedNextConfig` and `NextSnapshotRequest` are defined in
+`docs/contracts/next-config-v1.md`. The domain manifest and root manifest
+carry exact projections, recomputed project/config/source-plan/run digests,
+limits, budget, artifacts, and diagnostics. Node provenance is a closed union:
+`not_applicable` has no version, `available` has a Node version >=22, and
+`unavailable` has a null version plus a closed failure kind.
+
+The complete status vector ties the domain manifest, root run status/exit,
+run-summary, stdout result, published bytes, artifact SHA/size, and stderr
+diagnostics. Complete and `partial_safe` selectors return the exact published
+bytes; `not_applicable` and `payload_unavailable` return only a typed
+unavailable result. Fatal and interrupt runs have no manifest and cannot be
+reinterpreted as a domain result.
