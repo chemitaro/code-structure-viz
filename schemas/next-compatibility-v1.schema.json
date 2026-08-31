@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-compatibility-v1",
+  "title": "CodeStructureViz Next semantic compatibility descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "semantic_schema", "identity_versions", "algorithm_versions", "semantic_profile_id", "compatibility_id"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-semantic-compatibility/v1"},
+    "semantic_schema": {"const": "code-structure-viz.semantic/v1"},
+    "identity_versions": {"$ref": "#/$defs/identity_versions"},
+    "algorithm_versions": {"$ref": "#/$defs/algorithm_versions"},
+    "semantic_profile_id": {"type": "string", "pattern": "^next-trusted-profile-v[0-9]+$"},
+    "compatibility_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "identity_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "component", "member", "relation", "fact", "props_ir"],
+      "properties": {"module": {"const": 1}, "component": {"const": 1}, "member": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "props_ir": {"const": 1}}
+    },
+    "algorithm_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recognition", "export", "props", "relation", "fact", "boundary"],
+      "properties": {"recognition": {"const": 1}, "export": {"const": 1}, "props": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "boundary": {"const": 1}}
+    }
+  }
+}

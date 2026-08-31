@@ -11,10 +11,10 @@
     "semantic_profile_id": {"type": "string", "pattern": "^next-trusted-profile-v[0-9]+$"},
     "typescript_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "license_inventory_digest": {"$ref": "#/$defs/digest"},
-    "files": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/file"}},
-    "reserved_module_specifiers": {"type": "array", "uniqueItems": true, "items": {"enum": ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "next/dynamic"]}},
-    "reserved_global_names": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "certified_symbols": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/symbol"}},
+    "files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/file"}},
+    "reserved_module_specifiers": {"type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": {"enum": ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "next/dynamic"]}},
+    "reserved_global_names": {"type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": {"enum": ["Array", "JSX", "ReadonlyArray"]}},
+    "certified_symbols": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/symbol"}},
     "sha256": {"$ref": "#/$defs/digest"}
   },
   "$defs": {
@@ -22,18 +22,22 @@
     "file": {
       "type": "object", "additionalProperties": false,
       "required": ["virtual_path", "sha256", "license_id"],
-      "properties": {"virtual_path": {"type": "string", "pattern": "^/\\.code-structure-viz/trusted/v1/.+\\.d\\.ts$"}, "sha256": {"$ref": "#/$defs/digest"}, "license_id": {"type": "string", "minLength": 1}}
+      "properties": {"virtual_path": {"type": "string", "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)/\\.code-structure-viz/trusted/v1/[A-Za-z0-9._/-]+\\.d\\.ts$"}, "sha256": {"$ref": "#/$defs/digest"}, "license_id": {"type": "string", "minLength": 1}}
     },
     "symbol": {
       "type": "object", "additionalProperties": false,
       "required": ["source_kind", "source_name", "export_path", "declaration_sha256", "symbol_kind", "signature_digest"],
       "properties": {
         "source_kind": {"enum": ["module", "global"]}, "source_name": {"type": "string", "minLength": 1},
-        "export_path": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "export_path": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"}},
         "declaration_sha256": {"$ref": "#/$defs/digest"},
         "symbol_kind": {"enum": ["function", "class", "interface", "namespace", "method", "type"]},
         "signature_digest": {"$ref": "#/$defs/digest"}
-      }
+      },
+      "oneOf": [
+        {"properties": {"source_kind": {"const": "module"}, "source_name": {"enum": ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "next/dynamic"]}}},
+        {"properties": {"source_kind": {"const": "global"}, "source_name": {"enum": ["Array", "JSX", "ReadonlyArray"]}}}
+      ]
     }
   }
 }

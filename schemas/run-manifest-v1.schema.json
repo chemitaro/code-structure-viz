@@ -340,6 +340,47 @@
           "command": {
             "properties": {
               "name": {"const": "snapshot"},
+              "domain": {"const": "next"}
+            }
+          }
+        }
+      },
+      "then": {
+        "required": ["source"],
+        "properties": {
+          "request": {
+            "required": ["projects", "formats"],
+            "properties": {
+              "projects": {"type": "array", "minItems": 1, "maxItems": 1000},
+              "formats": {"type": "array", "minItems": 1, "maxItems": 2}
+            }
+          },
+          "config": {
+            "properties": {
+              "resolved": {"$ref": "#/$defs/next_resolved"},
+              "value_sources": {"$ref": "#/$defs/next_value_sources"}
+            }
+          },
+          "domains": {
+            "prefixItems": [{"$ref": "urn:code-structure-viz:schema:next-domain-manifest-v1"}]
+          },
+          "artifacts": {
+            "items": {
+              "properties": {
+                "path": {"enum": ["next.snapshot.semantic.json", "next.snapshot.puml"]},
+                "domain": {"const": "next"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "name": {"const": "snapshot"},
               "domain": {"const": "sqlalchemy"}
             }
           }
@@ -570,6 +611,8 @@
       "additionalProperties": false,
       "properties": {
         "targets": {"type": "array", "items": {"$ref": "#/$defs/target"}},
+        "projects": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"type": "string", "minLength": 1}},
+        "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},
         "from": {"type": ["string", "null"], "minLength": 1},
         "to": {"type": ["string", "null"], "minLength": 1},
         "pr_target": {"type": ["string", "null"], "minLength": 1},
@@ -857,6 +900,17 @@
         "comparison": {"$ref": "#/$defs/resolved_comparison"}
       }
     },
+    "next_resolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["next", "traversal", "limits"],
+      "properties": {
+        "next": {"type": "object", "additionalProperties": false, "required": ["projects", "targets", "formats", "trusted_environment_digest"], "properties": {"projects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "targets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}}, "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
+        "traversal": {"$ref": "#/$defs/resolved_traversal"},
+        "limits": {"$ref": "urn:code-structure-viz:schema:next-limits-v1"},
+        "comparison": {"$ref": "#/$defs/resolved_comparison"}
+      }
+    },
     "value_sources": {
       "type": "object",
       "additionalProperties": false,
@@ -877,6 +931,20 @@
         "max_entities": {"enum": ["builtin", "repository", "explicit", "cli"]}
       }
     },
+    "next_value_sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["next_projects", "next_targets", "formats", "upstream_depth", "downstream_depth", "limits", "trusted_environment"],
+      "properties": {
+        "next_projects": {"enum": ["builtin", "repository", "explicit", "cli"]},
+        "next_targets": {"enum": ["builtin", "repository", "explicit", "cli"]},
+        "formats": {"enum": ["builtin", "repository", "explicit", "cli"]},
+        "upstream_depth": {"enum": ["builtin", "repository", "explicit", "cli"]},
+        "downstream_depth": {"enum": ["builtin", "repository", "explicit", "cli"]},
+        "limits": {"enum": ["builtin", "repository", "explicit", "cli"]},
+        "trusted_environment": {"enum": ["builtin", "repository", "explicit", "cli"]}
+      }
+    },
     "config": {
       "type": "object",
       "additionalProperties": false,
@@ -885,8 +953,8 @@
         "schema": {"const": "code-structure-viz.config/v1"},
         "source": {"enum": ["builtin", "repository", "explicit"]},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "resolved": {"$ref": "#/$defs/resolved"},
-        "value_sources": {"$ref": "#/$defs/value_sources"}
+        "resolved": {"oneOf": [{"$ref": "#/$defs/resolved"}, {"$ref": "#/$defs/next_resolved"}]},
+        "value_sources": {"oneOf": [{"$ref": "#/$defs/value_sources"}, {"$ref": "#/$defs/next_value_sources"}]}
       }
     },
     "run": {
@@ -1242,6 +1310,32 @@
             "CSV-SA-011",
             "CSV-SA-012",
             "CSV-SA-013",
+            "CSV-NEXT-APPLICABILITY-001",
+            "CSV-NEXT-CONFIG-001",
+            "CSV-NEXT-CONFIG-002",
+            "CSV-NEXT-EXPORT-001",
+            "CSV-NEXT-FLOW-001",
+            "CSV-NEXT-IDENTITY-001",
+            "CSV-NEXT-LIMIT-001",
+            "CSV-NEXT-LIMIT-002",
+            "CSV-NEXT-LIMIT-003",
+            "CSV-NEXT-LIMIT-004",
+            "CSV-NEXT-LIMIT-005",
+            "CSV-NEXT-NODE-001",
+            "CSV-NEXT-NODE-002",
+            "CSV-NEXT-NODE-003",
+            "CSV-NEXT-NODE-004",
+            "CSV-NEXT-PROJECT-001",
+            "CSV-NEXT-PROJECT-002",
+            "CSV-NEXT-PROTOCOL-001",
+            "CSV-NEXT-SOURCE-001",
+            "CSV-NEXT-SOURCE-002",
+            "CSV-NEXT-TARGET-001",
+            "CSV-NEXT-TRUST-001",
+            "CSV-NEXT-TRUST-002",
+            "CSV-NEXT-TRUST-003",
+            "CSV-NEXT-TYPE-001",
+            "CSV-NEXT-UNSUPPORTED-001",
             "CSV-DIFF-001",
             "CSV-DIFF-002",
             "CSV-DIFF-003",

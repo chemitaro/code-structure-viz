@@ -42,11 +42,14 @@ def _schema(name: str) -> dict[str, object]:
 
 def _validator(name: str) -> Draft202012Validator:
     resources = {
+        "next-compatibility-v1",
         "diagnostic-v1",
         "next-adapter-request-v1",
         "next-adapter-response-v1",
         "next-domain-manifest-v1",
+        "next-limits-v1",
         "next-semantic-v1",
+        "next-trusted-type-environment-v1",
     }
     registry = Registry()
     for resource_name in resources:
@@ -61,11 +64,13 @@ def _validator(name: str) -> Draft202012Validator:
     "name",
     [
         "diagnostic-v1.schema.json",
+        "next-compatibility-v1.schema.json",
         "file-change-set-v1.schema.json",
         "next-adapter-request-v1.schema.json",
         "next-adapter-response-v1.schema.json",
         "next-config-v1.schema.json",
         "next-domain-manifest-v1.schema.json",
+        "next-limits-v1.schema.json",
         "next-runtime-manifest-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
@@ -95,11 +100,18 @@ def test_next_diagnostic_catalog_is_unique_and_closed() -> None:
         "CSV-NEXT-LIMIT-004",
         "CSV-NEXT-LIMIT-005",
     } <= set(codes)
-    assert all(set(entry) == {"code", "severity", "recoverable", "message"} for entry in entries)
+    assert all(
+        set(entry) == {"code", "severity", "recoverable", "message", "ref_permission", "outcome"}
+        for entry in entries
+    )
+    assert all(
+        entry["ref_permission"] in {"none", "path", "symbol", "path_or_symbol"} for entry in entries
+    )
 
 
 def _next_limits() -> dict[str, int]:
     return {
+        "max_entities": 500,
         "max_files": 20000,
         "max_file_bytes": 4194304,
         "max_decoded_bytes": 67108864,
@@ -113,12 +125,32 @@ def _next_limits() -> dict[str, int]:
         "max_stderr_bytes": 65536,
         "timeout_seconds": 60,
         "v8_old_space_mib": 512,
+        "max_type_depth": 16,
+        "max_type_nodes_per_prop": 512,
+        "max_union_members": 64,
+        "max_intersection_members": 64,
+        "max_nested_properties": 256,
+        "max_signatures_per_component": 16,
+        "max_flow_visits": 10000,
+        "max_alias_edges": 64,
     }
 
 
 def _next_coverage() -> dict[str, object]:
     return {
-        "counts": {},
+        "counts": {
+            "projects": 0,
+            "files": 0,
+            "modules": 0,
+            "components": 0,
+            "members": 0,
+            "relations": 0,
+            "facts": 0,
+            "discovered": 0,
+            "published": 0,
+            "excluded": 0,
+            "failed": 0,
+        },
         "failed_files": [],
         "affected_ids": [],
         "taint_frontier": [],
@@ -128,6 +160,87 @@ def _next_coverage() -> dict[str, object]:
         "non_component_value_export_count": 0,
         "type_only_export_count": 0,
         "target_completeness": [],
+    }
+
+
+def _next_compatibility_descriptor() -> dict[str, object]:
+    return {
+        "schema": "code-structure-viz.next-semantic-compatibility/v1",
+        "semantic_schema": "code-structure-viz.semantic/v1",
+        "identity_versions": {
+            "module": 1,
+            "component": 1,
+            "member": 1,
+            "relation": 1,
+            "fact": 1,
+            "props_ir": 1,
+        },
+        "algorithm_versions": {
+            "recognition": 1,
+            "export": 1,
+            "props": 1,
+            "relation": 1,
+            "fact": 1,
+            "boundary": 1,
+        },
+        "semantic_profile_id": "next-trusted-profile-v1",
+        "compatibility_id": "a" * 64,
+    }
+
+
+def _next_project() -> dict[str, object]:
+    return {
+        "kind": "project",
+        "id": "next:project:" + "1" * 64,
+        "root": ".",
+        "source_roots": ["src"],
+        "config_path": "tsconfig.json",
+        "config_digest": "2" * 64,
+        "compiler_options": {
+            "allow_js": False,
+            "check_js": False,
+            "jsx": "preserve",
+            "module": "esnext",
+            "module_resolution": "bundler",
+            "base_url": None,
+            "paths": {},
+        },
+        "file_ids": [],
+    }
+
+
+def _next_trusted_environment() -> dict[str, object]:
+    return {
+        "schema": "code-structure-viz.next-trusted-types/v1",
+        "environment_version": "1",
+        "semantic_profile_id": "next-trusted-profile-v1",
+        "typescript_version": "5.9.2",
+        "license_inventory_digest": "3" * 64,
+        "files": [
+            {
+                "virtual_path": "/.code-structure-viz/trusted/v1/lib.d.ts",
+                "sha256": "5" * 64,
+                "license_id": "typescript",
+            }
+        ],
+        "reserved_module_specifiers": [
+            "react",
+            "react/jsx-runtime",
+            "react/jsx-dev-runtime",
+            "next/dynamic",
+        ],
+        "reserved_global_names": ["Array", "JSX", "ReadonlyArray"],
+        "certified_symbols": [
+            {
+                "source_kind": "module",
+                "source_name": "react",
+                "export_path": ["memo"],
+                "declaration_sha256": "5" * 64,
+                "symbol_kind": "function",
+                "signature_digest": "6" * 64,
+            }
+        ],
+        "sha256": "7" * 64,
     }
 
 
@@ -147,6 +260,7 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
         "document_kind": "snapshot",
         "status": "complete",
         "semantic_compatibility_id": "a" * 64,
+        "compatibility_descriptor": _next_compatibility_descriptor(),
         "identity_versions": identity_versions,
         "source": {
             "schema": "code-structure-viz.source-view/v1",
@@ -160,12 +274,16 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
             "targets": [],
             "upstream_depth": 1,
             "downstream_depth": 1,
+            "formats": ["semantic-json"],
+            "limits": _next_limits(),
             "source_plan_digest": "c" * 64,
             "domain_config_digest": "d" * 64,
             "run_fingerprint": "e" * 64,
             "trusted_environment_digest": "f" * 64,
         },
         "coverage": _next_coverage(),
+        "projects": [_next_project()],
+        "files": [],
         "entities": [],
         "members": [],
         "relations": [],
@@ -183,25 +301,49 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
         "payload_available": True,
         "entity_count": 0,
         "semantic_compatibility_id": "a" * 64,
+        "compatibility_descriptor": _next_compatibility_descriptor(),
         "identity_versions": identity_versions,
+        "budget": {
+            "name": "max_entities",
+            "requested": None,
+            "resolved": 500,
+            "actual": 0,
+            "source": "builtin",
+        },
         "source_plan_digest": "c" * 64,
         "domain_config_digest": "d" * 64,
         "run_fingerprint": "e" * 64,
-        "projects": [{"root": ".", "config_path": None, "config_digest": "0" * 64}],
+        "source": {
+            "schema": "code-structure-viz.source-view/v1",
+            "kind": "working-tree",
+            "head_commit": None,
+            "fingerprint": "b" * 64,
+            "file_count": 0,
+        },
+        "request": {
+            "projects": ["."],
+            "targets": [],
+            "upstream_depth": 1,
+            "downstream_depth": 1,
+            "formats": ["semantic-json"],
+        },
+        "config": {
+            "schema": "code-structure-viz.domain-config/next/v1",
+            "sha256": "8" * 64,
+            "projects": [_next_project()],
+            "limits": _next_limits(),
+            "trusted_environment_digest": "7" * 64,
+        },
+        "projects": [_next_project()],
         "targets": [],
+        "formats": ["semantic-json"],
         "toolchain": {
-            "node_version": "20.19.5",
+            "node_version": "22.14.0",
             "typescript_version": "5.9.2",
             "adapter_version": "1.0.0",
             "protocol": "code-structure-viz.next-adapter/v1",
         },
-        "trusted_environment": {
-            "schema": "code-structure-viz.next-trusted-types/v1",
-            "version": "1",
-            "semantic_profile_id": "next-types-v1",
-            "sha256": "f" * 64,
-            "license_inventory_digest": "1" * 64,
-        },
+        "trusted_environment": _next_trusted_environment(),
         "limits": _next_limits(),
         "coverage": _next_coverage(),
         "artifact_paths": ["next.snapshot.semantic.json"],
@@ -375,6 +517,8 @@ def test_semantic_schema_accepts_zero_class_vector_and_rejects_shape_mutations()
         validator.validate({**value, "status": "incomplete"})
     with pytest.raises(ValidationError):
         validator.validate({**value, "entities": None})
+    with pytest.raises(ValidationError):
+        validator.validate({**value, "coverage": {"unexpected": 1}})
 
 
 def _sqlalchemy_semantic_vector() -> dict[str, Any]:

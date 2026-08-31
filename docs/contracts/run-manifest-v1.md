@@ -40,6 +40,33 @@ selected entity、unknown declaration、frontier、redaction rule/countのclosed
 run fingerprint preimageは変更しない。SQLAlchemy diffは同じroot contractで
 `sqlalchemy-ast/1`と `code-structure-viz.plantuml/sqlalchemy/v2` を選択する。
 
+## Next snapshot branch (Issue #8 pre-implementation)
+
+The public `run-manifest/v1` registry has a complete Next snapshot branch. A
+`command.name=snapshot` and `command.domain=next` manifest must contain
+`request.projects/targets/formats`, a Next `config` projection, immutable
+`source`, the resolved canonical `limits` record, `budget`, Next toolchain and
+trusted-environment provenance, coverage, diagnostics, and only the two Next
+snapshot artifact paths. `formats` is the ordered requested set and must equal
+the domain artifact projection; `semantic-json` maps to
+`next.snapshot.semantic.json` and `plantuml` to `next.snapshot.puml`.
+
+The exact status matrix is closed:
+
+| status | payload | entity count | artifacts | exit |
+| --- | --- | --- | --- | --- |
+| `complete` | available | integer | requested Next artifacts | 0 |
+| `not_applicable` | unavailable | `0` | none; one applicability diagnostic | 0 |
+| `incomplete/partial_safe` | available | integer | same safe subset in both requested formats | 3 |
+| `incomplete/payload_unavailable` | unavailable | `null` | none; typed diagnostic(s) | 3 |
+
+`limits` is the exact `code-structure-viz.next-limits/v1` object referenced by
+the adapter request, resolved config, fingerprint descriptor, and domain
+manifest. The fixed type/signature/flow fields are part of the preimage, not
+free-form comments. Current CLI rejection of `--domain next` remains the
+explicit production boundary until Issue #8 implementation; these schema
+vectors are not runtime support claims.
+
 ## Diff run
 
 `diff` は同じ `run-manifest/v1` root を使うが、snapshot の `source`/`request` shape を流用せず、

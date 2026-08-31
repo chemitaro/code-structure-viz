@@ -69,17 +69,45 @@
         "CSV-SA-011",
         "CSV-SA-012",
         "CSV-SA-013",
+        "CSV-NEXT-APPLICABILITY-001",
+        "CSV-NEXT-CONFIG-001",
+        "CSV-NEXT-CONFIG-002",
+        "CSV-NEXT-EXPORT-001",
+        "CSV-NEXT-FLOW-001",
+        "CSV-NEXT-IDENTITY-001",
+        "CSV-NEXT-LIMIT-001",
+        "CSV-NEXT-LIMIT-002",
+        "CSV-NEXT-LIMIT-003",
+        "CSV-NEXT-LIMIT-004",
+        "CSV-NEXT-LIMIT-005",
+        "CSV-NEXT-NODE-001",
+        "CSV-NEXT-NODE-002",
+        "CSV-NEXT-NODE-003",
+        "CSV-NEXT-NODE-004",
+        "CSV-NEXT-PROJECT-001",
+        "CSV-NEXT-PROJECT-002",
+        "CSV-NEXT-PROTOCOL-001",
+        "CSV-NEXT-SOURCE-001",
+        "CSV-NEXT-SOURCE-002",
+        "CSV-NEXT-TARGET-001",
+        "CSV-NEXT-TRUST-001",
+        "CSV-NEXT-TRUST-002",
+        "CSV-NEXT-TRUST-003",
+        "CSV-NEXT-TYPE-001",
+        "CSV-NEXT-UNSUPPORTED-001",
         "CSV-INTERNAL-001",
         "CSV-INTERRUPT-001"
       ]
     },
     "severity": {"enum": ["error", "warning", "info"]},
-    "domain": {"enum": ["python", "sqlalchemy", null]},
+    "domain": {"enum": ["python", "sqlalchemy", "next", null]},
     "path": {"type": ["string", "null"], "minLength": 1},
     "symbol": {"type": ["string", "null"], "minLength": 1},
     "line": {"type": ["integer", "null"], "minimum": 1},
     "recoverable": {"type": "boolean"},
-    "message": {"type": "string", "minLength": 1}
+    "message": {"type": "string", "minLength": 1},
+    "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
+    "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
   },
   "allOf": [
     {
@@ -427,6 +455,162 @@
         },
         {
           "properties": {
+            "code": {"const": "CSV-NEXT-APPLICABILITY-001"},
+            "message": {"const": "Next.js is not directly declared by the selected project."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-CONFIG-001"},
+            "message": {"const": "The Next.js configuration is invalid or unsupported."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-CONFIG-002"},
+            "message": {"const": "The Next.js configuration requests external or executable type resolution."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-EXPORT-001"},
+            "message": {"const": "A component export cannot be resolved uniquely."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-FLOW-001"},
+            "message": {"const": "Component output-flow analysis reached its configured limit."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-IDENTITY-001"},
+            "message": {"const": "Canonical Next.js semantic identities collide."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-LIMIT-001"},
+            "message": {"const": "A source transport limit was exceeded."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-LIMIT-002"},
+            "message": {"const": "The source file count or decoded source total exceeded its configured limit."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-LIMIT-003"},
+            "message": {"const": "Adapter output exceeded a configured byte limit."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-LIMIT-004"},
+            "message": {"const": "The adapter exceeded its V8 old-space limit."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-LIMIT-005"},
+            "message": {"const": "The semantic model or entity count exceeded its configured limit."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-NODE-001"},
+            "message": {"const": "A supported Node.js runtime is unavailable."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-NODE-002"},
+            "message": {"const": "The Next.js adapter process could not be started."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-NODE-003"},
+            "message": {"const": "The Next.js adapter process timed out."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-NODE-004"},
+            "message": {"const": "The Next.js adapter process failed."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-PROJECT-001"},
+            "message": {"const": "Selected Next.js project roots overlap."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-PROJECT-002"},
+            "message": {"const": "A source file belongs to more than one selected project."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-PROTOCOL-001"},
+            "message": {"const": "The Next.js adapter response violates the private protocol."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-SOURCE-001"},
+            "message": {"const": "A source file could not be analyzed safely."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-SOURCE-002"},
+            "message": {"const": "A selected Next.js source path is a symbolic link."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-TARGET-001"},
+            "message": {"const": "An explicit Next.js target cannot be resolved uniquely."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-TRUST-001"},
+            "message": {"const": "The trusted type environment digest does not match."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-TRUST-002"},
+            "message": {"const": "Target declarations shadow or augment the trusted type environment."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-TRUST-003"},
+            "message": {"const": "A target path collides with a trusted virtual path."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-TYPE-001"},
+            "message": {"const": "A props type subtree is represented as opaque."}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "CSV-NEXT-UNSUPPORTED-001"},
+            "message": {"const": "A runtime-dependent pattern is intentionally represented as unknown."}
+          }
+        },
+        {
+          "properties": {
             "code": {"const": "CSV-DIFF-001"},
             "message": {"const": "Comparison endpoint or implicit base could not be resolved safely."}
           }
@@ -493,6 +677,27 @@
                 "CSV-SA-011",
                 "CSV-SA-012",
                 "CSV-SA-013",
+                "CSV-NEXT-CONFIG-001",
+                "CSV-NEXT-CONFIG-002",
+                "CSV-NEXT-EXPORT-001",
+                "CSV-NEXT-IDENTITY-001",
+                "CSV-NEXT-LIMIT-001",
+                "CSV-NEXT-LIMIT-002",
+                "CSV-NEXT-LIMIT-003",
+                "CSV-NEXT-LIMIT-004",
+                "CSV-NEXT-LIMIT-005",
+                "CSV-NEXT-NODE-001",
+                "CSV-NEXT-NODE-002",
+                "CSV-NEXT-NODE-003",
+                "CSV-NEXT-NODE-004",
+                "CSV-NEXT-PROJECT-001",
+                "CSV-NEXT-PROJECT-002",
+                "CSV-NEXT-PROTOCOL-001",
+                "CSV-NEXT-SOURCE-002",
+                "CSV-NEXT-TARGET-001",
+                "CSV-NEXT-TRUST-001",
+                "CSV-NEXT-TRUST-002",
+                "CSV-NEXT-TRUST-003",
                 "CSV-INTERNAL-001"
               ]
             },
@@ -516,7 +721,8 @@
                 "CSV-SA-004",
                 "CSV-SA-005",
                 "CSV-SA-007",
-                "CSV-SA-008"
+                "CSV-SA-008",
+                "CSV-NEXT-SOURCE-001"
               ]
             },
             "severity": {"const": "error"},
@@ -532,7 +738,9 @@
                 "CSV-PY-013",
                 "CSV-SA-006",
                 "CSV-SA-009",
-                "CSV-SA-010"
+                "CSV-SA-010",
+                "CSV-NEXT-FLOW-001",
+                "CSV-NEXT-TYPE-001"
               ]
             },
             "severity": {"const": "warning"},
@@ -541,7 +749,7 @@
         },
         {
           "properties": {
-            "code": {"const": "CSV-PY-009"},
+            "code": {"enum": ["CSV-PY-009", "CSV-NEXT-APPLICABILITY-001", "CSV-NEXT-UNSUPPORTED-001"]},
             "severity": {"const": "info"},
             "recoverable": {"const": true}
           }
@@ -743,8 +951,109 @@
             "symbol": {"type": "null"},
             "line": {"type": "null"}
           }
+        },
+        {
+          "required": ["code", "domain", "line", "outcome", "ref_permission"],
+          "properties": {
+            "code": {
+              "enum": [
+                "CSV-NEXT-APPLICABILITY-001", "CSV-NEXT-CONFIG-001", "CSV-NEXT-CONFIG-002",
+                "CSV-NEXT-EXPORT-001", "CSV-NEXT-FLOW-001", "CSV-NEXT-IDENTITY-001",
+                "CSV-NEXT-LIMIT-001", "CSV-NEXT-LIMIT-002", "CSV-NEXT-LIMIT-003", "CSV-NEXT-LIMIT-004",
+                "CSV-NEXT-LIMIT-005", "CSV-NEXT-NODE-001", "CSV-NEXT-NODE-002", "CSV-NEXT-NODE-003",
+                "CSV-NEXT-NODE-004", "CSV-NEXT-PROJECT-001", "CSV-NEXT-PROJECT-002", "CSV-NEXT-PROTOCOL-001",
+                "CSV-NEXT-SOURCE-001", "CSV-NEXT-SOURCE-002", "CSV-NEXT-TARGET-001", "CSV-NEXT-TRUST-001",
+                "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003", "CSV-NEXT-TYPE-001", "CSV-NEXT-UNSUPPORTED-001"
+              ]
+            },
+            "domain": {"const": "next"},
+            "line": {"type": "null"},
+            "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
+            "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
+          }
         }
       ]
+    },
+    {
+      "if": {"properties": {"domain": {"const": "next"}}},
+      "then": {
+        "oneOf": [
+          {
+            "properties": {
+              "code": {"const": "CSV-NEXT-APPLICABILITY-001"},
+              "severity": {"const": "info"}, "recoverable": {"const": true},
+              "outcome": {"const": "not_applicable"}, "ref_permission": {"const": "none"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"const": "CSV-NEXT-UNSUPPORTED-001"},
+              "severity": {"const": "info"}, "recoverable": {"const": true},
+              "outcome": {"const": "complete"}, "ref_permission": {"const": "symbol"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"enum": ["CSV-NEXT-CONFIG-001", "CSV-NEXT-CONFIG-002", "CSV-NEXT-IDENTITY-001", "CSV-NEXT-LIMIT-001", "CSV-NEXT-LIMIT-002", "CSV-NEXT-LIMIT-003", "CSV-NEXT-LIMIT-004", "CSV-NEXT-LIMIT-005", "CSV-NEXT-NODE-001", "CSV-NEXT-NODE-002", "CSV-NEXT-NODE-003", "CSV-NEXT-NODE-004", "CSV-NEXT-PROTOCOL-001", "CSV-NEXT-TRUST-001"]},
+              "severity": {"const": "error"}, "recoverable": {"const": false},
+              "outcome": {"const": "payload_unavailable"}, "ref_permission": {"const": "none"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"const": "CSV-NEXT-EXPORT-001"},
+              "severity": {"const": "error"}, "recoverable": {"const": false},
+              "outcome": {"const": "payload_unavailable"}, "ref_permission": {"const": "symbol"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"enum": ["CSV-NEXT-PROJECT-001", "CSV-NEXT-PROJECT-002", "CSV-NEXT-SOURCE-002", "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003"]},
+              "severity": {"const": "error"}, "recoverable": {"const": false},
+              "outcome": {"const": "payload_unavailable"}, "ref_permission": {"const": "path"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"const": "CSV-NEXT-TARGET-001"},
+              "severity": {"const": "error"}, "recoverable": {"const": false},
+              "outcome": {"const": "payload_unavailable"}, "ref_permission": {"const": "path_or_symbol"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"const": "CSV-NEXT-SOURCE-001"},
+              "severity": {"const": "error"}, "recoverable": {"const": true},
+              "outcome": {"const": "partial_safe"}, "ref_permission": {"const": "path"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"enum": ["CSV-NEXT-FLOW-001", "CSV-NEXT-TYPE-001"]},
+              "severity": {"const": "warning"}, "recoverable": {"const": true},
+              "outcome": {"const": "partial_safe"}, "ref_permission": {"const": "symbol"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {"properties": {"domain": {"const": "next"}}},
+      "then": {
+        "oneOf": [
+          {"required": ["ref_permission"], "properties": {"ref_permission": {"const": "none"}, "path": {"const": null}, "symbol": {"const": null}}},
+          {"required": ["ref_permission"], "properties": {"ref_permission": {"const": "path"}, "path": {"type": "string", "minLength": 1}, "symbol": {"const": null}}},
+          {"required": ["ref_permission"], "properties": {"ref_permission": {"const": "symbol"}, "path": {"const": null}, "symbol": {"type": "string", "minLength": 1}}},
+          {
+            "required": ["ref_permission"],
+            "properties": {"ref_permission": {"const": "path_or_symbol"}},
+            "oneOf": [
+              {"required": ["path"], "properties": {"path": {"type": "string", "minLength": 1}, "symbol": {"const": null}}},
+              {"required": ["symbol"], "properties": {"path": {"const": null}, "symbol": {"type": "string", "minLength": 1}}}
+            ]
+          }
+        ]
+      }
     }
   ]
 }

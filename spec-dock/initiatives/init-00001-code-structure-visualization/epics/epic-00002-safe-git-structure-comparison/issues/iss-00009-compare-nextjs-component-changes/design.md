@@ -138,6 +138,7 @@ ISSUE-02のendpoint/freeze/FileChangeSet/changed-path contractをconsumeし、IS
 - `BoundaryRolePropagation/v1`が導出する`client_dependency`、`server_candidate`、dual role、`boundary_effect`はcontextとして再計算する。derived role単独の変化をmatching keyやprimary seedにしない。
 - exact declaration identityが片側に存在しない場合だけ、rename evidence、structural fingerprint、unique candidateをすべて満たす候補をmovedとする。ExportBinding、route、range、order、diagnostic、derived roleはmoved evidenceに使わない。
 - 各sideは独立した`SourceAcquisitionPlan/v1`、`domain_config_projection("next")`/digest、TrustedTypeEnvironment digest、adapter/protocol/model versionを持つ。一方のcompiler/config/type environmentを他方へ適用しない。
+- 各sideの`semantic_compatibility_id`は、同梱された closed `next-semantic-compatibility/v1` descriptor の canonical preimage（semantic schema、identity versions、algorithm versions、semantic profile）からPython側で再計算した値と一致しなければならない。IDだけの自己申告、descriptor欠落、再計算不一致は`analysis_failed/incompatible_contract`として扱う。IDが一致する場合に限り、adapter patch、Node patch、content-only TrustedTypeEnvironment digest、source/config digestの差をside provenanceとして保持したうえで比較を許可する。
 - sideのsource acquisition、protocol、schema、config、TrustedTypeEnvironment、static analysisが失敗した場合はdiff payloadをunavailableとし、canonical empty-side、removed/added、movedを捏造しない。
 
 side compatibility matrix:

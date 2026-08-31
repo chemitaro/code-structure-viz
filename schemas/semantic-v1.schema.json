@@ -18,64 +18,25 @@
     "document_kind": {"enum": ["snapshot", "diff"]},
     "status": {"enum": ["complete", "incomplete", "not_applicable"]},
     "incomplete_kind": {"const": "partial_safe"},
-    "source": {"$ref": "#/$defs/source"},
-    "request": {"$ref": "#/$defs/request"},
-    "coverage": {
-      "oneOf": [
-        {"$ref": "#/$defs/coverage"},
-        {"$ref": "#/$defs/sqlalchemy_coverage"}
-      ]
-    },
-    "before": {"$ref": "#/$defs/diff_side"},
-    "after": {"$ref": "#/$defs/diff_side"},
-    "before_snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "after_snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "file_change_set": {"$ref": "#/$defs/file_change_set"},
-    "semantic_change_set": {
-      "oneOf": [
-        {"$ref": "#/$defs/semantic_change_set"},
-        {"$ref": "#/$defs/sqlalchemy_semantic_change_set"}
-      ]
-    },
-    "entities": {
-      "type": "array",
-      "items": {
-        "oneOf": [
-          {"$ref": "#/$defs/entity"},
-          {"$ref": "#/$defs/sqlalchemy_table"}
-        ]
-      }
-    },
-    "members": {
-      "type": "array",
-      "items": {
-        "oneOf": [
-          {"$ref": "#/$defs/member"},
-          {"$ref": "#/$defs/sqlalchemy_row"}
-        ]
-      }
-    },
-    "relations": {
-      "type": "array",
-      "items": {
-        "oneOf": [
-          {"$ref": "#/$defs/relation"},
-          {"$ref": "#/$defs/sqlalchemy_relation"}
-        ]
-      }
-    },
-    "facts": {"type": "array"},
-    "semantic_compatibility_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "identity_versions": {"type": "object"},
-    "diagnostics": {
-      "type": "array",
-      "items": {
-        "oneOf": [
-          {"$ref": "#/$defs/diagnostic"},
-          {"$ref": "#/$defs/sqlalchemy_diagnostic"}
-        ]
-      }
-    }
+    "source": {},
+    "request": {},
+    "coverage": {},
+    "before": {},
+    "after": {},
+    "before_snapshot_sha256": {},
+    "after_snapshot_sha256": {},
+    "file_change_set": {},
+    "semantic_change_set": {},
+    "entities": {},
+    "members": {},
+    "relations": {},
+    "facts": {},
+    "projects": {},
+    "files": {},
+    "semantic_compatibility_id": {},
+    "compatibility_descriptor": {},
+    "identity_versions": {},
+    "diagnostics": {}
   },
   "oneOf": [
     {
@@ -311,7 +272,76 @@
     },
     {"$ref": "urn:code-structure-viz:schema:next-semantic-v1"}
   ],
+  "allOf": [
+    {
+      "if": {"properties": {"domain": {"const": "next"}}},
+      "then": {},
+      "else": {
+        "properties": {
+          "source": {"$ref": "#/$defs/source"},
+          "request": {"$ref": "#/$defs/request"},
+          "coverage": {
+            "oneOf": [
+              {"$ref": "#/$defs/coverage"},
+              {"$ref": "#/$defs/sqlalchemy_coverage"}
+            ]
+          },
+          "before": {"$ref": "#/$defs/diff_side"},
+          "after": {"$ref": "#/$defs/diff_side"},
+          "before_snapshot_sha256": {"$ref": "#/$defs/semantic_digest"},
+          "after_snapshot_sha256": {"$ref": "#/$defs/semantic_digest"},
+          "file_change_set": {"$ref": "#/$defs/file_change_set"},
+          "semantic_change_set": {
+            "oneOf": [
+              {"$ref": "#/$defs/semantic_change_set"},
+              {"$ref": "#/$defs/sqlalchemy_semantic_change_set"}
+            ]
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {"$ref": "#/$defs/entity"},
+                {"$ref": "#/$defs/sqlalchemy_table"}
+              ]
+            }
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {"$ref": "#/$defs/member"},
+                {"$ref": "#/$defs/sqlalchemy_row"}
+              ]
+            }
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {"$ref": "#/$defs/relation"},
+                {"$ref": "#/$defs/sqlalchemy_relation"}
+              ]
+            }
+          },
+          "facts": {"type": "array"},
+          "semantic_compatibility_id": {"$ref": "#/$defs/semantic_digest"},
+          "identity_versions": {"type": "object"},
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {"$ref": "#/$defs/diagnostic"},
+                {"$ref": "#/$defs/sqlalchemy_diagnostic"}
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
+    "semantic_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "diff_side": {
       "type": "object",
       "additionalProperties": false,

@@ -72,11 +72,13 @@ CLI request -> safe source acquisition -> domain semantic analysis
 - targetless/path/component target/depth/missing/ambiguous/out-of-scopeをfixture化する。
 - not_applicable、complete empty、complete+diagnostic、partial_safe、payload_unavailable、usage/fatal/interrupt、entity/transport limits、stdout selectorをtable-drivenに固定する。
 - TrustedTypeEnvironment、private request/response、PropsTypeIR、PlantUML、diagnostic、wheel/sdist/offline、domain config/source projectionのpositive/negative fixturesを固定する。
+- production adapterを追加せず、`tests/contracts/next_reference_validation.py` のdata-only validator、`tests/contracts/test_next_contracts.py` のmutation/golden vectors、`tests/fixtures/next_contract_vectors.json` のPLAN-008 indexで、JSON Schemaでは表現できないownership、taint closure、digest、order、status、renderer、compatibility invariantを実行可能にする。
 - Designで固定したv1 normative source/process/type/flow limitをboundary fixtureで検証し、変更が必要ならproduction実装前にcanonical DesignとStrict gateを更新する。
 
 ### I05-PLAN-008 machine-checkable contract Strict gate
 
 - private request/response/model、TrustedTypeEnvironment、Next semantic/domain manifest/config/runtime member/licenseのJSON Schema、diagnostic catalog、semantic/PlantUML contract docs、positive/negative mutation vectorsを実ファイルとして固定する。
+- P0/P1 closureのローカル証拠は、`tests/contracts/test_json_schemas.py`（schema registry、既存Python/SQLAlchemy golden、public Next branch）と `tests/contracts/test_next_contracts.py`（cross-record reference validator、status matrix、known-answer/golden vectors）で再実行できる形にする。新しいNext production behavior、Node adapter、依存関係はこのstepへ含めない。
 - SpecDock/schema/HTML/format validation、clean commit/push、exact upstream SHA binding後にChatGPT Use StrictでP0/P1とcontract gapをレビューする。
 - findingをcanonical authority/current sourceへ照合して修復し、fresh exact SHAでP0/P1=0まで再レビューする。passはIssue実装完了ではない。
 

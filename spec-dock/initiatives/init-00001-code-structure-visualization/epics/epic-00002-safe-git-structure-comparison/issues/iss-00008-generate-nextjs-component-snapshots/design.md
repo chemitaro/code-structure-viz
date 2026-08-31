@@ -421,7 +421,7 @@ CompilerHostは`readFile/fileExists/directoryExists/realpath/getCurrentDirectory
 | `primitive` | `name` | closed enum `boolean,bigint,number,string,symbol,null,undefined,void,never,unknown` |
 | `type_parameter` | `ordinal` | declaration orderの0-based integer。source name非公開 |
 | `redacted_literals` | `base`, `count` | baseは`boolean,bigint,number,string`。value非公開 |
-| `reference` | `scope,module,exported_name,type_arguments` | scope `repository/external`。repository moduleはModule ID、external moduleはsafe package name |
+| `reference` | `scope,module,exported_name,type_arguments` | scope `repository/external/trusted`。repository moduleはModule ID、external moduleはsafe package name、trusted module/globalはTrustedTypeEnvironmentのclosed allowlistだけを参照 |
 | `array` | `element,readonly` | readonly boolean |
 | `tuple` | `elements,rest,readonly` | elementは`type,optional`、restはTypeNode/null |
 | `union` / `intersection` | `members` |同kindをflatten、canonical bytesでdedupe/sort |
@@ -677,7 +677,8 @@ snapshot/model/manifestは`identity_versions={module:1,component:1,member:1,rela
 request/response/modelは`additionalProperties:false`。modelは次のclosed collectionを持つ。
 
 ```text
-model = {schema, projects[], modules[], components[], members[], relations[], facts[], coverage, diagnostics[]}
+private model = {schema, projects[], files[], modules[], components[], members[], relations[], facts[], coverage, diagnostics[]}
+public semantic snapshot = {type, schema, domain, document_kind, status, compatibility, source, request, coverage, projects[], files[], entities[], members[], relations[], facts[], diagnostics[]}
 ProjectRecord = {id,root,source_roots,config_path|null,config_digest,compiler_options,file_ids}
 ModuleRecord = {id,project_id,path,router_context,client_entry,derived_roles[]}
 ComponentRecord = {id,module_id,declaration_key,recognition_evidence[],props_state}
@@ -686,14 +687,16 @@ RelationRecord = {id,plane:module|component,kind,source_id,target,facets}
 FactRecord = {id,owner_id,kind:client_entry|router_context,value}
 ```
 
-record IDはkind prefix + identity tuple canonical JSON digest。arraysはID順、unique。refはdeclared recordまたはclosed external/unresolved descriptorだけ。diagnosticはclosed code/severity/recoverability/path-or-symbol-ref/countだけでraw compiler textを持たない。
+record IDはkind prefix + identity tuple canonical JSON digest。arraysはID順、unique。refはdeclared record、closed external/unresolved descriptor、またはTrustedTypeEnvironmentのclosed symbolだけ。diagnosticはclosed code/severity/recoverability/path-or-symbol-ref/countだけでraw compiler textを持たない。
+
+`private model` は adapter response の検証単位として collection ごとに保持し、Python の public serializer が `modules[]` と `components[]` を `entities[]` へ統合する。両表現は同一 ID・coverage・diagnostic subsetを使い、serializer は collection の追加・欠落・並べ替えを許さない。`projects[]` と `files[]` は両表現に残し、各 file の `project_id` と各 project の `file_ids` を相互検証する。
 
 closed payload variants:
 
 - export binding payloadは`{exported_name,role:value,target_component_id,reexport:boolean}`。targetがinternal Componentへ一意解決しないexportはrecordを作らずcoverageへ入れる。
-- import binding payloadは`{local_component_id|null,imported_name,role:value|type,source:{kind:internal,module_id}|{kind:external|unresolved,safe_specifier}}`。local alias spellingはidentity/payloadへ入れない。
+- import binding payloadは`{local_component_id|null,imported_name,role:value|type,source:{kind:internal,module_id}|{kind:external|unresolved,safe_specifier,exported_name|null}}`。local alias spellingはidentity/payloadへ入れない。
 - prop payloadは`{name,type:TypeNode,optional,readonly,default_evidence}`。
-- module relation kindは`static_import|literal_dynamic_import`、targetは`{kind:internal,module_id}`または`{kind:external|unresolved,safe_specifier}`、facetsは`{role:value|type,reexport,boundary_effect:none|server_to_client_entry}`。
+- module relation kindは`static_import|literal_dynamic_import`、targetは`{kind:internal,module_id}`または`{kind:external|unresolved,safe_specifier,exported_name|null}`、facetsは`{role:value|type,reexport,boundary_effect:none|server_to_client_entry}`。
 - `jsx_render` targetは`{kind:internal,component_id}|{kind:external|unresolved,safe_specifier,exported_name|null}`。`component_wrap` targetはinternal Component IDだけ。facetsは`{occurrence_count,contexts:[direct|conditional|collection]}`。
 - client entry fact valueはboolean trueだけ、router context fact valueは`app_ui|app_route_handler|pages_ui|pages_api|none`。
 - derived roleはModule payloadのsorted unique `client_dependency|server_candidate`だけでFact/Relation recordを増やさない。
@@ -726,7 +729,7 @@ diagnostic mappingはfile bytes/encoded stdin=`LIMIT-001`、file count/decoded t
 - `object.index_signatures[]`は`{key:string|number|symbol,value_type,readonly}`。
 - `object.call_signatures[]`はfunction payload shape。function propertyはproperty typeとしてfunction TypeNodeを使う。
 - reference scopeは`repository|external|trusted`。`exported_name`はIdentifierName、`default`、trusted global/libのnullだけ。
-- external moduleは`(@scope/)?name(/subpath)*` grammar。exportはIdentifierName/default/null。specifier以外を保持しない。
+- external moduleは`(@scope/)?name(/subpath)*` grammar。exportはIdentifierName/default。specifier以外を保持しない。
 - property identityはNFC name、index identityはkey、call identityはcanonical signature bytes。重複identityはpayload unavailable。
 - `default_evidence`は`none|parameter_initializer|destructuring_initializer|class_default_props|jsdoc_default`。値は保持しない。
 - overloadはnormalize後canonical bytesでsort/dedupeし、union化したpropへ`coverage.correlation_losses[{component_id,prop_ids,signature_count}]`を記録する。

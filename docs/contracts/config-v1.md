@@ -32,6 +32,13 @@ Issue #8 の production step は top-level `[next]` を追加し、`projects` �
 `schemas/next-config-v1.schema.json` とする。現在の parser がこの table を拒否する状態は、
 Issue #8 実装前の明示された境界であり、事前契約を current CLI support と誤認してはならない。
 
+Next の resolved `limits` は `schemas/next-limits-v1.schema.json` の一つの closed record を
+そのまま使う。`max_entities` 以外の transport/process/type/signature/flow 値は v1 fixed
+constant で、request、fingerprint descriptor、adapter response、domain manifest の値を
+別々に解決しない。projectごとの compiler options は `allow_js`、`check_js`、`jsx`、
+`module`、`module_resolution`、`base_url`、`paths` の closed shape とし、package-based
+extends、typeRoots、plugins、実行可能な設定を受理しない。
+
 `diff` で暗黙の比較候補を設定する場合だけ、任意の `comparison` table を追加できる。
 両方とも省略可能で、指定された値は解決済み設定の `resolved.comparison` に同じ
 NFC 正規化済み文字列として記録される。

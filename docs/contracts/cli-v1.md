@@ -24,8 +24,10 @@ SQLAlchemy snapshot は `sqlalchemy.snapshot.semantic.json` / `sqlalchemy.snapsh
 entity budget は選択domainの解析結果へ適用する。
 
 `--stdout` は `manifest` または選択domainと一致する
-`python|sqlalchemy:semantic-json|plantuml` selectorだけを受理する。別domain selector、
-未選択format、unknown selectorはsource acquisition前にexit 2とする。
+`python|sqlalchemy|next:semantic-json|plantuml` selectorだけを受理する。別domain selector、
+未選択format、unknown selectorはsource acquisition前にexit 2とする。Next の
+`next:semantic-json` / `next:plantuml` は Issue #8 の production step で有効化する
+planned selectorであり、current CLI の `--domain next` rejection を変更したことを意味しない。
 
 `snapshot` は `--from`、`--to`、`--pr-target`、`--max-changed-paths` を
 `CSV-USAGE-003` で拒否する。`--help` と `--version` は単独のmeta operationで、

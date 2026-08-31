@@ -28,7 +28,7 @@
         "domains": {
           "minItems": 1,
           "maxItems": 1,
-          "prefixItems": [{"$ref": "#/$defs/complete_domain"}]
+          "prefixItems": [{"$ref": "#/$defs/domain_complete"}]
         },
         "manifest": {"const": "run-manifest.json"}
       }
@@ -40,7 +40,7 @@
         "domains": {
           "minItems": 1,
           "maxItems": 1,
-          "prefixItems": [{"$ref": "#/$defs/not_applicable_domain"}]
+          "prefixItems": [{"$ref": "#/$defs/domain_not_applicable"}]
         },
         "manifest": {"const": "run-manifest.json"}
       }
@@ -52,7 +52,7 @@
         "domains": {
           "minItems": 1,
           "maxItems": 1,
-          "prefixItems": [{"$ref": "#/$defs/incomplete_domain"}]
+          "prefixItems": [{"$ref": "#/$defs/domain_incomplete"}]
         },
         "manifest": {"const": "run-manifest.json"}
       }
@@ -103,11 +103,50 @@
         "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]}
       }
     },
+    "next_complete_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "status"],
+      "properties": {"domain": {"const": "next"}, "status": {"const": "complete"}}
+    },
+    "next_not_applicable_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "status"],
+      "properties": {"domain": {"const": "next"}, "status": {"const": "not_applicable"}}
+    },
+    "next_incomplete_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "status", "incomplete_kind"],
+      "properties": {"domain": {"const": "next"}, "status": {"const": "incomplete"}, "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]}}
+    },
+    "domain_complete": {
+      "oneOf": [
+        {"$ref": "#/$defs/complete_domain"},
+        {"$ref": "#/$defs/next_complete_domain"}
+      ]
+    },
+    "domain_not_applicable": {
+      "oneOf": [
+        {"$ref": "#/$defs/not_applicable_domain"},
+        {"$ref": "#/$defs/next_not_applicable_domain"}
+      ]
+    },
+    "domain_incomplete": {
+      "oneOf": [
+        {"$ref": "#/$defs/incomplete_domain"},
+        {"$ref": "#/$defs/next_incomplete_domain"}
+      ]
+    },
     "domain": {
       "oneOf": [
         {"$ref": "#/$defs/complete_domain"},
         {"$ref": "#/$defs/not_applicable_domain"},
-        {"$ref": "#/$defs/incomplete_domain"}
+        {"$ref": "#/$defs/incomplete_domain"},
+        {"$ref": "#/$defs/next_complete_domain"},
+        {"$ref": "#/$defs/next_not_applicable_domain"},
+        {"$ref": "#/$defs/next_incomplete_domain"}
       ]
     }
   }

@@ -20,7 +20,9 @@
         "python:semantic-json",
         "python:plantuml",
         "sqlalchemy:semantic-json",
-        "sqlalchemy:plantuml"
+        "sqlalchemy:plantuml",
+        "next:semantic-json",
+        "next:plantuml"
       ]
     },
     "availability": {"const": false},
@@ -101,6 +103,24 @@
       "properties": {
         "run_status": {"const": "interrupted"},
         "stable_reason": {"const": "run_interrupted"}
+      }
+    },
+    {
+      "required": ["domain_status"],
+      "not": {"required": ["run_status"]},
+      "properties": {
+        "selector": {"enum": ["next:semantic-json", "next:plantuml"]},
+        "domain_status": {"const": "not_applicable"},
+        "stable_reason": {"const": "domain_not_applicable"}
+      }
+    },
+    {
+      "required": ["domain_status"],
+      "not": {"required": ["run_status"]},
+      "properties": {
+        "selector": {"enum": ["next:semantic-json", "next:plantuml"]},
+        "domain_status": {"const": "incomplete"},
+        "stable_reason": {"const": "domain_payload_unavailable"}
       }
     }
   ]

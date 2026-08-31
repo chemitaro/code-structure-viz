@@ -4,53 +4,330 @@
   "title": "CodeStructureViz Next semantic snapshot v1 pre-implementation contract",
   "type": "object",
   "additionalProperties": false,
-  "required": ["type", "schema", "domain", "document_kind", "status", "semantic_compatibility_id", "identity_versions", "source", "request", "coverage", "entities", "members", "relations", "facts", "diagnostics"],
+  "required": [
+    "type",
+    "schema",
+    "domain",
+    "document_kind",
+    "status",
+    "semantic_compatibility_id",
+    "compatibility_descriptor",
+    "identity_versions",
+    "source",
+    "request",
+    "coverage",
+    "projects",
+    "files",
+    "entities",
+    "members",
+    "relations",
+    "facts",
+    "diagnostics"
+  ],
   "properties": {
-    "type": {"const": "semantic_snapshot"}, "schema": {"const": "code-structure-viz.semantic/v1"}, "domain": {"const": "next"},
-    "document_kind": {"const": "snapshot"}, "status": {"enum": ["complete", "incomplete"]}, "incomplete_kind": {"const": "partial_safe"},
-    "semantic_compatibility_id": {"$ref": "#/$defs/digest"}, "identity_versions": {"$ref": "#/$defs/identity_versions"},
-    "source": {"$ref": "#/$defs/source"}, "request": {"$ref": "#/$defs/request"}, "coverage": {"$ref": "#/$defs/coverage"},
-    "entities": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/module"}, {"$ref": "#/$defs/component"}]}},
-    "members": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/export_member"}, {"$ref": "#/$defs/import_member"}, {"$ref": "#/$defs/prop_member"}]}},
-    "relations": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/module_relation"}, {"$ref": "#/$defs/render_relation"}, {"$ref": "#/$defs/wrap_relation"}]}},
-    "facts": {"type": "array", "items": {"$ref": "#/$defs/fact"}},
+    "type": {"const": "semantic_snapshot"},
+    "schema": {"const": "code-structure-viz.semantic/v1"},
+    "domain": {"const": "next"},
+    "document_kind": {"const": "snapshot"},
+    "status": {"enum": ["complete", "incomplete"]},
+    "incomplete_kind": {"const": "partial_safe"},
+    "semantic_compatibility_id": {"$ref": "#/$defs/digest"},
+    "compatibility_descriptor": {"$ref": "urn:code-structure-viz:schema:next-compatibility-v1"},
+    "identity_versions": {"$ref": "#/$defs/identity_versions"},
+    "source": {"$ref": "#/$defs/source"},
+    "request": {"$ref": "#/$defs/request"},
+    "coverage": {"$ref": "#/$defs/coverage"},
+    "projects": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/project"}},
+    "files": {"type": "array", "maxItems": 20000, "items": {"$ref": "#/$defs/file"}},
+    "entities": {"type": "array", "maxItems": 20000, "items": {"oneOf": [{"$ref": "#/$defs/module"}, {"$ref": "#/$defs/component"}]}},
+    "members": {"type": "array", "maxItems": 20000, "items": {"oneOf": [{"$ref": "#/$defs/export_member"}, {"$ref": "#/$defs/import_member"}, {"$ref": "#/$defs/prop_member"}]}},
+    "relations": {"type": "array", "maxItems": 20000, "items": {"oneOf": [{"$ref": "#/$defs/module_relation"}, {"$ref": "#/$defs/render_relation"}, {"$ref": "#/$defs/wrap_relation"}]}},
+    "facts": {"type": "array", "maxItems": 20000, "items": {"oneOf": [{"$ref": "#/$defs/client_fact"}, {"$ref": "#/$defs/router_fact"}]}},
     "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
   },
-  "allOf": [{"if": {"properties": {"status": {"const": "incomplete"}}}, "then": {"required": ["incomplete_kind"]}, "else": {"not": {"required": ["incomplete_kind"]}}}],
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "incomplete"}}},
+      "then": {"required": ["incomplete_kind"]},
+      "else": {"not": {"required": ["incomplete_kind"]}}
+    }
+  ],
   "$defs": {
-    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "id": {"type": "string", "pattern": "^next:[a-z-]+:[0-9a-f]{64}$"},
-    "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
-    "identity_versions": {"type": "object", "additionalProperties": false, "required": ["module", "component", "member", "relation", "fact", "props_ir"], "properties": {"module": {"const": 1}, "component": {"const": 1}, "member": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "props_ir": {"const": 1}}},
-    "source": {"type": "object", "additionalProperties": false, "required": ["schema", "kind", "head_commit", "fingerprint", "file_count"], "properties": {"schema": {"const": "code-structure-viz.source-view/v1"}, "kind": {"enum": ["working-tree", "commit"]}, "head_commit": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{40,64}$"}, {"type": "null"}]}, "fingerprint": {"$ref": "#/$defs/digest"}, "file_count": {"type": "integer", "minimum": 0}}},
-    "request": {"type": "object", "additionalProperties": false, "required": ["projects", "targets", "upstream_depth", "downstream_depth", "source_plan_digest", "domain_config_digest", "run_fingerprint", "trusted_environment_digest"], "properties": {"projects": {"type": "array", "items": {"$ref": "#/$defs/path"}}, "targets": {"type": "array", "items": {"type": "string"}}, "upstream_depth": {"type": "integer", "minimum": 0}, "downstream_depth": {"type": "integer", "minimum": 0}, "source_plan_digest": {"$ref": "#/$defs/digest"}, "domain_config_digest": {"$ref": "#/$defs/digest"}, "run_fingerprint": {"$ref": "#/$defs/digest"}, "trusted_environment_digest": {"$ref": "#/$defs/digest"}}},
-    "module": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "project_id", "path", "derived_roles"], "properties": {"kind": {"const": "module"}, "id": {"$ref": "#/$defs/id"}, "project_id": {"$ref": "#/$defs/id"}, "path": {"$ref": "#/$defs/path"}, "derived_roles": {"type": "array", "uniqueItems": true, "items": {"enum": ["client_dependency", "server_candidate"]}}}},
-    "component": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "module_id", "declaration_key", "recognition_evidence", "props_state"], "properties": {"kind": {"const": "component"}, "id": {"$ref": "#/$defs/id"}, "module_id": {"$ref": "#/$defs/id"}, "declaration_key": {"type": "string", "minLength": 1}, "recognition_evidence": {"type": "array", "uniqueItems": true, "items": {"enum": ["route_default", "trusted_callable", "trusted_class", "wrapper", "jsx_output", "reachable_local"]}}, "props_state": {"enum": ["known", "no_props", "unknown"]}}},
-    "external_target": {"type": "object", "additionalProperties": false, "required": ["kind", "safe_specifier", "exported_name"], "properties": {"kind": {"enum": ["external", "unresolved"]}, "safe_specifier": {"type": "string", "pattern": "^(@[a-z0-9._-]+/)?[a-z0-9._-]+(?:/[a-z0-9._-]+)*$"}, "exported_name": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]}}},
-    "export_member": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "owner_id", "exported_name", "role", "target_component_id", "reexport"], "properties": {"kind": {"const": "export_binding"}, "id": {"$ref": "#/$defs/id"}, "owner_id": {"$ref": "#/$defs/id"}, "exported_name": {"type": "string", "minLength": 1}, "role": {"const": "value"}, "target_component_id": {"$ref": "#/$defs/id"}, "reexport": {"type": "boolean"}}},
-    "import_member": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "owner_id", "local_component_id", "imported_name", "role", "source"], "properties": {"kind": {"const": "import_binding"}, "id": {"$ref": "#/$defs/id"}, "owner_id": {"$ref": "#/$defs/id"}, "local_component_id": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]}, "imported_name": {"type": "string", "minLength": 1}, "role": {"enum": ["value", "type"]}, "source": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["kind", "module_id"], "properties": {"kind": {"const": "internal"}, "module_id": {"$ref": "#/$defs/id"}}}, {"$ref": "#/$defs/external_target"}]}}},
-    "prop_member": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "owner_id", "name", "type_node", "optional", "readonly", "default_evidence"], "properties": {"kind": {"const": "prop"}, "id": {"$ref": "#/$defs/id"}, "owner_id": {"$ref": "#/$defs/id"}, "name": {"type": "string", "minLength": 1}, "type_node": {"$ref": "#/$defs/type_node"}, "optional": {"type": "boolean"}, "readonly": {"type": "boolean"}, "default_evidence": {"enum": ["none", "parameter_initializer", "destructuring_initializer", "class_default_props", "jsdoc_default"]}}},
-    "type_node": {"oneOf": [
-      {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"const": "primitive"}, "name": {"enum": ["boolean", "bigint", "number", "string", "symbol", "null", "undefined", "void", "never", "unknown"]}}},
-      {"type": "object", "additionalProperties": false, "required": ["kind", "ordinal"], "properties": {"kind": {"const": "type_parameter"}, "ordinal": {"type": "integer", "minimum": 0}}},
-      {"type": "object", "additionalProperties": false, "required": ["kind", "scope", "module", "exported_name", "type_arguments"], "properties": {"kind": {"const": "reference"}, "scope": {"enum": ["repository", "external", "trusted"]}, "module": {"type": "string"}, "exported_name": {"anyOf": [{"type": "string"}, {"type": "null"}]}, "type_arguments": {"type": "array", "items": {"$ref": "#/$defs/type_node"}}}},
-      {"type": "object", "additionalProperties": false, "required": ["kind", "element", "readonly"], "properties": {"kind": {"const": "array"}, "element": {"$ref": "#/$defs/type_node"}, "readonly": {"type": "boolean"}}},
-      {"type": "object", "additionalProperties": false, "required": ["kind", "value_kind", "value_digest"], "properties": {"kind": {"const": "redacted_literal"}, "value_kind": {"enum": ["boolean", "bigint", "number", "string"]}, "value_digest": {"$ref": "#/$defs/digest"}}},
-      {"type": "object", "additionalProperties": false, "required": ["kind", "elements", "readonly"], "properties": {"kind": {"const": "tuple"}, "elements": {"type": "array", "items": {"$ref": "#/$defs/tuple_element"}}, "readonly": {"type": "boolean"}}},
-      {"type": "object", "additionalProperties": false, "required": ["kind", "parameters", "return_type"], "properties": {"kind": {"const": "function"}, "parameters": {"type": "array", "items": {"$ref": "#/$defs/function_parameter"}}, "return_type": {"$ref": "#/$defs/type_node"}}},
-      {"type": "object", "additionalProperties": false, "required": ["kind", "members"], "properties": {"kind": {"enum": ["union", "intersection"]}, "members": {"type": "array", "items": {"$ref": "#/$defs/type_node"}}}},
-      {"type": "object", "additionalProperties": false, "required": ["kind", "properties", "index_signatures", "call_signatures"], "properties": {"kind": {"const": "object"}, "properties": {"type": "array", "items": {"$ref": "#/$defs/object_property"}}, "index_signatures": {"type": "array", "items": {"$ref": "#/$defs/index_signature"}}, "call_signatures": {"type": "array", "items": {"$ref": "#/$defs/call_signature"}}}},
-      {"type": "object", "additionalProperties": false, "required": ["kind", "reason"], "properties": {"kind": {"const": "opaque"}, "reason": {"enum": ["any_open_world", "external_unresolved", "unsupported_syntax", "recursive_type", "type_complexity_limit", "ambiguous_signature", "trusted_type_mismatch"]}}}
-    ]},
-    "tuple_element": {"type": "object", "additionalProperties": false, "required": ["type", "optional", "rest"], "properties": {"type": {"$ref": "#/$defs/type_node"}, "optional": {"type": "boolean"}, "rest": {"type": "boolean"}}},
-    "function_parameter": {"type": "object", "additionalProperties": false, "required": ["ordinal", "type", "optional", "rest"], "properties": {"ordinal": {"type": "integer", "minimum": 0}, "type": {"$ref": "#/$defs/type_node"}, "optional": {"type": "boolean"}, "rest": {"type": "boolean"}}},
-    "object_property": {"type": "object", "additionalProperties": false, "required": ["name", "type", "optional", "readonly"], "properties": {"name": {"type": "string"}, "type": {"$ref": "#/$defs/type_node"}, "optional": {"type": "boolean"}, "readonly": {"type": "boolean"}}},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "id": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"},
+    "project_id": {"type": "string", "pattern": "^next:project:[0-9a-f]{64}$"},
+    "file_id": {"type": "string", "pattern": "^next:file:[0-9a-f]{64}$"},
+    "module_id": {"type": "string", "pattern": "^next:module:[0-9a-f]{64}$"},
+    "component_id": {"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"},
+    "member_id": {"type": "string", "pattern": "^next:member:[0-9a-f]{64}$"},
+    "relation_id": {"type": "string", "pattern": "^next:relation:[0-9a-f]{64}$"},
+    "fact_id": {"type": "string", "pattern": "^next:fact:[0-9a-f]{64}$"},
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
+    },
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"},
+    "identity_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "component", "member", "relation", "fact", "props_ir"],
+      "properties": {"module": {"const": 1}, "component": {"const": 1}, "member": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "props_ir": {"const": 1}}
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "kind", "head_commit", "fingerprint", "file_count"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.source-view/v1"},
+        "kind": {"enum": ["working-tree", "commit"]},
+        "head_commit": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{40,64}$"}, {"type": "null"}]},
+        "fingerprint": {"$ref": "#/$defs/digest"},
+        "file_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projects", "targets", "upstream_depth", "downstream_depth", "formats", "limits", "source_plan_digest", "domain_config_digest", "run_fingerprint", "trusted_environment_digest"],
+      "properties": {
+        "projects": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/path"}},
+        "targets": {"type": "array", "maxItems": 10000, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+        "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
+        "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
+        "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},
+        "limits": {"$ref": "urn:code-structure-viz:schema:next-limits-v1"},
+        "source_plan_digest": {"$ref": "#/$defs/digest"},
+        "domain_config_digest": {"$ref": "#/$defs/digest"},
+        "run_fingerprint": {"$ref": "#/$defs/digest"},
+        "trusted_environment_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "compiler_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allow_js", "check_js", "jsx", "module", "module_resolution", "base_url", "paths"],
+      "properties": {
+        "allow_js": {"type": "boolean"},
+        "check_js": {"type": "boolean"},
+        "jsx": {"enum": ["preserve", "react", "react-jsx", "react-jsxdev"]},
+        "module": {"const": "esnext"},
+        "module_resolution": {"const": "bundler"},
+        "base_url": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
+        "paths": {"type": "object", "patternProperties": {"^[A-Za-z0-9_.*?/-]+$": {"type": "array", "items": {"$ref": "#/$defs/path"}}}, "additionalProperties": false}
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "root", "source_roots", "config_path", "config_digest", "compiler_options", "file_ids"],
+      "properties": {
+        "kind": {"const": "project"},
+        "id": {"$ref": "#/$defs/project_id"},
+        "root": {"$ref": "#/$defs/path"},
+        "source_roots": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
+        "config_path": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
+        "config_digest": {"$ref": "#/$defs/digest"},
+        "compiler_options": {"$ref": "#/$defs/compiler_options"},
+        "file_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/file_id"}}
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "path", "project_id", "roles", "effective_role", "size_bytes", "sha256"],
+      "properties": {
+        "kind": {"const": "file"},
+        "id": {"$ref": "#/$defs/file_id"},
+        "path": {"$ref": "#/$defs/path"},
+        "project_id": {"$ref": "#/$defs/project_id"},
+        "roles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["control", "context", "program"]}},
+        "effective_role": {"enum": ["control", "context", "program"]},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 4194304},
+        "sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "project_id", "path", "router_context", "client_entry", "derived_roles"],
+      "properties": {
+        "kind": {"const": "module"},
+        "id": {"$ref": "#/$defs/module_id"},
+        "project_id": {"$ref": "#/$defs/project_id"},
+        "path": {"$ref": "#/$defs/path"},
+        "router_context": {"enum": ["app_ui", "app_route_handler", "pages_ui", "pages_api", "none"]},
+        "client_entry": {"type": "boolean"},
+        "derived_roles": {"type": "array", "uniqueItems": true, "items": {"enum": ["client_dependency", "server_candidate"]}}
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "module_id", "declaration_key", "recognition_evidence", "props_state"],
+      "properties": {
+        "kind": {"const": "component"},
+        "id": {"$ref": "#/$defs/component_id"},
+        "module_id": {"$ref": "#/$defs/module_id"},
+        "declaration_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "recognition_evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["route_default", "trusted_callable", "trusted_class", "wrapper", "jsx_output", "reachable_local"]}},
+        "props_state": {"enum": ["known", "no_props", "unknown"]}
+      }
+    },
+    "external_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "safe_specifier", "exported_name"],
+      "properties": {
+        "kind": {"enum": ["external", "unresolved"]},
+        "safe_specifier": {"type": "string", "pattern": "^(@[a-z0-9._-]+/)?[a-z0-9._-]+(?:/[a-z0-9._-]+)*$"},
+        "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"type": "null"}]}
+      }
+    },
+    "export_member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "owner_id", "exported_name", "role", "target_component_id", "reexport"],
+      "properties": {
+        "kind": {"const": "export_binding"},
+        "id": {"$ref": "#/$defs/member_id"},
+        "owner_id": {"$ref": "#/$defs/module_id"},
+        "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]},
+        "role": {"const": "value"},
+        "target_component_id": {"$ref": "#/$defs/component_id"},
+        "reexport": {"type": "boolean"}
+      }
+    },
+    "import_member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "owner_id", "local_component_id", "imported_name", "role", "source"],
+      "properties": {
+        "kind": {"const": "import_binding"},
+        "id": {"$ref": "#/$defs/member_id"},
+        "owner_id": {"$ref": "#/$defs/module_id"},
+        "local_component_id": {"anyOf": [{"$ref": "#/$defs/component_id"}, {"type": "null"}]},
+        "imported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]},
+        "role": {"enum": ["value", "type"]},
+        "source": {"oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["kind", "module_id"], "properties": {"kind": {"const": "internal"}, "module_id": {"$ref": "#/$defs/module_id"}}},
+          {"$ref": "#/$defs/external_target"}
+        ]}
+      }
+    },
+    "prop_member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "owner_id", "name", "type_node", "optional", "readonly", "default_evidence"],
+      "properties": {
+        "kind": {"const": "prop"},
+        "id": {"$ref": "#/$defs/member_id"},
+        "owner_id": {"$ref": "#/$defs/component_id"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "type_node": {"$ref": "#/$defs/type_node"},
+        "optional": {"type": "boolean"},
+        "readonly": {"type": "boolean"},
+        "default_evidence": {"enum": ["none", "parameter_initializer", "destructuring_initializer", "class_default_props", "jsdoc_default"]}
+      }
+    },
+    "type_node": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"const": "primitive"}, "name": {"enum": ["boolean", "bigint", "number", "string", "symbol", "null", "undefined", "void", "never", "unknown"]}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "ordinal"], "properties": {"kind": {"const": "type_parameter"}, "ordinal": {"type": "integer", "minimum": 0}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "base", "count"], "properties": {"kind": {"const": "redacted_literals"}, "base": {"enum": ["boolean", "bigint", "number", "string"]}, "count": {"type": "integer", "minimum": 1}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "scope", "module", "exported_name", "type_arguments"], "properties": {"kind": {"const": "reference"}, "scope": {"const": "repository"}, "module": {"$ref": "#/$defs/module_id"}, "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]}, "type_arguments": {"type": "array", "items": {"$ref": "#/$defs/type_node"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "scope", "module", "exported_name", "type_arguments"], "properties": {"kind": {"const": "reference"}, "scope": {"const": "external"}, "module": {"type": "string", "pattern": "^(@[a-z0-9._-]+/)?[a-z0-9._-]+(?:/[a-z0-9._-]+)*$"}, "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]}, "type_arguments": {"type": "array", "items": {"$ref": "#/$defs/type_node"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "scope", "module", "exported_name", "type_arguments"], "properties": {"kind": {"const": "reference"}, "scope": {"const": "trusted"}, "module": {"enum": ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "next/dynamic", "typescript/lib"]}, "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"type": "null"}]}, "type_arguments": {"type": "array", "items": {"$ref": "#/$defs/type_node"}}}, "oneOf": [{"properties": {"module": {"enum": ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "next/dynamic"]}, "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]} }}, {"properties": {"module": {"const": "typescript/lib"}}}]},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "element", "readonly"], "properties": {"kind": {"const": "array"}, "element": {"$ref": "#/$defs/type_node"}, "readonly": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "elements", "rest", "readonly"], "properties": {"kind": {"const": "tuple"}, "elements": {"type": "array", "items": {"$ref": "#/$defs/tuple_element"}}, "rest": {"anyOf": [{"$ref": "#/$defs/type_node"}, {"type": "null"}]}, "readonly": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "type_parameter_count", "this_type", "parameters", "return_type"], "properties": {"kind": {"const": "function"}, "type_parameter_count": {"type": "integer", "minimum": 0}, "this_type": {"anyOf": [{"$ref": "#/$defs/type_node"}, {"type": "null"}]}, "parameters": {"type": "array", "items": {"$ref": "#/$defs/function_parameter"}}, "return_type": {"$ref": "#/$defs/type_node"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "members"], "properties": {"kind": {"enum": ["union", "intersection"]}, "members": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/type_node"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "properties", "index_signatures", "call_signatures"], "properties": {"kind": {"const": "object"}, "properties": {"type": "array", "items": {"$ref": "#/$defs/object_property"}}, "index_signatures": {"type": "array", "items": {"$ref": "#/$defs/index_signature"}}, "call_signatures": {"type": "array", "items": {"$ref": "#/$defs/call_signature"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "reason"], "properties": {"kind": {"const": "opaque"}, "reason": {"enum": ["any_open_world", "external_unresolved", "unsupported_syntax", "recursive_type", "type_complexity_limit", "ambiguous_signature", "trusted_type_mismatch"]}}}
+      ]
+    },
+    "tuple_element": {"type": "object", "additionalProperties": false, "required": ["type", "optional"], "properties": {"type": {"$ref": "#/$defs/type_node"}, "optional": {"type": "boolean"}}},
+    "function_parameter": {"type": "object", "additionalProperties": false, "required": ["type", "optional", "rest"], "properties": {"type": {"$ref": "#/$defs/type_node"}, "optional": {"type": "boolean"}, "rest": {"type": "boolean"}}},
+    "object_property": {"type": "object", "additionalProperties": false, "required": ["name", "type", "optional", "readonly"], "properties": {"name": {"type": "string", "minLength": 1}, "type": {"$ref": "#/$defs/type_node"}, "optional": {"type": "boolean"}, "readonly": {"type": "boolean"}}},
     "index_signature": {"type": "object", "additionalProperties": false, "required": ["key_type", "value_type", "readonly"], "properties": {"key_type": {"enum": ["string", "number", "symbol"]}, "value_type": {"$ref": "#/$defs/type_node"}, "readonly": {"type": "boolean"}}},
-    "call_signature": {"type": "object", "additionalProperties": false, "required": ["parameters", "return_type"], "properties": {"parameters": {"type": "array", "items": {"$ref": "#/$defs/function_parameter"}}, "return_type": {"$ref": "#/$defs/type_node"}}},
-    "module_relation": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "source_id", "target", "role", "reexport", "boundary_effect"], "properties": {"kind": {"enum": ["static_import", "literal_dynamic_import"]}, "id": {"$ref": "#/$defs/id"}, "source_id": {"$ref": "#/$defs/id"}, "target": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["kind", "module_id"], "properties": {"kind": {"const": "internal"}, "module_id": {"$ref": "#/$defs/id"}}}, {"$ref": "#/$defs/external_target"}]}, "role": {"enum": ["value", "type"]}, "reexport": {"type": "boolean"}, "boundary_effect": {"enum": ["none", "server_to_client_entry"]}}},
-    "render_relation": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "source_id", "target", "occurrence_count", "contexts"], "properties": {"kind": {"const": "jsx_render"}, "id": {"$ref": "#/$defs/id"}, "source_id": {"$ref": "#/$defs/id"}, "target": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["kind", "component_id"], "properties": {"kind": {"const": "internal"}, "component_id": {"$ref": "#/$defs/id"}}}, {"$ref": "#/$defs/external_target"}]}, "occurrence_count": {"type": "integer", "minimum": 1}, "contexts": {"type": "array", "uniqueItems": true, "items": {"enum": ["direct", "conditional", "collection"]}}}},
-    "wrap_relation": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "source_id", "target_component_id", "occurrence_count", "contexts"], "properties": {"kind": {"const": "component_wrap"}, "id": {"$ref": "#/$defs/id"}, "source_id": {"$ref": "#/$defs/id"}, "target_component_id": {"$ref": "#/$defs/id"}, "occurrence_count": {"type": "integer", "minimum": 1}, "contexts": {"type": "array", "uniqueItems": true, "items": {"enum": ["direct"]}}}},
-    "fact": {"type": "object", "additionalProperties": false, "required": ["id", "owner_id", "kind", "value"], "properties": {"id": {"$ref": "#/$defs/id"}, "owner_id": {"$ref": "#/$defs/id"}, "kind": {"enum": ["client_entry", "router_context"]}, "value": {"oneOf": [{"const": true}, {"enum": ["app_ui", "app_route_handler", "pages_ui", "pages_api", "none"]}]}}},
-    "coverage": {"type": "object", "additionalProperties": false, "required": ["counts", "failed_files", "affected_ids", "taint_frontier", "opaque_reason_counts", "unknown_relation_count", "correlation_losses", "non_component_value_export_count", "type_only_export_count", "target_completeness"], "properties": {"counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}, "failed_files": {"type": "array", "items": {"$ref": "#/$defs/path"}}, "affected_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}}, "taint_frontier": {"type": "array", "items": {"$ref": "#/$defs/id"}}, "opaque_reason_counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}, "unknown_relation_count": {"type": "integer", "minimum": 0}, "correlation_losses": {"type": "array", "items": {"$ref": "urn:code-structure-viz:schema:next-adapter-response-v1#/$defs/correlation_loss"}}, "non_component_value_export_count": {"type": "integer", "minimum": 0}, "type_only_export_count": {"type": "integer", "minimum": 0}, "target_completeness": {"type": "array", "items": {"$ref": "urn:code-structure-viz:schema:next-adapter-response-v1#/$defs/target_completeness"}}}},
-    "diagnostic": {"type": "object", "additionalProperties": false, "required": ["code", "severity", "recoverable", "count", "path_ref", "symbol_ref"], "properties": {"code": {"type": "string", "pattern": "^CSV-NEXT-[A-Z]+-[0-9]{3}$"}, "severity": {"enum": ["info", "warning", "error"]}, "recoverable": {"type": "boolean"}, "count": {"type": "integer", "minimum": 1}, "path_ref": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]}, "symbol_ref": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]}}}
+    "call_signature": {"type": "object", "additionalProperties": false, "required": ["type_parameter_count", "this_type", "parameters", "return_type"], "properties": {"type_parameter_count": {"type": "integer", "minimum": 0}, "this_type": {"anyOf": [{"$ref": "#/$defs/type_node"}, {"type": "null"}]}, "parameters": {"type": "array", "items": {"$ref": "#/$defs/function_parameter"}}, "return_type": {"$ref": "#/$defs/type_node"}}},
+    "module_relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "source_id", "target", "role", "reexport", "boundary_effect"],
+      "properties": {
+        "kind": {"enum": ["static_import", "literal_dynamic_import"]},
+        "id": {"$ref": "#/$defs/relation_id"},
+        "source_id": {"$ref": "#/$defs/module_id"},
+        "target": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["kind", "module_id"], "properties": {"kind": {"const": "internal"}, "module_id": {"$ref": "#/$defs/module_id"}}}, {"$ref": "#/$defs/external_target"}]},
+        "role": {"enum": ["value", "type"]},
+        "reexport": {"type": "boolean"},
+        "boundary_effect": {"enum": ["none", "server_to_client_entry"]}
+      }
+    },
+    "render_relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "source_id", "target", "occurrence_count", "contexts"],
+      "properties": {
+        "kind": {"const": "jsx_render"},
+        "id": {"$ref": "#/$defs/relation_id"},
+        "source_id": {"$ref": "#/$defs/component_id"},
+        "target": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["kind", "component_id"], "properties": {"kind": {"const": "internal"}, "component_id": {"$ref": "#/$defs/component_id"}}}, {"$ref": "#/$defs/external_target"}]},
+        "occurrence_count": {"type": "integer", "minimum": 1},
+        "contexts": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["direct", "conditional", "collection"]}}
+      }
+    },
+    "wrap_relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "source_id", "target_component_id", "occurrence_count", "contexts"],
+      "properties": {
+        "kind": {"const": "component_wrap"},
+        "id": {"$ref": "#/$defs/relation_id"},
+        "source_id": {"$ref": "#/$defs/component_id"},
+        "target_component_id": {"$ref": "#/$defs/component_id"},
+        "occurrence_count": {"type": "integer", "minimum": 1},
+        "contexts": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"const": "direct"}}
+      }
+    },
+    "client_fact": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "owner_id", "value"], "properties": {"kind": {"const": "client_entry"}, "id": {"$ref": "#/$defs/fact_id"}, "owner_id": {"$ref": "#/$defs/module_id"}, "value": {"const": true}}},
+    "router_fact": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "owner_id", "value"], "properties": {"kind": {"const": "router_context"}, "id": {"$ref": "#/$defs/fact_id"}, "owner_id": {"$ref": "#/$defs/module_id"}, "value": {"enum": ["app_ui", "app_route_handler", "pages_ui", "pages_api", "none"]}}},
+    "coverage_count": {"type": "integer", "minimum": 0},
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["counts", "failed_files", "affected_ids", "taint_frontier", "opaque_reason_counts", "unknown_relation_count", "correlation_losses", "non_component_value_export_count", "type_only_export_count", "target_completeness"],
+      "properties": {
+        "counts": {"type": "object", "additionalProperties": false, "required": ["projects", "files", "modules", "components", "members", "relations", "facts", "discovered", "published", "excluded", "failed"], "properties": {"projects": {"$ref": "#/$defs/coverage_count"}, "files": {"$ref": "#/$defs/coverage_count"}, "modules": {"$ref": "#/$defs/coverage_count"}, "components": {"$ref": "#/$defs/coverage_count"}, "members": {"$ref": "#/$defs/coverage_count"}, "relations": {"$ref": "#/$defs/coverage_count"}, "facts": {"$ref": "#/$defs/coverage_count"}, "discovered": {"$ref": "#/$defs/coverage_count"}, "published": {"$ref": "#/$defs/coverage_count"}, "excluded": {"$ref": "#/$defs/coverage_count"}, "failed": {"$ref": "#/$defs/coverage_count"}}},
+        "failed_files": {"type": "array", "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["path", "reason"], "properties": {"path": {"$ref": "#/$defs/path"}, "reason": {"enum": ["parse_file", "read_file", "type_symbol", "export_binding", "props_subtree", "component_flow", "module_relation", "boundary_derivation"]}}}},
+        "affected_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "taint_frontier": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "opaque_reason_counts": {"type": "object", "additionalProperties": false, "properties": {"any_open_world": {"$ref": "#/$defs/coverage_count"}, "external_unresolved": {"$ref": "#/$defs/coverage_count"}, "unsupported_syntax": {"$ref": "#/$defs/coverage_count"}, "recursive_type": {"$ref": "#/$defs/coverage_count"}, "type_complexity_limit": {"$ref": "#/$defs/coverage_count"}, "ambiguous_signature": {"$ref": "#/$defs/coverage_count"}, "trusted_type_mismatch": {"$ref": "#/$defs/coverage_count"}}},
+        "unknown_relation_count": {"$ref": "#/$defs/coverage_count"},
+        "correlation_losses": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/correlation_loss"}},
+        "non_component_value_export_count": {"$ref": "#/$defs/coverage_count"},
+        "type_only_export_count": {"$ref": "#/$defs/coverage_count"},
+        "target_completeness": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/target_completeness"}}
+      }
+    },
+    "correlation_loss": {"type": "object", "additionalProperties": false, "required": ["component_id", "prop_ids", "signature_count"], "properties": {"component_id": {"$ref": "#/$defs/component_id"}, "prop_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/member_id"}}, "signature_count": {"type": "integer", "minimum": 2}}},
+    "target_completeness": {"type": "object", "additionalProperties": false, "required": ["target_key", "status", "record_ids"], "properties": {"target_key": {"type": "string", "minLength": 1}, "status": {"enum": ["complete", "failed"]}, "record_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}}},
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "recoverable", "count", "path_ref", "symbol_ref", "outcome", "ref_permission"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^CSV-NEXT-[A-Z]+-[0-9]{3}$"},
+        "severity": {"enum": ["info", "warning", "error"]},
+        "recoverable": {"type": "boolean"},
+        "count": {"type": "integer", "minimum": 1},
+        "path_ref": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
+        "symbol_ref": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+        "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
+        "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
+      }
+    }
   }
 }

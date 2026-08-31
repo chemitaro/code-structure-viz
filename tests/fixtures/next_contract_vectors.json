@@ -1,0 +1,37 @@
+{
+  "schema": "code-structure-viz.next-contract-vectors/v1",
+  "positive": [
+    "semantic-complete-empty",
+    "semantic-complete-non-empty",
+    "semantic-partial-safe",
+    "partial-proof-decomposition",
+    "run-status-matrix",
+    "runtime-unavailable",
+    "entity-overrun",
+    "request-response-envelope",
+    "diagnostic-catalog",
+    "trusted-known-answer",
+    "runtime-known-answer",
+    "plantuml-control-escape",
+    "plantuml-complete-non-empty",
+    "plantuml-partial-safe",
+    "plantuml-external-dynamic",
+    "nfc-canonical-digest",
+    "compatibility-known-answer"
+  ],
+  "negative": [
+    "cross-domain",
+    "wrong-fact-value",
+    "wrong-project-owner",
+    "wrong-role-precedence",
+    "dangling-reference",
+    "duplicate-project-file",
+    "taint-set-mismatch",
+    "failed-proof-overlap",
+    "diagnostic-ref-permission",
+    "unsafe-trusted-path",
+    "runtime-http-url",
+    "compatibility-mismatch",
+    "plantuml-injection"
+  ]
+}
