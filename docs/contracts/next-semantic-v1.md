@@ -2,13 +2,14 @@
 
 Status: pre-implementation normative contract for Issue #8.
 
-Round 10 review state: ChatGPT Use Strict returned `review_status: fail` with
-P0=0, P1=8, P2=0. Pass A project/order, EntityBudgetGate, canonical path, and
-File-to-Module completeness remediation is locally reflected below and in the
-data-only schemas/reference vectors. Pass B's closed export grammar, independent
-raw re-export witness, public stderr gate, and bounded decoder are locally
-reflected; fresh exact-SHA Strict is pending, so readiness is unconfirmed and
-the production adapter/CLI remains unimplemented.
+Round 11 review state: ChatGPT Use Strict returned `review_status: fail` with
+P0=0, P1=8, P2=0 at exact SHA `75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Pass A/B
+remediations and Pass C project/order, explicit run-context, canonical path, and
+File-to-Module completeness work are locally reflected below and in the data-only
+schemas/reference vectors. Pass D additionally reflects the closed JSX export scanner,
+independent re-export witness, bounded public stderr, and raw-response decoder. Fresh
+exact-SHA Strict is pending, so readiness is unconfirmed and the production adapter/CLI
+remains unimplemented.
 
 The machine-readable authority is:
 
@@ -111,6 +112,14 @@ files, and other derived arrays are canonical JSON UTF-8 order and are checked
 against the submitted order without first sorting it. A two-project fixture
 whose path and ID orders differ, plus a permuted CLI input, must produce equal
 canonical source-plan and config digests.
+
+`NextRunContext/v1` is the single run-level context copied through the response,
+entity gate, domain manifest, root `run`, and stdout projection. It carries
+`requested_formats`, `budget_requested`, `budget_resolved`, `budget_source`, and
+the actual `stdout_selector`; the selector must name one requested format. No
+surface fills in a missing format from `FORMAT_ORDER`. The context's formats and
+selector are fields of the run-fingerprint preimage, so changing either changes
+the fingerprint.
 
 Only a frozen file with `program` role and exact suffix `.ts`, `.tsx`, `.js`, or
 `.jsx` (explicitly excluding `.d.ts`) may own a public Module. Components,

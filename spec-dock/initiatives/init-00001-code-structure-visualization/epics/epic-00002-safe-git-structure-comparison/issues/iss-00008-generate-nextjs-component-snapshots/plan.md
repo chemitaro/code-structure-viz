@@ -77,6 +77,44 @@ grammar、独立re-export witness、public diagnostic stderr、bounded response 
 validator/schema/fixture/testへ反映した。focused/full quality gates後にfresh Strictへ
 戻すが、現時点ではfresh exact-SHA Strict未実行・未通過、readiness未確定である。
 
+### Round 11 review state and Pass C remediation
+
+Round 11 は exact SHA `75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`、CI run
+`33422630936`（7/7 success）に対し `review_status: fail`、P0=0、P1=8、P2=0だった。証拠は
+`20260901t010000z-disc-strict-spec-review-round-11.md`へ固定する。Pass Cでは、逆順二projectの
+full-chain vector、explicit `NextRunContext`のresponse→gate→domain→root/stdout propagation、
+shared UTF-8/NFC path helper、File→Module typed target failureをdata-only contractへ反映した。
+Pass Dでは、module-level JSX lexical scanner、raw declaration/edgeからの独立re-export witness、
+public diagnostic stderrのbounded JSONL gate、raw response bytes専用のbounded decoderを
+data-only contractへ追加反映した。fresh exact-SHA Strict、readiness確認は未実施であり、
+production adapter/CLIは未着手のままとする。
+
+Pass Cの実行項目:
+
+- immutable project ID/root correspondenceとsurfaceごとのroot-path/record-ID orderを独立検証し、
+  request、response、domain、root manifest、fingerprintの各mutationをrejectする。
+- requested formats、budget requested/resolved/source、stdout selectorを一つのcontextで受け渡し、
+  requested formatを暗黙のFORMAT_ORDERから補わず、formatsとselectorをfingerprintへ含める。
+- `next-path-v1`を全path-bearing surfaceの補助schema refとして使い、helperでNFC/UTF-8 bytes、
+  root `.`文脈、4095/4096/4097 boundaryを検証する。
+- file/directory targetのmissing、duplicate、component-onlyをpre-model typed failureにし、
+  `CSV-NEXT-TARGET-001`、payload unavailable、no artifacts、manifest/stdout、exit 3を通す。
+
+Pass Dの実行項目:
+
+- JSXをmodule-level lexical grammarとして走査し、self-closing/fragment/nested same-name、属性式内の
+  string/template/comment/regex、property/literal/comment内の偽`export`を除外する。async/generic/type
+  span、semicolon/ASI、BOM/CRLF、NFC、exact UTF-8 byte spanをsource censusとgoldenで固定する。
+- raw declarations/edgesからre-exportを独立再計算し、double alias、star 0..N/default exclusion、
+  cycle/conflict/missing sourceをoriginal/exported name付きwitnessへ記録する。starのcomponent行を
+  public bindingへ、value/type行をcoverageへ投影し、response proofのmutationを拒否する。
+- public stderrはcanonical JSONLを全行UTF-8 encodeしてからlimit判定し、limit+1をpartial write 0、
+  `CSV-NEXT-LIMIT-003`、manifest-onlyへ投影する。raw response bytesはbounded decoder一つを入口とし、
+  duplicate key、depth、decoded string、per-array、aggregateをmaterialization前に数える。
+
+Pass D実装後もRound 11の `review_status: fail`（P0=0、P1=8、P2=0）は履歴として保持する。
+fresh exact-SHA Strictは未実施・未通過で、readinessは未確定、production adapter/CLIは未着手である。
+
 Pass Bの実行条件:
 
 - scannerはmodule-level深さ0だけを対象に、async declaration、generic/type span、semicolon

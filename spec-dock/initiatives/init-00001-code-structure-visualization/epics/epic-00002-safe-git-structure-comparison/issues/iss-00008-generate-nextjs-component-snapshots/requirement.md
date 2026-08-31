@@ -180,6 +180,52 @@ materializeせず検査するbounded decoderをdata-only契約へ反映した。
   100,001を拒否し、reason/counter/materialized=falseを証人として残す。成功時も同じ
   decoderをresponse envelope validation前段で通す。
 
+### Round 11 review state and Pass C remediation
+
+ChatGPT Use Strict Round 11 は exact SHA
+`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`、CI run `33422630936`（7/7 success）に対して
+`review_status: fail`、P0=0、P1=8、P2=0を返した。証拠とtranscript SHA-256は
+`20260901t010000z-disc-strict-spec-review-round-11.md`へ固定した。Pass Cでは、(1) root-path
+orderとrecord-ID orderを逆転させる二projectをprivate requestからresponse、domain、root
+manifest、fingerprintまで通す、(2) requested formats、budget requested/resolved/source、
+stdout selectorを一つのcanonical run contextとして全projectionへ渡す、(3) UTF-8 byte境界を
+含む一つのPOSIX path helperを全path surfaceで使う、(4) selected program File→exactly one
+Moduleの欠落・重複・Component-onlyをtyped `CSV-NEXT-TARGET-001`へ投影する、という
+data-only契約を反映した。Pass Dでは、(5) module-level JSX lexical scanner、(6) raw
+declaration/edgeからのre-export witness、(7) public diagnostic stderrのbounded JSONL gate、
+(8) raw response bytes専用のbounded decoderを追加で反映した。これらはローカル契約の修復であり、
+fresh exact-SHA Strictは未実行・未通過、readinessは未確定、production adapter/CLIは未着手である。
+
+Pass Cの固定事項:
+
+- projectはimmutable ID/rootで対応付け、input/config/source-planはNFC UTF-8 root-path order、
+  semantic modelはrecord-ID orderとする。順序を混同したrequest/response/domain/rootの各
+  mutationは拒否し、formatsとstdout selectorもrun fingerprint preimageに含める。
+- run contextの`requested_formats`、`budget_requested`、`budget_resolved`、`budget_source`、
+  `stdout_selector`をresponse、EntityBudgetGate、domain、root runへ同じ値で投影する。
+  requested formatを暗黙のFORMAT_ORDERから補わず、selectorはrequested setの一員でなければ
+  ならない。
+- `next-path-v1`の`maxLength`は補助的な文字数検査に留め、NFC・UTF-8 bytes・root `.`の文脈
+  規則を共有helperで再検証する。4095/4096 bytesは受理し、4097 bytes、NFC collision、
+  ordinary file surfaceのroot `.`は拒否する。
+- target failureはmodel assertionへ逃がさず、file/directory両方でmissing、duplicate、
+  Component-onlyをpre-model typed failureとして扱う。選択された集合は全体を
+  `payload_unavailable`、no artifact、manifest/stdout unavailable、exit 3へ投影する。
+
+Pass Dの固定事項:
+
+- export scannerはself-closing/fragment/nested same-name JSX、attribute expression内の
+  string/template/comment/regex、propertyやliteral内の偽`export`を無視し、async/generic/typeの
+  declaration spanをBOM/CRLFを含む凍結UTF-8 byte範囲として再計算する。ASIを暗黙に補わず、閉じた文法の
+  semicolon終端を要求する。
+- re-exportは公開ExportBindingから導出せず、凍結raw declaration/edgeを独立再計算する。aliasは何段でも
+  追跡し、starはdefaultを除く0..N行へ展開する。cycle/conflict/missing sourceは元のexport名と理由を
+  witnessへ残し、component bindingとvalue/type coverageを同じ独立結果から投影する。
+- public diagnostic stderrは全JSONLをUTF-8 encodeしてからinclusive limitを測る。limitは全行を出し、
+  limit+1はpartial write 0、`CSV-NEXT-LIMIT-003`だけをmanifestへ投影する。adapter captureとは別の
+  counterであり、raw responseはbytesを入口とするbounded decoderでduplicate key、depth、decoded string、
+  per-array、aggregateをmaterialize前に拒否する。
+
 ### semantic contract
 
 - entityはphysical-path `ModuleEntity`とdeclaration-anchored `ComponentEntity`。named declarationまたは`@anonymous-default`でComponentを識別し、range/export/route/wrapper/propsをidentityに含めない。

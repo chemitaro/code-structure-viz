@@ -1,7 +1,9 @@
 # Next resolved limits v1
 
-Round 10 review state: `review_status: fail` (P0=0, P1=8, P2=0). Pass A entity
-gate and Pass B public stderr/bounded decoder remediations are locally reflected.
+Round 11 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
+`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Pass A/B entity, stderr, and bounded decoder
+remediations plus Pass C explicit run-context propagation and Pass D raw-response/public
+stderr boundary checks are locally reflected.
 The independent entity publication gate, separate stderr/array counters, and
 response-to-outcome vectors below are local data-only remediations; fresh
 exact-SHA Strict is pending, readiness is unconfirmed, and production

@@ -1,6 +1,7 @@
 # Next PlantUML contract v1
 
-Round 10 review state: `review_status: fail` (P0=0, P1=8, P2=0). Pass A/B contract
+Round 11 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
+`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Pass A/B, Pass C, and Pass D contract
 remediation is locally reflected. The
 PlantUML grammar remains a pre-implementation data-only contract; fresh
 exact-SHA Strict is pending, readiness is unconfirmed, and production

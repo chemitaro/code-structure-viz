@@ -14,7 +14,7 @@ import json
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
 
 VALIDATOR_SCHEMA = "code-structure-viz.next-reference-validation/v1"
@@ -31,6 +31,8 @@ ROLE_ORDER = {role: index for index, role in enumerate(ROLES)}
 ROLE_PRECEDENCE = {"control": 3, "context": 2, "program": 1}
 FORMAT_ORDER = ("semantic-json", "plantuml")
 FORMAT_ORDER_INDEX = {format_name: index for index, format_name in enumerate(FORMAT_ORDER)}
+RUN_CONTEXT_BUDGET_SOURCES = ("builtin", "repository", "explicit", "cli")
+RUN_CONTEXT_SELECTORS = tuple(f"next:{format_name}" for format_name in FORMAT_ORDER)
 TAINTS = {
     "parse_file",
     "read_file",
@@ -112,6 +114,17 @@ LIMIT_DEFAULTS = {
     "max_alias_edges": 64,
 }
 DEFAULT_MAX_ENTITIES = 500
+
+
+class NextRunContext(TypedDict):
+    """The one explicit context shared by response and publication projections."""
+
+    requested_formats: list[str]
+    budget_requested: int | None
+    budget_resolved: int
+    budget_source: str
+    stdout_selector: str
+
 
 # Every limit has an explicit measurement contract.  The production adapter
 # must use the same unit, measurement point, inclusive boundary, and stable
@@ -541,23 +554,225 @@ _EXPORT_KEYWORDS = {
 }
 
 
-def _jsx_element_end(text: str, start: int) -> int | None:
-    """Return the end of a conservative JSX element, if one starts here.
+def _jsx_tag_end(text: str, start: int) -> tuple[int, str | None, bool, bool] | None:
+    """Parse one JSX tag while ignoring ``>`` inside attributes.
 
-    The export contract is lexical rather than a JSX parser.  We only skip a
-    tag-shaped region when a matching closing tag is present, which keeps
-    TypeScript generic/comparison syntax visible to the scanner while making
-    words such as ``export`` in JSX text inert.
+    The scanner does not attempt to parse JavaScript expressions.  It only
+    needs a lexical boundary for a tag, so quoted attributes and balanced
+    ``{...}`` expressions are consumed as opaque regions.  The returned tuple
+    is ``(end, name, closing, self_closing)``; ``name`` is ``None`` for a
+    fragment tag.
     """
 
-    if text.startswith("<>", start):
-        closing = text.find("</>", start + 3)
-        return closing + 3 if closing >= 0 else None
-    match = re.match(r"<([A-Za-z_$][A-Za-z0-9_$.-]*)(?:\s[^<>]*?)?(/?)>", text[start:])
-    if match is None or match.group(2) == "/":
+    if not text.startswith("<", start):
         return None
-    closing = text.find(f"</{match.group(1)}>", start + match.end())
-    return closing + len(match.group(1)) + 3 if closing >= 0 else None
+    if text.startswith("</>", start):
+        return start + 3, None, True, False
+    if text.startswith("<>", start):
+        return start + 2, None, False, False
+
+    closing = text.startswith("</", start)
+    cursor = start + (2 if closing else 1)
+    name_match = re.match(r"[A-Za-z_$][A-Za-z0-9_$.:\-]*", text[cursor:])
+    if name_match is None:
+        return None
+    name = name_match.group(0)
+    cursor += name_match.end()
+    last_significant = ""
+    while cursor < len(text):
+        character = text[cursor]
+        if character in "'\"`":
+            cursor = _jsx_quoted_end(text, cursor)
+            continue
+        if character == "{":
+            expression_end = _jsx_expression_end(text, cursor)
+            if expression_end is None:
+                return None
+            cursor = expression_end
+            continue
+        if character == ">":
+            self_closing = last_significant == "/" and not closing
+            return cursor + 1, name, closing, self_closing
+        if not character.isspace():
+            last_significant = character
+        cursor += 1
+    return None
+
+
+def _jsx_quoted_end(text: str, start: int) -> int:
+    """Skip one JSX attribute or JavaScript string/template literal."""
+
+    quote = text[start]
+    assert quote in "'\"`"
+    cursor = start + 1
+    escaped = False
+    while cursor < len(text):
+        character = text[cursor]
+        if escaped:
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == quote:
+            return cursor + 1
+        cursor += 1
+    return len(text)
+
+
+def _jsx_regex_can_start(previous_character: str, previous_word: str | None) -> bool:
+    """Use a conservative lexical test before skipping a JSX regex literal."""
+
+    if previous_word in {
+        "await",
+        "case",
+        "delete",
+        "do",
+        "else",
+        "in",
+        "instanceof",
+        "of",
+        "return",
+        "throw",
+        "typeof",
+        "void",
+        "yield",
+    }:
+        return True
+    return not previous_character or previous_character in "([{=,:;!?&|+-*%^~<>"
+
+
+def _jsx_expression_end(text: str, start: int) -> int | None:
+    """Skip a balanced JSX attribute/child expression.
+
+    Strings, templates, comments, and regular expressions are opaque inside
+    the expression.  This prevents a literal ``}`` or ``export`` from
+    changing the JSX stack used by the outer lexical scanner.
+    """
+
+    assert text[start] == "{"
+    depth = 1
+    cursor = start + 1
+    line_comment = False
+    block_comment = False
+    previous_character = ""
+    previous_word: str | None = None
+    while cursor < len(text):
+        character = text[cursor]
+        if line_comment:
+            if character in "\r\n":
+                line_comment = False
+            cursor += 1
+            continue
+        if block_comment:
+            if text.startswith("*/", cursor):
+                block_comment = False
+                cursor += 2
+            else:
+                cursor += 1
+            continue
+        if text.startswith("//", cursor):
+            line_comment = True
+            cursor += 2
+            continue
+        if text.startswith("/*", cursor):
+            block_comment = True
+            cursor += 2
+            continue
+        if character in "'\"`":
+            cursor = _jsx_quoted_end(text, cursor)
+            previous_character = "literal"
+            previous_word = None
+            continue
+        if character == "/" and _jsx_regex_can_start(previous_character, previous_word):
+            regex_end = _regex_literal_end(text, cursor)
+            if regex_end is not None:
+                cursor = regex_end
+                previous_character = "literal"
+                previous_word = None
+                continue
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return cursor + 1
+        if character.isspace():
+            cursor += 1
+            continue
+        if character.isidentifier() or character in "$_":
+            word_start = cursor
+            cursor += 1
+            while cursor < len(text) and (
+                text[cursor].isidentifier() or text[cursor].isdecimal() or text[cursor] in "$_"
+            ):
+                cursor += 1
+            previous_word = text[word_start:cursor]
+            previous_character = "identifier"
+            continue
+        previous_word = None
+        previous_character = character
+        cursor += 1
+    return None
+
+
+def _jsx_element_end(text: str, start: int) -> int | None:
+    """Return the end of a complete JSX element, if one starts here.
+
+    A stack is required here: a first matching ``</Item>`` is not necessarily
+    the close for ``<Item>`` when JSX nests same-name elements.  Self-closing
+    tags and fragments are stack entries too, and attribute expressions are
+    skipped before the next child tag is considered.  A valid TypeScript
+    generic/comparison expression still returns ``None`` because it has no
+    matching JSX close.
+    """
+
+    opening = _jsx_tag_end(text, start)
+    if opening is None:
+        return None
+    cursor, name, closing, self_closing = opening
+    if closing:
+        return None
+    if self_closing:
+        return cursor
+    stack: list[str | None] = [name]
+    while cursor < len(text):
+        if text[cursor] == "{":
+            expression_end = _jsx_expression_end(text, cursor)
+            if expression_end is None:
+                return None
+            cursor = expression_end
+            continue
+        if text.startswith("{/*", cursor):
+            expression_end = _jsx_expression_end(text, cursor)
+            if expression_end is None:
+                return None
+            cursor = expression_end
+            continue
+        if text.startswith("<!--", cursor):
+            comment_end = text.find("-->", cursor + 4)
+            if comment_end < 0:
+                return None
+            cursor = comment_end + 3
+            continue
+        if text[cursor] != "<":
+            cursor += 1
+            continue
+        tag = _jsx_tag_end(text, cursor)
+        if tag is None:
+            cursor += 1
+            continue
+        tag_end, tag_name, tag_closing, tag_self_closing = tag
+        if tag_closing:
+            if not stack or stack[-1] != tag_name:
+                return None
+            stack.pop()
+            cursor = tag_end
+            if not stack:
+                return cursor
+            continue
+        if not tag_self_closing:
+            stack.append(tag_name)
+        cursor = tag_end
+    return None
 
 
 def _regex_literal_end(text: str, start: int) -> int | None:
@@ -1004,25 +1219,116 @@ def _find_statement_end(tokens: list[dict[str, Any]], index: int) -> int:
     raise AssertionError("export statement must end with semicolon")
 
 
+def _matching_angle_end(tokens: list[dict[str, Any]], start: int) -> int | None:
+    """Find the closing ``>`` for a declaration's generic parameter list."""
+
+    assert tokens[start]["value"] == "<"
+    depth = 0
+    for position in range(start, len(tokens)):
+        value = tokens[position]["value"]
+        if value == "<":
+            depth += 1
+        elif value == ">":
+            depth -= 1
+            if depth == 0:
+                return position
+            if depth < 0:
+                return None
+    return None
+
+
+def _matching_paren_end(tokens: list[dict[str, Any]], start: int) -> int | None:
+    """Find a function parameter list's closing parenthesis."""
+
+    assert tokens[start]["value"] == "("
+    depth = 0
+    for position in range(start, len(tokens)):
+        value = tokens[position]["value"]
+        if value == "(":
+            depth += 1
+        elif value == ")":
+            depth -= 1
+            if depth == 0:
+                return position
+            if depth < 0:
+                return None
+    return None
+
+
+def _declaration_body_start(tokens: list[dict[str, Any]], index: int) -> int | None:
+    """Locate a declaration body without mistaking a generic type literal for it."""
+
+    declaration_kind = tokens[index]["value"]
+    if declaration_kind == "async":
+        declaration_kind = "function"
+    if declaration_kind not in {"function", "class", "interface"}:
+        return None
+
+    cursor = index + 1
+    if declaration_kind == "function" and tokens[index]["value"] == "async":
+        assert cursor < len(tokens) and tokens[cursor]["value"] == "function"
+        cursor += 1
+    if cursor < len(tokens) and tokens[cursor]["value"] == "*":
+        cursor += 1
+    if cursor >= len(tokens) or tokens[cursor]["kind"] != "identifier":
+        return None
+    cursor += 1
+    if cursor < len(tokens) and tokens[cursor]["value"] == "<":
+        generic_end = _matching_angle_end(tokens, cursor)
+        if generic_end is None:
+            return None
+        cursor = generic_end + 1
+
+    if declaration_kind == "function":
+        parameter_start = next(
+            (
+                position
+                for position in range(cursor, len(tokens))
+                if tokens[position]["value"] == "("
+                and tokens[position]["brace_depth"] == tokens[index]["brace_depth"]
+            ),
+            None,
+        )
+        if parameter_start is None:
+            return None
+        parameter_end = _matching_paren_end(tokens, parameter_start)
+        if parameter_end is None:
+            return None
+        cursor = parameter_end + 1
+
+    base_brace_depth = tokens[index]["brace_depth"]
+    # A top-level type literal can occur in a generic constraint or in a
+    # function return annotation.  The declaration body follows a type-literal
+    # close, so punctuation that can only introduce a type is skipped.  This
+    # is deliberately conservative: unsupported syntax falls through to the
+    # closed semicolon rule rather than producing a truncated span.
+    type_introducers = {":", "|", "&", "=>", "extends", "implements", "=", "<", ","}
+    for position in range(cursor, len(tokens)):
+        token = tokens[position]
+        if token["value"] == "export" and token["brace_depth"] == base_brace_depth:
+            break
+        if token["value"] != "{" or token["brace_depth"] != base_brace_depth:
+            continue
+        previous = tokens[position - 1]["value"] if position > 0 else None
+        if previous in type_introducers:
+            continue
+        return position
+    return None
+
+
 def _find_decl_end(tokens: list[dict[str, Any]], index: int) -> int:
     """Find a declaration's balanced body, or its required semicolon."""
 
-    brace_start: int | None = None
-    for position in range(index, len(tokens)):
-        value = tokens[position]["value"]
-        if (
-            position > index
-            and value == "export"
-            and tokens[position]["brace_depth"] == 0
-            and tokens[position]["paren_depth"] == 0
-            and tokens[position]["bracket_depth"] == 0
-        ):
-            break
-        if value == ";":
-            break
-        if value == "{":
-            brace_start = position
-            break
+    declaration_kind = tokens[index]["value"]
+    if declaration_kind == "async":
+        declaration_kind = "function"
+    if declaration_kind == "type":
+        # Generic constraints may contain object types before the alias
+        # equals sign.  Treat the whole type alias as a semicolon-terminated
+        # statement instead of mistaking the first constraint brace for its
+        # declaration body.
+        return _find_statement_end(tokens, index)
+    brace_start = _declaration_body_start(tokens, index)
     if brace_start is None:
         return _find_statement_end(tokens, index)
     depth = 0
@@ -1283,8 +1589,9 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
             declared_name = cast(str, tokens[declaration_cursor]["value"])
             assert tokens[declaration_cursor]["kind"] == "identifier"
             assert _is_export_identifier(declared_name)
+            declaration_start = cursor - 1 if type_name_direct else cursor
             end = (
-                _find_decl_end(tokens, cursor)
+                _find_decl_end(tokens, declaration_start)
                 if declaration in {"function", "class", "type", "interface"}
                 else _find_statement_end(tokens, cursor)
             )
@@ -1695,6 +2002,150 @@ def _validate_project_correspondence(
     assert model_ids == sorted(model_ids)
 
 
+class NextTargetCompletenessFailure(AssertionError):
+    """Typed pre-model failure for a selected program File→Module mapping."""
+
+    def __init__(self, failures: list[dict[str, Any]]) -> None:
+        self.failures = failures
+        super().__init__("selected target has no unique program File→Module mapping")
+
+
+def target_completeness_failure(
+    model: dict[str, Any], targets: list[str]
+) -> NextTargetCompletenessFailure | None:
+    """Check target completeness before strict model validation can assert.
+
+    This intentionally reads the raw discovered arrays.  A duplicate module ID
+    is still classified as a target failure rather than escaping as an opaque
+    collection assertion; the public outcome is therefore deterministic.
+    """
+
+    files = list(model.get("files", []))
+    modules = list(model.get("modules", []))
+    components = list(model.get("components", []))
+    modules_by_key: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+    for module in modules:
+        modules_by_key.setdefault((module.get("project_id"), module.get("path")), []).append(module)
+    component_module_ids = {component.get("module_id") for component in components}
+    selected_targets = list(targets)
+    if not selected_targets:
+        selected_targets = [
+            f"path:{file_record.get('path')}"
+            for file_record in files
+            if _is_program_file(file_record)
+        ]
+    failures: list[dict[str, Any]] = []
+    for target in selected_targets:
+        target_key = canonical_target_key(target)
+        requested_path = target_key.removeprefix(TARGET_SELECTOR_PREFIX)
+        exact_files = [file for file in files if file.get("path") == requested_path]
+        matching_files = exact_files or [
+            file for file in files if _under(file.get("path", ""), requested_path)
+        ]
+        project_ids = {file.get("project_id") for file in matching_files}
+        selected_program_files = [file for file in matching_files if _is_program_file(file)]
+        reason = None
+        if not matching_files or len(project_ids) != 1 or len(exact_files) > 1:
+            reason = "missing_or_ambiguous_path"
+        elif exact_files and not _is_program_file(exact_files[0]):
+            reason = "non_program_file"
+        elif not selected_program_files:
+            reason = "no_program_file"
+        else:
+            for file in selected_program_files:
+                key = (file.get("project_id"), file.get("path"))
+                matching_modules = modules_by_key.get(key, [])
+                if len(matching_modules) != 1:
+                    expected_module_id = recompute_record_id(
+                        {
+                            "kind": "module",
+                            "project_id": key[0],
+                            "path": key[1],
+                        }
+                    )
+                    reason = (
+                        "component_only"
+                        if not matching_modules and expected_module_id in component_module_ids
+                        else "module_missing_or_duplicate"
+                    )
+                    break
+                module_id = matching_modules[0].get("id")
+                if module_id not in {module.get("id") for module in modules}:
+                    reason = "module_missing_or_duplicate"
+                    break
+        if reason is not None:
+            failures.append({"target_key": target_key, "reason": reason})
+    return NextTargetCompletenessFailure(failures) if failures else None
+
+
+def target_failure_decision(
+    failure: NextTargetCompletenessFailure, run_context: NextRunContext
+) -> dict[str, Any]:
+    """Return the stable response-envelope projection for a target failure."""
+
+    context = canonical_run_context(**run_context)
+    return {
+        "actual": None,
+        "resolved": context["budget_resolved"],
+        "allowed": False,
+        "payload_available": False,
+        "original_outcome": "payload_unavailable",
+        "outcome": "payload_unavailable",
+        "diagnostic_code": "CSV-NEXT-TARGET-001",
+        "run_context": context,
+        "requested_formats": context["requested_formats"],
+        "budget_requested": context["budget_requested"],
+        "budget_source": context["budget_source"],
+        "stdout_selector": context["stdout_selector"],
+        "artifact_paths": [],
+        "target_failures": copy.deepcopy(failure.failures),
+    }
+
+
+def export_reexport_failure_rows(proof: dict[str, Any]) -> list[dict[str, Any]]:
+    """Select fail-closed cycle/conflict rows from the validated graph witness."""
+
+    rows = [
+        {
+            "syntax_identity": witness["syntax_identity"],
+            "original_exported_name": witness["original_exported_name"],
+            "exported_name": witness["exported_name"],
+            "diagnostic": witness["diagnostic"],
+        }
+        for witness in proof["export_reexport_witness"]
+        if witness["diagnostic"] in {"cycle", "conflict"}
+    ]
+    rows.sort(key=canonical_json_bytes)
+    return rows
+
+
+def export_failure_decision(
+    proof: dict[str, Any], run_context: NextRunContext
+) -> dict[str, Any] | None:
+    """Project graph cycle/conflict evidence to a stable unavailable outcome."""
+
+    failures = export_reexport_failure_rows(proof)
+    if not failures:
+        return None
+    context = canonical_run_context(**run_context)
+    return {
+        "actual": None,
+        "resolved": context["budget_resolved"],
+        "allowed": False,
+        "payload_available": False,
+        "original_outcome": "payload_unavailable",
+        "outcome": "payload_unavailable",
+        "diagnostic_code": "CSV-NEXT-EXPORT-001",
+        "run_context": context,
+        "requested_formats": context["requested_formats"],
+        "budget_requested": context["budget_requested"],
+        "budget_source": context["budget_source"],
+        "stdout_selector": context["stdout_selector"],
+        "artifact_paths": [],
+        "export_failures": failures,
+    }
+
+
 def derive_pre_budget_outcome(proof: dict[str, Any], model: dict[str, Any]) -> str:
     """Derive publication quality from validated proof/model facts only."""
 
@@ -1706,16 +2157,14 @@ def derive_pre_budget_outcome(proof: dict[str, Any], model: dict[str, Any]) -> s
 
 
 def validate_response_envelope(
-    response: dict[str, Any],
+    response_bytes: bytes,
     request: dict[str, Any],
-    *,
-    response_bytes: bytes | None = None,
 ) -> dict[str, Any]:
-    bounded = bounded_decode_json(
-        response if response_bytes is None else response_bytes,
-        limits=request["limits"],
-    )
+    """Validate one adapter response only after bounded raw-byte decoding."""
+
+    bounded = bounded_decode_json(response_bytes, limits=request["limits"])
     assert bounded["allowed"]
+    response = cast(dict[str, Any], bounded["value"])
     assert response["protocol"] == request["protocol"] == "code-structure-viz.next-adapter/v1"
     assert response["request_id"] == request["request_id"]
     assert response["adapter_version"] == request["adapter_version"]
@@ -1732,6 +2181,8 @@ def validate_response_envelope(
         response["trusted_type_environment_digest"] == request["trusted_type_environment"]["sha256"]
     )
     validate_limits_consistency(request["limits"], response["limits"])
+    run_context = canonical_run_context(**response["run_context"])
+    assert run_context["budget_resolved"] == request["limits"]["max_entities"]
     model = response["model"]
     _validate_project_correspondence(request["projects"], model["projects"])
     request_files = [
@@ -1739,17 +2190,23 @@ def validate_response_envelope(
         for file_record in request["files"]
     ]
     assert model["files"] == request_files
+    target_failure = target_completeness_failure(model, request["targets"])
+    if target_failure is not None:
+        return target_failure_decision(target_failure, run_context)
     actual_entities = validate_model(
         model,
         max_model_records=request["limits"]["max_model_records"],
     )
     validate_proof(response["proof"], model, request_targets=request["targets"])
+    export_failure = export_failure_decision(response["proof"], run_context)
+    if export_failure is not None:
+        return export_failure
     pre_budget_outcome = derive_pre_budget_outcome(response["proof"], model)
     return entity_budget_gate(
         actual_entities,
-        request["limits"]["max_entities"],
+        run_context["budget_resolved"],
         original_outcome=pre_budget_outcome,
-        requested_formats=request.get("formats", FORMAT_ORDER),
+        run_context=run_context,
     )
 
 
@@ -1760,6 +2217,8 @@ def recompute_run_fingerprint(
     domain_config_digest: str,
     projects: list[dict[str, Any]],
     targets: list[str],
+    formats: list[str] | tuple[str, ...],
+    stdout_selector: str,
     limits: dict[str, Any],
     node_version: str | None,
     typescript_version: str,
@@ -1774,6 +2233,8 @@ def recompute_run_fingerprint(
             "domain_config_digest": domain_config_digest,
             "projects": projects,
             "targets": targets,
+            "formats": list(formats),
+            "stdout_selector": stdout_selector,
             "limits": limits,
             "node_version": node_version,
             "typescript_version": typescript_version,
@@ -1786,6 +2247,11 @@ def recompute_run_fingerprint(
 
 def validate_domain_manifest(value: dict[str, Any]) -> None:
     assert value["domain"] == "next"
+    run_context = canonical_run_context(**value["run_context"])
+    assert run_context["requested_formats"] == value["formats"]
+    assert run_context["budget_resolved"] == value["budget"]["resolved"]
+    assert run_context["budget_requested"] == value["budget"]["requested"]
+    assert run_context["budget_source"] == value["budget"]["source"]
     validate_compatibility_descriptor(value["compatibility_descriptor"])
     assert (
         value["semantic_compatibility_id"] == value["compatibility_descriptor"]["compatibility_id"]
@@ -1943,16 +2409,17 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             assert any(
                 diagnostic["code"] == "CSV-NEXT-LIMIT-005" for diagnostic in value["diagnostics"]
             )
-        else:
+        elif value["payload_available"]:
             assert value["entity_count"] == value["budget"]["actual"]
-            if value["payload_available"]:
-                assert coverage_internal_entities == value["entity_count"]
+            assert coverage_internal_entities == value["entity_count"]
     assert value["run_fingerprint"] == recompute_run_fingerprint(
         source_view_fingerprint=value["source"]["fingerprint"],
         source_plan_digest=value["source_plan_digest"],
         domain_config_digest=value["domain_config_digest"],
         projects=value["projects"],
         targets=value["targets"],
+        formats=run_context["requested_formats"],
+        stdout_selector=run_context["stdout_selector"],
         limits=value["limits"],
         node_version=value["toolchain"]["node_version"],
         typescript_version=value["toolchain"]["typescript_version"],
@@ -2023,7 +2490,7 @@ def entity_budget_gate(
     resolved: int,
     *,
     original_outcome: str,
-    requested_formats: list[str] | tuple[str, ...] = FORMAT_ORDER,
+    run_context: NextRunContext,
 ) -> dict[str, Any]:
     """Compose the entity gate without upgrading a pre-budget outcome.
 
@@ -2034,8 +2501,8 @@ def entity_budget_gate(
     """
 
     assert original_outcome in {"complete", "partial_safe"}
-    formats = list(requested_formats)
-    _assert_formats(formats)
+    context = canonical_run_context(**run_context)
+    formats = context["requested_formats"]
     expected_artifacts = {
         "semantic-json": "next.snapshot.semantic.json",
         "plantuml": "next.snapshot.puml",
@@ -2050,7 +2517,11 @@ def entity_budget_gate(
         "original_outcome": original_outcome,
         "outcome": outcome,
         "diagnostic_code": None if allowed else "CSV-NEXT-LIMIT-005",
+        "run_context": context,
         "requested_formats": formats,
+        "budget_requested": context["budget_requested"],
+        "budget_source": context["budget_source"],
+        "stdout_selector": context["stdout_selector"],
         "artifact_paths": [expected_artifacts[format_name] for format_name in formats]
         if allowed
         else [],
@@ -2062,7 +2533,7 @@ def compose_entity_budget_outcome(
     resolved: int,
     *,
     original_outcome: str,
-    requested_formats: list[str] | tuple[str, ...] = FORMAT_ORDER,
+    run_context: NextRunContext,
 ) -> dict[str, Any]:
     """Return the manifest-facing status fields produced by EntityBudgetGate."""
 
@@ -2070,7 +2541,7 @@ def compose_entity_budget_outcome(
         measured,
         resolved,
         original_outcome=original_outcome,
-        requested_formats=requested_formats,
+        run_context=run_context,
     )
 
 
@@ -2118,7 +2589,7 @@ class _BoundedJsonDecodeFailure(Exception):
 
 
 class _BoundedJsonDecoder:
-    """Count a response's JSON structure without constructing the response."""
+    """Bound a raw JSON response before constructing its Python object."""
 
     def __init__(self, payload: bytes, limits: dict[str, int]) -> None:
         self.payload = payload
@@ -2137,32 +2608,107 @@ class _BoundedJsonDecoder:
         while self.index < len(self.payload) and self.payload[self.index] in b" \t\r\n":
             self.index += 1
 
-    def _parse_string(self) -> str:
-        start = self.index
+    def _scan_string(self) -> tuple[int, int]:
+        """Scan one JSON string and count decoded UTF-8 bytes incrementally."""
+
         assert self.payload[self.index] == ord('"')
         self.index += 1
+        decoded_bytes = 0
+        hex_digits = b"0123456789abcdefABCDEF"
         while self.index < len(self.payload):
             byte = self.payload[self.index]
             if byte == ord('"'):
                 self.index += 1
-                try:
-                    value = json.loads(self.payload[start : self.index].decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    self._fail("invalid_json")
-                assert isinstance(value, str)
-                encoded_bytes = len(value.encode("utf-8"))
-                self.max_string_bytes = max(self.max_string_bytes, encoded_bytes)
-                if encoded_bytes > self.limits["max_json_string_bytes"]:
-                    self._fail("max_json_string_bytes")
-                return value
+                return self.index, decoded_bytes
             if byte < 0x20:
                 self._fail("invalid_json")
             if byte == ord("\\"):
-                self.index += 2
-            else:
                 self.index += 1
+                if self.index >= len(self.payload):
+                    self._fail("invalid_json")
+                escape = self.payload[self.index]
+                if escape in b'"\\/bfnrt':
+                    decoded_bytes += 1
+                    self.index += 1
+                    continue
+                if escape != ord("u"):
+                    self._fail("invalid_json")
+                if self.index + 4 >= len(self.payload):
+                    self._fail("invalid_json")
+                digits = self.payload[self.index + 1 : self.index + 5]
+                if any(digit not in hex_digits for digit in digits):
+                    self._fail("invalid_json")
+                codepoint = int(digits.decode("ascii"), 16)
+                self.index += 5
+                if 0xD800 <= codepoint <= 0xDBFF:
+                    # JSON requires a high surrogate to be followed by a
+                    # second escaped low surrogate.  Count the combined code
+                    # point without constructing the decoded string.
+                    if self.payload[self.index : self.index + 2] != b"\\u":
+                        self._fail("invalid_json")
+                    if self.index + 6 > len(self.payload):
+                        self._fail("invalid_json")
+                    low_digits = self.payload[self.index + 2 : self.index + 6]
+                    if any(digit not in hex_digits for digit in low_digits):
+                        self._fail("invalid_json")
+                    low = int(low_digits.decode("ascii"), 16)
+                    if not 0xDC00 <= low <= 0xDFFF:
+                        self._fail("invalid_json")
+                    self.index += 6
+                    decoded_bytes += len(
+                        chr(0x10000 + ((codepoint - 0xD800) << 10) + low - 0xDC00).encode("utf-8")
+                    )
+                elif 0xDC00 <= codepoint <= 0xDFFF:
+                    self._fail("invalid_json")
+                else:
+                    decoded_bytes += len(chr(codepoint).encode("utf-8"))
+                continue
+            if byte < 0x80:
+                decoded_bytes += 1
+                self.index += 1
+                continue
+            if 0xC2 <= byte <= 0xDF:
+                width = 2
+            elif 0xE0 <= byte <= 0xEF:
+                width = 3
+            elif 0xF0 <= byte <= 0xF4:
+                width = 4
+            else:
+                self._fail("invalid_json")
+            sequence = self.payload[self.index : self.index + width]
+            if len(sequence) != width or any((item & 0xC0) != 0x80 for item in sequence[1:]):
+                self._fail("invalid_json")
+            try:
+                sequence.decode("utf-8")
+            except UnicodeDecodeError:
+                self._fail("invalid_json")
+            decoded_bytes += width
+            self.index += width
         self._fail("invalid_json")
         raise AssertionError("unreachable")
+
+    def _parse_string(self, *, materialize: bool) -> str | None:
+        """Scan a string before its value is materialized.
+
+        Object keys are materialized only after their decoded size has passed
+        the bound because duplicate-key detection needs the key value.  JSON
+        values remain byte-only during the structural pass; the complete
+        object is decoded once, after every bound has passed.
+        """
+
+        start = self.index
+        end, decoded_bytes = self._scan_string()
+        self.max_string_bytes = max(self.max_string_bytes, decoded_bytes)
+        if decoded_bytes > self.limits["max_json_string_bytes"]:
+            self._fail("max_json_string_bytes")
+        if not materialize:
+            return None
+        try:
+            value = json.loads(self.payload[start:end].decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._fail("invalid_json")
+        assert isinstance(value, str)
+        return value
 
     def _parse_number_or_literal(self) -> None:
         start = self.index
@@ -2189,7 +2735,7 @@ class _BoundedJsonDecoder:
             self._fail("invalid_json")
         byte = self.payload[self.index]
         if byte == ord('"'):
-            self._parse_string()
+            self._parse_string(materialize=False)
             return
         if byte == ord("{"):
             self._parse_object(depth)
@@ -2210,7 +2756,8 @@ class _BoundedJsonDecoder:
             self._skip_whitespace()
             if self.index >= len(self.payload) or self.payload[self.index] != ord('"'):
                 self._fail("invalid_json")
-            key = self._parse_string()
+            key = self._parse_string(materialize=True)
+            assert key is not None
             if key in keys:
                 self._fail("duplicate_object_key")
             keys.add(key)
@@ -2264,6 +2811,25 @@ class _BoundedJsonDecoder:
             self._skip_whitespace()
             if self.index != len(self.payload):
                 self._fail("invalid_json")
+
+            # The structural pass above is the trust-boundary gate.  Only
+            # after duplicate keys, nesting, string bytes, and array counts
+            # have passed do we materialize the response used by the schema
+            # and envelope validator.  ``object_pairs_hook`` keeps this
+            # invariant explicit even if the scanner is changed later.
+            def reject_duplicate_keys(
+                pairs: list[tuple[str, Any]],
+            ) -> dict[str, Any]:
+                value: dict[str, Any] = {}
+                for key, item in pairs:
+                    if key in value:
+                        self._fail("duplicate_object_key")
+                    value[key] = item
+                return value
+
+            value = json.loads(self.payload, object_pairs_hook=reject_duplicate_keys)
+            if not isinstance(value, dict):
+                self._fail("response_not_object")
         except _BoundedJsonDecodeFailure as failure:
             return {
                 "allowed": False,
@@ -2277,6 +2843,19 @@ class _BoundedJsonDecoder:
                 "reason": failure.reason,
                 "materialized": False,
             }
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+            return {
+                "allowed": False,
+                "bytes": len(self.payload),
+                "total_array_items": self.total_array_items,
+                "array_count": self.array_count,
+                "max_array_items": self.max_array_items,
+                "max_nesting": self.max_nesting,
+                "max_string_bytes": self.max_string_bytes,
+                "failed_at_byte": self.index,
+                "reason": "invalid_json",
+                "materialized": False,
+            }
         return {
             "allowed": True,
             "bytes": len(self.payload),
@@ -2287,18 +2866,20 @@ class _BoundedJsonDecoder:
             "max_string_bytes": self.max_string_bytes,
             "failed_at_byte": None,
             "reason": None,
-            "materialized": False,
+            "materialized": True,
+            "value": value,
         }
 
 
 def bounded_decode_json(
-    response: bytes | bytearray | dict[str, Any],
+    response: bytes,
     *,
     limits: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Run the bounded response decoder over bytes before object materialization."""
+    """Decode only raw response bytes through the bounded trust boundary."""
 
-    payload = canonical_json_bytes(response) if isinstance(response, dict) else bytes(response)
+    assert isinstance(response, bytes)
+    payload = response
     resolved_limits = {**LIMIT_DEFAULTS, **(limits or {})}
     for name in (
         "max_json_nesting",
@@ -2532,12 +3113,8 @@ def _assert_canonical(values: list[Any]) -> None:
 
 def _assert_target_keys(targets: list[str]) -> None:
     assert all(target.startswith(TARGET_SELECTOR_PREFIX) for target in targets)
-    assert all(
-        1
-        <= len(target.removeprefix(TARGET_SELECTOR_PREFIX).encode("utf-8"))
-        <= PATH_VALUE_MAX_BYTES
-        for target in targets
-    )
+    for target in targets:
+        _assert_path(target.removeprefix(TARGET_SELECTOR_PREFIX), allow_root=True)
     normalized = [canonical_target_key(target) for target in targets]
     assert normalized == targets
     _assert_canonical(targets)
@@ -2575,6 +3152,17 @@ def resolve_target_resolutions(
     project in the selected set is a project-scope failure.
     """
 
+    preflight = target_completeness_failure(model, targets)
+    if preflight is not None:
+        failed_keys = {item["target_key"] for item in preflight.failures}
+        return [
+            {
+                "target_key": canonical_target_key(target),
+                "status": "failed" if canonical_target_key(target) in failed_keys else "resolved",
+                "record_ids": [],
+            }
+            for target in sorted(targets, key=canonical_target_key)
+        ]
     collections = _validate_model_collections(model)
     unavailable = unavailable_record_ids or set()
     resolutions: list[dict[str, Any]] = []
@@ -2674,6 +3262,36 @@ def _assert_formats(formats: list[str]) -> None:
     assert len(formats) == len(set(formats))
     assert all(format_name in FORMAT_ORDER_INDEX for format_name in formats)
     assert formats == sorted(formats, key=FORMAT_ORDER_INDEX.__getitem__)
+
+
+def canonical_run_context(
+    *,
+    requested_formats: list[str] | tuple[str, ...],
+    budget_requested: int | None,
+    budget_resolved: int,
+    budget_source: str,
+    stdout_selector: str,
+) -> NextRunContext:
+    """Construct and validate the explicit context shared by all run surfaces."""
+
+    formats = list(requested_formats)
+    _assert_formats(formats)
+    assert budget_requested is None or 1 <= budget_requested <= 100000
+    assert 1 <= budget_resolved <= 100000
+    assert budget_source in RUN_CONTEXT_BUDGET_SOURCES
+    assert stdout_selector in RUN_CONTEXT_SELECTORS
+    assert stdout_selector.removeprefix("next:") in formats
+    if budget_source == "builtin":
+        assert budget_requested is None
+    else:
+        assert budget_requested is not None
+    return {
+        "requested_formats": formats,
+        "budget_requested": budget_requested,
+        "budget_resolved": budget_resolved,
+        "budget_source": budget_source,
+        "stdout_selector": stdout_selector,
+    }
 
 
 def _assert_external_target(target: dict[str, Any]) -> None:
@@ -3743,12 +4361,31 @@ def validate_model(
         owner_file = files_by_key.get((module["project_id"], module["path"]))
         assert owner_file is not None
         assert _is_program_file(owner_file)
-        assert len(modules_by_key[(module["project_id"], module["path"])]) == 1
-    _assert_unique([(module["project_id"], module["path"]) for module in module_records.values()])
+    duplicate_module_keys = [
+        key for key, candidates in modules_by_key.items() if len(candidates) != 1
+    ]
+    if duplicate_module_keys:
+        raise NextTargetCompletenessFailure(
+            [
+                {
+                    "target_key": f"path:{path}",
+                    "reason": "module_missing_or_duplicate",
+                }
+                for _project_id, path in duplicate_module_keys
+            ]
+        )
     for file_record in file_records.values():
-        if _is_program_file(file_record):
-            assert (
-                len(modules_by_key.get((file_record["project_id"], file_record["path"]), [])) == 1
+        if (
+            _is_program_file(file_record)
+            and len(modules_by_key.get((file_record["project_id"], file_record["path"]), [])) != 1
+        ):
+            raise NextTargetCompletenessFailure(
+                [
+                    {
+                        "target_key": f"path:{file_record['path']}",
+                        "reason": "module_missing_or_duplicate",
+                    }
+                ]
             )
     for component in component_records.values():
         assert component["kind"] == "component"
@@ -3967,7 +4604,7 @@ def validate_request_files(request: dict[str, Any]) -> None:
         assert file_record["kind"] == "file"
         assert recompute_record_id(file_record) == file_record["id"]
         assert file_record["project_id"] in project_set
-        _assert_path(file_record["path"])
+        _assert_file_path(file_record["path"])
         matching_roots = [
             project_id for root, project_id in roots if _under(file_record["path"], root)
         ]
@@ -4041,6 +4678,26 @@ def recompute_export_graph_case(case: dict[str, Any]) -> dict[str, Any]:
 
     cycles: set[tuple[str, str]] = set()
     conflicts: set[tuple[str, str]] = set()
+
+    cycle_reachability: dict[str, bool] = {}
+
+    def reaches_cycle(module_path: str, visiting: set[str] | None = None) -> bool:
+        """Determine whether a module's export graph reaches a module cycle."""
+
+        cached = cycle_reachability.get(module_path)
+        if cached is not None:
+            return cached
+        active = visiting or set()
+        if module_path in active:
+            return True
+        active = active | {module_path}
+        result = any(
+            source_path is not None and reaches_cycle(source_path, active)
+            for edge in edges_by_owner[module_path]
+            for source_path in [resolve_source(module_path, edge["source_specifier"])]
+        )
+        cycle_reachability[module_path] = result
+        return result
 
     def unknown(source_path: str | None, reason: str) -> dict[str, Any]:
         return {
@@ -4139,22 +4796,28 @@ def recompute_export_graph_case(case: dict[str, Any]) -> dict[str, Any]:
                     if name != "default"
                 ),
             )
-            if not expanded_names:
+            if not expanded_names and (source_path is None or reaches_cycle(source_path)):
                 expanded_names = [None]
         else:
             expanded_names = [edge["exported_name"]]
         for expanded_name in expanded_names:
-            result = (
-                owner_exports.get(expanded_name)
-                if expanded_name is not None
-                else unknown(source_path, "missing_source")
-            )
+            result: dict[str, Any] | None
+            if expanded_name is None:
+                result = unknown(
+                    source_path,
+                    "cycle"
+                    if source_path is not None and reaches_cycle(source_path)
+                    else "missing_source",
+                )
+            else:
+                result = owner_exports.get(expanded_name)
             if result is None:
                 result = unknown(source_path, "missing_export")
             witness = {
                 "owner_file_path": owner,
                 "source_specifier": edge["source_specifier"],
                 "imported_name": edge["imported_name"],
+                "original_exported_name": edge["exported_name"],
                 "exported_name": expanded_name,
                 "resolved_source_file_path": source_path,
                 "expanded_exported_name": result["expanded_exported_name"],
@@ -4183,22 +4846,49 @@ def recompute_export_graph_case(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _reexport_graph_index() -> dict[tuple[str, str, str], list[dict[str, Any]]]:
+def _reexport_graph_index() -> dict[tuple[str, str, str, str | None], list[dict[str, Any]]]:
     """Derive the main fixture graph from raw declarations and edges."""
 
     raw = load_export_graph_raw_fixture()
     result = recompute_export_graph_case(raw)
-    index: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    index: dict[tuple[str, str, str, str | None], list[dict[str, Any]]] = {}
     for witness in result["witnesses"]:
         key = (
             witness["owner_file_path"],
             witness["source_specifier"],
             witness["imported_name"],
+            witness["exported_name"],
         )
         index.setdefault(key, []).append(witness)
     for witnesses in index.values():
         witnesses.sort(key=canonical_json_bytes)
     return index
+
+
+def _export_syntax_rows_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Scan the frozen fixture bytes under each model module's exact path."""
+
+    fixture_by_path = {item["path"]: item for item in load_export_census_fixture()}
+    rows: list[dict[str, Any]] = []
+    for module in model["modules"]:
+        fixture = fixture_by_path.get(module["path"])
+        if fixture is None:
+            fixture = next(
+                (
+                    item
+                    for path, item in fixture_by_path.items()
+                    if module["path"].endswith(f"/{path}")
+                ),
+                None,
+            )
+        assert fixture is not None
+        rows.extend(
+            _scan_export_file(
+                cast(str, module["path"]),
+                cast(bytes, fixture["content"]),
+            )
+        )
+    return sorted(rows, key=canonical_json_bytes)
 
 
 def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
@@ -4213,6 +4903,15 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
         assert file is not None
         assert _is_program_file(file)
         fixture = fixture_by_path.get(module["path"])
+        if fixture is None:
+            fixture = next(
+                (
+                    item
+                    for path, item in fixture_by_path.items()
+                    if module["path"].endswith(f"/{path}")
+                ),
+                None,
+            )
         assert fixture is not None
         content = cast(bytes, fixture["content"])
         assert file["size_bytes"] == len(content)
@@ -4226,31 +4925,33 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
     graph = _reexport_graph_index()
 
     observations: list[dict[str, Any]] = []
-    for syntax in scan_export_syntax_census():
+    for syntax in _export_syntax_rows_for_model(model):
         module = modules_by_path.get(syntax["owner_file_path"])
         if module is None:
             # Context/control and grammar-only fixtures are scanned but do not
             # acquire semantic Module ownership.
             continue
         candidates = components_by_module.get(module["id"], [])
-        graph_witnesses = (
-            graph.get(
-                (
-                    syntax["owner_file_path"],
-                    syntax["source_specifier"],
-                    syntax["imported_name"],
-                )
+        graph_witnesses: list[dict[str, Any]] | None
+        if syntax["reexport"]:
+            base_key = (
+                syntax["owner_file_path"],
+                syntax["source_specifier"],
+                syntax["imported_name"],
             )
-            if syntax["reexport"]
-            else None
-        )
-        if graph_witnesses is not None:
-            assert graph_witnesses
+            graph_witnesses = [
+                witness
+                for key, witnesses in graph.items()
+                if key[:3] == base_key and (syntax["star"] or key[3] == syntax["exported_name"])
+                for witness in witnesses
+            ]
             if not syntax["star"]:
                 assert len(graph_witnesses) == 1
+        else:
+            graph_witnesses = None
         source_path = (
             graph_witnesses[0]["resolved_source_file_path"]
-            if graph_witnesses is not None
+            if graph_witnesses
             else _resolve_export_source_path(syntax["owner_file_path"], syntax["source_specifier"])
             if syntax["source_specifier"] is not None
             else None
@@ -4261,7 +4962,7 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
         )
         declaration_key = (
             graph_witnesses[0]["target_declaration_key"]
-            if graph_witnesses is not None and not syntax["star"]
+            if graph_witnesses and not syntax["star"]
             else syntax["imported_name"]
             if syntax["imported_name"] not in {None, "*", "default"}
             else syntax["exported_name"]
@@ -4283,7 +4984,7 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
                 and len(candidates) == 1
             ):
                 component = candidates[0]
-        if graph_witnesses is not None and not syntax["star"]:
+        if graph_witnesses and not syntax["star"]:
             resolution = graph_witnesses[0]["resolution"]
             expanded_name = graph_witnesses[0]["expanded_exported_name"]
         else:
@@ -4316,7 +5017,7 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
 def expected_export_resolution_witness(model: dict[str, Any]) -> list[dict[str, Any]]:
     """Return the TypeChecker resolution witness for public component bindings."""
 
-    public = _export_binding_projection_from_observations(_export_census_for_model(model))
+    public = _export_binding_projection_for_model(model)
     members = {
         (
             member["owner_id"],
@@ -4356,7 +5057,7 @@ def expected_export_reexport_witness(model: dict[str, Any]) -> list[dict[str, An
         for component in model["components"]
     }
     syntax_by_edge: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
-    for syntax_row in scan_export_syntax_census():
+    for syntax_row in _export_syntax_rows_for_model(model):
         if syntax_row["reexport"]:
             syntax_by_edge.setdefault(
                 (
@@ -4395,10 +5096,13 @@ def expected_export_reexport_witness(model: dict[str, Any]) -> list[dict[str, An
                 "syntax_identity": matched_syntax["syntax_identity"],
                 "source_specifier": graph_witness["source_specifier"],
                 "imported_name": graph_witness["imported_name"],
+                "original_exported_name": graph_witness["original_exported_name"],
+                "exported_name": graph_witness["exported_name"],
                 "resolved_source_module_id": source_module["id"] if source_module else None,
                 "expanded_exported_name": graph_witness["expanded_exported_name"],
                 "target_declaration_id": target_component_id,
                 "resolution": graph_witness["resolution"],
+                "diagnostic": graph_witness["diagnostic"],
             }
         )
     return sorted(witnesses, key=canonical_json_bytes)
@@ -4445,6 +5149,75 @@ def _export_binding_projection_from_observations(
         )
     projected.sort(key=canonical_json_bytes)
     return projected
+
+
+def _export_binding_projection_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project local and independently expanded re-export Components."""
+
+    observations = _export_census_for_model(model)
+    # A re-export observation is syntax evidence only.  Its public binding is
+    # derived from the raw declaration/edge graph below, so a coordinated
+    # observation+binding mutation cannot make the graph disappear.
+    projected = _export_binding_projection_from_observations(
+        [observation for observation in observations if not observation["reexport"]]
+    )
+    module_by_path = {module["path"]: module for module in model["modules"]}
+    for witness in expected_export_reexport_witness(model):
+        if witness["resolution"] != "component":
+            continue
+        owner_module = module_by_path.get(witness["owner_file_path"])
+        assert owner_module is not None
+        component_id = witness["target_declaration_id"]
+        assert component_id is not None
+        identity = {
+            "owner_id": owner_module["id"],
+            "exported_name": witness["exported_name"],
+            "role": "value",
+        }
+        projected.append(
+            {
+                "kind": "export_binding",
+                "id": (
+                    "next:member:"
+                    f"{digest({'kind': 'export_binding', 'version': 1, 'identity': identity})}"
+                ),
+                "owner_id": owner_module["id"],
+                "exported_name": witness["exported_name"],
+                "role": "value",
+                "target_component_id": component_id,
+                "resolution_kind": "component",
+                "reexport": True,
+            }
+        )
+    projected.sort(key=canonical_json_bytes)
+    keys = [(item["owner_id"], item["exported_name"], item["role"]) for item in projected]
+    assert len(keys) == len(set(keys))
+    return projected
+
+
+def expected_export_coverage_counts(model: dict[str, Any]) -> dict[str, int]:
+    """Count value/type coverage from local observations and graph rows once."""
+
+    observations = _export_census_for_model(model)
+    counts = {
+        "value": sum(
+            observation["resolution"] == "value"
+            for observation in observations
+            if not observation["reexport"]
+        ),
+        "type": sum(
+            observation["resolution"] == "type"
+            for observation in observations
+            if not observation["reexport"]
+        ),
+    }
+    for witness in expected_export_reexport_witness(model):
+        if witness["resolution"] in counts:
+            counts[witness["resolution"]] += 1
+    return {
+        "non_component_value_export_count": counts["value"],
+        "type_only_export_count": counts["type"],
+    }
 
 
 def validate_export_observations(observations: list[dict[str, Any]], model: dict[str, Any]) -> None:
@@ -4557,7 +5330,7 @@ def validate_export_observations(observations: list[dict[str, Any]], model: dict
         [member for member in model["members"] if member["kind"] == "export_binding"],
         key=canonical_json_bytes,
     )
-    assert _export_binding_projection_from_observations(observations) == expected_public
+    assert _export_binding_projection_for_model(model) == expected_public
 
 
 def validate_proof(
@@ -4694,12 +5467,10 @@ def validate_proof(
     assert proof["causal_edges"] == derive_required_causal_edges(proof, discovered)
 
     validate_export_observations(proof["export_observations"], model)
-    assert model["coverage"]["non_component_value_export_count"] == sum(
-        observation["resolution"] == "value" for observation in proof["export_observations"]
-    )
-    assert model["coverage"]["type_only_export_count"] == sum(
-        observation["resolution"] == "type" for observation in proof["export_observations"]
-    )
+    assert {
+        "non_component_value_export_count": model["coverage"]["non_component_value_export_count"],
+        "type_only_export_count": model["coverage"]["type_only_export_count"],
+    } == expected_export_coverage_counts(model)
     assert proof["export_resolution_witness"] == expected_export_resolution_witness(model)
     assert proof["export_reexport_witness"] == expected_export_reexport_witness(model)
 
@@ -4827,12 +5598,10 @@ def validate_proof(
         for relation in model["relations"]
         if "target" in relation
     )
-    assert coverage["non_component_value_export_count"] == sum(
-        observation["resolution"] == "value" for observation in proof["export_observations"]
-    )
-    assert coverage["type_only_export_count"] == sum(
-        observation["resolution"] == "type" for observation in proof["export_observations"]
-    )
+    assert {
+        "non_component_value_export_count": coverage["non_component_value_export_count"],
+        "type_only_export_count": coverage["type_only_export_count"],
+    } == expected_export_coverage_counts(model)
 
 
 def validate_trusted_environment(
@@ -4986,9 +5755,16 @@ def validate_run_status_vector(
     stdout_result: dict[str, Any] | None,
     published_bytes: dict[str, bytes],
     stdout_bytes: bytes | None,
-    stderr_diagnostics: list[dict[str, Any]],
+    manifest_diagnostics: list[dict[str, Any]],
+    *,
+    stderr_bytes: bytes,
+    public_stderr_diagnostics: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Validate the cross-artifact status and exact-byte publication vector."""
+    """Validate status while keeping emitted stderr separate from manifest data."""
+
+    if public_stderr_diagnostics is None:
+        public_stderr_diagnostics = manifest_diagnostics
+    assert stderr_bytes == _public_diagnostic_jsonl(public_stderr_diagnostics)
 
     run_status = summary["run_status"]
     expected_exit = {
@@ -5006,7 +5782,7 @@ def validate_run_status_vector(
         assert summary["manifest"] is None
         assert stdout_result is None
         assert stdout_bytes == b""
-        assert stderr_diagnostics == []
+        assert manifest_diagnostics == []
         return
     if run_status in {"fatal", "interrupted"}:
         assert manifest is None
@@ -5017,7 +5793,7 @@ def validate_run_status_vector(
         assert stdout_result["run_status"] == run_status
         assert stdout_result["artifact"] is None
         assert stdout_bytes == canonical_json_bytes(stdout_result) + b"\n"
-        assert stderr_diagnostics == []
+        assert manifest_diagnostics == []
         return
 
     assert manifest is not None
@@ -5041,11 +5817,12 @@ def validate_run_status_vector(
         descriptor = artifact_records[path]
         assert descriptor["size_bytes"] == len(payload)
         assert descriptor["sha256"] == hashlib.sha256(payload).hexdigest()
-    assert stderr_diagnostics == manifest["diagnostics"]
+    assert manifest_diagnostics == manifest["diagnostics"]
 
     assert stdout_result is not None
     selector = stdout_result["selector"]
     assert selector in {"next:semantic-json", "next:plantuml"}
+    assert selector.removeprefix("next:") in manifest["run"]["run_context"]["requested_formats"]
     assert stdout_result["domain_status"] == run_status
     format_name = selector.removeprefix("next:")
     expected_path = (
@@ -5089,7 +5866,7 @@ def validate_run_manifest(
         "name": "snapshot",
         "domain": "next",
         "formats": domain["formats"],
-        "stdout_selector": f"next:{domain['formats'][0]}",
+        "stdout_selector": domain["run_context"]["stdout_selector"],
     }
     assert manifest["source"] == domain["source"]
     assert manifest["next_request"] == domain["request"]
@@ -5121,6 +5898,7 @@ def validate_run_manifest(
         "status": domain["status"],
         "exit_code": expected_exit,
         "fingerprint": domain["run_fingerprint"],
+        "run_context": domain["run_context"],
     }
     expected_artifacts = []
     for path in domain["artifact_paths"]:

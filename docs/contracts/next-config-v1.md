@@ -1,11 +1,13 @@
 # Next configuration and request projection v1
 
-Round 10 review state: `review_status: fail` (P0=0, P1=8, P2=0). Pass A/B path,
-project correspondence, and requested-format remediation is locally reflected. The
-domain-discriminated target projection, closed SourceAcquisitionPlan, and
-surface-specific ordering below are local data-only remediations; fresh
-exact-SHA Strict is pending, readiness is unconfirmed, and production
-implementation has not started. Fresh Strict remains pending.
+Round 11 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
+`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Pass A/B path, project correspondence, and
+requested-format remediation plus Pass C explicit run context, shared path helper, and
+typed File-to-Module target failure are locally reflected. Pass D's raw-response trust
+boundary, export witness, and public stderr gate are also reflected. The domain-discriminated target
+projection, closed SourceAcquisitionPlan, and surface-specific ordering below are local
+data-only remediations; fresh exact-SHA Strict is pending, readiness is unconfirmed, and
+production implementation has not started. Fresh Strict remains pending.
 
 Issue #8 uses one canonical configuration value object and one canonical
 snapshot request projection.  The same values are copied into the domain
@@ -109,8 +111,14 @@ Module/Component set only when the file has program role and an exact
 `.ts/.tsx/.js/.jsx` suffix. A directory path resolves the complete canonical
 descendant set; context/control files may remain as File provenance, but they
 never contribute semantic Modules or children. Multiple descendants are
-expected and are not ambiguous. Paths are NFC-normalized, bounded to 1--4096
-characters, and reject traversal, backslashes, control characters, and `#`.
+expected and are not ambiguous. Every path-bearing request, response, proof,
+domain, root-manifest, and raw-graph field calls the same canonical helper.
+The value is NFC-normalized, uses UTF-8, is bounded to 1--4096 bytes (the
+`path:` prefix is not counted), and rejects empty segments, traversal,
+backslashes, control characters, trailing slash, and `#`. JSON Schema
+`maxLength` is only an auxiliary character-count guard; it never replaces the
+helper. The root sentinel `.` is accepted only by fields that explicitly
+declare a project/source root, and is rejected for ordinary file paths.
 
 Missing path, project-scope ambiguity, out-of-scope path, or any selected
 tainted/excluded/failed record makes the whole domain
@@ -128,3 +136,11 @@ arithmetic measurements rather than allocating a 96 MiB fixture.
 The data-only reference validator and mutation vectors are the executable
 authority for projection equality, digest recomputation, role precedence, and
 encoded-byte limits until the production adapter is implemented.
+
+`NextRunContext/v1` is the one explicit context used after request resolution:
+`requested_formats`, `budget_requested`, `budget_resolved`, `budget_source`, and
+the actual `stdout_selector` are copied unchanged through the adapter response,
+EntityBudgetGate, domain manifest, root run, and stdout result. A selector must
+be one of the requested formats; no projection uses an implicit format-order
+fallback. Formats and selector are also included in the run-fingerprint
+preimage.

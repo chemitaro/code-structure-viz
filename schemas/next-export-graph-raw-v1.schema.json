@@ -18,12 +18,7 @@
     }
   },
   "$defs": {
-    "path": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 4096,
-      "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
-    },
+    "path": {"$ref": "urn:code-structure-viz:schema:next-path-v1"},
     "identifier": {
       "type": "string",
       "minLength": 1,

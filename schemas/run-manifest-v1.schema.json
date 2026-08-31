@@ -350,6 +350,7 @@
       "then": {
         "required": ["source", "next_request", "next_config"],
         "properties": {
+          "run": {"required": ["run_context"]},
           "request": {
             "required": ["projects", "targets", "formats"],
             "properties": {
@@ -1001,7 +1002,8 @@
       "properties": {
         "status": {"enum": ["complete", "not_applicable", "incomplete"]},
         "exit_code": {"enum": [0, 3]},
-        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "run_context": {"$ref": "urn:code-structure-viz:schema:next-run-context-v1"}
       },
       "oneOf": [
         {

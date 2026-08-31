@@ -54,6 +54,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-semantic-v1",
         "next-source-plan-v1",
         "next-path-v1",
+        "next-run-context-v1",
         "next-trusted-type-environment-v1",
     }
     registry = Registry()
@@ -80,6 +81,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-runtime-manifest-v1.schema.json",
         "next-source-plan-v1.schema.json",
         "next-path-v1.schema.json",
+        "next-run-context-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
         "run-manifest-v1.schema.json",
@@ -503,6 +505,13 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
             "actual": 0,
             "source": "builtin",
             "outcome": "complete",
+        },
+        "run_context": {
+            "requested_formats": ["semantic-json"],
+            "budget_requested": None,
+            "budget_resolved": 500,
+            "budget_source": "builtin",
+            "stdout_selector": "next:semantic-json",
         },
         "source_plan_digest": "c" * 64,
         "domain_config_digest": "d" * 64,

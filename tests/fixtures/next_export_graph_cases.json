@@ -87,6 +87,52 @@
       ]
     },
     {
+      "name": "double-alias",
+      "modules": [
+        {
+          "path": "src/Button.tsx",
+          "exports": [
+            {
+              "name": "Button",
+              "resolution": "component",
+              "target_declaration_key": "Button"
+            }
+          ]
+        },
+        {"path": "src/barrel.ts", "exports": []},
+        {"path": "src/index.ts", "exports": []}
+      ],
+      "edges": [
+        {
+          "owner_file_path": "src/barrel.ts",
+          "source_specifier": "./Button",
+          "imported_name": "Button",
+          "exported_name": "ButtonAlias"
+        },
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./barrel",
+          "imported_name": "ButtonAlias",
+          "exported_name": "FinalButton"
+        }
+      ]
+    },
+    {
+      "name": "empty-star",
+      "modules": [
+        {"path": "src/empty.ts", "exports": []},
+        {"path": "src/index.ts", "exports": []}
+      ],
+      "edges": [
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./empty",
+          "imported_name": "*",
+          "exported_name": "*"
+        }
+      ]
+    },
+    {
       "name": "star",
       "modules": [
         {"path": "src/index.ts", "exports": []},
@@ -111,6 +157,27 @@
         {
           "owner_file_path": "src/index.ts",
           "source_specifier": "./values",
+          "imported_name": "*",
+          "exported_name": "*"
+        }
+      ]
+    },
+    {
+      "name": "star-cycle",
+      "modules": [
+        {"path": "src/a.ts", "exports": []},
+        {"path": "src/b.ts", "exports": []}
+      ],
+      "edges": [
+        {
+          "owner_file_path": "src/a.ts",
+          "source_specifier": "./b",
+          "imported_name": "*",
+          "exported_name": "*"
+        },
+        {
+          "owner_file_path": "src/b.ts",
+          "source_specifier": "./a",
           "imported_name": "*",
           "exported_name": "*"
         }

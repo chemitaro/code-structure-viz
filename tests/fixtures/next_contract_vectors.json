@@ -47,7 +47,17 @@
     "round10-export-module-lexical-grammar",
     "round10-reexport-independent-raw-graph",
     "round10-public-stderr-jsonl-gate",
-    "round10-response-bounded-decoder"
+    "round10-response-bounded-decoder",
+    "round11-inverse-project-full-chain",
+    "round11-run-context-propagation",
+    "round11-path-byte-boundaries",
+    "round11-file-module-typed-target-failure",
+    "round11-jsx-lexical-state",
+    "round11-reexport-star-zero",
+    "round11-reexport-double-alias",
+    "round11-export-failure-projection",
+    "round11-raw-response-trust-boundary",
+    "round11-stderr-end-to-end"
   ],
   "negative": [
     "cross-domain",
@@ -108,6 +118,25 @@
     "round10-reexport-main-witness-mutation",
     "round10-public-stderr-limit-plus-one-no-partial",
     "round10-response-duplicate-key",
-    "round10-response-aggregate-pre-materialization"
+    "round10-response-aggregate-pre-materialization",
+    "round11-inverse-project-request-order",
+    "round11-inverse-project-response-order",
+    "round11-inverse-project-domain-order",
+    "round11-inverse-project-root-order",
+    "round11-run-context-selector-substitution",
+    "round11-path-4097-byte",
+    "round11-path-nfc-collision",
+    "round11-target-missing-module-file",
+    "round11-target-missing-module-directory",
+    "round11-target-duplicate-module-file",
+    "round11-target-duplicate-module-directory",
+    "round11-target-component-only-file",
+    "round11-target-component-only-directory",
+    "round11-jsx-false-positive",
+    "round11-reexport-witness-original-name",
+    "round11-reexport-failure-as-resolved",
+    "round11-raw-response-duplicate-key",
+    "round11-raw-response-limit-mutation",
+    "round11-stderr-limit-plus-one-end-to-end"
   ]
 }

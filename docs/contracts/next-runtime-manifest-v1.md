@@ -1,10 +1,12 @@
 # Next runtime manifest v1
 
-Round 10 review state: `review_status: fail` (P0=0, P1=8, P2=0). Runtime and
-trusted fixture attestation is synchronized as data-only remediation; fresh
+Round 11 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
+`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Runtime and trusted fixture attestation is
+synchronized as data-only remediation; fresh
 exact-SHA Strict is pending, readiness is unconfirmed, and production
 implementation has not started. Pass B's public stderr and bounded response decoder
-contracts are locally reflected. Fresh Strict remains pending.
+contracts, reinforced by Pass D's raw-byte trust-boundary checks, are locally reflected.
+Fresh Strict remains pending.
 
 `schemas/next-runtime-manifest-v1.schema.json` is the checked-in compatibility
 unit inventory. `members` are sorted by safe wheel-relative path and unique;

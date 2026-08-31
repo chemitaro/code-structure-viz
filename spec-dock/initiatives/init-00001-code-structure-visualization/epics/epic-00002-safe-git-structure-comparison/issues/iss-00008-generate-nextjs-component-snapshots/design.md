@@ -117,6 +117,56 @@ public stderrはcanonical JSONLを先にUTF-8 encodeし、inclusive limit/+1、p
 per-array/aggregateをbounded decoderでmaterialize前に数える。fresh exact-SHA Strictは
 未実行・未通過、readiness未確定、production実装未着手である。
 
+### Round 11 review state and Pass C remediation
+
+Round 11 は exact SHA `75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`、CI run
+`33422630936`（7/7 success）で `review_status: fail`、P0=0、P1=8、P2=0だった。証拠は
+`20260901t010000z-disc-strict-spec-review-round-11.md`へ保存する。Pass Cでは、root-path
+orderとsemantic ID orderを分離した逆順二projectのresponse→domain→root→fingerprint
+chain、全projectionで同一のrun context、全path surfaceで共有するUTF-8/NFC helper、
+program File→exactly one Moduleのtyped pre-model failureをdata-only validator/schema/
+fixture/testへ反映した。Pass Dでは、module-level JSX lexical scanner、raw declaration/edgeからの
+独立re-export witness、public diagnostic stderrのbounded JSONL gate、raw response bytes専用の
+bounded decoderを追加でfixture/testへ反映した。fresh exact-SHA Strictとreadiness確認は未実施で、
+production adapter/CLIは未実装のままである。
+
+Pass Cの設計不変条件は次のとおりとする。
+
+1. Project対応はID/rootで行う。input/config/source-plan/root manifestはNFC UTF-8
+   root-path order、semantic record collectionはrecord-ID orderとし、各surfaceの
+   submitted順を独立に検証する。formatsと実際のstdout selectorはfingerprint preimageへ含める。
+2. `NextRunContext`は`requested_formats`、budgetのrequested/resolved/source、
+   `stdout_selector`を持つ唯一のprojection contextであり、response、gate、domain、root
+   runで値を複製する。selectorはrequested formatに含まれ、FORMAT_ORDERを暗黙補完しない。
+3. `next-path-v1`の`maxLength`は補助ガードであり、NFC、UTF-8 byte（4095/4096受理、4097拒否）、
+   root `.`の文脈規則は共通helperが再検証する。ordinary file pathにroot sentinelを許さない。
+4. target resolution前にprogram File→Module写像を型付きfailureとして判定し、missing/
+   duplicate/Component-onlyのfile/directory targetは`CSV-NEXT-TARGET-001`、全domain
+   `payload_unavailable`、no artifact、manifest/stdout unavailable、exit 3へ投影する。
+
+### Round 11 Pass D（P1-3〜P1-6）
+
+Pass Dのdata-only契約は次を固定する。
+
+1. export scannerはJSXのself-closing tag、fragment、同名nested tag、属性と属性式をstack/lexical
+   stateで閉じ、string/template/comment/regex/property内の`export`を構文として扱わない。async
+   declaration、generic/type span、ASI方針、BOM/CRLF、Unicode NFC、exact UTF-8 byte spanを同じ
+   source censusから再計算する。
+2. re-export witnessはraw declarationとedgeだけから独立導出する。original/exported nameを分離し、
+   legal double alias、star 0..N（default除外）、cycle/conflict/missing sourceのreasonを閉じた
+   witnessへ保持する。そこからcomponent bindingとvalue/type coverageを投影し、response proofで
+   exact compareする。
+3. public diagnostic stderrはcanonical JSONL全行をUTF-8 encodeしてから計測する。inclusive limitは
+   出力し、limit+1はpartial write 0、`CSV-NEXT-LIMIT-003`、raw/partial disposal、manifest-only
+   projectionとする。adapter capture counterとは分離する。
+4. response trust boundaryはraw bytes一つだけとし、bounded decoderがduplicate key、nesting、decoded
+   string bytes、per-array、aggregate array itemsをmaterialization前に数える。個別arrayが上限内でも
+   aggregate 100001はrejectし、成功時だけ同じ入口からobject/schema/envelope validationへ進む。
+
+Pass DはRound 11のP1をローカル契約へ反映した状態を示すだけであり、Round 11 Strictの
+`review_status: fail`（P0=0、P1=8、P2=0）を書き換えない。fresh exact-SHA Strictは未実施・未通過で、
+readinessは未確定、production adapter/CLIも未着手である。
+
 ## 責務・Interface
 
 ### planned component responsibilities
@@ -769,7 +819,7 @@ module resolutionはvirtual inventoryだけを使う。relative/baseUrl/pathsに
 - request schemaは`code-structure-viz.next-adapter-request/v1`、response schemaは`code-structure-viz.next-adapter-response/v1`。両方の`protocol` fieldがfamily IDを持つ。
 - `request_id = SHA256(canonical_json(request without request_id))`。
 - `model_digest = SHA256(canonical_json(model))`。
-- `run_fingerprint = SHA256(canonical_json({source_view_fingerprint,source_plan_digest,domain_config_digest,projects,targets,limits,node_version,typescript_version,adapter_version,protocol,trusted_environment_digest}))`。
+- `run_fingerprint = SHA256(canonical_json({source_view_fingerprint,source_plan_digest,domain_config_digest,projects,targets,formats,stdout_selector,limits,node_version,typescript_version,adapter_version,protocol,trusted_environment_digest}))`。`formats`と実際の`stdout_selector`はcanonical `NextRunContext`から供給し、欠落時に`FORMAT_ORDER`を補わない。
 - Artifact digestはpublished exact bytes、manifest digestはmanifest自身のdigest fieldを除いたcanonical bytesから計算する。
 
 snapshot/model/manifestは`identity_versions={project:1,file:1,module:1,component:1,member:1,relation:1,fact:1,props_ir:1}`と`semantic_compatibility_id`を持つ。compatibility IDはsemantic schema ID、identity versions、recognition/export/props/relation/fact/boundary algorithm version、TrustedTypeEnvironment `semantic_profile_id`のcanonical JSON SHA-256。content-only environment digest、adapter patch、Node patch、config/source digestはpreimageに入れない。identity/payload semanticsまたはtrusted certified signatureを変えるとalgorithm/profile versionを上げ、compatibility IDを変える。
