@@ -145,7 +145,7 @@ serializer と manifest builder は `incomplete_kind` と `payload_available` �
 - compiled first-party adapter、exact TypeScript runtime、lockfile、license inventoryを一つのcompatibility unitとしてbundleする。
 - Node 22 LTS以上はapplicable Next runだけで必要とし、Python/SQLAlchemy core install/run/testへ持ち込まない。
 
-candidate finite limitsは4 MiB/file、64 MiB total、20,000 files、16 MiB stdout、64 KiB stderr capture、60秒、512 MiB old-space。実測で採用値を調整できるが、unbounded/silent truncationは不可。
+v1 finite limitsは4 MiB/file、64 MiB decoded total、20,000 files、96 MiB encoded stdin、16 MiB stdout、64 KiB stderr capture、60秒、512 MiB old-spaceとRound 2 decoder/model limitsに固定する。unbounded/silent truncationは不可。
 
 ### Identity and members
 
@@ -165,7 +165,7 @@ candidate finite limitsは4 MiB/file、64 MiB total、20,000 files、16 MiB stdo
 - propsはTypeCheckerのeffective call/construct signatureから取得し、source spelling/`typeToString()` raw textをpublic contractにしない。
 - closed type IRはprimitive、ordinal type parameter、redacted literals、repository/external reference、array、tuple、union、intersection、parameter-name-free function、object、opaque。
 - NFC、canonical sort/dedup、generic alpha-normalizationを行い、literal value/function parameter名を出さない。`children`/`ref`はpublic signatureに実在するときだけ。
-- candidate complexity limitsはdepth 16、nodes/prop 512、union/intersection 64、nested properties 256、signatures/component 16。over-limit subtreeはtruncationせずopaque + partial coverage。
+- v1 complexity limitsはdepth 16、nodes/prop 512、union/intersection 64、nested properties 256、signatures/component 16。over-limit subtreeはtruncationせずopaque + partial coverage。
 
 ### Two-plane relations
 
@@ -278,7 +278,7 @@ project rootsはCLI occurrence順に依存せず、NFC pathをUTF-8 bytesでsort
 | ancestor/descendant rootの同時選択 | なし | usage `CSV-NEXT-PROJECT-001` / exit 2 |
 | 複数disjoint roots | canonical sorted tuple | valid |
 
-overlapping rootsを禁止するため、各source moduleのowning projectは一意。shared source rootはproject descriptorではなく、explicit `[next].source_roots` contextとして重複dedupeする。
+overlapping rootsを禁止するため、各source moduleのowning projectは一意。source rootsはRound 2の`projects[].source_roots`でprojectごとに所有し、複数project ownershipを拒否する。
 
 ### PackageApplicabilityMatrix
 
@@ -317,8 +317,7 @@ plan value object:
 
 ```text
 schema = code-structure-viz.source-acquisition-plan/next/v1
-project_roots = canonical tuple
-source_roots = canonical tuple
+projects = canonical tuple[{root,source_roots,config_path}]
 program_suffixes = [.js,.jsx,.ts,.tsx]
 context_suffixes = [.d.ts]
 hard_exclusions = fixed tuple
@@ -334,10 +333,10 @@ discovery procedure:
 
 1. common Git repositoryがrun-start inventory/state fingerprintを取得する。
 2. validated project rootsからknown `package.json`と`tsconfig.json`/`jsconfig.json`候補をcontrol pathへ追加する。
-3. descriptor-safe readでcontrol bytesを取得し、duplicate-aware decoderでapplicability/configを解析する。
-4. repository-local `extends`をvisited path setで再帰し、cycle/escape/package referenceを拒否する。
+3. descriptor-safe readでcontrol bytesを一度だけ`control_snapshot`へ取得し、その保持bytesでapplicability/configを解析する。
+4. repository-local `extends`をvisited path setで解き、新規controlだけを一度読みsnapshotへ追加する。既読controlを再読しない。
 5. resolved include/exclude/source rootsをrun-start inventoryへ適用し、program/context path closureを確定する。
-6. common SourceView readerでcontrol/program/context bytesを取得し、最後にinventory/state driftを検証する。
+6. control以外のprogram/context bytesを一度だけ取得しcontrol snapshotと結合し、最後にinventory/state driftを検証する。
 7. 一つのlogical SourceView、plan digest、file-role mapを確定し、それ以降target filesystemを読まない。
 
 control failureはglobal payload unavailable、unsafe path/inventory/state driftはrun fatal。program/context read/UTF-8/parse failureはlocalized coverageを証明できる場合だけpartial safe。
@@ -349,7 +348,7 @@ control failureはglobal payload unavailable、unsafe path/inventory/state drift
 - `domain_config_digest(domain)`はprojectionのcanonical JSON digest。
 - Python/SQLAlchemyのcurrent projection、config SHA preimage、manifest encoding、source candidate/failure code/sort/fingerprintをbyte-for-byte維持する。
 - `[next]`は`--domain next`でだけrequired/default-resolved。Python/SQLAlchemy runではNext defaultをdigest/manifestへ含めない。
-- Next projectionはproject roots、source roots、config path policy、TrustedTypeEnvironment digest、type/source/process limitsを持つ。
+- Next projectionはper-project root/source roots/config path、targets、TrustedTypeEnvironment digest、type/source/process limitsを持つ。
 
 compiler option policy:
 
@@ -358,7 +357,7 @@ compiler option policy:
 | `jsx` | `preserve/react/react-jsx/react-jsxdev`をclosed enumへnormalize。emitしない |
 | `allowJs/checkJs` | booleanを採用し、program suffix selection/JS diagnosticsに反映 |
 | `baseUrl/paths` | repository-local frozen pathだけ採用 |
-| module/moduleResolution | adapter-owned closed strategyへnormalizeし、host/node_modules fallbackなし |
+| module/moduleResolution | exact `esnext` / `bundler`へnormalizeし、Round 2のvirtual resolutionだけ。host/node_modules fallbackなし |
 | `plugins/typeRoots/types` package refs |実行/外部resolutionせず`CSV-NEXT-CONFIG-002` payload unavailable |
 | emit/outDir/declaration/build options | analysisに使わずsafe ignored-option coverageへ記録 |
 | unknown/invalid option type | `CSV-NEXT-CONFIG-001` payload unavailable |
@@ -452,7 +451,7 @@ rules:
 - Component overloadはReact-compatible public signaturesをcanonicalizeし、同一shapeをdedupeする。16以下の複数shapeはprop名ごとにtype unionを作り、全shapeでrequiredな場合だけrequired。correlation lossをcoverage factとして記録する。16超または一意統合不能は`opaque(ambiguous_signature)`。
 - `any`は`opaque(any_open_world)`。external package/export identityだけ証明できればreference、shapeが必要で解決不能なら`opaque(external_unresolved)`。
 
-normative default limitsはcalibration fixtureをI05-PLAN-001で実行してcanonical config/schemaへ採用するまでimplementation gateを開かない。初期proposed defaultsはdepth 16、nodes/prop 512、union/intersection 64、nested properties 256、signatures/component 16。
+normative type limitsはdepth 16、nodes/prop 512、union/intersection 64、nested properties 256、signatures/component 16。fixtureが変更必要性を示した場合はproduction実装前にcanonical DesignとStrict gateを更新する。
 
 counting:
 
@@ -488,7 +487,7 @@ for each recognized Component root:
   enqueue direct return expressions / concise body / class render returns
   visit expressions with identity-based visited set
   follow JSX children, fragment, conditional, logical, array
-  follow one-hop single-assignment const aliases backward
+  follow immutable single-assignment const alias edges backward, max 64
   follow safe Array/ReadonlyArray map/flatMap callback return
   resolve JSX tag or exact React createElement symbol through TypeChecker
   emit relation only when target is unique internal/external symbol
@@ -496,7 +495,7 @@ for each recognized Component root:
 
 - reassigned/multi-assignment/destructured alias、arbitrary helper/nested function、event handler、render prop/function childのbodyを追わない。
 - cycleはvisited expression IDで停止。
-- expression visit default 10,000/component、alias backward steps default 64。calibration gateでnormative configへ固定する。
+- expression visit 10,000/component、alias backward edges 64をv1 defaultとする。
 - flow limit到達はaffected Component relation coverageをlocalized partial。既存の証明済みrelationsは保持。
 - lowercase intrinsicとFragmentはentity/relation targetにしない。
 - exact React `createElement` provenanceはTrustedTypeEnvironment symbol identityで確認する。
@@ -521,7 +520,7 @@ ordered first match。route group/dynamic/parallel segmentはdirectory tokenと�
 - UTF-8 BOMはsource decoderで一度だけ除去。comments/whitespaceはAST triviaとして許可。
 - `client_entry`はprogram bodyのdirective prologueにあるparenthesizedでないexact string expression `"use client"`。最初のnon-directive statement後は認めない。
 - client dependency closureは各client entryからinternal static `role:value` import/re-exportをforward fixed-pointで辿る。seed自身は`client_entry`であり`client_dependency`には含めない。ただし別client entryからcycleで到達しても重複roleは増やさない。
-- server candidate seedは`app_ui` route module。seedを含め、internal static value edgeをforwardに辿るが、targetがclient entryならtargetをserver candidateへ加えず展開を止める。
+- server candidate seedは`app_ui` route module。seed自身がclient entryならserver candidateへ加えず停止する。それ以外はseedを含めinternal static value edgeをforwardに辿り、target client entryは加えず停止する。
 - cycleはModule ID visited set。type/dynamic/JSX/external/unresolved edgeを伝播に使わない。
 - 異なるseed/closureにより同一Moduleがclient_dependencyとserver_candidateのdual roleを持てる。
 - value edgeのsourceがserver_candidate、targetがclient_entryなら、そのunderlying `static_import` relation payloadに`boundary_effect: server_to_client_entry`を付ける。別relationを生成しない。
@@ -585,11 +584,245 @@ Node source workspaceはbuild inputで、runtime wheelはcompiled outputとtrust
 
 Next PlantUML v1はaliasを`N_M_<64hex>`/`N_C_<64hex>`に閉じ、label escaping、member order、relation line style、boundary marker、unknown/partial note、legendをcontract fixtureで固定する。writerは許可外row/alias/path/absolute pathを拒否する。
 
+## Round 2 normative closure
+
+このsectionは上記contractの曖昧caseを閉じる。競合時はこのsectionを優先する。
+
+### Trusted declaration manifest and anti-shadowing
+
+`TrustedTypeEnvironmentManifest/v1`は`schema`、environment/TypeScript version、license inventory digest、`files[{virtual_path,sha256,license_id}]`、reserved module/global、certified symbolsを持つclosed recordである。
+
+- trusted pathは`/.code-structure-viz/trusted/v1/`配下だけ。target pathと交差しない。
+- reserved specifierは`react`、`react/jsx-runtime`、`react/jsx-dev-runtime`、`next/dynamic`。reserved globalは`JSX`と同梱standard lib global。
+- certified symbolはspecifier/global、export path、declaration file SHA-256、symbol kind、signature digestで一意。Component/wrapper/createElement/Array map認定はこのidentityだけを使う。
+- target ambient module、global augmentation、triple-slash type/lib reference、`paths` aliasがreserved specifier/globalをdeclare、merge、augment、redirectした場合は`CSV-NEXT-TRUST-002`、domain payload unavailable。symbol mergeを許さない。
+- target pathとtrusted virtual pathのNFC衝突は`CSV-NEXT-TRUST-003`、payload unavailable。
+- repository-local `baseUrl/paths`はreserved specifier以外だけを対象にし、frozen fileへ一意解決する場合だけ許可する。
+- manifest自身のcanonical JSON SHA-256をrequest expected、response actual、run manifestへ記録する。
+- ambient React/Next、global JSX/Array augmentation、jsx-runtime alias、trusted path collision、symbol mergeをnegative fixtureにする。
+
+### Finite Component recognition and export algorithm
+
+認定はcanonical path/declaration key順の単調algorithmで行う。setは追加だけで候補数を超えるiterationを許さない。
+
+1. module-scope value declaration candidateを収集する。
+2. route default、trusted callable/construct signature、trusted React class provenanceからinitial seedを作る。
+3. allowlisted wrapperのouter result candidateを追加し、argument/import callbackが一意candidateへ解決する場合だけwrap候補を作る。
+4. 全candidateに`JsxOutputFlow/v1`を実行し、JSX/createElement outputが証明されたcandidateを追加する。
+5. proven render/wrap relationのtargetとなるreachable local candidateを追加する。
+6. 追加0なら終了する。候補数回後も追加がある状態はinternal contract failure、payload unavailable。
+
+`recognized Component root`はstep開始時のrecognized set、`candidate root`は全candidateを意味する。output-flow positive evidenceはcandidateへ実行し、循環定義を避ける。
+
+| default/export syntax | Component result | ExportBinding target |
+| --- | --- | --- |
+| `export default Button` / `(Button)` | 新規Componentなし | local/alias chainの既存declaration |
+| `const Alias = Button; export default Alias` | 新規Componentなし | immutable alias chain終点 |
+| `export default memo(Button)`等allowlisted call | `@anonymous-default` wrapper result | result。wrapped targetは別Component |
+| named default function/class | named declaration | named declaration |
+| anonymous function/class/JSX/allowlisted expression | `@anonymous-default` | 同Component |
+| arbitrary call/object/literal/conditional | none | unknown coverage。explicit targetならpayload unavailable |
+
+- alias chainはmodule-scope `const`、single initializer/write、identifier/parenthesized identifierだけ。cycle/ambiguityはunknown、explicit targetならpayload unavailable。
+- `export *`は一意にComponentへ解決するvalue exportだけをExportBindingへ展開する。non-component valueはbindingを作らず`non_component_value_export_count`へ、type-onlyは別countへ記録する。
+- fixed-point、alias、star expansionはNFC UTF-8 byte order。collision/ambiguous starはpayload unavailable。
+
+### Per-project ownership and closed config semantics
+
+global source rootを廃止し、Next projectionを`projects=[{root,source_roots,config_path}]`へ一本化する。
+
+- CLI `--project ROOT`はrootだけを置換し、source roots/configはroot固有configまたはbuilt-inから解決する。
+- `[next].projects`はrootごとのtable array。source/config pathはowning project root配下に限定する。
+- 同一resolved physical file/source rootが複数projectへ入る場合は`CSV-NEXT-PROJECT-002`、payload unavailable。shared sourceを自動推測しない。
+- project/control/program/context symlinkはすべて`CSV-NEXT-SOURCE-002`で拒否する。一般SourceViewのsymlink許容をNext planへ継承しない。
+
+| config concern | v1 rule |
+| --- | --- |
+| syntax | UTF-8 JSONC。先頭BOM一つ、comment、trailing commaを許可。duplicate key/multiple root/non-objectを拒否 |
+| lookup | explicit、project `tsconfig.json`、`jsconfig.json`、built-inの順。両方存在時はtsconfig |
+| extends | repository-relative string一件。package ref/array/escape/cycleを拒否。baseからderivedへmerge、files/include/excludeはderivedが置換 |
+| files | project-relative literal POSIX path tuple。globなし |
+| include/exclude | segment `*`,`?`,`**`だけ。brace/extglob/class/backslash/absolute/`..`を拒否 |
+| defaults | `allowJs=true`,`checkJs=false`,`jsx=preserve`,`module=esnext`,`moduleResolution=bundler` |
+| accepted module/resolution | `esnext`/`bundler`だけ |
+| typeRoots/types/plugins | v1では拒否 |
+
+module resolutionはvirtual inventoryだけを使う。relative/baseUrl/pathsにexact file、`.ts,.tsx,.js,.jsx,.d.ts` substitution、`/index` substitutionを固定順で適用し、一意候補だけ採用する。`.js/.jsx/.mjs/.cjs` suffixは同stemへ同順で置換する。bare specifierはreserved trusted以外external frontierで止める。ambiguityはunknown、explicit identityに必要ならpayload unavailable。
+
+### Two-phase single-read freeze
+
+一つのlogical SourceViewは次のprotocolで作る。各path bytesは一度だけ読む。
+
+1. run-start inventory/state fingerprintを固定する。
+2. selected projectのknown package/config候補をdescriptor-safeに一度読み、`control_snapshot`へbytes/digestを保持する。
+3. 保持bytesだけでapplicability/config/extends closureを解く。新たなlocal extendsは一度読み追加し、既読controlを再読しない。
+4. config closureからprogram/context path closureをinventory上で確定する。
+5. control以外のprogram/context bytesを一度読み、control snapshotと結合する。
+6. inventory/state driftを再検証し、logical SourceView fingerprintを計算する。それ以降target filesystemを読まない。
+
+同一pathが複数roleを持つ場合は`control > context > program`で一recordにし、role setも保持する。phase間drift、descriptor/path mismatch、read-after-freezeはrun fatal。
+
+### Protocol family, closed model, and digest preimages
+
+- familyは`code-structure-viz.next-adapter/v1`。
+- request schemaは`code-structure-viz.next-adapter-request/v1`、response schemaは`code-structure-viz.next-adapter-response/v1`。両方の`protocol` fieldがfamily IDを持つ。
+- `request_id = SHA256(canonical_json(request without request_id))`。
+- `model_digest = SHA256(canonical_json(model))`。
+- `run_fingerprint = SHA256(canonical_json({source_view_fingerprint,source_plan_digest,domain_config_digest,projects,targets,limits,node_version,typescript_version,adapter_version,protocol,trusted_environment_digest}))`。
+- Artifact digestはpublished exact bytes、manifest digestはmanifest自身のdigest fieldを除いたcanonical bytesから計算する。
+
+request/response/modelは`additionalProperties:false`。modelは次のclosed collectionを持つ。
+
+```text
+model = {schema, projects[], modules[], components[], members[], relations[], facts[], coverage, diagnostics[]}
+ProjectRecord = {id,root,config_path|null,config_digest}
+ModuleRecord = {id,project_id,path,router_context,client_entry,derived_roles[]}
+ComponentRecord = {id,module_id,declaration_key,recognition_evidence[]}
+MemberRecord = {id,owner_id,kind:export_binding|prop,payload}
+RelationRecord = {id,plane:module|component,kind,source_id,target,facets}
+FactRecord = {id,owner_id,kind:client_entry|router_context,value}
+```
+
+record IDはkind prefix + identity tuple canonical JSON digest。arraysはID順、unique。refはdeclared recordまたはclosed external/unresolved descriptorだけ。diagnosticはclosed code/severity/recoverability/path-or-symbol-ref/countだけでraw compiler textを持たない。
+
+closed payload variants:
+
+- export binding payloadは`{exported_name,role:value,target_component_id,reexport:boolean}`。targetがinternal Componentへ一意解決しないexportはrecordを作らずcoverageへ入れる。
+- prop payloadは`{name,type:TypeNode,optional,readonly,default_evidence}`。
+- module relation kindは`static_import|literal_dynamic_import`、targetは`{kind:internal,module_id}`または`{kind:external|unresolved,safe_specifier}`、facetsは`{role:value|type,reexport,boundary_effect:none|server_to_client_entry}`。
+- component relation kindは`jsx_render|component_wrap`、targetはinternal Component ID、facetsは`{occurrence_count,contexts:[direct|conditional|collection]}`。
+- client entry fact valueはboolean trueだけ、router context fact valueは`app_ui|app_route_handler|pages_ui|pages_api|none`。
+- derived roleはModule payloadのsorted unique `client_dependency|server_candidate`だけでFact/Relation recordを増やさない。
+
+### Normative resource limits
+
+| resource | v1 default | failure |
+| --- | --- | --- |
+| files | 20,000 | payload unavailable |
+| decoded bytes/file | 4 MiB | payload unavailable |
+| decoded source total | 64 MiB | payload unavailable |
+| encoded stdin | 96 MiB | spawn前payload unavailable |
+| JSON nesting | 64 | request/response reject |
+| JSON string bytes | 8 MiB | request/response reject |
+| array items | overall 100,000 / collection 20,000 | request/response reject |
+| model records | 100,000 | payload unavailable |
+| stdout | 16 MiB | terminate/payload unavailable |
+| stderr capture | 64 KiB | terminate/payload unavailable |
+| timeout | 60 s | terminate/payload unavailable |
+| V8 old space | 512 MiB | process failure/payload unavailable |
+
+v1は総RSS上限を約束しない。finite memoryはencoded/decoded bytes、decoder、collections/model、V8 old-spaceを上記で制限する意味である。OS-level RSS isolationは将来の別contract。
+
+### Complete PropsTypeIR and JavaScript extraction
+
+- 全TypeNodeは`kind`とvariant記載fieldだけを持つ。
+- `function.this_type`は`TypeNode|null`。
+- `object.index_signatures[]`は`{key:string|number|symbol,value_type,readonly}`。
+- `object.call_signatures[]`はfunction payload shape。function propertyはproperty typeとしてfunction TypeNodeを使う。
+- reference scopeは`repository|external|trusted`。`exported_name`はIdentifierName、`default`、trusted global/libのnullだけ。
+- external moduleは`(@scope/)?name(/subpath)*` grammar。exportはIdentifierName/default/null。specifier以外を保持しない。
+- property identityはNFC name、index identityはkey、call identityはcanonical signature bytes。重複identityはpayload unavailable。
+- `default_evidence`は`none|parameter_initializer|destructuring_initializer|class_default_props|jsdoc_default`。値は保持しない。
+- overloadはnormalize後canonical bytesでsort/dedupeし、union化したpropへ`coverage.correlation_losses[{component_id,prop_ids,signature_count}]`を記録する。
+
+| source | props extraction | outcome |
+| --- | --- | --- |
+| TS/TSX callable/wrapper | effective trusted-compatible call signature first parameter | closed IRまたはlocalized opaque |
+| React class | trusted base class generic props argument | closed IRまたはlocalized opaque |
+| JS/JSX + JSDoc | TypeChecker JSDoc type | closed IRまたはlocalized opaque |
+| JS/JSX destructured/default param | names + available JSDoc/inferred primitive。initializerはdefault evidenceのみ | unknown typeは`opaque(any_open_world)` |
+| JS/JSX `propTypes`/`defaultProps` | names/default evidenceだけ。validator非実行 | partial_safe |
+| untyped/implicit any/checkJs false | props存在 + `opaque(any_open_world)` | partial_safe |
+| zero parameter / explicit empty object | `props_state:no_props` | complete |
+| signature ambiguity | `props_state:unknown` + opaque ambiguous | partial_safe |
+
+`props_state`は`known|no_props|unknown`。opaque subtree/source/correlation lossをcoverageへ入れ、JSON/PlantUMLで同じsubsetを使う。
+
+### Exact wrapper and output-flow patterns
+
+- alias backward traversalは各immutable alias edgeを一hopと数え最大64。65到達時はaffected flowをlocalized partial。
+- `memo(X)`/`forwardRef(X)`はtrusted named importまたはnamespace member symbol、argument一件、Xが一意candidateの場合だけ。
+- `lazy(() => import("./literal"))`はtrusted lazy、zero-arg arrow、literal internal import一件、default exportだけ。
+- `dynamic(() => import("./literal"))`はtrusted `next/dynamic`でdefault。`.then(m => m.Name)`のdirect property一件だけnamedを許す。optionsはobject literalなら無視、他はunknown。alias/namespaceはtrusted symbol identityが同じ場合だけ。
+- logical `&&`はright、`||`/`??`は両operand、conditionalは両branchを追い、conditionは追わない。
+- arrayはelements、`map/flatMap`はtrusted Array/ReadonlyArray receiver + inline callback一件のreturnだけ。任意method/helperは追わない。
+- app UI seedがdirect client entryなら`client_entry`と`client_dependency`を持ち`server_candidate`にはしない。server traversalはseed時点で停止。
+
+### Partial-safe taint proof
+
+taint kindは`parse_file|read_file|type_symbol|export_binding|props_subtree|component_flow|module_relation|boundary_derivation`。
+
+| taint | propagation/removal |
+| --- | --- |
+| parse/read file | file内全record、incoming explicit re-export、value import依存、component flow、boundary closureをtaint |
+| type symbol | 参照Prop subtree/correlationだけ。identityへ必要ならComponent全体 |
+| export binding | bindingとそのbindingを通るexplicit target/re-export |
+| component flow | affected Componentのrender/wrap relationとdownstream traversal |
+| module relation | edgeとそのedgeに依存するderived boundary role |
+| boundary derivation | derived role/effectだけ。primitive fact/edgeは保持 |
+
+published subsetはtainted recordを除き、全refがun-tainted recordまたはclosed frontierへ解決し、collectionごとに`discovered = published + excluded + failed`が成立する場合だけ安全。Python validatorはcoverage、dangling ref、taint frontier、renderer subsetを再計算する。
+
+| target | partial_safe permission |
+| --- | --- |
+| targetless | untainted independent subsetが上記proofを満たす場合 |
+| `path:FILE` | target fileのparse/read/identity taint不可。局所prop/flowだけ可 |
+| `path:DIRECTORY` | frozen subtree path setをidentityとし、failed file列挙 + 残りの独立proofがある場合 |
+| `component:` | declaration/export identity taint不可。局所prop/flow/derived boundaryだけ可 |
+
+`NextCoverageRecord`はdiscovered/published/excluded/failed counts、failed safe paths/reasons、affected IDs、taint frontier、opaque reason counts、unknown relation counts、correlation losses、non-component/type-only export counts、target completenessを持つ。source body/raw diagnosticは持たない。
+
+### Public schema, config, renderer, and distribution contract
+
+production adapter実装前のcontract-authoring commitで次を実ファイルとして追加し、mutation/golden testを作る。Strict passはそのfield-level contractを含むcommitに対して行う。
+
+- `semantic-v1.schema.json`: domain enumに`next`、上記Project/Module/Component/Member/Relation/Fact/Coverage discriminated branchを追加。既存Python/SQLAlchemy branchは変更しない。
+- `run-manifest-v1.schema.json`: Next domain descriptor内だけにsource plan/config/run fingerprint、projects、targets、toolchain、trusted environment、limits、coverageを追加。
+- diagnostic catalog: `CSV-NEXT-*`ごとにexact code、severity、recoverable、path/symbol permission、fixed message templateをregistry/docs/schemaへ一件ずつ定義する。
+- PlantUML grammar: one statement/line、UTF-8 LF、start/title/legend/packages/entities/members/relations/end固定順。identifierはdigest alias、displayはNFC escape済み。backslash、LF/CR/tab、quote、PlantUML control characterをescapeし、raw source/literalを入力にしない。
+- Next projection canonical JSONは`schema,projects,targets,depth,limits,trusted_environment_digest`だけをclosed orderで持つ。
+- top-level legacy config SHAは既存Python/SQLAlchemy runで従来bytesを維持する。Next runだけdomain config digestをdescriptorへ追加する。Next-only configは`[python]`不要、未選択branchをprojection/digestへ入れない。
+- `adapters/next/` source/lockを管理し、compiled runtime、TypeScript libs、trusted declarations、member manifestを`src/code_structure_viz/_next_runtime/`へchecked-inする。CIはsource build outputとchecked-in member digestを再現比較する。
+- wheelはruntime closed assets、sdistはruntimeに加えsource/lock/build scriptを収録する。release buildはnetworkなしで再現する。
+- license inventoryはecosystem、package/resource、version、license ID、source URL、content/lock digestを持つ。既存Python rows/order/bytesは不変、Node/trusted rowsは別`next_runtime` sectionへcanonical sortする。
+- packaging ownerは既存`tests/packaging/test_distribution.py`を拡張し、Next vectorsを`tests/packaging/test_next_distribution.py`から呼ぶ。両方をgateに含める。
+
+diagnostic catalog v1（messageはこのfixed text、variable dataはsafe structured ref/countだけ）:
+
+| code | severity / recoverable | fixed message |
+| --- | --- | --- |
+| CSV-NEXT-APPLICABILITY-001 | info / yes | Next.js is not directly declared by the selected project. |
+| CSV-NEXT-CONFIG-001 | error / no | The Next.js configuration is invalid or unsupported. |
+| CSV-NEXT-CONFIG-002 | error / no | The Next.js configuration requests external or executable type resolution. |
+| CSV-NEXT-EXPORT-001 | error / no | A component export cannot be resolved uniquely. |
+| CSV-NEXT-FLOW-001 | warning / yes | Component output-flow analysis reached its configured limit. |
+| CSV-NEXT-IDENTITY-001 | error / no | Canonical Next.js semantic identities collide. |
+| CSV-NEXT-LIMIT-001 | error / no | A source transport limit was exceeded. |
+| CSV-NEXT-LIMIT-003 | error / no | Adapter output exceeded a configured byte limit. |
+| CSV-NEXT-LIMIT-004 | error / no | The adapter exceeded its V8 old-space limit. |
+| CSV-NEXT-NODE-001 | error / no | A supported Node.js runtime is unavailable. |
+| CSV-NEXT-NODE-002 | error / no | The Next.js adapter process could not be started. |
+| CSV-NEXT-NODE-003 | error / no | The Next.js adapter process timed out. |
+| CSV-NEXT-NODE-004 | error / no | The Next.js adapter process failed. |
+| CSV-NEXT-PROJECT-001 | error / no | Selected Next.js project roots overlap. |
+| CSV-NEXT-PROJECT-002 | error / no | A source file belongs to more than one selected project. |
+| CSV-NEXT-PROTOCOL-001 | error / no | The Next.js adapter response violates the private protocol. |
+| CSV-NEXT-SOURCE-001 | error / yes | A source file could not be analyzed safely. |
+| CSV-NEXT-SOURCE-002 | error / no | A selected Next.js source path is a symbolic link. |
+| CSV-NEXT-TARGET-001 | error / no | An explicit Next.js target cannot be resolved uniquely. |
+| CSV-NEXT-TRUST-001 | error / no | The trusted type environment digest does not match. |
+| CSV-NEXT-TRUST-002 | error / no | Target declarations shadow or augment the trusted type environment. |
+| CSV-NEXT-TRUST-003 | error / no | A target path collides with a trusted virtual path. |
+| CSV-NEXT-TYPE-001 | warning / yes | A props type subtree is represented as opaque. |
+| CSV-NEXT-UNSUPPORTED-001 | info / yes | A runtime-dependent pattern is intentionally represented as unknown. |
+
+error/nonrecoverableはpayload unavailable。ただしSOURCE-001はtaint proof、FLOW/TYPEはlocalized proofを満たす場合だけpartial safe。infoはcompleteを許す。diagnostic structured fieldsは`code,severity,recoverable,count,path_ref|null,symbol_ref|null`のみ。
+
 ## data / failure
 
 ### adapter protocol and semantic model
 
-Python bridgeはfrozen SourceView bytesを`code-structure-viz.next-adapter/v1` requestとしてstdinへ送り、stdoutのexact one JSON documentをuntrusted inputとしてvalidateする。adapterはin-memory TypeScript compiler APIだけを使い、target filesystem/build/config/plugin/applicationを実行しない。Pythonはresponseのpath/ref/redaction/order/ID/count/digestを検証・再計算してdomain `next` snapshotへmapする。
+Python bridgeはprotocol family `code-structure-viz.next-adapter/v1`の`next-adapter-request/v1`をstdinへ送り、stdoutのexact one `next-adapter-response/v1`をuntrusted inputとしてvalidateする。adapterはin-memory TypeScript compiler APIだけを使い、target filesystem/build/config/plugin/applicationを実行しない。Pythonはresponseのpath/ref/redaction/order/ID/count/digestを検証・再計算してdomain `next` snapshotへmapする。
 
 ### applicability and failure
 
@@ -603,7 +836,7 @@ Python bridgeはfrozen SourceView bytesを`code-structure-viz.next-adapter/v1` r
 
 ### determinism and optionality
 
-same frozen source bytes、source plan、project/target、resolved config、Node/TypeScript/adapter/protocol versionではresponse orderingとpublished digestが一致する。Node dependencyはNext applicable runにだけ必要で、npm/network runtime requirementを持たずcore-only install/testから分離する。
+same SourceView fingerprint、source plan、project/target/limits、domain config、Node/TypeScript/adapter/protocol、TrustedTypeEnvironment digestではresponse ordering、run/model/Artifact digestが一致する。Node dependencyはNext applicable runだけに必要で、npm/network runtime requirementを持たずcore-only install/testから分離する。
 
 ## 変更対象
 
@@ -644,14 +877,14 @@ same frozen source bytes、source plan、project/target、resolved config、Node
 | --- | --- | --- | --- |
 | I05-AT-001 | identity/exports/props/relations/boundary/targets | tests/acceptance/next/test_snapshot_cli.py | uv run pytest tests/acceptance/next/test_snapshot_cli.py -q |
 | I05-AT-002 | frozen request/protocol/Python strict validation | tests/contracts/next/test_adapter_protocol.py | uv run pytest tests/contracts/next/test_adapter_protocol.py -q |
-| I05-AT-003 | JS/JSX/wrappers/type IR/output-flow safe subset | Node adapter tests（exact commandはworkspace確定時に固定） | runtime package managerを呼ばないcompiled artifactとunit fixtureを検証 |
+| I05-AT-003 | JS/JSX/wrappers/type IR/output-flow safe subset | adapters/next/test/safe-subset.test.ts | `npm --prefix adapters/next test -- safe-subset` |
 | I05-AT-004 | incomplete class matrix | tests/acceptance/next/test_adapter_failures.py | partial_safe JSON+PlantUML+manifest、payload_unavailable manifest-only、protocol/schema/security、exit 3 |
 | I05-AT-005 | security | tests/security/test_next_static_boundary.py | uv run pytest tests/security/test_next_static_boundary.py -q |
 | I05-AT-006 | optionality | tests/acceptance/next/test_optionality.py | uv run pytest tests/acceptance/next/test_optionality.py -q |
 | I05-AT-007 | entity budget / diff-only option rejection | tests/acceptance/next/test_snapshot_budget.py | uv run pytest tests/acceptance/next/test_snapshot_budget.py -q |
 | I05-AT-008 | stdout selector matrix | tests/acceptance/next/test_stdout_selector.py | selector grammar、exact bytes、unavailable result、summary、stderr、exit/publication |
 | I05-AT-009 | TrustedTypeEnvironment | tests/acceptance/next/test_trusted_type_environment.py | target types/node_modules/networkなしのReact/Next subset、digest/license provenance |
-| I05-AT-010 | contracts / distribution | tests/contracts/next + tests/packaging/test_next_distribution.py | closed schemas/PlantUML/diagnostics/writer、wheel/sdist/offline/license |
+| I05-AT-010 | contracts / distribution | tests/contracts/next + tests/packaging/test_distribution.py + test_next_distribution.py | closed schemas/PlantUML/diagnostics/writer、wheel/sdist/offline/license |
 | I05-AT-011 | compatibility | tests/regression/test_next_domain_compatibility.py | Python/SQLAlchemy source/config/run fingerprintと全published/stream bytes不変 |
 
 - unit testはdomain parser/matcher/serializerとcanonicalizationのpure functionを対象にする。
@@ -665,7 +898,7 @@ same frozen source bytes、source plan、project/target、resolved config、Node
 - Python/Node 二 runtime で protocol drift が起きる。versioned schema、golden fixtures、strict parser で境界を固定する。
 - Next/React static patterns は幅広い。初期 release は根拠のある static subset を列挙し、runtime tree を推測しない。
 - Node を core 必須にすると Python/SQLAlchemy 利用を壊す。applicability preflight 後だけ adapter を要求する。
-- bundled TypeScriptとtarget expectation、package-based tsconfig extendsを閉じることによるcoverage低下、candidate resource/type limitsの実測不足をacceptanceで評価する。
+- bundled TypeScriptとtarget expectation、package-based tsconfig extendsを閉じることによるcoverage低下、固定resource/type limitsの妥当性をacceptanceで評価する。
 
 - Re-evaluation trigger: security/privacy incident、target repository の不可逆変更、secret leak、rollback に incident response が必要な設計へ変わる場合は Planning Level を `critical` に上げる。
 - Stop condition: declaration identity/export binding、frozen-bytes-only Node、closed props IR、two-plane relations、positive-evidence boundary、complete/partial/unavailable、finite limits、offline bundle、Node optionalityがacceptanceで成立するまでNext diffへ進まない。

@@ -76,7 +76,7 @@ Next targetが片側だけに存在する場合はreal snapshotとcanonical empt
 ### CLI examples
 
 ```bash
-code-structure-viz diff --repo . --domain next --from origin/main --to working-tree --output-dir /tmp/csv-next-diff
+code-structure-viz diff --repo . --domain next --project apps/web --target path:apps/web/app --from origin/main --to working-tree --output-dir /tmp/csv-next-diff
 code-structure-viz diff --repo . --domain next --from release/1 --to head --upstream-depth 2 --downstream-depth 1 --output-dir /tmp/csv-next-impact
 code-structure-viz diff --repo . --domain next --format semantic-json --stdout next:semantic-json --output-dir /tmp/csv-stdout
 ```
@@ -86,6 +86,7 @@ code-structure-viz diff --repo . --domain next --format semantic-json --stdout n
 - ISSUE-02のnamed endpoint、read-only Git、external working-tree freeze、fingerprint、metadata-only FileChangeSet、changed-path admissionを再利用し、両sideでISSUE-05 adapterを独立実行する。
 - `--to working-tree` を `--from` なしで指定した場合、run開始時にworking treeをfreezeし、同時点の`HEAD^{commit}`をimplicit-base merge-baseのendpoint commit anchorにする。priorityはexplicit PR target、configured comparison target/upstream、`origin/HEAD`、local `main`/`develop`/`master`。provenanceはrequested endpoints、frozen digest、start HEAD anchor、selected candidate、merge-base、`resolution_method: "implicit-base-from-start-head-anchor"`を持つ。initial-commit fallback、auto fetch、checkoutを行わない。
 - domain absenceだけをcanonical empty-sideへ写像し、Node/adapter/config/protocol/static-analysis failureをabsenceへ変換しない。
+- diffはsnapshotと同じrepeatable `--project`/`--target` grammarを受け、同一normalized selectionをbefore/afterへ適用する。片側でproject/target resolutionが失敗してもdomain absenceへ変換しない。
 - `FileChangeSet` hunkはmetadataだけを持つ。許可項目はrepository-relative old/new path、file status、old/new start line、old/new line count、ordinal、これらのcanonical tupleから生成したcontent-independent SHA-256 `hunk_id`である。raw patch/context/added/deleted lines、source body、comment、literal、secret、absolute pathをmodel、JSON、PlantUML、manifest、diagnostic、logへ保持・公開しない。
 - implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
 
@@ -93,17 +94,18 @@ code-structure-viz diff --repo . --domain next --format semantic-json --stdout n
 
 - Componentのexact identityはISSUE-05 `ComponentDeclarationResolution/v1`が定めるdeclaration identityであり、export aliasやroute/range/order/diagnosticをidentityへ混ぜない。
 - `ExportBindingResolution/v1`のdirect/default/re-export/star bindingはComponentとは別memberとして比較する。barrel移動、alias変更、default/named再公開はExportBinding deltaであり、同じdeclaration Componentのremoved/addedへ変換しない。
-- Propとprimitive relation（value/type import、render、component_wrap、client_entry、router context）をprimary semantic deltaとする。`client_dependency`、`server_candidate`、dual role、`boundary_effect`はprimitive factから再計算するcontextであり、exact matchingまたはprimary seedにしない。
+- Propとprimitive static relation（value/type import、render、component_wrap）をprimary semantic deltaとする。`client_entry`と`router_context`はtyped `FactDelta`、ExportBinding/Propは`MemberDelta`、static relationは`RelationDelta`へ分離する。`client_dependency`、`server_candidate`、dual role、`boundary_effect`はprimitive fact/edgeから再計算するcontextであり、exact matchingまたはprimary seedにしない。
 - before/after各sideは自身の`SourceAcquisitionPlan/v1`、`domain_config_projection("next")`/digest、TrustedTypeEnvironment digest、adapter/protocol/model versionを所有し、他sideのconfigへ寄せない。
 - format、comment、range、order、local alias、diagnosticだけの変化はprimary seedにしない。
 
 | before domain evidence | after domain evidence | status | comparison / publication | exit |
 | --- | --- | --- | --- | --- |
-| absent | absent | `not_applicable` | statusとsafe diagnosticのみ。semantic JSON/PlantUMLなし。 | 0 |
+| domain_absent | domain_absent | `not_applicable` | statusとsafe diagnosticのみ。semantic JSON/PlantUMLなし。 | 0 |
 | present・analysis成功 | present・analysis成功 | `complete` | real snapshot同士を比較し、domain diff JSON/PlantUMLを公開する。 | 0 |
-| present・analysis成功 | absent | `complete` | real beforeとcanonical empty-sideを比較し、全entity/member/relationをremovedとして公開する。 | 0 |
-| absent | present・analysis成功 | `complete` | canonical empty-sideとreal afterを比較し、全entity/member/relationをaddedとして公開する。 | 0 |
-| target evidenceあり | いずれかのsideでacquisition/static analysis失敗 | `incomplete` / `payload_unavailable` | added/removedを推測せず、affected domain diff JSON/PlantUMLを公開しない。safe manifestへ`incomplete_kind: "payload_unavailable"`、`payload_available: false`、diagnostic/coverage/provenanceを記録する。 | 3 |
+| present・analysis成功 | domain_absent | `complete` | real beforeとcanonical empty-sideを比較し、全entity/member/relation/factをremovedとして公開する。 | 0 |
+| domain_absent | present・analysis成功 | `complete` | canonical empty-sideとreal afterを比較し、全entity/member/relation/factをaddedとして公開する。 | 0 |
+| target_resolution_failed / analysis_failed | any | `incomplete` / `payload_unavailable` | added/removedを推測せず、affected payloadなし。safe manifestへtyped side state/diagnostic/coverage/provenanceを記録する。 | 3 |
+| any | target_resolution_failed / analysis_failed | `incomplete` / `payload_unavailable` | 同上。 | 3 |
 
 - internal canonical empty-side は `code-structure-viz.empty-side/v1` の canonical UTF-8 JSONである。`domain`、`document_kind: "internal-diff-side"`、空の `entities`/`members`/`relations` を持ち、endpointやside名を含めない。同一domain/versionではSHA-256が一定で、manifestのbefore/after side descriptorに`kind: "canonical-empty-side"`として記録する。standalone snapshot、semantic Artifact、empty diagramとして公開しない。
 - component matchingはdeclaration exact identityを最優先する。exact identityが片側に存在しない場合だけ、rename evidence、structural fingerprint、unique candidateをすべて満たす高信頼候補をmovedとする。ExportBinding、route、range、order、diagnostic、derived boundary roleはmoved判定のidentity/evidenceに使わない。
@@ -111,7 +113,7 @@ code-structure-viz diff --repo . --domain next --format semantic-json --stdout n
 
 ### output contract
 
-- Next diff JSONはbefore/after side kind/schema/digest、adapter contract/version/config digest、component/member/relation change、matching evidence、impact context、metadata-only FileChangeSetを持つ。
+- Next diff JSONはbefore/after side presence/schema/digest、adapter/model/protocol/trusted-environment/config compatibility、ComponentDelta、MemberDelta、RelationDelta、FactDelta、matching evidence、impact context、metadata-only FileChangeSetを持つ。
 - PlantUMLはcomponent、props、imports/render/client boundaryをmember/relation-level vocabularyで示す。
 - manifestはrequested/resolved endpoint、start HEAD anchor、frozen digest、candidate、merge-base、side digests、budget requested/resolved/count、coverage、diagnostic、Artifact hashを記録する。
 - raw hunk、source body、comment、literal、secret、absolute pathを含めない。
@@ -120,7 +122,7 @@ code-structure-viz diff --repo . --domain next --format semantic-json --stdout n
 
 `incomplete` は `incomplete_kind` により次の二種類へ分ける。`not_applicable`、run-level fatal、usage error と混同しない。
 
-| incomplete_kind | 判定条件 | affected domain payload | manifest / sibling | exit |
+| incomplete_kind | 判定条件 | affected domain payload | manifest | exit |
 | --- | --- | --- | --- | --- |
 | `partial_safe` | failure が局所的に隔離でき、残る subset が semantic に安全で、coverage と diagnostic が欠落範囲を明示し、全 requested payload が redaction を満たし、entity budget 内である。 | status `incomplete` の requested semantic JSON と PlantUML を安全 subset として公開する。truncation や failure entity の added/removed 推測はしない。 | `payload_available: true`、`incomplete_kind`、coverage、diagnostic、Artifact descriptor を記録する。 | 3 |
 | `payload_unavailable` | safe subset がない、global source acquisition/protocol/schema/security/unsafe-path failure、entity budget 超過、または diff のいずれかの side acquisition/static analysis failureである。 | affected domain の semantic JSON と PlantUML を公開しない。 | run-level fatalでない限りsafe core manifestに `payload_available: false`、`incomplete_kind`、coverage/diagnostic/countを記録する。 | 3 |
@@ -188,13 +190,13 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 
 ## 失敗・境界条件
 
-- diff domain presenceは上記truth tableに従う。片側target absenceはcomplete全added/removed、side adapter/config/protocol/static-analysis failureはincomplete。
+- `SidePresence = domain_absent | real_snapshot | target_resolution_failed | analysis_failed`。canonical empty-sideへ写像できるのは`domain_absent`だけ。explicit project/target missing/ambiguous/out-of-scopeは`target_resolution_failed`であり全added/removedにしない。
 - このdiff sliceではbefore/afterのいずれかのsource acquisitionまたはstatic analysisが失敗した場合、常に`incomplete_kind: payload_unavailable`、affected JSON/PlantUMLなし、safe manifestのみ、exit 3とする。failure sideをcanonical empty-sideへ置換せず、`partial_safe`へ降格しない。
 - nonliteral dynamic importはunknown relation diagnosticとcoverageへ残し、runtime relationを生成しない。
 - implicit changed-path budgetはdomain比較前のrun-level admission gateでdefault 1,000。overrideなしでactual countが超過したrunはfatal analysis/environment、exit 1、safe machine-readable diagnosticのみとし、semantic JSON、PlantUML、final run manifestを公開しない。positive integerの`--max-changed-paths N`は通常処理を許可し、manifestへrequested/resolved/count/config sourceを記録する。invalid overrideはexit 2。
-- entity-per-diagram budgetはdomain-local gateでdefault 500。overrideなしで超過したdomainは`incomplete`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。valid core runではsafe run manifestを公開し、requested/resolved limit、actual count、diagnosticを記録する。all-domainではsuccessful sibling Artifactを保持する。positive integerの`--max-entities N`は通常公開を許可し、同じ値とcountをmanifestへ記録する。invalid overrideはexit 2。
+- entity-per-diagram budgetはdomain-local gateでdefault 500。overrideなしで超過したNext domainは`incomplete`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。safe manifestへrequested/resolved/count/diagnosticを記録する。positive integer overrideは通常公開、invalidはexit 2。
 - `--to working-tree` start-HEAD anchor/provenanceとmetadata-only hunk boundaryをISSUE-02から変更しない。
-- stop condition: Next member/relation seed、truth table、union impact、endpoint/hunk safety、budget/publication、unknown dynamic behaviorがacceptanceで固定されるまでall-domain集約へ進まない。
+- stop condition: Next member/relation/fact seed、SidePresence truth table、compatibility、union impact、endpoint/hunk safety、budget/publication、unknown dynamic behaviorがacceptanceで固定されるまでISSUE-07へhand offしない。
 
 - slice-local consumer acceptance は `--domain next` の implicit 1,001 changed pathsをfan-out前exit 1、safe diagnosticのみ、semantic JSON/PlantUML/final manifestなしとし、valid `--max-changed-paths` overrideのrequested/resolved/count/config sourceをmanifest provenanceで検証する。
 
@@ -208,7 +210,7 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 | I06-AC-004 | target evidenceがある片側adapter/config/protocol failureをdomain absenceやremovalへ変換せずincompleteにする。 | I06-AT-004 |
 | I06-AC-005 | removed componentのbefore edgeをunion graph contextに保持する。 | I06-AT-005 |
 | I06-AC-006 | nonliteral dynamic behaviorをunknownとしruntime relationを生成しない。 | I06-AT-006 |
-| I06-AC-007 | both-absent、both-present、before-only、after-only、side failureのtruth tableでstatus/delta/publication/exit/empty-side digestが一致する。 | I06-AT-007 |
+| I06-AC-007 | SidePresence cross-productでdomain absenceだけがempty-sideとなり、target/analysis failureはpayload unavailable、project/target selectionとside compatibilityが一致する。 | I06-AT-007 |
 | I06-AC-008 | `--to working-tree`だけでstart HEAD anchor、frozen digest、candidate、merge-base、resolution methodを記録する。 | I06-AT-008 |
 | I06-AC-009 | reused FileChangeSetがrange/status/content-independent IDだけを持ち、raw patch/context/sourceを出さない。 | I06-AT-009 |
 | I06-AC-010 | 501 entitiesはdomain `incomplete_kind: payload_unavailable`・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid overrideは通常公開する。 | I06-AT-010 |

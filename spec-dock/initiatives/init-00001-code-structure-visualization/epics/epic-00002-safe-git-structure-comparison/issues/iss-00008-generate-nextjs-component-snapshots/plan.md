@@ -43,7 +43,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
-| I05-PLAN-000 | approved decision-candidateをRequirement/Design/Planへ反映し、current implementation truthとplanned pathを整合させてStrict spec reviewを通す。 | I05-DES-001〜007 |
+| I05-PLAN-000 | implementation判断を残さないfield-level identity/source/protocol/type/taint/public schema/config/package contractをcanonical Designへ固定し、そのcommitでStrict spec reviewを通す。 | I05-DES-001〜007 |
 | I05-PLAN-001 | identity/export、project/target、protocol、type IR、relations/boundary、outcome/publication、TrustedTypeEnvironment、packaging/regressionのI05-AT-001〜011 fixtures/schemaを先に固定する。 | I05-DES-001〜007 |
 | I05-PLAN-002 | domain-owned SourceAcquisitionPlan、Next config/project/target parser、frozen-bytes request、hardened one-shot Node boundaryを実装する。 | I05-DES-002, I05-DES-006 |
 | I05-PLAN-003 | declaration identity、bindings、Component recognition、closed props IR、two-plane relations、positive-evidence boundaryを実装する。 | I05-DES-003 |
@@ -60,6 +60,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
   `20260831t022358z-decision-candidate-nextjs-component-snapshot-best-practice.md`のapproved decisions、
   人間向けHTMLのvisual explanationをcanonical R/D/Pへ反映する。
 - current production package/core pathsを`未実装`とするstale記述を修正し、existing extension pointとnew planned pathを分離する。
+- anti-shadowing、finite recognition/export、per-project config/module resolution、two-phase freeze、protocol/digest、PropsTypeIR/JS extraction、flow/boundary、partial-safe taint proof、public schema/config/package contractをfield-levelでcanonical Designへ固定する。これをproduction implementation後の判断へ先送りしない。
 - SpecDock validation、clean commit/push、exact upstream SHA binding後にChatGPT Use StrictでP0/P1とcontract gapをレビューする。
 - review findingをcanonical authorityとcurrent sourceに照合し、必要な修復をcommit/pushして再度Strict reviewする。review passはIssue実装完了ではない。
 
@@ -72,7 +73,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 - targetless/path/component target/depth/missing/ambiguous/out-of-scopeをfixture化する。
 - not_applicable、complete empty、complete+diagnostic、partial_safe、payload_unavailable、usage/fatal/interrupt、entity/transport limits、stdout selectorをtable-drivenに固定する。
 - TrustedTypeEnvironment、private request/response、PropsTypeIR、PlantUML、diagnostic、wheel/sdist/offline、domain config/source projectionのpositive/negative fixturesを固定する。
-- candidate source/process/type/flow limitsをboundary fixtureでcalibrateし、normative defaultをconfig/schema/manifestへ固定するまでproduction implementation gateを開かない。
+- Designで固定したv1 normative source/process/type/flow limitをboundary fixtureで検証し、変更が必要ならproduction実装前にcanonical DesignとStrict gateを更新する。
 
 ### I05-PLAN-002 bridge and adapter boundary
 
@@ -139,7 +140,7 @@ explicit project rootのdirect Next dependencyをPythonで判定し、不在を�
 | I05-AT-007 | entity budget publication and diff-only option rejection | tests/acceptance/next/test_snapshot_budget.py | uv run pytest tests/acceptance/next/test_snapshot_budget.py -q |
 | I05-AT-008 | stdout selector matrix | tests/acceptance/next/test_stdout_selector.py | uv run pytest tests/acceptance/next/test_stdout_selector.py -q |
 | I05-AT-009 | TrustedTypeEnvironment / no target types | tests/acceptance/next/test_trusted_type_environment.py | uv run pytest tests/acceptance/next/test_trusted_type_environment.py -q |
-| I05-AT-010 | closed contracts / wheel/sdist / offline/license | tests/packaging/test_next_distribution.py | uv run pytest tests/contracts/next tests/packaging/test_next_distribution.py -q |
+| I05-AT-010 | closed contracts / wheel/sdist / offline/license | tests/packaging/test_distribution.py + test_next_distribution.py | uv run pytest tests/contracts/next tests/packaging/test_distribution.py tests/packaging/test_next_distribution.py -q |
 | I05-AT-011 | Python/SQLAlchemy byte compatibility | tests/regression/test_next_domain_compatibility.py | uv run pytest tests/regression/test_next_domain_compatibility.py -q |
 
 ### issue gate commands
@@ -154,11 +155,12 @@ uv run pytest tests/acceptance/next/test_optionality.py -q
 uv run pytest tests/acceptance/next/test_snapshot_budget.py -q
 uv run pytest tests/acceptance/next/test_stdout_selector.py -q
 uv run pytest tests/acceptance/next/test_trusted_type_environment.py -q
-uv run pytest tests/contracts/next tests/packaging/test_next_distribution.py -q
+uv run pytest tests/contracts/next tests/packaging/test_distribution.py tests/packaging/test_next_distribution.py -q
 uv run pytest tests/regression/test_next_domain_compatibility.py -q
-uv build
+uv build --offline
 ./spec-dock/scripts/spec-dock validate
 uv run ruff check .
+uv run ruff format --check .
 uv run mypy src tests
 uv run pytest
 ```

@@ -46,7 +46,7 @@ coding agent が first-party TypeScript adapter を通じ、Next.js repository �
 | I05-REQ-003 | semantic behavior | Component identityはphysical declaration moduleとdeclaration keyで安定化し、export/re-export/aliasは別bindingとして保持する。propsはclosed normalized type IR、relationはmodule/componentの二平面、client boundaryはpositive evidenceに基づくfact/roleとして表現する。 |
 | I05-REQ-004 | Artifact/output | Node adapterは`code-structure-viz.next-adapter/v1`のexact one response JSONを返し、Python coreがuntrusted responseのschema/path/ref/redaction/order/ID/count/digestを検証・再計算して`code-structure-viz.semantic/v1`と`code-structure-viz.plantuml/next/v1`を生成する。 |
 | I05-REQ-005 | failure behavior | non-literal dynamic behaviorはrelationを捏造せずunknown diagnosticとcoverage limitationにする。Node/protocol/static analysis failureはincomplete、entity budget超過はdomain incomplete exit 3でaffected semantic JSON/PlantUMLを公開しない。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`指定はusage error、exit 2とする。 |
-| I05-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
+| I05-REQ-006 | safety/determinism | 解析対象codeを実行しない。source view/plan、domain config、project/target/limits、Node/TypeScript/adapter/protocol、TrustedTypeEnvironmentが同じなら全record/order/digest/outputが決定的になる。finite memoryはtransport/decoder/model/V8 old-spaceのclosed上限で保証し、総RSSはv1非保証とする。 |
 | I05-REQ-007 | stdout contract | `--stdout SELECTOR`を高々1回のclosed selectorとして検証し、available exact bytes、unavailable result、selectorなしsummary、stderr diagnostics、exit 2 no-publicationを提供する。 |
 
 ### I05-REQ-001
@@ -66,7 +66,7 @@ Node adapterは`code-structure-viz.next-adapter/v1`のexact one response JSONを
 non-literal dynamic behaviorはrelationを捏造せずunknown diagnosticとcoverage limitationにする。Node/protocol/static analysis failureはincomplete、entity budget超過はdomain incomplete exit 3でaffected semantic JSON/PlantUMLを公開しない。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`指定はusage error、exit 2とする。
 ### I05-REQ-006
 
-解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。
+解析対象 module、plugin、migration、build script、application entry pointをimportまたは実行しない。source view fingerprint、source plan digest、domain config digest、projects、targets、limits、Node/TypeScript/adapter/protocol version、TrustedTypeEnvironment digestが同じなら全record/order/run fingerprint/model digest/Artifact bytesとdigestが決定的になる。
 
 
 ### I05-REQ-007
@@ -84,13 +84,13 @@ code-structure-viz snapshot --repo . --domain next --format semantic-json --stdo
 
 ### source acquisition contract
 
-- `--repo`はexact Git rootのまま、repeatable `--project REPOSITORY_RELATIVE_DIRECTORY`でNext project rootを明示する。CLI指定はconfig `[next].project_roots`を置換し、defaultは`.`。monorepo/workspaceを自動探索しない。
+- `--repo`はexact Git rootのまま、repeatable `--project REPOSITORY_RELATIVE_DIRECTORY`でNext project rootを明示する。CLI指定はconfig `[next].projects[].root`を置換し、root固有source/configはproject descriptorから解決する。default projectは`.`。monorepo/workspaceを自動探索しない。
 - project root直下`package.json`のdirect `dependencies.next`または`devDependencies.next`にnon-empty stringがある場合だけapplicableとする。`next.config.*`、directory名、source import、lockfile indirect entryをevidenceにしない。
 - domain-owned immutable SourceAcquisitionPlanに従い、Python coreがprogram/control/context bytesを一度だけSourceViewへ凍結する。Nodeへtarget root path/cwdを渡さない。
 - program filesはTS/TSX/JS/JSX、`.d.ts`はcontext-only。`.git`、`node_modules`、`.next`、`out`、`dist`、`build`、`coverage`はhard exclude。test/spec/storyはdefault excludeにしない。
 - config lookupは`tsconfig.json`、`jsconfig.json`、versioned built-in safe configの順。repository-local `extends`、`baseUrl`、`paths`だけをfrozen SourceView内で解決し、package-based extendsやtarget `node_modules`を暗黙に読まない。
 - one-shot Node adapterはrequest virtual files、bundled TypeScript standard library、`code-structure-viz.next-trusted-types/v1`だけを読むin-memory CompilerHostを使う。TrustedTypeEnvironmentはminimal JSX/React/Next wrapper declarations、exact version/digest/licenseを持ち、target type roots/node_modules/networkを参照しない。Node.js 22 LTS以上はapplicable runだけで要求する。
-- transport/processはfile/total/file-count/stdout/stderr/time/memoryに有限上限を持ち、超過時はsilent truncationせず`payload_unavailable`とする。候補値は4 MiB/file、64 MiB total、20,000 files、16 MiB stdout、64 KiB stderr capture、60秒、512 MiB old-space。
+- transport/processは20,000 files、4 MiB/file、64 MiB decoded source、96 MiB encoded stdin、JSON nesting 64、8 MiB/string、100,000 total/20,000 per collection array items、100,000 model records、16 MiB stdout、64 KiB stderr、60秒、512 MiB V8 old-spaceをv1上限とし、超過はsilent truncationせず`payload_unavailable`とする。総RSS上限はv1で保証しない。
 
 ### semantic contract
 
@@ -181,7 +181,7 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 - 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。
 - Git repository は read-only とし、fetch、checkout、reset、stash、clean、commit、ref 更新を実行しない。すべての Git subprocess で lazy fetch、external diff、textconv、color を無効化する。
 - Artifact には repository-relative path、symbol、type、signature、relation、line range だけを許可し、source body、comment、literal、secret らしい値、absolute path を含めない。
-- 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。
+- source view/plan、domain config、projects/targets/limits、Node/TypeScript/adapter/protocol、TrustedTypeEnvironmentが同じならrecord order、run/model/Artifact digestが決定的になる。
 
 ## 失敗・境界条件
 
@@ -199,14 +199,14 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 | ID | 観測可能な完了条件 | acceptance test |
 | --- | --- | --- |
 | I05-AC-001 | App/Pages RouterのTS/TSXでdeclaration identity、export binding、reachable local Component、closed props IR、two-plane relation、positive-evidence client rolesを出力し、barrel/aliasでComponentを複製しない。 | I05-AT-001 |
-| I05-AC-002 | Pythonが凍結したvirtual filesだけをone-shot adapterへ渡し、versioned exact-one JSONとPython側strict validation/ID再計算をcontract fixtureで検証する。 | I05-AT-002 |
-| I05-AC-003 | JS/JSX、wrapper、props complexity、dynamic/render output-flowのclosed safe subsetを解析し、証明できないbehaviorはentity/relationを捏造せずunknown/coverageにする。 | I05-AT-003 |
-| I05-AC-004 | promised semanticsの局所欠落は全条件を満たす場合だけ`partial_safe` JSON+PlantUML+manifest、explicit target・Node・global config/program/protocol/schema/security/identity/limit failureは`payload_unavailable` manifest-only、exit 3とする。 | I05-AT-004 |
+| I05-AC-002 | two-phase single-read freezeでcontrol/program/contextを再読せず凍結し、closed request/response/model schema、self-field除外digest preimage、versioned exact-one JSON、Python側validation/ID/coverage再計算を検証する。 | I05-AT-002 |
+| I05-AC-003 | finite recognition、default/alias/star export、JS/JSX props matrix、complete PropsTypeIR、exact wrapper/dynamic/render flowを解析し、証明不能behaviorは捏造せずunknown/coverageにする。 | I05-AT-003 |
+| I05-AC-004 | typed taint propagationとPython再計算可能なcount/ref/target proofを満たす場合だけ`partial_safe` JSON+PlantUML+manifest、満たさないglobal/identity/limit failureは`payload_unavailable` manifest-only、exit 3とする。 | I05-AT-004 |
 | I05-AC-005 | target path/cwd/node_modules/network/npm/npx/build/config/plugin/application moduleを利用せず、literal/body/comment/secret/absolute path/raw compiler textをoutput/diagnosticへ出さない。 | I05-AT-005 |
 | I05-AC-006 | explicit project rootsだけを対象とし、direct `next` dependencyがない場合はNode probeなしnot_applicable、applicableでComponent 0はcomplete empty、malformed evidenceはpayload_unavailableとする。 | I05-AT-006 |
 | I05-AC-007 | selected internal Module+Componentが501 entitiesならdomain `incomplete_kind: payload_unavailable`・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid 600 overrideはrequested/resolved/count付きで成功する。snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`はexit 2・Artifactなしとする。 | I05-AT-007 |
 | I05-AC-008 | stdout selectorのvalid/invalid/duplicate/domain/format、exact-byte、not_applicable/payload_unavailable/fatal/interrupt result、selectorなしsummaryをtable-drivenに満たす。 | I05-AT-008 |
-| I05-AC-009 | target `node_modules`/type roots/networkなしでTrustedTypeEnvironmentによりReact.FC、class、memo/forwardRef/lazy、next/dynamicの採用subsetを解析し、environment version/digest/licenseをmanifestへ記録する。 | I05-AT-009 |
+| I05-AC-009 | target `node_modules`/type roots/networkなしでTrustedTypeEnvironmentを使い、reserved module/global/pathのshadow/augmentation/mergeをfail-closedで拒否し、manifest/version/digest/license/certified symbolを検証する。 | I05-AT-009 |
 | I05-AC-010 | Next semantic/private protocol/diagnostic/manifest/stdout/PlantUML/writerのclosed schema/grammar/pathをmutation testで固定し、wheel/sdistにcompiled runtime/trusted declarations/lock/licenseを正しく収録してcheckout外offline Next runが成功する。 | I05-AT-010 |
 | I05-AC-011 | domain config/source-plan projectionにより、Next追加前後で既存Python/SQLAlchemyのsource/config/run fingerprint、semantic JSON、PlantUML、manifest、stdout、stderrがbyte-for-byte不変である。 | I05-AT-011 |
 

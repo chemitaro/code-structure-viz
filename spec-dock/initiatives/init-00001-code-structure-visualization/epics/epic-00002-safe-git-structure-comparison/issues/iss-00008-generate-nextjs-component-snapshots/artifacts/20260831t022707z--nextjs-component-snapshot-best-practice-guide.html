@@ -382,6 +382,9 @@
       <div class="callout warning">
         <strong>位置づけ:</strong> この資料はゼロベース分析から得た設計候補です。2026-08-31に中心判断が承認され、canonical Requirement / Design / Planへ反映されました。最終authorityはcanonical文書であり、このHTML自体は説明用Artifactです。
       </div>
+      <div class="callout">
+        <strong>Strictレビュー後の具体化:</strong> trusted declarationのshadowing拒否、有限なComponent認定とdefault/export規則、project別config/module resolution、control bytesを再読しないtwo-phase freeze、digest preimage、完全なProps型表現、partial-safeのtaint証明、公開schemaとoffline package contractまで正本で固定しました。後続の差分Issueでは、domain不在だけをempty-sideにし、target解析失敗をadded/removedへ誤変換しません。
+      </div>
     </section>
 
     <section>

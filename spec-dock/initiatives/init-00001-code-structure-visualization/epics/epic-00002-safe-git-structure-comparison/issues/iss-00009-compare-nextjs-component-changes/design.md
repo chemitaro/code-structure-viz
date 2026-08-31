@@ -60,7 +60,7 @@ package_sequence_key: "ISSUE-06"
 
 ```text
 code-structure-viz snapshot --repo PATH --output-dir PATH [--domain DOMAIN] [--target SELECTOR] [--format FORMAT] [--config PATH] [--stdout SELECTOR]
-code-structure-viz diff --repo PATH --output-dir PATH [--domain DOMAIN] [--from ENDPOINT] [--to ENDPOINT] [--format FORMAT] [--config PATH] [--stdout SELECTOR]
+code-structure-viz diff --repo PATH --output-dir PATH [--domain DOMAIN] [--project ROOT]... [--target SELECTOR]... [--from ENDPOINT] [--to ENDPOINT] [--format FORMAT] [--config PATH] [--stdout SELECTOR]
 ```
 
 - `--output-dir` は必須。writer は existing file を置換せず、全 payload を staging 後に公開する。
@@ -83,11 +83,12 @@ stdout emitter は diagnostic renderer と分離し、diagnostic は stderr だ�
 
 ```json
 {
-  "contract": "code-structure-viz.source-view/v1",
-  "endpoint": {"kind": "commit-or-frozen-working-tree", "digest": "sha256"},
-  "files": [{"path": "repository/relative", "sha256": "digest", "media_type": "text/plain"}],
-  "fingerprint": "safe-run-fingerprint",
-  "diagnostics": []
+  "schema": "code-structure-viz.source-view/v1",
+  "kind": "commit-or-frozen-working-tree",
+  "head_commit": "full-object-id-or-null",
+  "files": [{"path": "repository/relative", "kind": "regular", "resolved_target": null, "size_bytes": 1, "sha256": "digest"}],
+  "failures": [],
+  "fingerprint": "sha256"
 }
 ```
 
@@ -123,7 +124,7 @@ ISSUE-02のendpoint/freeze/FileChangeSet/changed-path contractをconsumeし、IS
 
 ### Next domain presence and empty-side
 
-`NextSide`はreal snapshot、canonical empty-side、analysis-failedのunion。empty-sideは`code-structure-viz.empty-side/v1` domain `next`のcanonical digestでstandalone publishしない。before-only/after-onlyは全removed/added、both-absentはnot_applicable、adapter/config/protocol/static-analysis failureを含むpairはincompleteでaffected diff payloadなし。
+`NextSide`は`domain_absent | real_snapshot | target_resolution_failed | analysis_failed`のtagged union。empty-sideはdomain_absentだけから作る`code-structure-viz.empty-side/v1` domain `next`のcanonical digestでstandalone publishしない。before-only/after-only domain absenceは全removed/added、both domain-absentはnot_applicable、target/config/adapter/protocol/static-analysis failureを含むpairはincompleteでaffected payloadなし。
 
 ### ISSUE-05 handoff and semantic diff
 
@@ -131,11 +132,20 @@ ISSUE-02のendpoint/freeze/FileChangeSet/changed-path contractをconsumeし、IS
 
 - Componentのprimary keyは`ComponentDeclarationResolution/v1`が生成するdeclaration identityである。export alias、route、range、order、diagnosticはidentityへ含めない。
 - `ExportBindingResolution/v1`のdirect/default/re-export/star bindingはComponentと別memberとして比較する。barrel移動、export alias変更、default/named再公開はbinding deltaであり、同じdeclaration Componentのremoved/addedを生成しない。
-- Propとprimitive relation（value/type import、render、component_wrap、client_entry、router context）をprimary delta/seedにする。
+- Propとprimitive static relation（value/type import、render、component_wrap）をprimary delta/seedにする。ExportBinding/PropはMemberDelta、static edgeはRelationDelta、`client_entry`/`router_context`はFactDeltaとして別collectionにする。
 - `BoundaryRolePropagation/v1`が導出する`client_dependency`、`server_candidate`、dual role、`boundary_effect`はcontextとして再計算する。derived role単独の変化をmatching keyやprimary seedにしない。
 - exact declaration identityが片側に存在しない場合だけ、rename evidence、structural fingerprint、unique candidateをすべて満たす候補をmovedとする。ExportBinding、route、range、order、diagnostic、derived roleはmoved evidenceに使わない。
 - 各sideは独立した`SourceAcquisitionPlan/v1`、`domain_config_projection("next")`/digest、TrustedTypeEnvironment digest、adapter/protocol/model versionを持つ。一方のcompiler/config/type environmentを他方へ適用しない。
 - sideのsource acquisition、protocol、schema、config、TrustedTypeEnvironment、static analysisが失敗した場合はdiff payloadをunavailableとし、canonical empty-side、removed/added、movedを捏造しない。
+
+side compatibility matrix:
+
+| observation | comparison |
+| --- | --- |
+| semantic/model major、protocol family、Component/Member/Relation/Fact identity versionがexact同一 | comparison可 |
+| adapter patch/minorまたはTrustedTypeEnvironment digestが異なるが、manifestの`semantic_compatibility_id`がexact同一 | comparison可。差異をside provenanceへ記録 |
+| `semantic_compatibility_id`不一致、missing、unknown version | `analysis_failed/incompatible_contract`、payload unavailable |
+| config/source plan digest差 | comparison可。各side provenanceとして保持し、構造deltaと混同しない |
 
 impact graphはbefore/after primitive static relation unionで、removed componentはbefore edgeを使う。nonliteral dynamic behaviorはunknownでruntime relationを生成しない。
 

@@ -56,7 +56,7 @@ CLI request -> safe source acquisition -> domain semantic analysis
 ### I06-PLAN-001 acceptance-first contract
 
 - declaration Component/member/primitive relation delta、ExportBinding、derived role、seed、matching、side failure、impact、dynamic unknown、five-row presence、working-tree anchor、hunk safety、entity budgetをplanned testsで先に固定する。
-- barrel移動、export alias変更、default/named再公開ではExportBindingだけが変化し、同じdeclaration Componentをremoved/addedにしないfixtureを先に固定する。
+- barrel移動、export alias変更、default/named再公開ではExportBindingだけが変化し、同じdeclaration Componentをremoved/addedにしないfixtureを先に固定する。FactDelta/MemberDelta/RelationDeltaを別collectionで検証する。
 
 ### I06-PLAN-002 shared source and adapter
 
@@ -68,12 +68,13 @@ planned modules（canonical specification 時点では未実装。実装開始�
 - `src/code_structure_viz/adapters/next/diff_bridge.py`
 - `src/code_structure_viz/semantic/impact.py` Next relation extension
 
-ISSUE-02 endpoint/freezer/FileChangeSet/changed-path gateとISSUE-05 `SourceAcquisitionPlan/v1`、`domain_config_projection("next")`/digest、TrustedTypeEnvironment、adapter request/response protocolを両sideで独立にconsumeする。`--to working-tree` onlyのrequested endpoint、frozen digest、start HEAD anchor、selected candidate、merge-base、resolution methodをそのままprovenanceへ記録する。
+ISSUE-02 endpoint/freezer/FileChangeSet/changed-path gateとISSUE-05 `SourceAcquisitionPlan/v1`、`domain_config_projection("next")`/digest、TrustedTypeEnvironment、adapter request/response protocolを両sideで独立にconsumeする。diffのrepeatable `--project`/`--target`を両sideへ同じnormalized selectionとして渡す。`--to working-tree` onlyのrequested endpoint、frozen digest、start HEAD anchor、selected candidate、merge-base、resolution methodをprovenanceへ記録する。
 
 ### I06-PLAN-003 Next presence and semantic diff
 
 - canonical empty-side domain `next` bytes/digestをgolden固定する。
-- before-only/after-only=all removed/added、both-absent=not_applicable、adapter/config/protocol failure=incomplete no payload。
+- `domain_absent|real_snapshot|target_resolution_failed|analysis_failed`のcross-productを固定し、domain absenceだけをempty-sideへ写像する。target/config/adapter/protocol failureはincomplete no payload。
+- side semantic compatibility IDのexact/mismatch、environment/adapter version差、config/source plan差をmatrixで固定する。
 - exact declaration identityを最優先し、片側にexact identityがない場合だけhigh-confidence unique candidateをmovedにする。ExportBinding、route、range、order、diagnostic、derived boundary roleをmatching key/evidenceにしない。
 - Component、ExportBinding、Prop、primitive relationをprimary seed、derived boundary roleを再計算contextとして扱い、union impactとunknown dynamic behaviorを実装する。
 
@@ -104,10 +105,10 @@ ISSUE-02 endpoint/freezer/FileChangeSet/changed-path gateとISSUE-05 `SourceAcqu
 | I06-AT-001 | Next diff | tests/acceptance/next/test_diff_cli.py | uv run pytest tests/acceptance/next/test_diff_cli.py -q |
 | I06-AT-002 | declaration/export/primitive semantic seedsとderived role非primary | tests/acceptance/next/test_semantic_seed.py | uv run pytest tests/acceptance/next/test_semantic_seed.py -q |
 | I06-AT-003 | declaration exact identity、barrel/alias/default-named binding、high-confidence moved | tests/integration/next/test_component_matching.py | uv run pytest tests/integration/next/test_component_matching.py -q |
-| I06-AT-004 | side failure | tests/acceptance/next/test_diff_failures.py | uv run pytest tests/acceptance/next/test_diff_failures.py -q |
+| I06-AT-004 | side presence/failure/compatibility | tests/acceptance/next/test_diff_failures.py | uv run pytest tests/acceptance/next/test_diff_failures.py -q |
 | I06-AT-005 | primitive union impactとderived boundary cascade | tests/integration/next/test_component_impact.py | uv run pytest tests/integration/next/test_component_impact.py -q |
 | I06-AT-006 | unknown dynamic | adapters/next/test/dynamic-unknown.test.ts | npm --prefix adapters/next test -- dynamic-unknown |
-| I06-AT-007 | domain presence | tests/acceptance/next/test_diff_domain_presence.py | uv run pytest tests/acceptance/next/test_diff_domain_presence.py -q |
+| I06-AT-007 | SidePresence cross-product + project/target | tests/acceptance/next/test_diff_domain_presence.py | uv run pytest tests/acceptance/next/test_diff_domain_presence.py -q |
 | I06-AT-008 | working-tree anchor | tests/acceptance/next/test_working_tree_anchor.py | uv run pytest tests/acceptance/next/test_working_tree_anchor.py -q |
 | I06-AT-009 | hunk safety | tests/security/test_next_diff_hunk_redaction.py | uv run pytest tests/security/test_next_diff_hunk_redaction.py -q |
 | I06-AT-010 | entity budget publication | tests/acceptance/next/test_diff_entity_budget.py | uv run pytest tests/acceptance/next/test_diff_entity_budget.py -q |
