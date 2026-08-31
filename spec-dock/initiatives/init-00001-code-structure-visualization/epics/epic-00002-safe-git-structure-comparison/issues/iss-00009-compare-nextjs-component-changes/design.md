@@ -84,13 +84,15 @@ stdout emitter は diagnostic renderer と分離し、diagnostic は stderr だ�
 ```json
 {
   "schema": "code-structure-viz.source-view/v1",
-  "kind": "commit-or-frozen-working-tree",
+  "kind": "working-tree",
   "head_commit": "full-object-id-or-null",
   "files": [{"path": "repository/relative", "kind": "regular", "resolved_target": null, "size_bytes": 1, "sha256": "digest"}],
   "failures": [],
   "fingerprint": "sha256"
 }
 ```
+
+各sideの`kind`はcurrent SourceViewと同じexact enum `working-tree|commit`を使い、working tree freezeは`working-tree`、named commit endpointは`commit`とする。
 
 SourceView は immutable value object であり、absolute temporary path を serializer へ渡さない。
 
@@ -124,7 +126,7 @@ ISSUE-02のendpoint/freeze/FileChangeSet/changed-path contractをconsumeし、IS
 
 ### Next domain presence and empty-side
 
-`NextSide`は`domain_absent | real_snapshot | target_resolution_failed | analysis_failed`のtagged union。empty-sideはdomain_absentだけから作る`code-structure-viz.empty-side/v1` domain `next`のcanonical digestでstandalone publishしない。before-only/after-only domain absenceは全removed/added、both domain-absentはnot_applicable、target/config/adapter/protocol/static-analysis failureを含むpairはincompleteでaffected payloadなし。
+`NextSide`は`domain_absent | real_snapshot | target_resolution_failed | analysis_failed`のtagged union。empty-sideはdomain_absentだけから作る`code-structure-viz.empty-side/v1` domain `next`のcanonical digestで、`entities:[]`,`members:[]`,`relations:[]`,`facts:[]`とidentity versionsを持ちstandalone publishしない。before-only/after-only domain absenceは全removed/added、both domain-absentはnot_applicable、target/config/adapter/protocol/static-analysis failureを含むpairはincompleteでaffected payloadなし。
 
 ### ISSUE-05 handoff and semantic diff
 

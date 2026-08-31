@@ -41,11 +41,19 @@ def _schema(name: str) -> dict[str, object]:
 
 
 def _validator(name: str) -> Draft202012Validator:
-    diagnostic_schema = _schema("diagnostic-v1.schema.json")
-    registry = Registry().with_resource(
-        "urn:code-structure-viz:schema:diagnostic-v1",
-        Resource.from_contents(diagnostic_schema),
-    )
+    resources = {
+        "diagnostic-v1",
+        "next-adapter-request-v1",
+        "next-adapter-response-v1",
+        "next-domain-manifest-v1",
+        "next-semantic-v1",
+    }
+    registry = Registry()
+    for resource_name in resources:
+        registry = registry.with_resource(
+            f"urn:code-structure-viz:schema:{resource_name}",
+            Resource.from_contents(_schema(f"{resource_name}.schema.json")),
+        )
     return Draft202012Validator(_schema(name), registry=registry)
 
 
@@ -54,6 +62,13 @@ def _validator(name: str) -> Draft202012Validator:
     [
         "diagnostic-v1.schema.json",
         "file-change-set-v1.schema.json",
+        "next-adapter-request-v1.schema.json",
+        "next-adapter-response-v1.schema.json",
+        "next-config-v1.schema.json",
+        "next-domain-manifest-v1.schema.json",
+        "next-runtime-manifest-v1.schema.json",
+        "next-semantic-v1.schema.json",
+        "next-trusted-type-environment-v1.schema.json",
         "run-manifest-v1.schema.json",
         "run-summary-v1.schema.json",
         "semantic-v1.schema.json",
@@ -65,6 +80,137 @@ def test_checked_in_schema_is_valid_and_closed(name: str) -> None:
 
     Draft202012Validator.check_schema(schema)
     assert schema["additionalProperties"] is False
+
+
+def test_next_diagnostic_catalog_is_unique_and_closed() -> None:
+    catalog = _schema("next-diagnostic-catalog-v1.json")
+    assert catalog["schema"] == "code-structure-viz.next-diagnostic-catalog/v1"
+    entries = cast(list[dict[str, object]], catalog["entries"])
+    codes = [entry["code"] for entry in entries]
+    assert len(codes) == len(set(codes))
+    assert {
+        "CSV-NEXT-LIMIT-001",
+        "CSV-NEXT-LIMIT-002",
+        "CSV-NEXT-LIMIT-003",
+        "CSV-NEXT-LIMIT-004",
+        "CSV-NEXT-LIMIT-005",
+    } <= set(codes)
+    assert all(set(entry) == {"code", "severity", "recoverable", "message"} for entry in entries)
+
+
+def _next_limits() -> dict[str, int]:
+    return {
+        "max_files": 20000,
+        "max_file_bytes": 4194304,
+        "max_decoded_bytes": 67108864,
+        "max_encoded_stdin_bytes": 100663296,
+        "max_json_nesting": 64,
+        "max_json_string_bytes": 8388608,
+        "max_array_items": 100000,
+        "max_collection_items": 20000,
+        "max_model_records": 100000,
+        "max_stdout_bytes": 16777216,
+        "max_stderr_bytes": 65536,
+        "timeout_seconds": 60,
+        "v8_old_space_mib": 512,
+    }
+
+
+def _next_coverage() -> dict[str, object]:
+    return {
+        "counts": {},
+        "failed_files": [],
+        "affected_ids": [],
+        "taint_frontier": [],
+        "opaque_reason_counts": {},
+        "unknown_relation_count": 0,
+        "correlation_losses": [],
+        "non_component_value_export_count": 0,
+        "type_only_export_count": 0,
+        "target_completeness": [],
+    }
+
+
+def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras() -> None:
+    identity_versions = {
+        "module": 1,
+        "component": 1,
+        "member": 1,
+        "relation": 1,
+        "fact": 1,
+        "props_ir": 1,
+    }
+    semantic = {
+        "type": "semantic_snapshot",
+        "schema": "code-structure-viz.semantic/v1",
+        "domain": "next",
+        "document_kind": "snapshot",
+        "status": "complete",
+        "semantic_compatibility_id": "a" * 64,
+        "identity_versions": identity_versions,
+        "source": {
+            "schema": "code-structure-viz.source-view/v1",
+            "kind": "working-tree",
+            "head_commit": None,
+            "fingerprint": "b" * 64,
+            "file_count": 0,
+        },
+        "request": {
+            "projects": ["."],
+            "targets": [],
+            "upstream_depth": 1,
+            "downstream_depth": 1,
+            "source_plan_digest": "c" * 64,
+            "domain_config_digest": "d" * 64,
+            "run_fingerprint": "e" * 64,
+            "trusted_environment_digest": "f" * 64,
+        },
+        "coverage": _next_coverage(),
+        "entities": [],
+        "members": [],
+        "relations": [],
+        "facts": [],
+        "diagnostics": [],
+    }
+    semantic_validator = _validator("next-semantic-v1.schema.json")
+    semantic_validator.validate(semantic)
+    with pytest.raises(ValidationError):
+        semantic_validator.validate({**semantic, "absolute_path": "/private/secret"})
+
+    domain = {
+        "domain": "next",
+        "status": "complete",
+        "payload_available": True,
+        "entity_count": 0,
+        "semantic_compatibility_id": "a" * 64,
+        "identity_versions": identity_versions,
+        "source_plan_digest": "c" * 64,
+        "domain_config_digest": "d" * 64,
+        "run_fingerprint": "e" * 64,
+        "projects": [{"root": ".", "config_path": None, "config_digest": "0" * 64}],
+        "targets": [],
+        "toolchain": {
+            "node_version": "20.19.5",
+            "typescript_version": "5.9.2",
+            "adapter_version": "1.0.0",
+            "protocol": "code-structure-viz.next-adapter/v1",
+        },
+        "trusted_environment": {
+            "schema": "code-structure-viz.next-trusted-types/v1",
+            "version": "1",
+            "semantic_profile_id": "next-types-v1",
+            "sha256": "f" * 64,
+            "license_inventory_digest": "1" * 64,
+        },
+        "limits": _next_limits(),
+        "coverage": _next_coverage(),
+        "artifact_paths": ["next.snapshot.semantic.json"],
+        "diagnostics": [],
+    }
+    domain_validator = _validator("next-domain-manifest-v1.schema.json")
+    domain_validator.validate(domain)
+    with pytest.raises(ValidationError):
+        domain_validator.validate({**domain, "incomplete_kind": "partial_safe"})
 
 
 def test_diagnostic_schema_accepts_exact_vector_and_rejects_extra_field() -> None:

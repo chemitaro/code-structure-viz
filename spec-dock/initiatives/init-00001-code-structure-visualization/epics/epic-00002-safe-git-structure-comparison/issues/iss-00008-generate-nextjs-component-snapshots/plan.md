@@ -37,14 +37,15 @@ CLI request -> safe source acquisition -> domain semantic analysis
 ## 順序・依存
 
 - declared dependency: ISSUE-01。
-- execution order: I05-PLAN-000 → 001 → 002 → 003 → 005 → 004 → 007 → 006。canonical adoptionとacceptance fixtureを先行し、Node optionality/applicabilityをprocess起動前に固定する。
+- execution order: I05-PLAN-000 → 001 → 008 → 002 → 003 → 005 → 004 → 007 → 006。canonical adoptionとmachine-checkable contractをmaterializeし、そのexact commitのStrict pass後にproduction実装へ進む。
 - TypeScript fixtures、protocol golden、renderer golden、security trapsはcontract固定後に並行できる。
 - stop condition: adapter protocol、static semantics、not_applicable/incomplete、entity budget、optional Node、determinismが成立するまでNext diffへ進まない。
 
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
-| I05-PLAN-000 | implementation判断を残さないfield-level identity/source/protocol/type/taint/public schema/config/package contractをcanonical Designへ固定し、そのcommitでStrict spec reviewを通す。 | I05-DES-001〜007 |
+| I05-PLAN-000 | implementation判断を残さないfield-level identity/source/protocol/type/taint/public schema/config/package contractをcanonical Designへ固定する。 | I05-DES-001〜007 |
 | I05-PLAN-001 | identity/export、project/target、protocol、type IR、relations/boundary、outcome/publication、TrustedTypeEnvironment、packaging/regressionのI05-AT-001〜011 fixtures/schemaを先に固定する。 | I05-DES-001〜007 |
+| I05-PLAN-008 | actual schema/docs/catalog/golden/mutation fixtureを含むclean pushed exact SHAでChatGPT Use Strictを再実行し、P0/P1=0をproduction implementation gateとする。 | I05-DES-001〜007 |
 | I05-PLAN-002 | domain-owned SourceAcquisitionPlan、Next config/project/target parser、frozen-bytes request、hardened one-shot Node boundaryを実装する。 | I05-DES-002, I05-DES-006 |
 | I05-PLAN-003 | declaration identity、bindings、Component recognition、closed props IR、two-plane relations、positive-evidence boundaryを実装する。 | I05-DES-003 |
 | I05-PLAN-004 | untrusted response strict validation/ID再計算、semantic JSON、PlantUML、manifest、closed registry/publicationを接続する。 | I05-DES-004 |
@@ -54,15 +55,13 @@ CLI request -> safe source acquisition -> domain semantic analysis
 
 ## 実装step
 
-### I05-PLAN-000 canonical adoption and Strict specification gate
+### I05-PLAN-000 canonical adoption
 
 - `20260831t024052z-research-nextjs-snapshot-zero-base-investigation.md`のsource facts、
   `20260831t022358z-decision-candidate-nextjs-component-snapshot-best-practice.md`のapproved decisions、
   人間向けHTMLのvisual explanationをcanonical R/D/Pへ反映する。
 - current production package/core pathsを`未実装`とするstale記述を修正し、existing extension pointとnew planned pathを分離する。
 - anti-shadowing、finite recognition/export、per-project config/module resolution、two-phase freeze、protocol/digest、PropsTypeIR/JS extraction、flow/boundary、partial-safe taint proof、public schema/config/package contractをfield-levelでcanonical Designへ固定する。これをproduction implementation後の判断へ先送りしない。
-- SpecDock validation、clean commit/push、exact upstream SHA binding後にChatGPT Use StrictでP0/P1とcontract gapをレビューする。
-- review findingをcanonical authorityとcurrent sourceに照合し、必要な修復をcommit/pushして再度Strict reviewする。review passはIssue実装完了ではない。
 
 ### I05-PLAN-001 acceptance-first contract
 
@@ -74,6 +73,12 @@ CLI request -> safe source acquisition -> domain semantic analysis
 - not_applicable、complete empty、complete+diagnostic、partial_safe、payload_unavailable、usage/fatal/interrupt、entity/transport limits、stdout selectorをtable-drivenに固定する。
 - TrustedTypeEnvironment、private request/response、PropsTypeIR、PlantUML、diagnostic、wheel/sdist/offline、domain config/source projectionのpositive/negative fixturesを固定する。
 - Designで固定したv1 normative source/process/type/flow limitをboundary fixtureで検証し、変更が必要ならproduction実装前にcanonical DesignとStrict gateを更新する。
+
+### I05-PLAN-008 machine-checkable contract Strict gate
+
+- private request/response/model、TrustedTypeEnvironment、Next semantic/domain manifest/config/runtime member/licenseのJSON Schema、diagnostic catalog、semantic/PlantUML contract docs、positive/negative mutation vectorsを実ファイルとして固定する。
+- SpecDock/schema/HTML/format validation、clean commit/push、exact upstream SHA binding後にChatGPT Use StrictでP0/P1とcontract gapをレビューする。
+- findingをcanonical authority/current sourceへ照合して修復し、fresh exact SHAでP0/P1=0まで再レビューする。passはIssue実装完了ではない。
 
 ### I05-PLAN-002 bridge and adapter boundary
 

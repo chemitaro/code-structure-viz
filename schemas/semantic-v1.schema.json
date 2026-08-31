@@ -14,7 +14,7 @@
   "properties": {
     "type": {"enum": ["semantic_snapshot", "semantic_diff"]},
     "schema": {"const": "code-structure-viz.semantic/v1"},
-    "domain": {"enum": ["python", "sqlalchemy"]},
+    "domain": {"enum": ["python", "sqlalchemy", "next"]},
     "document_kind": {"enum": ["snapshot", "diff"]},
     "status": {"enum": ["complete", "incomplete", "not_applicable"]},
     "incomplete_kind": {"const": "partial_safe"},
@@ -64,6 +64,9 @@
         ]
       }
     },
+    "facts": {"type": "array"},
+    "semantic_compatibility_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "identity_versions": {"type": "object"},
     "diagnostics": {
       "type": "array",
       "items": {
@@ -305,7 +308,8 @@
           {"required": ["semantic_change_set"]}
         ]
       }
-    }
+    },
+    {"$ref": "urn:code-structure-viz:schema:next-semantic-v1"}
   ],
   "$defs": {
     "diff_side": {

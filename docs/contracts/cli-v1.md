@@ -4,6 +4,15 @@
 `--domain python|sqlalchemy` を必須とする。domain 省略、`all`、`next`、
 positional target、option alias、短縮形、大小文字違いは受理しない。
 
+## Issue #8 で追加する Next snapshot branch
+
+現在の実装境界は上記のとおりだが、Issue #8 の production step は `snapshot --domain next`
+を追加する。追加後の selector は `next:semantic-json|plantuml`、Artifact は
+`next.snapshot.semantic.json` / `next.snapshot.puml` とし、`diff --domain next` は Issue #9
+まで受理しない。機械可読な事前契約は `schemas/next-config-v1.schema.json`、
+`schemas/next-semantic-v1.schema.json`、`schemas/next-domain-manifest-v1.schema.json`、および
+`schemas/run-manifest-v1.schema.json` の Next branch を正本とする。
+
 任意optionは `--config PATH`、反復可能な `--target TARGET`、
 `--upstream-depth NON_NEGATIVE_INT`、`--downstream-depth NON_NEGATIVE_INT`、
 反復可能な `--format semantic-json|plantuml`、`--max-entities POSITIVE_INT`、

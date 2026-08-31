@@ -69,7 +69,7 @@ code-structure-viz diff --repo PATH --output-dir PATH [--domain DOMAIN] [--from 
 - `--output-dir` は必須。writer は existing file を置換せず、全 payload を staging 後に公開する。
 - `--format` 未指定は semantic JSON と PlantUML。`--stdout` は output directory requirement を解除しない。
 - analysis behavior を environment variable で変更しない。環境は executable discovery と locale-independent process setup にだけ使う。
-- `--repo`はexact Git root。repeatable `--project`はconfig `[next].project_roots`を置換し、defaultは`.`。monorepo/workspaceを自動探索しない。
+- `--repo`はexact Git root。repeatable `--project`はconfig `[next].projects[].root`を置換し、defaultは`.`。source/configはproject descriptorから解決し、monorepo/workspaceを自動探索しない。
 - Next targetは`path:REPO_REL_FILE_OR_DIR`または`component:EXPORTING_MODULE#EXPORTED_NAME`。後者はexport addressをcanonical declarationへ解決する。explicit target失敗はfallbackしない。
 
 ### stdout selector and stream routing
@@ -307,7 +307,7 @@ overlapping rootsを禁止するため、各source moduleのowning projectは一
 - path/file-directory判定はfrozen inventoryで行い、host filesystemを再参照しない。
 - component targetはexport bindingを辿り、canonical declaration Componentを一意に選ぶ。barrel cycleはvisited setで停止。
 - extensionless module、string-named export、path中`#`はv1 usage error。
-- project overlapを禁止済みのためownershipは一意。shared sourceのComponent targetは、そのsource rootを宣言した一つのselected projectだけに属する。複数projectが同じshared sourceを宣言した場合は`CSV-NEXT-PROJECT-002` payload unavailable。
+- project overlapを禁止済みのためownershipは一意。source rootはowning project descriptor内だけで宣言し、同じresolved file/source rootを複数projectが宣言した場合は`CSV-NEXT-PROJECT-002` payload unavailable。
 - multiple targetsはcanonical target keyでdeduplicate/sortしたunion。入力順違いはsame bytes。一件でもresolution failureなら全target payload unavailable。
 - targetなしは全applicable project。depthはtargetありのときだけ。
 
@@ -374,9 +374,8 @@ request required fields:
 | `request_id` | canonical request preimage SHA-256 |
 | `adapter_version` | expected bundled adapter version |
 | `trusted_type_environment` | schema/version/SHA-256 expected descriptor |
-| `compiler_options` | closed normalized options |
-| `projects` | sorted root/config descriptors |
-| `files` | unique sorted path/role/size/SHA-256/base64 bytes |
+| `projects` | sorted `{id,root,source_roots,config_path,config_digest,compiler_options,file_ids}`。projectごとにProgram一件 |
+| `files` | unique sorted `{id,path,project_id,roles,effective_role,size,sha256,content_base64}`。project ownershipは一件 |
 | `targets` | canonical target keys |
 | `limits` | exact normalized analysis/process-relevant limits |
 
@@ -620,7 +619,9 @@ Next PlantUML v1はaliasを`N_M_<64hex>`/`N_C_<64hex>`に閉じ、label escaping
 | `const Alias = Button; export default Alias` | 新規Componentなし | immutable alias chain終点 |
 | `export default memo(Button)`等allowlisted call | `@anonymous-default` wrapper result | result。wrapped targetは別Component |
 | named default function/class | named declaration | named declaration |
-| anonymous function/class/JSX/allowlisted expression | `@anonymous-default` | 同Component |
+| anonymous function/classでpositive evidence成立 | `@anonymous-default` | 同Component |
+| allowlisted wrapper result | `@anonymous-default` | 同Component |
+| raw JSX element value | none | non-component value export coverage。explicit Component targetならpayload unavailable |
 | arbitrary call/object/literal/conditional | none | unknown coverage。explicit targetならpayload unavailable |
 
 - alias chainはmodule-scope `const`、single initializer/write、identifier/parenthesized identifierだけ。cycle/ambiguityはunknown、explicit targetならpayload unavailable。
@@ -671,14 +672,16 @@ module resolutionはvirtual inventoryだけを使う。relative/baseUrl/pathsに
 - `run_fingerprint = SHA256(canonical_json({source_view_fingerprint,source_plan_digest,domain_config_digest,projects,targets,limits,node_version,typescript_version,adapter_version,protocol,trusted_environment_digest}))`。
 - Artifact digestはpublished exact bytes、manifest digestはmanifest自身のdigest fieldを除いたcanonical bytesから計算する。
 
+snapshot/model/manifestは`identity_versions={module:1,component:1,member:1,relation:1,fact:1,props_ir:1}`と`semantic_compatibility_id`を持つ。compatibility IDはsemantic schema ID、identity versions、recognition/export/props/relation/fact/boundary algorithm version、TrustedTypeEnvironment `semantic_profile_id`のcanonical JSON SHA-256。content-only environment digest、adapter patch、Node patch、config/source digestはpreimageに入れない。identity/payload semanticsまたはtrusted certified signatureを変えるとalgorithm/profile versionを上げ、compatibility IDを変える。
+
 request/response/modelは`additionalProperties:false`。modelは次のclosed collectionを持つ。
 
 ```text
 model = {schema, projects[], modules[], components[], members[], relations[], facts[], coverage, diagnostics[]}
-ProjectRecord = {id,root,config_path|null,config_digest}
+ProjectRecord = {id,root,source_roots,config_path|null,config_digest,compiler_options,file_ids}
 ModuleRecord = {id,project_id,path,router_context,client_entry,derived_roles[]}
-ComponentRecord = {id,module_id,declaration_key,recognition_evidence[]}
-MemberRecord = {id,owner_id,kind:export_binding|prop,payload}
+ComponentRecord = {id,module_id,declaration_key,recognition_evidence[],props_state}
+MemberRecord = {id,owner_id,kind:export_binding|import_binding|prop,payload}
 RelationRecord = {id,plane:module|component,kind,source_id,target,facets}
 FactRecord = {id,owner_id,kind:client_entry|router_context,value}
 ```
@@ -688,9 +691,10 @@ record IDはkind prefix + identity tuple canonical JSON digest。arraysはID順�
 closed payload variants:
 
 - export binding payloadは`{exported_name,role:value,target_component_id,reexport:boolean}`。targetがinternal Componentへ一意解決しないexportはrecordを作らずcoverageへ入れる。
+- import binding payloadは`{local_component_id|null,imported_name,role:value|type,source:{kind:internal,module_id}|{kind:external|unresolved,safe_specifier}}`。local alias spellingはidentity/payloadへ入れない。
 - prop payloadは`{name,type:TypeNode,optional,readonly,default_evidence}`。
 - module relation kindは`static_import|literal_dynamic_import`、targetは`{kind:internal,module_id}`または`{kind:external|unresolved,safe_specifier}`、facetsは`{role:value|type,reexport,boundary_effect:none|server_to_client_entry}`。
-- component relation kindは`jsx_render|component_wrap`、targetはinternal Component ID、facetsは`{occurrence_count,contexts:[direct|conditional|collection]}`。
+- `jsx_render` targetは`{kind:internal,component_id}|{kind:external|unresolved,safe_specifier,exported_name|null}`。`component_wrap` targetはinternal Component IDだけ。facetsは`{occurrence_count,contexts:[direct|conditional|collection]}`。
 - client entry fact valueはboolean trueだけ、router context fact valueは`app_ui|app_route_handler|pages_ui|pages_api|none`。
 - derived roleはModule payloadのsorted unique `client_dependency|server_candidate`だけでFact/Relation recordを増やさない。
 
@@ -713,6 +717,8 @@ closed payload variants:
 
 v1は総RSS上限を約束しない。finite memoryはencoded/decoded bytes、decoder、collections/model、V8 old-spaceを上記で制限する意味である。OS-level RSS isolationは将来の別contract。
 
+diagnostic mappingはfile bytes/encoded stdin=`LIMIT-001`、file count/decoded total=`LIMIT-002`、JSON/string/array/stdout/stderr=`LIMIT-003`、V8 old-space=`LIMIT-004`、model records/entity budget=`LIMIT-005`。timeoutは`NODE-003`。
+
 ### Complete PropsTypeIR and JavaScript extraction
 
 - 全TypeNodeは`kind`とvariant記載fieldだけを持つ。
@@ -724,6 +730,15 @@ v1は総RSS上限を約束しない。finite memoryはencoded/decoded bytes、de
 - property identityはNFC name、index identityはkey、call identityはcanonical signature bytes。重複identityはpayload unavailable。
 - `default_evidence`は`none|parameter_initializer|destructuring_initializer|class_default_props|jsdoc_default`。値は保持しない。
 - overloadはnormalize後canonical bytesでsort/dedupeし、union化したpropへ`coverage.correlation_losses[{component_id,prop_ids,signature_count}]`を記録する。
+
+TypeNode variant selectionは次の順で最初に一致したものを使う。
+
+1. any/unknown/unsupported/recursive/limitをopaqueへ写像する。
+2. primitive/literal/type parameterを対応variantへ写像する。
+3. array/tuple/callable/union/intersectionを対応variantへ写像する。
+4. effective props rootのrepository interface/type alias/class shapeはobjectへstructural展開する。
+5. nested anonymous objectはobjectへ展開し、nested named repository typeはreferenceにする。
+6. external named/default typeはexternal reference、trusted global/libはtrusted reference `exported_name:null`にする。external referenceの`exported_name`はIdentifierNameまたは`default`で、nullを許さない。
 
 | source | props extraction | outcome |
 | --- | --- | --- |
@@ -737,6 +752,8 @@ v1は総RSS上限を約束しない。finite memoryはencoded/decoded bytes、de
 | signature ambiguity | `props_state:unknown` + opaque ambiguous | partial_safe |
 
 `props_state`は`known|no_props|unknown`。opaque subtree/source/correlation lossをcoverageへ入れ、JSON/PlantUMLで同じsubsetを使う。
+
+JS merge precedenceはJSDoc type、parameter/destructuring inference、`propTypes` names、`defaultProps` evidenceの順。`propTypes/defaultProps`は`Component.propTypes = {}`、`Component.defaultProps = {}`、class static propertyのdirect object literalだけを読む。spread、computed key、method/getter、alias object、call resultはunknown coverage。`defaultProps`はoptional flagを変えず`default_evidence`だけを変える。重複sourceのtype conflictはより高いprecedenceを採用しcoverageへcountする。
 
 ### Exact wrapper and output-flow patterns
 
@@ -761,7 +778,9 @@ taint kindは`parse_file|read_file|type_symbol|export_binding|props_subtree|comp
 | module relation | edgeとそのedgeに依存するderived boundary role |
 | boundary derivation | derived role/effectだけ。primitive fact/edgeは保持 |
 
-published subsetはtainted recordを除き、全refがun-tainted recordまたはclosed frontierへ解決し、collectionごとに`discovered = published + excluded + failed`が成立する場合だけ安全。Python validatorはcoverage、dangling ref、taint frontier、renderer subsetを再計算する。
+responseはpublic candidate modelに加え`proof`を返す。proofは`discovered_records[]`（全record payload + `taints[]`）、`failure_roots[{id,kind,path_ref}]`、`causal_edges[{failure_or_record_id,record_id,rule}]`、`target_resolutions[{target_key,status,record_ids}]`、`excluded[{record_id,reason}]`をclosed schemaで持つ。Pythonが規範taint rulesを適用してpublished subsetを生成し、adapter proposed modelとexact bytes比較する。
+
+published subsetはtainted recordを除き、全refがun-tainted recordまたはclosed frontierへ解決し、collectionごとに`discovered = published + excluded + failed`が成立する場合だけ安全。Python validatorはproofからcoverage、taint closure、dangling ref、target completeness、renderer subsetを独立再計算する。countだけの自己申告は受理しない。
 
 | target | partial_safe permission |
 | --- | --- |
@@ -798,8 +817,10 @@ diagnostic catalog v1（messageはこのfixed text、variable dataはsafe struct
 | CSV-NEXT-FLOW-001 | warning / yes | Component output-flow analysis reached its configured limit. |
 | CSV-NEXT-IDENTITY-001 | error / no | Canonical Next.js semantic identities collide. |
 | CSV-NEXT-LIMIT-001 | error / no | A source transport limit was exceeded. |
+| CSV-NEXT-LIMIT-002 | error / no | The source file count or decoded source total exceeded its configured limit. |
 | CSV-NEXT-LIMIT-003 | error / no | Adapter output exceeded a configured byte limit. |
 | CSV-NEXT-LIMIT-004 | error / no | The adapter exceeded its V8 old-space limit. |
+| CSV-NEXT-LIMIT-005 | error / no | The semantic model or entity count exceeded its configured limit. |
 | CSV-NEXT-NODE-001 | error / no | A supported Node.js runtime is unavailable. |
 | CSV-NEXT-NODE-002 | error / no | The Next.js adapter process could not be started. |
 | CSV-NEXT-NODE-003 | error / no | The Next.js adapter process timed out. |

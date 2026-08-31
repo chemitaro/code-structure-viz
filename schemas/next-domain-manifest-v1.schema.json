@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-domain-manifest-v1",
+  "title": "CodeStructureViz Next run-manifest domain descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["domain", "status", "payload_available", "entity_count", "semantic_compatibility_id", "identity_versions", "source_plan_digest", "domain_config_digest", "run_fingerprint", "projects", "targets", "toolchain", "trusted_environment", "limits", "coverage", "artifact_paths", "diagnostics"],
+  "properties": {
+    "domain": {"const": "next"}, "status": {"enum": ["complete", "incomplete", "not_applicable"]},
+    "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]},
+    "payload_available": {"type": "boolean"},
+    "entity_count": {"type": ["integer", "null"], "minimum": 0},
+    "semantic_compatibility_id": {"$ref": "#/$defs/digest"},
+    "identity_versions": {"type": "object", "additionalProperties": false, "required": ["module", "component", "member", "relation", "fact", "props_ir"], "properties": {"module": {"const": 1}, "component": {"const": 1}, "member": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "props_ir": {"const": 1}}},
+    "source_plan_digest": {"$ref": "#/$defs/digest"}, "domain_config_digest": {"$ref": "#/$defs/digest"}, "run_fingerprint": {"$ref": "#/$defs/digest"},
+    "projects": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["root", "config_path", "config_digest"], "properties": {"root": {"$ref": "#/$defs/path"}, "config_path": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]}, "config_digest": {"$ref": "#/$defs/digest"}}}},
+    "targets": {"type": "array", "items": {"type": "string"}},
+    "toolchain": {"type": "object", "additionalProperties": false, "required": ["node_version", "typescript_version", "adapter_version", "protocol"], "properties": {"node_version": {"type": "string"}, "typescript_version": {"type": "string"}, "adapter_version": {"type": "string"}, "protocol": {"const": "code-structure-viz.next-adapter/v1"}}},
+    "trusted_environment": {"type": "object", "additionalProperties": false, "required": ["schema", "version", "semantic_profile_id", "sha256", "license_inventory_digest"], "properties": {"schema": {"const": "code-structure-viz.next-trusted-types/v1"}, "version": {"type": "string"}, "semantic_profile_id": {"type": "string"}, "sha256": {"$ref": "#/$defs/digest"}, "license_inventory_digest": {"$ref": "#/$defs/digest"}}},
+    "limits": {"$ref": "urn:code-structure-viz:schema:next-adapter-request-v1#/$defs/limits"},
+    "coverage": {"$ref": "urn:code-structure-viz:schema:next-adapter-response-v1#/$defs/coverage"},
+    "artifact_paths": {"type": "array", "maxItems": 2, "uniqueItems": true, "items": {"enum": ["next.snapshot.semantic.json", "next.snapshot.puml"]}},
+    "diagnostics": {"type": "array", "items": {"$ref": "urn:code-structure-viz:schema:next-adapter-response-v1#/$defs/diagnostic"}}
+  },
+  "oneOf": [
+    {"properties": {"status": {"const": "complete"}, "payload_available": {"const": true}, "entity_count": {"type": "integer"}, "artifact_paths": {"minItems": 1}}, "not": {"required": ["incomplete_kind"]}},
+    {"properties": {"status": {"const": "not_applicable"}, "payload_available": {"const": false}, "entity_count": {"const": 0}, "artifact_paths": {"maxItems": 0}, "diagnostics": {"maxItems": 0}}, "not": {"required": ["incomplete_kind"]}},
+    {"properties": {"status": {"const": "incomplete"}, "incomplete_kind": {"const": "partial_safe"}, "payload_available": {"const": true}, "entity_count": {"type": "integer"}, "artifact_paths": {"minItems": 1}, "diagnostics": {"minItems": 1}}, "required": ["incomplete_kind"]},
+    {"properties": {"status": {"const": "incomplete"}, "incomplete_kind": {"const": "payload_unavailable"}, "payload_available": {"const": false}, "entity_count": {"type": "null"}, "artifact_paths": {"maxItems": 0}, "diagnostics": {"minItems": 1}}, "required": ["incomplete_kind"]}
+  ],
+  "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"}}
+}

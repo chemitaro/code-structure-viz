@@ -1,0 +1,31 @@
+{
+  "schema": "code-structure-viz.next-diagnostic-catalog/v1",
+  "entries": [
+    {"code":"CSV-NEXT-APPLICABILITY-001","severity":"info","recoverable":true,"message":"Next.js is not directly declared by the selected project."},
+    {"code":"CSV-NEXT-CONFIG-001","severity":"error","recoverable":false,"message":"The Next.js configuration is invalid or unsupported."},
+    {"code":"CSV-NEXT-CONFIG-002","severity":"error","recoverable":false,"message":"The Next.js configuration requests external or executable type resolution."},
+    {"code":"CSV-NEXT-EXPORT-001","severity":"error","recoverable":false,"message":"A component export cannot be resolved uniquely."},
+    {"code":"CSV-NEXT-FLOW-001","severity":"warning","recoverable":true,"message":"Component output-flow analysis reached its configured limit."},
+    {"code":"CSV-NEXT-IDENTITY-001","severity":"error","recoverable":false,"message":"Canonical Next.js semantic identities collide."},
+    {"code":"CSV-NEXT-LIMIT-001","severity":"error","recoverable":false,"message":"A source transport limit was exceeded."},
+    {"code":"CSV-NEXT-LIMIT-002","severity":"error","recoverable":false,"message":"The source file count or decoded source total exceeded its configured limit."},
+    {"code":"CSV-NEXT-LIMIT-003","severity":"error","recoverable":false,"message":"Adapter output exceeded a configured byte limit."},
+    {"code":"CSV-NEXT-LIMIT-004","severity":"error","recoverable":false,"message":"The adapter exceeded its V8 old-space limit."},
+    {"code":"CSV-NEXT-LIMIT-005","severity":"error","recoverable":false,"message":"The semantic model or entity count exceeded its configured limit."},
+    {"code":"CSV-NEXT-NODE-001","severity":"error","recoverable":false,"message":"A supported Node.js runtime is unavailable."},
+    {"code":"CSV-NEXT-NODE-002","severity":"error","recoverable":false,"message":"The Next.js adapter process could not be started."},
+    {"code":"CSV-NEXT-NODE-003","severity":"error","recoverable":false,"message":"The Next.js adapter process timed out."},
+    {"code":"CSV-NEXT-NODE-004","severity":"error","recoverable":false,"message":"The Next.js adapter process failed."},
+    {"code":"CSV-NEXT-PROJECT-001","severity":"error","recoverable":false,"message":"Selected Next.js project roots overlap."},
+    {"code":"CSV-NEXT-PROJECT-002","severity":"error","recoverable":false,"message":"A source file belongs to more than one selected project."},
+    {"code":"CSV-NEXT-PROTOCOL-001","severity":"error","recoverable":false,"message":"The Next.js adapter response violates the private protocol."},
+    {"code":"CSV-NEXT-SOURCE-001","severity":"error","recoverable":true,"message":"A source file could not be analyzed safely."},
+    {"code":"CSV-NEXT-SOURCE-002","severity":"error","recoverable":false,"message":"A selected Next.js source path is a symbolic link."},
+    {"code":"CSV-NEXT-TARGET-001","severity":"error","recoverable":false,"message":"An explicit Next.js target cannot be resolved uniquely."},
+    {"code":"CSV-NEXT-TRUST-001","severity":"error","recoverable":false,"message":"The trusted type environment digest does not match."},
+    {"code":"CSV-NEXT-TRUST-002","severity":"error","recoverable":false,"message":"Target declarations shadow or augment the trusted type environment."},
+    {"code":"CSV-NEXT-TRUST-003","severity":"error","recoverable":false,"message":"A target path collides with a trusted virtual path."},
+    {"code":"CSV-NEXT-TYPE-001","severity":"warning","recoverable":true,"message":"A props type subtree is represented as opaque."},
+    {"code":"CSV-NEXT-UNSUPPORTED-001","severity":"info","recoverable":true,"message":"A runtime-dependent pattern is intentionally represented as unknown."}
+  ]
+}

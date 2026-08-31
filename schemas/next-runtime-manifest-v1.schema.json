@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-runtime-manifest-v1",
+  "title": "CodeStructureViz checked-in Next runtime member and license manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "build_input_digest", "build_output_digest", "members", "licenses"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-runtime-manifest/v1"},
+    "build_input_digest": {"$ref": "#/$defs/digest"}, "build_output_digest": {"$ref": "#/$defs/digest"},
+    "members": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["path", "size_bytes", "sha256", "role"], "properties": {"path": {"type": "string", "pattern": "^src/code_structure_viz/_next_runtime/.+$"}, "size_bytes": {"type": "integer", "minimum": 0}, "sha256": {"$ref": "#/$defs/digest"}, "role": {"enum": ["adapter", "typescript_lib", "trusted_declaration", "manifest"]}}}},
+    "licenses": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["ecosystem", "name", "version", "license_id", "source_url", "content_or_lock_digest"], "properties": {"ecosystem": {"enum": ["npm", "resource"]}, "name": {"type": "string", "minLength": 1}, "version": {"type": "string", "minLength": 1}, "license_id": {"type": "string", "minLength": 1}, "source_url": {"type": "string", "format": "uri"}, "content_or_lock_digest": {"$ref": "#/$defs/digest"}}}}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

@@ -24,6 +24,14 @@ SQLAlchemy snapshotはAST-onlyで解析し、runtime SQLAlchemy packageやDB設�
 v1に `[sqlalchemy]` tableはなく、SQLAlchemy固有の接続URL、engine、metadata import設定は
 unknown keyとして拒否する。`diff` は引き続きPython domain専用である。
 
+## Issue #8 で追加する Next config branch
+
+Issue #8 の production step は top-level `[next]` を追加し、`projects` を必須の非空配列とする。
+各 project は repository-relative `root`、`source_roots`、任意の `config_path` を持つ。
+対象、探索深さ、上限、trusted type environment digest を含む解決済み形の機械可読な正本は
+`schemas/next-config-v1.schema.json` とする。現在の parser がこの table を拒否する状態は、
+Issue #8 実装前の明示された境界であり、事前契約を current CLI support と誤認してはならない。
+
 `diff` で暗黙の比較候補を設定する場合だけ、任意の `comparison` table を追加できる。
 両方とも省略可能で、指定された値は解決済み設定の `resolved.comparison` に同じ
 NFC 正規化済み文字列として記録される。

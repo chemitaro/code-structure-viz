@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-adapter-response-v1",
+  "title": "CodeStructureViz Next adapter response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "protocol", "request_id", "adapter_version", "trusted_type_environment_digest", "semantic_compatibility_id", "identity_versions", "model", "proof", "model_digest"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-adapter-response/v1"},
+    "protocol": {"const": "code-structure-viz.next-adapter/v1"},
+    "request_id": {"$ref": "#/$defs/digest"},
+    "adapter_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "trusted_type_environment_digest": {"$ref": "#/$defs/digest"},
+    "semantic_compatibility_id": {"$ref": "#/$defs/digest"},
+    "identity_versions": {"$ref": "#/$defs/identity_versions"},
+    "model": {"$ref": "#/$defs/model"},
+    "proof": {"$ref": "#/$defs/proof"},
+    "model_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "id": {"type": "string", "pattern": "^next:[a-z-]+:[0-9a-f]{64}$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
+    "identity_versions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["module", "component", "member", "relation", "fact", "props_ir"],
+      "properties": {"module": {"const": 1}, "component": {"const": 1}, "member": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "props_ir": {"const": 1}}
+    },
+    "project": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "root", "source_roots", "config_path", "config_digest", "compiler_options", "file_ids"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "root": {"$ref": "#/$defs/path"},
+        "source_roots": {"type": "array", "items": {"$ref": "#/$defs/path"}},
+        "config_path": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
+        "config_digest": {"$ref": "#/$defs/digest"},
+        "compiler_options": {"$ref": "urn:code-structure-viz:schema:next-adapter-request-v1#/$defs/compiler_options"},
+        "file_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}}
+      }
+    },
+    "module": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "project_id", "path", "router_context", "client_entry", "derived_roles"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "project_id": {"$ref": "#/$defs/id"}, "path": {"$ref": "#/$defs/path"},
+        "router_context": {"enum": ["app_ui", "app_route_handler", "pages_ui", "pages_api", "none"]},
+        "client_entry": {"type": "boolean"},
+        "derived_roles": {"type": "array", "uniqueItems": true, "items": {"enum": ["client_dependency", "server_candidate"]}}
+      }
+    },
+    "component": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "module_id", "declaration_key", "recognition_evidence", "props_state"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "module_id": {"$ref": "#/$defs/id"},
+        "declaration_key": {"type": "string", "minLength": 1},
+        "recognition_evidence": {"type": "array", "uniqueItems": true, "items": {"enum": ["route_default", "trusted_callable", "trusted_class", "wrapper", "jsx_output", "reachable_local"]}},
+        "props_state": {"enum": ["known", "no_props", "unknown"]}
+      }
+    },
+    "member": {"oneOf": [{"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/export_member"}, {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/import_member"}, {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/prop_member"}]},
+    "relation": {"oneOf": [{"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/module_relation"}, {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/render_relation"}, {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/wrap_relation"}]},
+    "fact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "owner_id", "kind", "value"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "owner_id": {"$ref": "#/$defs/id"}, "kind": {"enum": ["client_entry", "router_context"]}, "value": {"oneOf": [{"const": true}, {"enum": ["app_ui", "app_route_handler", "pages_ui", "pages_api", "none"]}]}}
+    },
+    "coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["counts", "failed_files", "affected_ids", "taint_frontier", "opaque_reason_counts", "unknown_relation_count", "correlation_losses", "non_component_value_export_count", "type_only_export_count", "target_completeness"],
+      "properties": {
+        "counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "failed_files": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["path", "reason"], "properties": {"path": {"$ref": "#/$defs/path"}, "reason": {"type": "string"}}}},
+        "affected_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "taint_frontier": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "opaque_reason_counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "unknown_relation_count": {"type": "integer", "minimum": 0},
+        "correlation_losses": {"type": "array", "items": {"$ref": "#/$defs/correlation_loss"}},
+        "non_component_value_export_count": {"type": "integer", "minimum": 0},
+        "type_only_export_count": {"type": "integer", "minimum": 0},
+        "target_completeness": {"type": "array", "items": {"$ref": "#/$defs/target_completeness"}}
+      }
+    },
+    "correlation_loss": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner_id", "kind", "reason"],
+      "properties": {"owner_id": {"$ref": "#/$defs/id"}, "kind": {"enum": ["union_member", "intersection_member", "conditional_branch", "mapped_member", "overload"]}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "target_completeness": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_key", "status", "record_ids"],
+      "properties": {"target_key": {"type": "string", "minLength": 1}, "status": {"enum": ["complete", "failed"]}, "record_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}}}
+    },
+    "diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "severity", "recoverable", "count", "path_ref", "symbol_ref"],
+      "properties": {"code": {"type": "string", "pattern": "^CSV-NEXT-[A-Z]+-[0-9]{3}$"}, "severity": {"enum": ["info", "warning", "error"]}, "recoverable": {"type": "boolean"}, "count": {"type": "integer", "minimum": 1}, "path_ref": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]}, "symbol_ref": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]}}
+    },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "projects", "modules", "components", "members", "relations", "facts", "coverage", "diagnostics"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.next-model/v1"},
+        "projects": {"type": "array", "items": {"$ref": "#/$defs/project"}},
+        "modules": {"type": "array", "items": {"$ref": "#/$defs/module"}},
+        "components": {"type": "array", "items": {"$ref": "#/$defs/component"}},
+        "members": {"type": "array", "items": {"$ref": "#/$defs/member"}},
+        "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
+        "facts": {"type": "array", "items": {"$ref": "#/$defs/fact"}},
+        "coverage": {"$ref": "#/$defs/coverage"},
+        "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
+      }
+    },
+    "proof_record": {
+      "type": "object", "additionalProperties": false,
+      "required": ["record", "taints"],
+      "properties": {"record": {"oneOf": [{"$ref": "#/$defs/project"}, {"$ref": "#/$defs/module"}, {"$ref": "#/$defs/component"}, {"$ref": "#/$defs/member"}, {"$ref": "#/$defs/relation"}, {"$ref": "#/$defs/fact"}]}, "taints": {"type": "array", "uniqueItems": true, "items": {"enum": ["parse_file", "read_file", "type_symbol", "export_binding", "props_subtree", "component_flow", "module_relation", "boundary_derivation"]}}}
+    },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovered_records", "failure_roots", "causal_edges", "target_resolutions", "excluded"],
+      "properties": {
+        "discovered_records": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/proof_record"}},
+        "failure_roots": {"type": "array", "items": {"$ref": "#/$defs/failure_root"}},
+        "causal_edges": {"type": "array", "items": {"$ref": "#/$defs/causal_edge"}},
+        "target_resolutions": {"type": "array", "items": {"$ref": "#/$defs/target_resolution"}},
+        "excluded": {"type": "array", "items": {"$ref": "#/$defs/excluded_record"}}
+      }
+    },
+    "failure_root": {
+      "type": "object", "additionalProperties": false, "required": ["id", "kind", "path_ref"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "kind": {"enum": ["parse_file", "read_file", "type_symbol", "export_binding", "props_subtree", "component_flow", "module_relation", "boundary_derivation"]}, "path_ref": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]}}
+    },
+    "causal_edge": {
+      "type": "object", "additionalProperties": false, "required": ["source_id", "record_id", "rule"],
+      "properties": {"source_id": {"$ref": "#/$defs/id"}, "record_id": {"$ref": "#/$defs/id"}, "rule": {"type": "string"}}
+    },
+    "target_resolution": {
+      "type": "object", "additionalProperties": false, "required": ["target_key", "status", "record_ids"],
+      "properties": {"target_key": {"type": "string"}, "status": {"enum": ["resolved", "failed"]}, "record_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}}}
+    },
+    "excluded_record": {
+      "type": "object", "additionalProperties": false, "required": ["record_id", "reason"],
+      "properties": {"record_id": {"$ref": "#/$defs/id"}, "reason": {"type": "string"}}
+    }
+  }
+}
