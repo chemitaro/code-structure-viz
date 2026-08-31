@@ -114,3 +114,13 @@ jobs:
           uv sync --frozen --all-groups
           uv run pytest tests/contracts tests/security -q
           python3 ./spec-dock/scripts/spec-dock validate
+
+  trusted-profile-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Verify TypeScript trusted profile inventory
+        run: |
+          node --version
+          npm --prefix tests/contracts ci --ignore-scripts
+          npm --prefix tests/contracts test

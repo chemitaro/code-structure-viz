@@ -19,7 +19,7 @@
   },
   "$defs": {
     "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
-    "target_key": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?:component:[^#]+#[^#]+|module:[^#]+|file:[^#]+)$"},
+    "target_key": {"type": "string", "minLength": 6, "maxLength": 4096, "pattern": "^path:(?!/)(?!\\.\\.(?:/|$))(?!.*(?:/\\.\\.(?:/|$)))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f])[^#]+$"},
     "compiler_options": {
       "type": "object", "additionalProperties": false,
       "required": ["allow_js", "check_js", "jsx", "module", "module_resolution", "base_url", "paths"],

@@ -82,14 +82,21 @@ must carry the matching effective role.  Program suffixes are `.js/.jsx/.ts/.tsx
 files are context-only, and fixed hard exclusions are applied before the
 request is built.
 
-Explicit targets are canonicalized before they enter the request: a component
-is `component:<repository-relative-path>#<identifier>`, a module is
-`module:<repository-relative-path>`, and a file is
-`file:<repository-relative-path>`. Paths and identifiers are NFC-normalized,
-bounded to 1--4096 characters (component identifiers to 256 characters), and
-may not contain traversal, backslash, control characters, or a second `#`.
-The response proof must contain exactly one sorted resolution row per request
-target, with IDs independently resolved against the published model.
+Explicit targets are canonicalized before they enter the request using only
+`path:<repository-relative-path>`. This is a public address, distinct from
+internal Module/Component IDs and semantic keys; `component:`, `module:`, and
+`file:` are not public syntax. A file path resolves its frozen file, Module,
+and Component set. A directory path resolves the complete canonical descendant
+set, so multiple descendants are expected and are not ambiguous. Paths are
+NFC-normalized, bounded to 1--4096 characters, and reject traversal,
+backslashes, control characters, and `#`.
+
+Missing path, project-scope ambiguity, out-of-scope path, or any selected
+tainted/excluded/failed record makes the whole domain
+`CSV-NEXT-TARGET-001`/`payload_unavailable`, publishes no domain artifacts,
+and uses the exact manifest/stdout unavailable vector. The response proof has
+one canonical resolution row per request target; Python resolves the row's
+status and published IDs independently against the frozen model.
 
 The adapter receives exactly `canonical_json(request)` as UTF-8 stdin, with no
 BOM and no implicit source path/cwd.  Its byte length is inclusive of the

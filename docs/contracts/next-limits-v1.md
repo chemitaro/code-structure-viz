@@ -6,7 +6,10 @@ adapter request, resolved config, request fingerprint descriptor, response,
 and domain manifest; reference tests reject drift between projections.
 
 `max_entities` is the only user-resolvable budget (default `500`, bounded by
-the schema). Every other value is a fixed v1 constant. A boundary is
+the schema). It counts selected/published internal Module + Component
+records only; members, relations, facts, projects, and external frontiers do
+not consume it. The all-record cap is the separate `max_model_records` limit.
+Every other value is a fixed v1 constant. A boundary is
 inclusive: the value equal to the limit is accepted and the first value above
 it produces the stated outcome. Measurements use UTF-8 bytes where marked;
 there is no implicit character-count conversion, silent truncation, or v1
@@ -14,7 +17,7 @@ total-RSS promise.
 
 | name | value | counting unit | measurement point | encoding | over-limit outcome |
 | --- | ---: | --- | --- | --- | --- |
-| `max_entities` | 500 | model records | after projection, before publication | N/A | `payload_unavailable` |
+| `max_entities` | 500 | published internal Module + Component entities | after target projection, before publication | N/A | `payload_unavailable` |
 | `max_files` | 20,000 | files | after safe source selection, before read | N/A | `payload_unavailable` |
 | `max_file_bytes` | 4,194,304 | UTF-8 bytes per file | after read, before base64 | UTF-8 | `payload_unavailable` |
 | `max_decoded_bytes` | 67,108,864 | UTF-8 bytes per request | sum after decode, before adapter spawn | UTF-8 | `payload_unavailable` |
@@ -23,7 +26,7 @@ total-RSS promise.
 | `max_json_string_bytes` | 8,388,608 | UTF-8 bytes per JSON string | parser decode, before materialization | UTF-8 | `payload_unavailable` |
 | `max_array_items` | 100,000 | items per JSON array | parser item count before append | N/A | `payload_unavailable` |
 | `max_collection_items` | 20,000 | records per model collection | record emission, before append | N/A | `payload_unavailable` |
-| `max_model_records` | 100,000 | records per model | model assembly, before publication | N/A | `payload_unavailable` |
+| `max_model_records` | 100,000 | all discovered model records | model assembly, before publication | N/A | `payload_unavailable` |
 | `max_stdout_bytes` | 16,777,216 | UTF-8 bytes per stdout payload | canonical output encode, before write | UTF-8 | `payload_unavailable` |
 | `max_stderr_bytes` | 65,536 | UTF-8 bytes per stderr payload | diagnostic encode, before write | UTF-8 | `payload_unavailable` |
 | `timeout_seconds` | 60 | wall-clock seconds per adapter run | monotonic deadline at process wait | N/A | `payload_unavailable` |
@@ -40,6 +43,9 @@ total-RSS promise.
 The executable boundary vectors in `tests/contracts/test_next_contracts.py`
 exercise `limit-1`, `limit`, and `limit+1` arithmetically for every row, so
 the suite does not allocate a 96 MiB payload merely to prove an inclusive
-boundary. Aggregate counts (`discovered`, `published`, `excluded`, `failed`,
-and every collection count) are recomputed from records and the proof; a
-caller cannot bypass a limit by mutating a summary count.
+boundary. It also covers 500 internal entities with additional non-entity
+records, 501 unavailable, a 600 override with 501 successful, and a
+compositional 100,001 `max_model_records` failure. Aggregate counts
+(`discovered`, `published`, `excluded`, `failed`, every collection count, and
+`internal_entities`) are recomputed from records and the proof; a caller
+cannot bypass a limit by mutating a summary count.

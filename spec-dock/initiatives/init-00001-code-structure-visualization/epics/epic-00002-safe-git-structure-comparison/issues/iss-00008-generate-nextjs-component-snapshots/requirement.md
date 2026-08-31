@@ -78,7 +78,7 @@ non-literal dynamic behaviorはrelationを捏造せずunknown diagnosticとcover
 ```bash
 code-structure-viz snapshot --repo . --domain next --output-dir /tmp/csv-next-snapshot
 code-structure-viz snapshot --repo . --domain next --project apps/web --target path:apps/web/app/dashboard --upstream-depth 1 --downstream-depth 2 --output-dir /tmp/csv-dashboard
-code-structure-viz snapshot --repo . --domain next --project apps/web --target component:apps/web/components/index.ts#Button --output-dir /tmp/csv-button
+code-structure-viz snapshot --repo . --domain next --project apps/web --target path:apps/web/components/index.ts --output-dir /tmp/csv-components
 code-structure-viz snapshot --repo . --domain next --format semantic-json --stdout next:semantic-json --output-dir /tmp/csv-stdout
 ```
 
@@ -91,6 +91,18 @@ code-structure-viz snapshot --repo . --domain next --format semantic-json --stdo
 - config lookupは`tsconfig.json`、`jsconfig.json`、versioned built-in safe configの順。repository-local `extends`、`baseUrl`、`paths`だけをfrozen SourceView内で解決し、package-based extendsやtarget `node_modules`を暗黙に読まない。
 - one-shot Node adapterはrequest virtual files、bundled TypeScript standard library、`code-structure-viz.next-trusted-types/v1`だけを読むin-memory CompilerHostを使う。TrustedTypeEnvironmentはminimal JSX/React/Next wrapper declarations、exact version/digest/licenseを持ち、target type roots/node_modules/networkを参照しない。Node.js 22 LTS以上はapplicable runだけで要求する。
 - transport/processは20,000 files、4 MiB/file、64 MiB decoded source、96 MiB encoded stdin、JSON nesting 64、8 MiB/string、100,000 total/20,000 per collection array items、100,000 model records、16 MiB stdout、64 KiB stderr、60秒、512 MiB V8 old-spaceをv1上限とし、超過はsilent truncationせず`payload_unavailable`とする。総RSS上限はv1で保証しない。
+
+### public target grammar
+
+`--target`、resolved config、private requestで公開するtargetは
+`path:<repository-relative-path>`だけとする。これは内部のModule/Component
+IDやsemantic keyとは別の利用者向けアドレスであり、`component:`、`module:`、
+`file:`形式は公開しない。frozen SourceViewのfile pathはそのfile・Module・
+Component集合へ解決し、directory pathは全canonical descendant集合へ解決する。
+directoryの複数descendantは正常で、曖昧さではない。missing、project-scope
+ambiguity、out-of-scope、または選択集合のtainted/excluded/failed recordが一つでも
+あれば、domain全体を`CSV-NEXT-TARGET-001`・`payload_unavailable`・no-artifact
+とし、manifest/stdoutのunavailable vectorをexactに出す。
 
 ### semantic contract
 
@@ -189,7 +201,7 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 - complete/partialはdiagnostic有無ではなくpromised v1 semanticsの欠落で決める。intentional unsupportedをunknownとして完全表現できる場合はdiagnostic付きcompleteを許す。
 - TypeScript parse/type resolutionの局所failureをfile/component/relation単位で隔離し、安全subset、exact coverage、全requested rendererの同一subset、safe diagnostic、redaction、explicit target completeness、entity-budget passを証明できる場合だけ`partial_safe` JSON+PlantUML+manifestを公開する。証明できない場合は`payload_unavailable` manifest-onlyとする。
 - Node起動不能、adapter stdoutのprotocol外text、global schema mismatch、security invariant violation、unexpected absolute pathはresponse全体を拒否し`payload_unavailable`とする。局所的なalias/relation unresolvedは安全subsetとcoverageを証明できる場合だけ`partial_safe`を許す。
-- explicit project/targetのmissing、ambiguous、out-of-scopeは全projectへfallbackせず`payload_unavailable`とする。
+- explicit project/targetのmissing、project-scope ambiguity、out-of-scope、または選択集合のtainted/excluded/failed recordは全projectへfallbackせず`CSV-NEXT-TARGET-001`の`payload_unavailable`とする。
 - entity-per-diagram budgetはselected internal Module+Componentのdomain-local gateでdefault 500。overrideなしで501以上のdomainは`incomplete/payload_unavailable`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。safe run manifestにrequested/resolved limit、actual count、diagnosticを記録する。
 - malformed manifest/configでNext不在を証明できない場合はnot_applicableへ変換せずpayload_unavailableとする。
 - stop condition: first-party adapter protocol、TS/TSX coverage、JS/JSX safe subset、client boundary、Node optionality、entity budgetがacceptanceで成立するまでNext diffへ進まない。
@@ -201,12 +213,12 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 | I05-AC-001 | App/Pages RouterのTS/TSXでdeclaration identity、export binding、reachable local Component、closed props IR、two-plane relation、positive-evidence client rolesを出力し、barrel/aliasでComponentを複製しない。 | I05-AT-001 |
 | I05-AC-002 | two-phase single-read freezeでcontrol/program/contextを再読せず凍結し、closed request/response/model schema、self-field除外digest preimage、versioned exact-one JSON、Python側validation/ID/coverage再計算を検証する。 | I05-AT-002 |
 | I05-AC-003 | finite recognition、default/alias/star export、JS/JSX props matrix、complete PropsTypeIR、exact wrapper/dynamic/render flowを解析し、証明不能behaviorは捏造せずunknown/coverageにする。 | I05-AT-003 |
-| I05-AC-004 | typed taint propagationとPython再計算可能なcount/ref/target proofを満たす場合だけ`partial_safe` JSON+PlantUML+manifest、満たさないglobal/identity/limit failureは`payload_unavailable` manifest-only、exit 3とする。 | I05-AT-004 |
+| I05-AC-004 | typed taint propagationとPython再計算可能なcount/ref/target proofを満たす場合だけ`partial_safe` JSON+PlantUML+manifest、満たさないglobal/identity/limit/target failureは`payload_unavailable` manifest-only、exit 3とする。failure-root seed、causal edge、frontierはrecordsから独立導出し、submitted witnessと完全一致させる。 | I05-AT-004 |
 | I05-AC-005 | target path/cwd/node_modules/network/npm/npx/build/config/plugin/application moduleを利用せず、literal/body/comment/secret/absolute path/raw compiler textをoutput/diagnosticへ出さない。 | I05-AT-005 |
 | I05-AC-006 | explicit project rootsだけを対象とし、direct `next` dependencyがない場合はNode probeなしnot_applicable、applicableでComponent 0はcomplete empty、malformed evidenceはpayload_unavailableとする。 | I05-AT-006 |
-| I05-AC-007 | selected internal Module+Componentが501 entitiesならdomain `incomplete_kind: payload_unavailable`・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid 600 overrideはrequested/resolved/count付きで成功する。snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`はexit 2・Artifactなしとする。 | I05-AT-007 |
+| I05-AC-007 | selected/published internal Module+Componentが501 entitiesならdomain `incomplete_kind: payload_unavailable`・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid 600 overrideはrequested/resolved/count付きで成功する。all-record capは`max_model_records`として別に再計算し、snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`はexit 2・Artifactなしとする。 | I05-AT-007 |
 | I05-AC-008 | stdout selectorのvalid/invalid/duplicate/domain/format、exact-byte、not_applicable/payload_unavailable/fatal/interrupt result、selectorなしsummaryをtable-drivenに満たす。 | I05-AT-008 |
-| I05-AC-009 | target `node_modules`/type roots/networkなしでTrustedTypeEnvironmentを使い、reserved module/global/pathのshadow/augmentation/mergeをfail-closedで拒否し、manifest/version/digest/license/certified symbolを検証する。 | I05-AT-009 |
+| I05-AC-009 | target `node_modules`/type roots/networkなしでTrustedTypeEnvironmentを使い、reserved module/global/pathのshadow/augmentation/mergeをfail-closedで拒否し、実fixture bytesのmanifest/version/digest/license、TypeScript 5.9.2 Programのparse/semantic diagnostics 0、AST/TypeChecker由来certified symbolを検証する。 | I05-AT-009 |
 | I05-AC-010 | Next semantic/private protocol/diagnostic/manifest/stdout/PlantUML/writerのclosed schema/grammar/pathをmutation testで固定し、wheel/sdistにcompiled runtime/trusted declarations/lock/licenseを正しく収録してcheckout外offline Next runが成功する。 | I05-AT-010 |
 | I05-AC-011 | domain config/source-plan projectionにより、Next追加前後で既存Python/SQLAlchemyのsource/config/run fingerprint、semantic JSON、PlantUML、manifest、stdout、stderrがbyte-for-byte不変である。 | I05-AT-011 |
 

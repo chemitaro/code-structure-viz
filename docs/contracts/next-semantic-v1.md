@@ -29,7 +29,10 @@ plus Python-entity, wrong-status, and unknown-root mutations.
 - Member identity: owner ID plus member-kind identity. Export aliases never create Components.
 - Relation and Fact identity: kind-specific canonical tuple.
 - IDs use a kind prefix and SHA-256 of canonical JSON identity bytes.
-- Collections are unique and sorted by UTF-8 ID bytes.
+- Collections are unique and sorted by UTF-8 ID bytes. Ordered derived
+  collections (`recognition_evidence`, diagnostics, `target_completeness`,
+  `failed_files`, and every proof list) use canonical JSON UTF-8 bytes; the
+  validator compares the submitted order directly and never sorts it first.
 
 `identity_versions` is `{project:1,file:1,module:1,component:1,member:1,relation:1,fact:1,props_ir:1}`. `semantic_compatibility_id` is the SHA-256 of the canonical
 preimage `{semantic_schema,identity_versions,algorithm_versions,semantic_profile_id}`.
@@ -43,9 +46,14 @@ are required; the value is not a self-reported opaque token.
 - Members are `export_binding`, `import_binding`, or `prop`.
 - Every `export_binding` has an explicit `resolution_kind`: `component` carries
   a Component ID, `value` denotes a non-component runtime value, and `type`
-  denotes a type-only export. The proof carries one exact resolution witness
-  per export; `non_component_value_export_count` and `type_only_export_count`
-  are recomputed from these records.
+  denotes a type-only export. Before that public projection, the adapter emits
+  a complete independent `export_observations` stream. Each observation has
+  the owner Module, canonical exported name, value/type role, re-export bit,
+  stable syntax identity, resolution (`component|value|type|unknown`), and
+  optional Component ID. Python derives and exact-compares public bindings,
+  resolution witnesses, and `non_component_value_export_count`/
+  `type_only_export_count`; omitted, duplicated, or substituted observations
+  are rejected.
 - Module relations are `static_import` and `literal_dynamic_import`.
 - Component relations are `jsx_render` and internal-only `component_wrap`.
 - Direct `client_entry` and `router_context` are Facts. Derived boundary roles remain Module facets.
@@ -73,7 +81,21 @@ request_id))`; the response must echo that exact ID and its `model_digest` is
 
 ## Partial-safe proof
 
-The Node response includes the complete discovered record set, typed taints, failure roots, causal edges, target-resolution witnesses, export-resolution witnesses, and exclusions. `collection`, taint kind, exclusion reason, and propagation rule are closed vocabularies. Python derives the mandatory causal edges and taint fixed point from the records, roots, and closed rule/ownership table; adapter-provided edges, taints, and counts are not trusted. It checks that every discovered record is exactly published/excluded/failed once, that every published reference is untainted or a closed frontier, that request target keys/status/IDs equal the independently resolved model, and that coverage counts equal the proof decomposition. Counts alone are not evidence. The validator contract is versioned as `code-structure-viz.next-reference-validation/v1` and lives in `tests/contracts/next_reference_validation.py` until production code owns it.
+The Node response includes the complete discovered record set, typed taints,
+failure roots, causal edges, target-resolution witnesses, the independent
+export-observation stream, export-resolution witnesses, and exclusions.
+`collection`, taint kind, exclusion reason, and propagation rule are closed
+vocabularies. Python derives the complete mandatory root seeds (including
+export target Component, incoming explicit re-export/barrel Module, and
+dependent bindings), causal edges, and taint fixed point from records, roots,
+and the closed rule/ownership table; adapter-provided edges, taints, and counts
+are not trusted. It checks that every discovered record is exactly
+published/excluded/failed once, that every published reference is untainted or
+a closed frontier, that request target keys/status/IDs equal the independently
+resolved model, and that coverage counts equal the proof decomposition. Counts
+alone are not evidence. The validator contract is versioned as
+`code-structure-viz.next-reference-validation/v1` and lives in
+`tests/contracts/next_reference_validation.py` until production code owns it.
 
 ## PropsTypeIR/v1
 
@@ -106,8 +128,14 @@ declaration, augmentation, or path redirect for one of those namespaces is a
 trust failure; target paths are also compared after NFC normalization against
 the trusted virtual paths. Each physical fixture's UTF-8 bytes, size, and
 SHA-256 are checked against the physical-to-virtual mapping; certified symbol
-signature digests are reproducible from their declaration metadata. The
-anti-shadowing witness covers all seven reserved names.
+signature digests are derived by the TypeScript 5.9.2 Program AST/TypeChecker
+and exact-compared with a checked-in expected inventory. The gate requires
+zero parse and semantic diagnostics, and trusted TypeIR references accept only
+the certified module/export identities (the bundled `typescript/lib` root is
+the sole non-symbol standard-library reference). Recognition evidence is
+interpreted against the same closed profile; it cannot introduce an
+uncertified callable or class. The anti-shadowing witness covers all seven
+reserved names.
 
 ## Exact identity preimages
 
@@ -188,6 +216,11 @@ closure; `taint_frontier` is the sorted untainted internal reference frontier;
 closed, sorted projections with owner/reference checks. A `partial_safe`
 semantic and PlantUML pair must use the same validated subset.
 
+`coverage.counts.internal_entities` is recomputed as the number of published
+internal Modules plus Components only. Members, relations, facts, projects,
+external frontiers, and proof-only records do not consume `max_entities`; the
+complete all-record cap is the separate `max_model_records` limit.
+
 ## Diagnostics, config, and status cross-checks
 
 Compact semantic diagnostics are catalog projections keyed by code. Their
@@ -198,12 +231,16 @@ may contain only `complete` diagnostics, while partial snapshots may contain
 only `partial_safe` diagnostics. Unknown codes, severity/ref/status mutations,
 and the historical FLOW fixture's wrong path reference are rejected.
 
-Explicit targets use only canonical keys `component:<path>#<name>`,
-`module:<path>`, or `file:<path>` (NFC, repository-relative, 1--4096
-characters).
-The adapter must return exactly one resolution row per requested key, sorted
-and duplicate-free; Python resolves the keys against the published model and
-rejects missing, extra, substituted, or `failed`-as-resolved rows.
+Explicit targets use only the public canonical key
+`path:<repository-relative-file-or-directory>` (NFC, 1--4096 characters).
+Internal Module/Component IDs are not public target syntax. A file resolves
+its frozen file/Module/Component set; a directory resolves its complete
+canonical descendant frozen set, and multiple descendants are normal. Missing,
+project-scope ambiguity, out-of-scope, or any selected tainted/excluded/failed
+record is `CSV-NEXT-TARGET-001`, `payload_unavailable`, and no artifact.
+The adapter must return exactly one canonical resolution row per requested key,
+duplicate-free; Python resolves keys against the frozen published model and
+rejects missing, extra, substituted, permuted, or `failed`-as-resolved rows.
 
 `ResolvedNextConfig` and `NextSnapshotRequest` are defined in
 `docs/contracts/next-config-v1.md`. The domain manifest and root manifest

@@ -1,3 +1,3 @@
 declare module "next/dynamic" {
-  export default function dynamic(loader: () => Promise<unknown>): unknown;
+  export default function dynamic(loader: () => unknown): unknown;
 }

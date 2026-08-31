@@ -147,6 +147,7 @@ def _next_coverage() -> dict[str, object]:
             "members": 0,
             "relations": 0,
             "facts": 0,
+            "internal_entities": 0,
             "discovered": 0,
             "published": 0,
             "excluded": 0,

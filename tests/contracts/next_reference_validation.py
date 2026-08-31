@@ -14,12 +14,14 @@ import json
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 VALIDATOR_SCHEMA = "code-structure-viz.next-reference-validation/v1"
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "schemas" / "next-diagnostic-catalog-v1.json"
 COLLECTIONS = ("projects", "files", "modules", "components", "members", "relations", "facts")
+# There are seven non-empty subsets of the three closed roles.  Keep this
+# tuple in wire order; the subset/effective-role invariant is checked below.
 ROLES = ("control", "context", "program")
 ROLE_ORDER = {role: index for index, role in enumerate(ROLES)}
 # The tuple above is the canonical wire order.  Precedence is intentionally a
@@ -53,7 +55,13 @@ TAINT_ORDER_INDEX = {taint: index for index, taint in enumerate(TAINT_ORDER)}
 ROOT_EDGE_TARGET_KINDS = {
     "type_symbol": {"component", "prop"},
     "props_subtree": {"component", "prop"},
-    "export_binding": {"module", "component", "export_binding", "import_binding"},
+    "export_binding": {
+        "module",
+        "component",
+        "export_binding",
+        "import_binding",
+        "static_import",
+    },
     "component_flow": {"component", "jsx_render", "component_wrap"},
     "module_relation": {"module", "static_import", "literal_dynamic_import"},
     "boundary_derivation": {
@@ -93,14 +101,15 @@ LIMIT_DEFAULTS = {
     "max_flow_visits": 10000,
     "max_alias_edges": 64,
 }
+DEFAULT_MAX_ENTITIES = 500
 
 # Every limit has an explicit measurement contract.  The production adapter
 # must use the same unit, measurement point, inclusive boundary, and stable
 # outcome; these records are intentionally data-only and cheap to exercise.
 LIMIT_CONTRACTS: dict[str, dict[str, Any]] = {
     "max_entities": {
-        "unit": "model_records",
-        "measurement": "after_projection_before_publication",
+        "unit": "published_internal_modules_and_components",
+        "measurement": "after_target_projection_before_publication",
         "encoding": "not_applicable",
         "inclusive": True,
         "outcome": "payload_unavailable",
@@ -349,6 +358,14 @@ TRUSTED_PROFILE_FILE_SIZES = {
     virtual_path: (REPO_ROOT / physical_path).stat().st_size
     for physical_path, virtual_path in TRUSTED_PROFILE_PHYSICAL_TO_VIRTUAL
 }
+TRUSTED_PROFILE_INVENTORY_PATH = (
+    REPO_ROOT / "tests/fixtures/next_trusted_profile/expected_inventory.json"
+)
+TRUSTED_PROFILE_EXPECTED_INVENTORY: tuple[dict[str, Any], ...] = tuple(
+    cast(
+        list[dict[str, Any]], json.loads(TRUSTED_PROFILE_INVENTORY_PATH.read_text(encoding="utf-8"))
+    )
+)
 TRUSTED_PROFILE_SHADOWING_WITNESS = tuple(
     [
         {
@@ -367,158 +384,43 @@ TRUSTED_PROFILE_SHADOWING_WITNESS = tuple(
         for global_name in TRUSTED_GLOBALS
     ]
 )
-TRUSTED_PROFILE_MODULE_SYMBOLS = (
-    ("next/dynamic", ("default",)),
-    ("react", ("Component",)),
-    ("react", ("createElement",)),
-    ("react", ("forwardRef",)),
-    ("react", ("lazy",)),
-    ("react", ("memo",)),
-    ("react/jsx-runtime", ("Fragment",)),
-    ("react/jsx-runtime", ("jsx",)),
-    ("react/jsx-runtime", ("jsxs",)),
-)
-TRUSTED_PROFILE_GLOBAL_SYMBOLS = (
-    ("Array", ("flatMap",)),
-    ("Array", ("map",)),
-    ("JSX", ("Element",)),
-    ("ReadonlyArray", ("flatMap",)),
-    ("ReadonlyArray", ("map",)),
-)
 
 
-def _signature_digest(
-    source_kind: str, source_name: str, export_name: str, symbol_kind: str
-) -> str:
-    preimage = {
-        "source_kind": source_kind,
-        "source_name": source_name,
-        "export_name": export_name,
-        "symbol_kind": symbol_kind,
+def _trusted_inventory_symbol_key(row: dict[str, Any]) -> tuple[str, str, tuple[str, ...]]:
+    return (row["source_kind"], row["source_name"], tuple(row["export_path"]))
+
+
+TRUSTED_PROFILE_MODULE_SYMBOLS = tuple(
+    (_trusted_inventory_symbol_key(row)[1], _trusted_inventory_symbol_key(row)[2])
+    for row in TRUSTED_PROFILE_EXPECTED_INVENTORY
+    if row["source_kind"] == "module"
+)
+TRUSTED_PROFILE_GLOBAL_SYMBOLS = tuple(
+    (_trusted_inventory_symbol_key(row)[1], _trusted_inventory_symbol_key(row)[2])
+    for row in TRUSTED_PROFILE_EXPECTED_INVENTORY
+    if row["source_kind"] == "global"
+)
+_TRUSTED_PROFILE_VIRTUAL_BY_BASENAME = {
+    Path(virtual_path).name: virtual_path for virtual_path in TRUSTED_PROFILE_FILES
+}
+TRUSTED_PROFILE_CERTIFIED_SYMBOLS: tuple[dict[str, Any], ...] = tuple(
+    {
+        "source_kind": row["source_kind"],
+        "source_name": row["source_name"],
+        "export_path": row["export_path"],
+        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[
+            _TRUSTED_PROFILE_VIRTUAL_BY_BASENAME[row["declaration_file"]]
+        ],
+        "symbol_kind": row["symbol_kind"],
+        "signature_digest": row["signature_digest"],
     }
-    return hashlib.sha256(
-        json.dumps(preimage, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
-
-
-TRUSTED_PROFILE_CERTIFIED_SYMBOLS: tuple[dict[str, Any], ...] = (
-    {
-        "source_kind": "global",
-        "source_name": "Array",
-        "export_path": ["flatMap"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[1]],
-        "symbol_kind": "method",
-        "signature_digest": _signature_digest("global", "Array", "flatMap", "method"),
-    },
-    {
-        "source_kind": "global",
-        "source_name": "Array",
-        "export_path": ["map"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[1]],
-        "symbol_kind": "method",
-        "signature_digest": _signature_digest("global", "Array", "map", "method"),
-    },
-    {
-        "source_kind": "global",
-        "source_name": "JSX",
-        "export_path": ["Element"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[1]],
-        "symbol_kind": "interface",
-        "signature_digest": _signature_digest("global", "JSX", "Element", "interface"),
-    },
-    {
-        "source_kind": "global",
-        "source_name": "ReadonlyArray",
-        "export_path": ["flatMap"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[1]],
-        "symbol_kind": "method",
-        "signature_digest": _signature_digest("global", "ReadonlyArray", "flatMap", "method"),
-    },
-    {
-        "source_kind": "global",
-        "source_name": "ReadonlyArray",
-        "export_path": ["map"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[1]],
-        "symbol_kind": "method",
-        "signature_digest": _signature_digest("global", "ReadonlyArray", "map", "method"),
-    },
-    {
-        "source_kind": "module",
-        "source_name": "next/dynamic",
-        "export_path": ["default"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[2]],
-        "symbol_kind": "function",
-        "signature_digest": _signature_digest("module", "next/dynamic", "default", "function"),
-    },
-    {
-        "source_kind": "module",
-        "source_name": "react",
-        "export_path": ["Component"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[3]],
-        "symbol_kind": "class",
-        "signature_digest": _signature_digest("module", "react", "Component", "class"),
-    },
-    {
-        "source_kind": "module",
-        "source_name": "react",
-        "export_path": ["createElement"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[3]],
-        "symbol_kind": "function",
-        "signature_digest": _signature_digest("module", "react", "createElement", "function"),
-    },
-    {
-        "source_kind": "module",
-        "source_name": "react",
-        "export_path": ["forwardRef"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[3]],
-        "symbol_kind": "function",
-        "signature_digest": _signature_digest("module", "react", "forwardRef", "function"),
-    },
-    {
-        "source_kind": "module",
-        "source_name": "react",
-        "export_path": ["lazy"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[3]],
-        "symbol_kind": "function",
-        "signature_digest": _signature_digest("module", "react", "lazy", "function"),
-    },
-    {
-        "source_kind": "module",
-        "source_name": "react",
-        "export_path": ["memo"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[3]],
-        "symbol_kind": "function",
-        "signature_digest": _signature_digest("module", "react", "memo", "function"),
-    },
-    {
-        "source_kind": "module",
-        "source_name": "react/jsx-runtime",
-        "export_path": ["Fragment"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[0]],
-        "symbol_kind": "interface",
-        "signature_digest": _signature_digest(
-            "module", "react/jsx-runtime", "Fragment", "interface"
-        ),
-    },
-    {
-        "source_kind": "module",
-        "source_name": "react/jsx-runtime",
-        "export_path": ["jsx"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[0]],
-        "symbol_kind": "function",
-        "signature_digest": _signature_digest("module", "react/jsx-runtime", "jsx", "function"),
-    },
-    {
-        "source_kind": "module",
-        "source_name": "react/jsx-runtime",
-        "export_path": ["jsxs"],
-        "declaration_sha256": TRUSTED_PROFILE_FILE_SHA256[TRUSTED_PROFILE_FILES[0]],
-        "symbol_kind": "function",
-        "signature_digest": _signature_digest("module", "react/jsx-runtime", "jsxs", "function"),
-    },
+    for row in sorted(TRUSTED_PROFILE_EXPECTED_INVENTORY, key=_trusted_inventory_symbol_key)
 )
+TRUSTED_PROFILE_CERTIFIED_MODULE_KEYS = {
+    (row["source_name"], tuple(row["export_path"]))
+    for row in TRUSTED_PROFILE_EXPECTED_INVENTORY
+    if row["source_kind"] == "module"
+}
 RUNTIME_REQUIRED_MEMBER_ROLES = {
     "adapter",
     "manifest",
@@ -551,7 +453,7 @@ SOURCE_PLAN_CONTEXT_SUFFIXES = (".d.ts",)
 SOURCE_PLAN_HARD_EXCLUSIONS = (".git", "node_modules", ".next", "out", "dist", "build", "coverage")
 SOURCE_PLAN_CONTROL_PATHS = ("package.json", "tsconfig.json", "jsconfig.json")
 SOURCE_PLAN_VERSION = "1"
-TARGET_KEY_RE = re.compile(r"^(component|module|file):([^#]+)(?:#(.+))?$")
+PUBLIC_TARGET_RE = re.compile(r"^path:([^#]+)$")
 
 # The propagation vocabulary is closed.  A failure root first reaches its
 # declared seed records (or every record on its path for a file failure), then
@@ -776,7 +678,11 @@ def validate_response_envelope(response: dict[str, Any], request: dict[str, Any]
         for file_record in request["files"]
     ]
     assert model["files"] == request_files
-    validate_model(model)
+    validate_model(
+        model,
+        max_entities=request["limits"]["max_entities"],
+        max_model_records=request["limits"]["max_model_records"],
+    )
     validate_proof(response["proof"], model, request_targets=request["targets"])
 
 
@@ -904,6 +810,23 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
     assert value["request"]["source_plan_digest"] == value["source_plan_digest"]
     assert value["request"]["domain_config_digest"] == value["domain_config_digest"]
     assert value["request"]["run_fingerprint"] == value["run_fingerprint"]
+    coverage_internal_entities = value["coverage"]["counts"]["internal_entities"]
+    assert value["budget"]["resolved"] == value["limits"]["max_entities"]
+    target_completeness = value["coverage"]["target_completeness"]
+    _assert_canonical(target_completeness)
+    target_rows = {item["target_key"]: item for item in target_completeness}
+    assert set(target_rows) == set(value["targets"])
+    assert all(item["record_ids"] == sorted(item["record_ids"]) for item in target_completeness)
+    failed_targets = [item for item in target_completeness if item["status"] == "failed"]
+    assert all(not item["record_ids"] for item in failed_targets)
+    if failed_targets:
+        assert value["status"] == "incomplete"
+        assert value["incomplete_kind"] == "payload_unavailable"
+        assert value["payload_available"] is False
+        assert value["artifact_paths"] == []
+        assert any(
+            diagnostic["code"] == "CSV-NEXT-TARGET-001" for diagnostic in value["diagnostics"]
+        )
     expected_artifacts = {
         "semantic-json": "next.snapshot.semantic.json",
         "plantuml": "next.snapshot.puml",
@@ -932,10 +855,13 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             assert value["artifact_paths"] == []
         assert value["diagnostics"]
     if value["budget"]["actual"] is not None:
+        assert value["budget"]["actual"] == coverage_internal_entities
         if value["budget"]["actual"] > value["budget"]["resolved"]:
             assert value["incomplete_kind"] == "payload_unavailable"
         else:
-            assert value["entity_count"] in {0, value["budget"]["actual"]}
+            assert value["entity_count"] == value["budget"]["actual"]
+            if value["payload_available"]:
+                assert coverage_internal_entities == value["entity_count"]
     assert value["run_fingerprint"] == recompute_run_fingerprint(
         source_view_fingerprint=value["source"]["fingerprint"],
         source_plan_digest=value["source_plan_digest"],
@@ -993,6 +919,24 @@ def limit_boundary_allowed(limit: int, measured: int) -> bool:
     """Model an inclusive non-negative counter boundary without allocation."""
 
     return measured >= 0 and measured <= limit
+
+
+def internal_entity_count(model: dict[str, Any]) -> int:
+    """Count only published internal Module and Component records."""
+
+    return len(model["modules"]) + len(model["components"])
+
+
+def entity_budget_allowed(measured: int, resolved: int) -> bool:
+    """Apply the inclusive max_entities boundary to internal entities."""
+
+    return measured >= 0 and resolved >= 1 and measured <= resolved
+
+
+def model_record_budget_allowed(measured: int, limit: int) -> bool:
+    """Apply max_model_records without allocating a model-sized fixture."""
+
+    return measured >= 0 and limit >= 1 and measured <= limit
 
 
 def assert_limit_boundary(limit: int, *, at_limit: bool, over_limit: bool) -> None:
@@ -1086,57 +1030,87 @@ def _assert_target_keys(targets: list[str]) -> None:
 
 
 def canonical_target_key(target: str) -> str:
-    """Canonicalize one explicit target key before proof comparison."""
+    """Canonicalize the public path target before proof comparison.
+
+    ``path:`` is the only public target grammar.  Component/module IDs and
+    semantic keys remain private model identifiers and are never accepted as
+    request syntax.
+    """
 
     normalized = unicodedata.normalize("NFC", target)
-    match = TARGET_KEY_RE.fullmatch(normalized)
+    match = PUBLIC_TARGET_RE.fullmatch(normalized)
     assert match is not None
-    kind, path, name = match.groups()
+    path = match.group(1)
     _assert_path(path)
-    if kind == "component":
-        assert name is not None
-        assert 1 <= len(name) <= 256
-        assert "#" not in name
-        return f"component:{path}#{name}"
-    assert name is None
-    return f"{kind}:{path}"
+    assert "#" not in path
+    return f"path:{path}"
 
 
-def resolve_target_resolutions(targets: list[str], model: dict[str, Any]) -> list[dict[str, Any]]:
-    """Resolve request targets from model records, without trusting adapter IDs."""
+def resolve_target_resolutions(
+    targets: list[str],
+    model: dict[str, Any],
+    *,
+    unavailable_record_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve public file/directory paths against the frozen published model.
+
+    A file target selects its file, matching module, and all components owned
+    by that module.  A directory target selects the complete descendant set;
+    multiple descendants are expected and are not ambiguous.  More than one
+    project in the selected set is a project-scope failure.
+    """
 
     collections = _validate_model_collections(model)
+    unavailable = unavailable_record_ids or set()
     resolutions: list[dict[str, Any]] = []
     for target in targets:
         target_key = canonical_target_key(target)
-        kind, remainder = target_key.split(":", 1)
-        if kind == "component":
-            path, name = remainder.rsplit("#", 1)
-            matching = [
-                record["id"]
-                for record in collections["components"].values()
-                if record["declaration_key"] == name
-                and any(
-                    module["id"] == record["module_id"] and module["path"] == path
-                    for module in collections["modules"].values()
-                )
-            ]
+        requested_path = target_key.removeprefix("path:")
+        exact_files = [
+            record for record in collections["files"].values() if record["path"] == requested_path
+        ]
+        matching_files = exact_files or [
+            record
+            for record in collections["files"].values()
+            if _under(record["path"], requested_path)
+        ]
+        project_ids = {record["project_id"] for record in matching_files}
+        if not matching_files or len(project_ids) != 1:
+            matching = []
+            status = "failed"
         else:
-            collection = f"{kind}s"
-            matching = [
-                record["id"]
-                for record in collections[collection].values()
-                if record["path"] == remainder
+            file_keys = {(record["project_id"], record["path"]) for record in matching_files}
+            matching_modules = [
+                record
+                for record in collections["modules"].values()
+                if (record["project_id"], record["path"]) in file_keys
             ]
-        matching.sort()
+            module_ids = {record["id"] for record in matching_modules}
+            matching_components = [
+                record
+                for record in collections["components"].values()
+                if record["module_id"] in module_ids
+            ]
+            matching = sorted(
+                [
+                    *[record["id"] for record in matching_files],
+                    *[record["id"] for record in matching_modules],
+                    *[record["id"] for record in matching_components],
+                ]
+            )
+            if not matching or unavailable.intersection(matching):
+                matching = []
+                status = "failed"
+            else:
+                status = "resolved"
         resolutions.append(
             {
                 "target_key": target_key,
-                "status": "resolved" if len(matching) == 1 else "failed",
-                "record_ids": matching if len(matching) == 1 else [],
+                "status": status,
+                "record_ids": matching if status == "resolved" else [],
             }
         )
-    return resolutions
+    return sorted(resolutions, key=canonical_json_bytes)
 
 
 def _assert_formats(formats: list[str]) -> None:
@@ -1210,6 +1184,15 @@ def _validate_type_node(
             assert node["module"] in TRUSTED_REFERENCE_MODULES
             if node["module"] != "typescript/lib":
                 assert node["exported_name"] is not None
+                assert (
+                    node["module"],
+                    (node["exported_name"],),
+                ) in TRUSTED_PROFILE_CERTIFIED_MODULE_KEYS
+            else:
+                # The bundled standard-library root is the one non-symbol
+                # trusted reference.  Its declarations are covered by the
+                # TypeScript Program inventory's certified global rows.
+                assert node["exported_name"] is None
             assert (
                 node["exported_name"] is None
                 or node["exported_name"] == "default"
@@ -1444,6 +1427,8 @@ def _diagnostic_catalog() -> dict[str, dict[str, Any]]:
 
 def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
     catalog = _diagnostic_catalog()
+    _assert_canonical(diagnostics)
+    aggregate_keys: list[Any] = []
     for diagnostic in diagnostics:
         entry = catalog.get(diagnostic["code"])
         assert entry is not None
@@ -1468,10 +1453,21 @@ def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
                 _assert_path(path_ref)
             if symbol_ref is not None:
                 _id_kind(symbol_ref)
+        aggregate_keys.append(
+            (
+                diagnostic["code"],
+                diagnostic["path_ref"],
+                diagnostic["symbol_ref"],
+                diagnostic["outcome"],
+            )
+        )
+    assert len(aggregate_keys) == len(set(aggregate_keys))
 
 
 def _validate_public_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
     catalog = _diagnostic_catalog()
+    _assert_canonical(diagnostics)
+    aggregate_keys: list[Any] = []
     for diagnostic in diagnostics:
         entry = catalog.get(diagnostic["code"])
         assert entry is not None
@@ -1500,6 +1496,10 @@ def _validate_public_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
                 _assert_path(path)
             if symbol is not None:
                 _id_kind(symbol)
+        aggregate_keys.append(
+            (diagnostic["code"], diagnostic["path"], diagnostic["symbol"], diagnostic["outcome"])
+        )
+    assert len(aggregate_keys) == len(set(aggregate_keys))
 
 
 def validate_semantic_snapshot(value: dict[str, Any]) -> None:
@@ -1509,6 +1509,8 @@ def validate_semantic_snapshot(value: dict[str, Any]) -> None:
     assert value["schema"] == "code-structure-viz.semantic/v1"
     assert value["domain"] == "next"
     assert value["document_kind"] == "snapshot"
+    head_commit = value["source"]["head_commit"]
+    assert head_commit is None or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", head_commit)
     status = value["status"]
     if status == "complete":
         assert "incomplete_kind" not in value
@@ -1532,7 +1534,11 @@ def validate_semantic_snapshot(value: dict[str, Any]) -> None:
         "coverage": value["coverage"],
         "diagnostics": value["diagnostics"],
     }
-    validate_model(model)
+    validate_model(
+        model,
+        max_entities=value["request"]["limits"]["max_entities"],
+        max_model_records=value["request"]["limits"]["max_model_records"],
+    )
     expected_projects = [
         {
             "root": project["root"],
@@ -1729,7 +1735,7 @@ def _causal_edge_is_allowed(
         root = failure_roots[source_id]
         if not _root_edge_is_allowed(root, target, rule):
             return False
-        if root["path_ref"] is not None:
+        if root["kind"] in {"parse_file", "read_file"} and root["path_ref"] is not None:
             target_path = _record_project_path(target, records)
             if target_path is None or target_path[1] != root["path_ref"]:
                 return False
@@ -1860,6 +1866,149 @@ def _record_edge_rule(source: dict[str, Any], target: dict[str, Any]) -> str | N
     return None
 
 
+def _derive_required_root_seed_ids(
+    root: dict[str, Any], records: dict[str, dict[str, Any]]
+) -> list[str]:
+    """Derive a root's complete mandatory seed set from records.
+
+    ``failure_root.record_ids`` is only a submitted witness.  In particular,
+    an export failure must seed its target component, the explicit incoming
+    re-export/barrel path, and bindings that depend on the affected module or
+    component; accepting a caller-selected subset would permit under-taint.
+    """
+
+    path_ref = root["path_ref"]
+    if path_ref is None:
+        if root["kind"] == "boundary_derivation":
+            return sorted(
+                record_id
+                for record_id, record in records.items()
+                if record["kind"] == "module"
+                and "server_candidate" in record.get("derived_roles", [])
+            )
+        if root["kind"] == "export_binding":
+            return sorted(
+                record_id
+                for record_id, record in records.items()
+                if record["kind"] == "export_binding"
+            )
+        if root["kind"] in {"type_symbol", "props_subtree"}:
+            return sorted(
+                record_id
+                for record_id, record in records.items()
+                if record["kind"] in {"component", "prop"}
+            )
+        if root["kind"] == "component_flow":
+            return sorted(
+                record_id for record_id, record in records.items() if record["kind"] == "component"
+            )
+        if root["kind"] == "module_relation":
+            return sorted(
+                record_id for record_id, record in records.items() if record["kind"] == "module"
+            )
+        return []
+
+    def on_path(record: dict[str, Any]) -> bool:
+        record_path = _record_project_path(record, records)
+        return record_path is not None and record_path[1] == path_ref
+
+    if root["kind"] in {"parse_file", "read_file"}:
+        return sorted(record_id for record_id, record in records.items() if on_path(record))
+
+    if root["kind"] in {"type_symbol", "props_subtree"}:
+        return sorted(
+            record_id
+            for record_id, record in records.items()
+            if on_path(record) and record["kind"] in {"component", "prop"}
+        )
+
+    if root["kind"] == "export_binding":
+        modules = {
+            record_id
+            for record_id, record in records.items()
+            if record["kind"] == "module" and on_path(record)
+        }
+        exports = {
+            record_id: record
+            for record_id, record in records.items()
+            if record["kind"] == "export_binding" and record["owner_id"] in modules
+        }
+        seed: set[str] = set(modules) | set(exports)
+        target_components = {
+            record["target_component_id"]
+            for record in exports.values()
+            if record["resolution_kind"] == "component"
+        }
+        seed.update(target_components)
+        target_modules = {
+            records[component_id]["module_id"]
+            for component_id in target_components
+            if component_id in records
+        }
+        seed.update(target_modules)
+
+        # An explicit re-export is represented by the incoming static edge;
+        # include the barrel and its binding records as root evidence too.
+        incoming_reexports = {
+            record_id: record
+            for record_id, record in records.items()
+            if record["kind"] == "static_import"
+            and record.get("reexport") is True
+            and record.get("target", {}).get("kind") == "internal"
+            and record["target"].get("module_id") in (modules | target_modules)
+        }
+        seed.update(incoming_reexports)
+        barrel_modules = {record["source_id"] for record in incoming_reexports.values()}
+        seed.update(barrel_modules)
+        seed.update(
+            record_id
+            for record_id, record in records.items()
+            if record["kind"] in {"export_binding", "import_binding"}
+            and record["owner_id"] in barrel_modules
+        )
+
+        # Include consumer bindings that explicitly refer to the affected
+        # module/component, regardless of where the consumer file lives.
+        seed.update(
+            record_id
+            for record_id, record in records.items()
+            if record["kind"] == "import_binding"
+            and (
+                record.get("local_component_id") in target_components
+                or (
+                    record.get("source", {}).get("kind") == "internal"
+                    and record["source"].get("module_id") in (modules | target_modules)
+                )
+            )
+        )
+        seed.update(
+            record["owner_id"]
+            for record in records.values()
+            if record["kind"] == "import_binding"
+            and record["id"] in seed
+            and record["owner_id"] in records
+        )
+        return sorted(seed)
+
+    kind_to_records = {
+        "component_flow": {"component", "jsx_render", "component_wrap"},
+        "module_relation": {"module", "static_import", "literal_dynamic_import"},
+        "boundary_derivation": {
+            "module",
+            "static_import",
+            "literal_dynamic_import",
+            "client_entry",
+            "router_context",
+        },
+    }
+    allowed = kind_to_records.get(root["kind"], set())
+    return sorted(
+        record_id
+        for record_id, record in records.items()
+        if on_path(record) and record["kind"] in allowed
+    )
+
+
 def derive_required_causal_edges(
     proof: dict[str, Any], discovered: dict[str, dict[str, dict[str, Any]]]
 ) -> list[dict[str, str]]:
@@ -1881,18 +2030,9 @@ def derive_required_causal_edges(
         seed_ids = root["record_ids"]
         assert seed_ids == sorted(set(seed_ids))
         assert all(seed_id in records for seed_id in seed_ids)
-        if root["kind"] in {"parse_file", "read_file"}:
-            candidates = []
-            for record in records.values():
-                if root["path_ref"] is None:
-                    continue
-                record_path = _record_project_path(record, records)
-                if record_path is not None and record_path[1] == root["path_ref"]:
-                    candidates.append(record)
-            candidate_ids = {record["id"] for record in candidates}
-            assert set(seed_ids) <= candidate_ids
-        else:
-            candidates = [records[seed_id] for seed_id in seed_ids]
+        required_seed_ids = _derive_required_root_seed_ids(root, records)
+        assert seed_ids == required_seed_ids
+        candidates = [records[seed_id] for seed_id in required_seed_ids]
         for target in sorted(candidates, key=lambda item: item["id"]):
             root_rule = TAINT_ROOT_RULES[root["kind"]]
             assert root_rule in TAINT_EDGE_RULES
@@ -1980,7 +2120,12 @@ def _derived_taint_fixed_point(
     return reachable
 
 
-def validate_model(model: dict[str, Any]) -> None:
+def validate_model(
+    model: dict[str, Any],
+    *,
+    max_entities: int = DEFAULT_MAX_ENTITIES,
+    max_model_records: int = LIMIT_DEFAULTS["max_model_records"],
+) -> None:
     collections = _validate_model_collections(model)
     project_records = collections["projects"]
     file_records = collections["files"]
@@ -2044,7 +2189,7 @@ def validate_model(model: dict[str, Any]) -> None:
     for component in component_records.values():
         assert component["kind"] == "component"
         assert component["module_id"] in module_records
-        _assert_unique(component["recognition_evidence"])
+        _assert_canonical(component["recognition_evidence"])
     _assert_unique(
         [
             (component["module_id"], component["declaration_key"])
@@ -2211,9 +2356,11 @@ def validate_model(model: dict[str, Any]) -> None:
     for collection in COLLECTIONS:
         assert counts[collection] == len(collections[collection])
         assert counts[collection] <= LIMIT_DEFAULTS["max_collection_items"]
+    assert counts["internal_entities"] == len(module_records) + len(component_records)
+    assert counts["internal_entities"] <= max_entities
     assert counts["published"] == sum(len(collections[collection]) for collection in COLLECTIONS)
     assert counts["published"] <= counts["discovered"]
-    assert counts["discovered"] <= LIMIT_DEFAULTS["max_model_records"]
+    assert counts["discovered"] <= max_model_records
     assert counts["excluded"] >= 0
     assert counts["failed"] >= 0
 
@@ -2301,6 +2448,125 @@ def expected_export_resolution_witness(model: dict[str, Any]) -> list[dict[str, 
         )
     witnesses.sort(key=canonical_json_bytes)
     return witnesses
+
+
+def expected_export_observations(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build the independent export-observation fixture projection.
+
+    The adapter will collect this observation stream directly from the
+    TypeScript checker.  The public ExportBinding is a later projection of
+    the stream; keeping the fields separate lets the reference validator
+    reject omitted observations, duplicate syntax identities, and component
+    substitutions.
+    """
+
+    observations: list[dict[str, Any]] = []
+    for member in model["members"]:
+        if member["kind"] != "export_binding":
+            continue
+        observations.append(
+            {
+                "owner_module_id": member["owner_id"],
+                "exported_name": member["exported_name"],
+                "role": member["role"],
+                "reexport": member["reexport"],
+                "syntax_identity": (
+                    f"export-declaration:{member['owner_id']}:{member['exported_name']}"
+                    f":{member['role']}:{'reexport' if member['reexport'] else 'local'}"
+                ),
+                "resolution": member["resolution_kind"],
+                "component_id": member["target_component_id"],
+            }
+        )
+    observations.sort(key=canonical_json_bytes)
+    return observations
+
+
+def _export_binding_projection_from_observations(
+    observations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project observed exports into the public binding identity tuple."""
+
+    projected: list[dict[str, Any]] = []
+    for observation in observations:
+        resolution = observation["resolution"]
+        if resolution == "unknown":
+            # Unknown observations are evidence of an unsupported export but
+            # cannot become a falsely resolved public binding.
+            continue
+        target_component_id = observation["component_id"] if resolution == "component" else None
+        identity = {
+            "owner_id": observation["owner_module_id"],
+            "exported_name": observation["exported_name"],
+            "role": observation["role"],
+        }
+        projected.append(
+            {
+                "kind": "export_binding",
+                "id": (
+                    "next:member:"
+                    f"{digest({'kind': 'export_binding', 'version': 1, 'identity': identity})}"
+                ),
+                "owner_id": observation["owner_module_id"],
+                "exported_name": observation["exported_name"],
+                "role": observation["role"],
+                "target_component_id": target_component_id,
+                "resolution_kind": resolution,
+                "reexport": observation["reexport"],
+            }
+        )
+    projected.sort(key=canonical_json_bytes)
+    return projected
+
+
+def validate_export_observations(observations: list[dict[str, Any]], model: dict[str, Any]) -> None:
+    """Validate an independent complete export-observation collection."""
+
+    modules = {item["id"]: item for item in model["modules"]}
+    components = {item["id"]: item for item in model["components"]}
+    assert observations == sorted(observations, key=canonical_json_bytes)
+    observation_keys: list[tuple[str, str, str, str]] = []
+    for observation in observations:
+        assert observation["owner_module_id"] in modules
+        assert (
+            unicodedata.normalize("NFC", observation["exported_name"])
+            == observation["exported_name"]
+        )
+        assert observation["role"] in {"value", "type"}
+        assert isinstance(observation["reexport"], bool)
+        assert observation["syntax_identity"]
+        assert (
+            unicodedata.normalize("NFC", observation["syntax_identity"])
+            == observation["syntax_identity"]
+        )
+        assert not any(
+            ord(char) < 0x20 or ord(char) == 0x7F for char in observation["syntax_identity"]
+        )
+        resolution = observation["resolution"]
+        assert resolution in {"component", "value", "type", "unknown"}
+        if resolution == "component":
+            assert observation["role"] == "value"
+            assert observation["component_id"] in components
+        else:
+            assert observation["component_id"] is None
+        if resolution == "value":
+            assert observation["role"] == "value"
+        if resolution == "type":
+            assert observation["role"] == "type"
+        observation_keys.append(
+            (
+                observation["owner_module_id"],
+                observation["exported_name"],
+                observation["role"],
+                observation["syntax_identity"],
+            )
+        )
+    assert len(observation_keys) == len(set(observation_keys))
+    expected_public = sorted(
+        [member for member in model["members"] if member["kind"] == "export_binding"],
+        key=canonical_json_bytes,
+    )
+    assert _export_binding_projection_from_observations(observations) == expected_public
 
 
 def validate_proof(
@@ -2436,10 +2702,19 @@ def validate_proof(
 
     assert proof["causal_edges"] == derive_required_causal_edges(proof, discovered)
 
+    validate_export_observations(proof["export_observations"], model)
+    assert model["coverage"]["non_component_value_export_count"] == sum(
+        observation["resolution"] == "value" for observation in proof["export_observations"]
+    )
+    assert model["coverage"]["type_only_export_count"] == sum(
+        observation["resolution"] == "type" for observation in proof["export_observations"]
+    )
     assert proof["export_resolution_witness"] == expected_export_resolution_witness(model)
 
     target_keys = [item["target_key"] for item in proof["target_resolutions"]]
-    assert target_keys == sorted(target_keys)
+    assert proof["target_resolutions"] == sorted(
+        proof["target_resolutions"], key=canonical_json_bytes
+    )
     assert len(target_keys) == len(set(target_keys))
     for resolution in proof["target_resolutions"]:
         if resolution["status"] == "resolved":
@@ -2462,11 +2737,27 @@ def validate_proof(
     if request_targets is not None:
         canonical_targets = [canonical_target_key(target) for target in request_targets]
         assert canonical_targets == request_targets
-        assert proof["target_resolutions"] == resolve_target_resolutions(request_targets, model)
+        discovered_model = {
+            collection: [item["record"] for _record_id, item in sorted(records.items())]
+            for collection, records in discovered.items()
+        }
+        unavailable_ids = tainted_ids | {
+            record_id
+            for collection in COLLECTIONS
+            for record_id in (excluded[collection] | failed[collection])
+        }
+        assert proof["target_resolutions"] == resolve_target_resolutions(
+            request_targets,
+            discovered_model,
+            unavailable_record_ids=unavailable_ids,
+        )
     coverage_targets = {
         item["target_key"]: (item["status"], tuple(item["record_ids"]))
         for item in model["coverage"]["target_completeness"]
     }
+    assert model["coverage"]["target_completeness"] == sorted(
+        model["coverage"]["target_completeness"], key=canonical_json_bytes
+    )
     assert len(coverage_targets) == len(model["coverage"]["target_completeness"])
     proof_targets = {
         item["target_key"]: (
@@ -2514,9 +2805,9 @@ def validate_proof(
             if collection == "files"
         }
     )
-    assert (
-        sorted((item["path"], item["reason"]) for item in coverage["failed_files"])
-        == expected_failed_files
+    assert coverage["failed_files"] == sorted(coverage["failed_files"], key=canonical_json_bytes)
+    assert [(item["path"], item["reason"]) for item in coverage["failed_files"]] == (
+        expected_failed_files
     )
 
     opaque_counts: dict[str, int] = {}
@@ -2614,26 +2905,18 @@ def validate_trusted_environment(
     )
     assert symbol_keys == expected_symbol_keys
     assert len(symbol_keys) == len(set(symbol_keys))
+    expected_inventory = {
+        _trusted_inventory_symbol_key(row): row for row in TRUSTED_PROFILE_EXPECTED_INVENTORY
+    }
+    assert len(expected_inventory) == len(TRUSTED_PROFILE_EXPECTED_INVENTORY)
     for symbol in symbols:
         assert symbol["declaration_sha256"] in file_digests
-        if symbol["source_kind"] == "module":
-            assert symbol["source_name"] in TRUSTED_MODULES
-            declaration_path = {
-                "react/jsx-runtime": TRUSTED_PROFILE_FILES[0],
-                "next/dynamic": TRUSTED_PROFILE_FILES[2],
-                "react": TRUSTED_PROFILE_FILES[3],
-                "react/jsx-dev-runtime": TRUSTED_PROFILE_FILES[0],
-            }[symbol["source_name"]]
-        else:
-            assert symbol["source_name"] in TRUSTED_GLOBALS
-            declaration_path = TRUSTED_PROFILE_FILES[1]
+        key = _trusted_inventory_symbol_key(symbol)
+        expected = expected_inventory[key]
+        assert symbol["symbol_kind"] == expected["symbol_kind"]
+        assert symbol["signature_digest"] == expected["signature_digest"]
+        declaration_path = _TRUSTED_PROFILE_VIRTUAL_BY_BASENAME[expected["declaration_file"]]
         assert symbol["declaration_sha256"] == TRUSTED_PROFILE_FILE_SHA256[declaration_path]
-        assert symbol["signature_digest"] == _signature_digest(
-            symbol["source_kind"],
-            symbol["source_name"],
-            symbol["export_path"][-1],
-            symbol["symbol_kind"],
-        )
     assert environment["anti_shadowing_witness"] == list(TRUSTED_PROFILE_SHADOWING_WITNESS)
     assert environment["sha256"] == digest(_without(environment, "sha256"))
 

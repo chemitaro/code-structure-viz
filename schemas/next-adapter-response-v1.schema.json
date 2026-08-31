@@ -66,12 +66,13 @@
     "proof": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["discovered_records", "failure_roots", "causal_edges", "target_resolutions", "export_resolution_witness", "excluded", "failed"],
+      "required": ["discovered_records", "failure_roots", "causal_edges", "target_resolutions", "export_observations", "export_resolution_witness", "excluded", "failed"],
       "properties": {
         "discovered_records": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/proof_record"}},
         "failure_roots": {"type": "array", "items": {"$ref": "#/$defs/failure_root"}},
         "causal_edges": {"type": "array", "items": {"$ref": "#/$defs/causal_edge"}},
         "target_resolutions": {"type": "array", "items": {"$ref": "#/$defs/target_resolution"}},
+        "export_observations": {"type": "array", "items": {"$ref": "#/$defs/export_observation"}},
         "export_resolution_witness": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/export_resolution_witness"}},
         "excluded": {"type": "array", "items": {"$ref": "#/$defs/excluded_record"}},
         "failed": {"type": "array", "items": {"$ref": "#/$defs/failed_record"}}
@@ -114,6 +115,26 @@
         "resolution": {"enum": ["component", "value", "type"]},
         "component_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]}
       }
+    },
+    "export_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_module_id", "exported_name", "role", "reexport", "syntax_identity", "resolution", "component_id"],
+      "properties": {
+        "owner_module_id": {"type": "string", "pattern": "^next:module:[0-9a-f]{64}$"},
+        "exported_name": {"anyOf": [{"type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"}, {"const": "default"}]},
+        "role": {"enum": ["value", "type"]},
+        "reexport": {"type": "boolean"},
+        "syntax_identity": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
+        "resolution": {"enum": ["component", "value", "type", "unknown"]},
+        "component_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]}
+      },
+      "allOf": [
+        {"if": {"properties": {"resolution": {"const": "component"}}}, "then": {"properties": {"role": {"const": "value"}, "component_id": {"type": "string"}}}},
+        {"if": {"properties": {"resolution": {"enum": ["value", "type", "unknown"]}}}, "then": {"properties": {"component_id": {"type": "null"}}}},
+        {"if": {"properties": {"resolution": {"const": "value"}}}, "then": {"properties": {"role": {"const": "value"}}}},
+        {"if": {"properties": {"resolution": {"const": "type"}}}, "then": {"properties": {"role": {"const": "type"}}}}
+      ]
     },
     "excluded_record": {
       "type": "object",

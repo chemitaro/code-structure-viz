@@ -69,9 +69,9 @@ CLI request -> safe source acquisition -> domain semantic analysis
 - inline/interface/alias/import/destructured/FC/class/forwardRef/generic/union/intersection propsとcomplexity opaqueをfixture化する。
 - static/literal dynamic/render conditional/collection/createElement、ambiguous/nonliteral unknownをfixture化する。
 - client entry/dependency/server candidate/dual role/boundary effectをfixture化する。
-- targetless/path/component target/depth/missing/ambiguous/out-of-scopeをfixture化する。
+- targetless/path(file+directory complete descendants)/depth/missing/project-scope ambiguity/out-of-scope/tainted-selectionをfixture化する。公開target文法は`path:<repository-relative-path>`だけとし、内部component/module/file keyを受理しない。
 - not_applicable、complete empty、complete+diagnostic、partial_safe、payload_unavailable、usage/fatal/interrupt、entity/transport limits、stdout selectorをtable-drivenに固定する。
-- TrustedTypeEnvironment、private request/response、PropsTypeIR、PlantUML、diagnostic、wheel/sdist/offline、domain config/source projectionのpositive/negative fixturesを固定する。
+- TrustedTypeEnvironment、private request/response、独立export observation、PropsTypeIR、PlantUML、diagnostic、wheel/sdist/offline、domain config/source projectionのpositive/negative fixturesを固定する。TypeScript 5.9.2 Programのparse/semantic diagnostics 0とAST/TypeChecker certified inventoryをNode contract gateで検証する。
 - production adapterを追加せず、`tests/contracts/next_reference_validation.py` のdata-only validator、`tests/contracts/test_next_contracts.py` のmutation/golden vectors、`tests/fixtures/next_contract_vectors.json` のPLAN-008 indexで、JSON Schemaでは表現できないownership、taint closure、digest、order、status、renderer、compatibility invariantを実行可能にする。
 - Designで固定したv1 normative source/process/type/flow limitをboundary fixtureで検証し、変更が必要ならproduction実装前にcanonical DesignとStrict gateを更新する。
 

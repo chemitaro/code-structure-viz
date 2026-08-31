@@ -1,0 +1,11 @@
+{
+  "name": "code-structure-viz-next-contracts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node next_trusted_profile_gate.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2"
+  }
+}

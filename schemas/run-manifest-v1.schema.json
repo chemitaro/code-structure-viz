@@ -907,7 +907,7 @@
       "additionalProperties": false,
       "required": ["next", "traversal", "limits"],
       "properties": {
-        "next": {"type": "object", "additionalProperties": false, "required": ["projects", "targets", "formats", "trusted_environment_digest"], "properties": {"projects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "targets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}}, "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
+        "next": {"type": "object", "additionalProperties": false, "required": ["projects", "targets", "formats", "trusted_environment_digest"], "properties": {"projects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "targets": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"}}, "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}}, "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
         "traversal": {"$ref": "#/$defs/resolved_traversal"},
         "limits": {"$ref": "urn:code-structure-viz:schema:next-limits-v1"},
         "comparison": {"$ref": "#/$defs/resolved_comparison"}

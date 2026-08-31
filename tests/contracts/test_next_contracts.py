@@ -31,16 +31,22 @@ from tests.contracts.next_reference_validation import (
     assert_encoded_stdin_boundary,
     assert_limit_boundary,
     canonical_json_bytes,
+    canonical_target_key,
     derive_required_causal_edges,
     digest,
     encoded_request_bytes,
+    entity_budget_allowed,
+    expected_export_observations,
     expected_export_resolution_witness,
+    internal_entity_count,
+    model_record_budget_allowed,
     project_config_digest,
     recompute_compatibility_id,
     recompute_record_id,
     recompute_request_id,
     recompute_run_fingerprint,
     render_plantuml,
+    resolve_target_resolutions,
     validate_compatibility_descriptor,
     validate_domain_manifest,
     validate_encoded_stdin_size,
@@ -442,7 +448,7 @@ def _model() -> dict[str, Any]:
         "id": _id("component", "5"),
         "module_id": module_one["id"],
         "declaration_key": "Button",
-        "recognition_evidence": ["route_default", "jsx_output"],
+        "recognition_evidence": ["jsx_output", "route_default"],
         "props_state": "known",
     }
     component_two = {
@@ -547,6 +553,7 @@ def _model() -> dict[str, Any]:
     for collection in COLLECTIONS:
         counts[collection] = len(model[collection])
     counts["published"] = sum(len(model[collection]) for collection in COLLECTIONS)
+    counts["internal_entities"] = len(model["modules"]) + len(model["components"])
     counts["discovered"] = counts["published"]
     for collection in COLLECTIONS:
         model[collection].sort(key=lambda record: record["id"])
@@ -565,6 +572,7 @@ def _empty_model() -> dict[str, Any]:
         counts[collection] = len(model[collection])
     counts["published"] = 1
     counts["discovered"] = 1
+    counts["internal_entities"] = 0
     return model
 
 
@@ -670,6 +678,7 @@ def _complete_proof(model: dict[str, Any]) -> dict[str, Any]:
         "failure_roots": [],
         "causal_edges": [],
         "target_resolutions": [],
+        "export_observations": expected_export_observations(model),
         "export_resolution_witness": expected_export_resolution_witness(model),
         "excluded": [],
         "failed": [],
@@ -904,6 +913,8 @@ def _domain(
         trusted_environment_digest=value["trusted_environment"]["sha256"],
     )
     value["request"]["run_fingerprint"] = value["run_fingerprint"]
+    if actual is not None:
+        value["coverage"]["counts"]["internal_entities"] = actual
     return value
 
 
@@ -1136,6 +1147,22 @@ def test_public_next_semantic_variants_are_closed() -> None:
     ]
     with pytest.raises(ValidationError):
         validator.validate(wrong_entity_shape)
+
+
+def test_head_commit_accepts_only_full_sha1_or_sha256_lengths() -> None:
+    validator = _validator("semantic-v1.schema.json")
+    for length in (40, 64):
+        value = _semantic(_model())
+        value["source"]["head_commit"] = "a" * length
+        validator.validate(value)
+        validate_semantic_snapshot(value)
+    for length in (39, 41, 63, 65):
+        value = _semantic(_model())
+        value["source"]["head_commit"] = "a" * length
+        with pytest.raises(ValidationError):
+            validator.validate(value)
+        with pytest.raises(AssertionError):
+            validate_semantic_snapshot(value)
 
 
 def test_props_ir_matches_design_variants_and_rejects_old_shapes() -> None:
@@ -1453,6 +1480,11 @@ def test_reference_validator_closes_ownership_order_and_fact_invariants() -> Non
     unknown_diagnostic["diagnostics"][0]["code"] = "CSV-NEXT-UNKNOWN-999"
     with pytest.raises(AssertionError):
         validate_model(unknown_diagnostic)
+    split_diagnostic = copy.deepcopy(diagnostic_model)
+    split_diagnostic["diagnostics"].append(copy.deepcopy(split_diagnostic["diagnostics"][0]))
+    split_diagnostic["diagnostics"].sort(key=canonical_json_bytes)
+    with pytest.raises(AssertionError):
+        validate_model(split_diagnostic)
     wrong_reference = copy.deepcopy(diagnostic_model)
     wrong_reference["diagnostics"][0]["path_ref"] = "src/Button.tsx"
     with pytest.raises(AssertionError):
@@ -1543,7 +1575,6 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     validate_proof(response["proof"], response["model"])
 
     partial_model = _model()
-    partial_model["coverage"]["counts"]["discovered"] += 2
     partial_model["coverage"]["counts"]["excluded"] = 1
     partial_model["coverage"]["counts"]["failed"] = 1
     partial_model["coverage"]["affected_ids"] = sorted([_id("file", "e"), _id("module", "f")])
@@ -1597,7 +1628,9 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
             "collection": "files",
             "kind": "parse_file",
             "path_ref": "src/Unused.tsx",
-            "record_ids": [extra_file["id"]],
+            "record_ids": sorted(
+                [extra_file["id"], extra_module["id"], extra_import["id"], extra_import_alias["id"]]
+            ),
         }
     ]
     _materialize_single_root_taints(partial_proof)
@@ -1606,24 +1639,24 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     }
     partial_model["coverage"]["affected_ids"] = sorted(tainted_ids)
     partial_model["coverage"]["taint_frontier"] = [_id("module", "3")]
-    partial_model["coverage"]["counts"]["discovered"] += 2
+    partial_model["coverage"]["counts"]["discovered"] += 4
     partial_model["coverage"]["counts"]["excluded"] = 3
     partial_model["coverage"]["counts"]["failed"] = 1
     target_request = _request()
-    target_request["targets"] = ["component:src/Button.tsx#Button"]
+    target_request["targets"] = ["path:src/Button.tsx"]
     target_request["request_id"] = recompute_request_id(target_request)
     partial_proof["target_resolutions"] = [
         {
-            "target_key": "component:src/Button.tsx#Button",
+            "target_key": "path:src/Button.tsx",
             "status": "resolved",
-            "record_ids": [_id("component", "5")],
+            "record_ids": sorted([_id("file", "1"), _id("module", "3"), _id("component", "5")]),
         }
     ]
     partial_model["coverage"]["target_completeness"] = [
         {
-            "target_key": "component:src/Button.tsx#Button",
+            "target_key": "path:src/Button.tsx",
             "status": "complete",
-            "record_ids": [_id("component", "5")],
+            "record_ids": sorted([_id("file", "1"), _id("module", "3"), _id("component", "5")]),
         }
     ]
     partial_response = _response(partial_model, partial_proof, target_request)
@@ -1632,7 +1665,11 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     validate_proof(
         partial_response["proof"],
         partial_response["model"],
-        {"component:src/Button.tsx#Button": (_id("component", "5"),)},
+        {
+            "path:src/Button.tsx": tuple(
+                sorted([_id("file", "1"), _id("module", "3"), _id("component", "5")])
+            )
+        },
         request_targets=target_request["targets"],
     )
 
@@ -1652,7 +1689,11 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         validate_proof(
             broken_target,
             partial_response["model"],
-            {"component:src/Button.tsx#Button": (_id("component", "5"),)},
+            {
+                "path:src/Button.tsx": tuple(
+                    sorted([_id("file", "1"), _id("module", "3"), _id("component", "5")])
+                )
+            },
         )
 
     missing_target = copy.deepcopy(partial_response)
@@ -1661,14 +1702,14 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         validate_response_envelope(missing_target, target_request)
     extra_target = copy.deepcopy(partial_response)
     extra_target["proof"]["target_resolutions"].append(
-        {"target_key": "module:src/Missing.tsx", "status": "failed", "record_ids": []}
+        {"target_key": "path:src/Missing.tsx", "status": "failed", "record_ids": []}
     )
     extra_target["proof"]["target_resolutions"].sort(key=canonical_json_bytes)
     with pytest.raises(AssertionError):
         validate_response_envelope(extra_target, target_request)
     failed_as_resolved = copy.deepcopy(partial_response)
     failed_as_resolved["proof"]["target_resolutions"][0] = {
-        "target_key": "component:src/Button.tsx#Button",
+        "target_key": "path:src/Button.tsx",
         "status": "failed",
         "record_ids": [],
     }
@@ -1847,6 +1888,109 @@ def test_export_resolution_witness_covers_components_values_and_types() -> None:
     with pytest.raises(AssertionError):
         validate_proof(substituted_witness, model)
 
+    missing_observation = copy.deepcopy(proof)
+    missing_observation["export_observations"].pop()
+    with pytest.raises(AssertionError):
+        validate_proof(missing_observation, model)
+    duplicate_observation = copy.deepcopy(proof)
+    duplicate_observation["export_observations"].append(
+        copy.deepcopy(duplicate_observation["export_observations"][0])
+    )
+    duplicate_observation["export_observations"].sort(key=canonical_json_bytes)
+    with pytest.raises(AssertionError):
+        validate_proof(duplicate_observation, model)
+    substituted_observation = copy.deepcopy(proof)
+    component_observation = next(
+        item
+        for item in substituted_observation["export_observations"]
+        if item["resolution"] == "component"
+    )
+    component_observation["component_id"] = _id("component", "6")
+    with pytest.raises(AssertionError):
+        validate_proof(substituted_observation, model)
+
+
+def test_public_targets_are_path_only_and_resolve_frozen_file_or_directory_sets() -> None:
+    model = _model()
+    all_records = {collection: list(model[collection]) for collection in COLLECTIONS}
+    file_target = resolve_target_resolutions(["path:src/Button.tsx"], all_records)
+    assert file_target == [
+        {
+            "target_key": "path:src/Button.tsx",
+            "status": "resolved",
+            "record_ids": sorted([_id("file", "1"), _id("module", "3"), _id("component", "5")]),
+        }
+    ]
+    directory_target = resolve_target_resolutions(["path:src"], all_records)
+    assert directory_target == [
+        {
+            "target_key": "path:src",
+            "status": "resolved",
+            "record_ids": sorted(
+                [
+                    _id("file", "1"),
+                    _id("file", "2"),
+                    _id("module", "3"),
+                    _id("module", "4"),
+                    _id("component", "5"),
+                    _id("component", "6"),
+                ]
+            ),
+        }
+    ]
+    assert resolve_target_resolutions(["path:src/Missing.tsx"], all_records) == [
+        {"target_key": "path:src/Missing.tsx", "status": "failed", "record_ids": []}
+    ]
+    unavailable = resolve_target_resolutions(
+        ["path:src/Button.tsx"],
+        all_records,
+        unavailable_record_ids={_id("component", "5")},
+    )
+    assert unavailable == [
+        {"target_key": "path:src/Button.tsx", "status": "failed", "record_ids": []}
+    ]
+    for target in (
+        "component:" + _id("component", "5"),
+        "module:" + _id("module", "3"),
+        "file:" + _id("file", "1"),
+        "path:../escape.tsx",
+        "path:/absolute.tsx",
+        "path:src\\Button.tsx",
+        "path:src/Button.tsx#fragment",
+    ):
+        with pytest.raises(AssertionError):
+            canonical_target_key(target)
+        with pytest.raises(ValidationError):
+            _validator("next-config-v1.schema.json").validate(_config_projection(targets=[target]))
+
+    multi_target_model = _model()
+    multi_target_proof = _complete_proof(multi_target_model)
+    requested_targets = ["path:src", "path:src/Button.tsx"]
+    resolutions = resolve_target_resolutions(requested_targets, multi_target_model)
+    multi_target_proof["target_resolutions"] = resolutions
+    multi_target_model["coverage"]["target_completeness"] = [
+        {
+            "target_key": item["target_key"],
+            "status": "complete",
+            "record_ids": item["record_ids"],
+        }
+        for item in resolutions
+    ]
+    validate_proof(multi_target_proof, multi_target_model, request_targets=requested_targets)
+    permuted_targets = copy.deepcopy(multi_target_proof)
+    permuted_targets["target_resolutions"].reverse()
+    with pytest.raises(AssertionError):
+        validate_proof(permuted_targets, multi_target_model, request_targets=requested_targets)
+    permuted_coverage = copy.deepcopy(multi_target_proof)
+    permuted_coverage_model = copy.deepcopy(multi_target_model)
+    permuted_coverage_model["coverage"]["target_completeness"].reverse()
+    with pytest.raises(AssertionError):
+        validate_proof(
+            permuted_coverage,
+            permuted_coverage_model,
+            request_targets=requested_targets,
+        )
+
 
 def test_taint_edges_are_derived_for_boundary_and_shared_frontier() -> None:
     model = _model()
@@ -1907,6 +2051,109 @@ def test_taint_edges_are_derived_for_boundary_and_shared_frontier() -> None:
     assert shared_frontier == {_id("module", "3")}
 
 
+def test_export_root_seeds_include_target_barrel_and_consumer_records() -> None:
+    model = _model()
+    barrel_module: dict[str, Any] = {
+        "kind": "module",
+        "id": "",
+        "project_id": _id("project", "0"),
+        "path": "src/index.ts",
+        "router_context": "none",
+        "client_entry": False,
+        "derived_roles": [],
+    }
+    barrel_module["id"] = recompute_record_id(barrel_module)
+    consumer_module: dict[str, Any] = {
+        "kind": "module",
+        "id": "",
+        "project_id": _id("project", "0"),
+        "path": "src/consumer.tsx",
+        "router_context": "none",
+        "client_entry": False,
+        "derived_roles": [],
+    }
+    consumer_module["id"] = recompute_record_id(consumer_module)
+    barrel_export: dict[str, Any] = {
+        "kind": "export_binding",
+        "id": "",
+        "owner_id": barrel_module["id"],
+        "exported_name": "Button",
+        "role": "value",
+        "target_component_id": _id("component", "5"),
+        "resolution_kind": "component",
+        "reexport": True,
+    }
+    barrel_export["id"] = recompute_record_id(barrel_export)
+    incoming_reexport: dict[str, Any] = {
+        "kind": "static_import",
+        "id": "",
+        "source_id": barrel_module["id"],
+        "target": {"kind": "internal", "module_id": _id("module", "3")},
+        "role": "value",
+        "reexport": True,
+        "boundary_effect": "none",
+    }
+    incoming_reexport["id"] = recompute_record_id(incoming_reexport)
+    consumer_binding: dict[str, Any] = {
+        "kind": "import_binding",
+        "id": "",
+        "owner_id": consumer_module["id"],
+        "local_component_id": _id("component", "5"),
+        "imported_name": "Button",
+        "role": "value",
+        "source": {"kind": "internal", "module_id": _id("module", "3")},
+    }
+    consumer_binding["id"] = recompute_record_id(consumer_binding)
+    proof = _complete_proof(model)
+    proof["discovered_records"].extend(
+        [
+            {"collection": "modules", "record": barrel_module, "taints": []},
+            {"collection": "modules", "record": consumer_module, "taints": []},
+            {"collection": "members", "record": barrel_export, "taints": []},
+            {"collection": "members", "record": consumer_binding, "taints": []},
+            {"collection": "relations", "record": incoming_reexport, "taints": []},
+        ]
+    )
+    records = _discovered_index(proof)
+    root = {
+        "id": "next:failure:" + "c" * 64,
+        "collection": "members",
+        "kind": "export_binding",
+        "path_ref": "src/Button.tsx",
+        "record_ids": [],
+    }
+    expected_seed_ids = sorted(
+        {
+            _id("module", "3"),
+            _id("member", "7"),
+            _id("component", "5"),
+            barrel_module["id"],
+            consumer_module["id"],
+            barrel_export["id"],
+            incoming_reexport["id"],
+            consumer_binding["id"],
+        }
+    )
+    root["record_ids"] = expected_seed_ids
+    proof["failure_roots"] = [root]
+    edges = derive_required_causal_edges(proof, records)
+    assert edges
+    for omitted in (
+        _id("component", "5"),
+        barrel_module["id"],
+        consumer_binding["id"],
+    ):
+        under_tainted = copy.deepcopy(proof)
+        under_tainted["failure_roots"][0]["record_ids"].remove(omitted)
+        with pytest.raises(AssertionError):
+            derive_required_causal_edges(under_tainted, records)
+    excess = copy.deepcopy(proof)
+    excess["failure_roots"][0]["record_ids"].append(_id("module", "4"))
+    excess["failure_roots"][0]["record_ids"].sort()
+    with pytest.raises(AssertionError):
+        derive_required_causal_edges(excess, records)
+
+
 def test_limits_are_one_resolved_record_across_all_projections() -> None:
     limits = _next_limits()
     validate_limits(limits)
@@ -1933,6 +2180,23 @@ def test_every_normative_limit_has_an_inclusive_arithmetic_boundary() -> None:
         assert contract["inclusive"] is True
         assert contract["outcome"] in {"partial_safe", "payload_unavailable"}
         assert_limit_boundary(limit, at_limit=True, over_limit=False)
+
+
+def test_entity_and_record_budgets_use_distinct_non_allocating_counters() -> None:
+    internal_model = {
+        "modules": [None] * 250,
+        "components": [None] * 250,
+    }
+    assert internal_entity_count(internal_model) == 500
+    assert entity_budget_allowed(500, 500)
+    assert not entity_budget_allowed(501, 500)
+    assert entity_budget_allowed(501, 600)
+
+    # 99,500 non-Module/Component records can coexist with 500 published
+    # internal entities at the all-record boundary.
+    assert model_record_budget_allowed(500 + 99_500, 100_000)
+    assert not model_record_budget_allowed(500 + 99_501, 100_000)
+    assert not model_record_budget_allowed(100_001, 100_000)
 
 
 def test_role_precedence_and_exact_encoded_request_boundaries_cover_every_subset() -> None:
@@ -2346,7 +2610,7 @@ def test_runtime_unavailable_is_a_manifest_only_payload_unavailable_vector() -> 
 def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests() -> None:
     environment = _trusted_environment()
     assert environment["sha256"] == (
-        "fbfe3b060b508dcbaef636330f63a1039646ffbe9c301751c8bd0b415406f85e"
+        "a437f12d35d8ad909e63d6f41b451d25c35e46d3726bd108d63acaede14f02c5"
     )
     validate_trusted_environment(environment)
     validate_trusted_environment(environment, ["src/Button.tsx"])
@@ -2637,8 +2901,15 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "plantuml-complete-non-empty",
         "plantuml-partial-safe",
         "plantuml-external-dynamic",
+        "plantuml-external-jsx",
         "nfc-canonical-digest",
         "compatibility-known-answer",
+        "export-resolution-witness",
+        "limits-inclusive-boundaries",
+        "runtime-inventory-attestation",
+        "stdout-all-selectors",
+        "head-commit-known-lengths",
+        "taint-boundary-closure",
     } <= set(fixture["positive"])
     assert {
         "cross-domain",
@@ -2660,4 +2931,15 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "compatibility-mismatch",
         "plantuml-injection",
         "plantuml-facet-mutation",
+        "taint-omitted-edge",
+        "taint-shared-frontier-duplicate",
+        "taint-boundary-underflow",
+        "target-missing-resolution",
+        "target-extra-resolution",
+        "target-substituted-id",
+        "target-failed-as-resolved",
+        "export-witness-count-mutation",
+        "runtime-member-byte-mutation",
+        "runtime-attestation-mutation",
+        "head-commit-invalid-length",
     } <= set(fixture["negative"])

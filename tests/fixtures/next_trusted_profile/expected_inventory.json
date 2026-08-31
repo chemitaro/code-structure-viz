@@ -1,0 +1,128 @@
+[
+  {
+    "source_kind": "module",
+    "source_name": "react/jsx-runtime",
+    "export_path": ["Fragment"],
+    "symbol_kind": "variable",
+    "type_string": "typeof Fragment",
+    "declaration_file": "jsx-runtime.d.ts",
+    "signature_digest": "dcb27ea3d78837b2225d8da2c1421d643f3c8c5e2e331344a3eb36011e21f8c9"
+  },
+  {
+    "source_kind": "module",
+    "source_name": "react/jsx-runtime",
+    "export_path": ["jsx"],
+    "symbol_kind": "function",
+    "type_string": "(type: unknown, props: unknown) => unknown",
+    "declaration_file": "jsx-runtime.d.ts",
+    "signature_digest": "a449b678c50d76ff600c731ef6f8697cb96ee0ce4a8de7a3e1cad7caca15bdb1"
+  },
+  {
+    "source_kind": "module",
+    "source_name": "react/jsx-runtime",
+    "export_path": ["jsxs"],
+    "symbol_kind": "function",
+    "type_string": "(type: unknown, props: unknown) => unknown",
+    "declaration_file": "jsx-runtime.d.ts",
+    "signature_digest": "fb58326dc9e6d1d99d0aeb63c2076921c47dc1c2df3f50fb027bf3753033e0dd"
+  },
+  {
+    "source_kind": "global",
+    "source_name": "JSX",
+    "export_path": ["Element"],
+    "symbol_kind": "interface",
+    "type_string": "any",
+    "declaration_file": "lib.d.ts",
+    "signature_digest": "03ea2064bad083bfe241623533099136e79e0f10a0aaa4565e832cadf37df6ae"
+  },
+  {
+    "source_kind": "global",
+    "source_name": "ReadonlyArray",
+    "export_path": ["flatMap"],
+    "symbol_kind": "method",
+    "type_string": "<U>(callback: (value: T) => U | U[]) => U[]",
+    "declaration_file": "lib.d.ts",
+    "signature_digest": "8dce2a540376e4c013c130151b9b86f02669f799ca4448a12ffbdc6d9c9707cf"
+  },
+  {
+    "source_kind": "global",
+    "source_name": "Array",
+    "export_path": ["flatMap"],
+    "symbol_kind": "method",
+    "type_string": "<U>(callback: (value: T) => U | U[]) => U[]",
+    "declaration_file": "lib.d.ts",
+    "signature_digest": "ce26c01a0913f0e1789d723203f97bc685782061f5e1887d912d0bf8ed030243"
+  },
+  {
+    "source_kind": "global",
+    "source_name": "Array",
+    "export_path": ["map"],
+    "symbol_kind": "method",
+    "type_string": "<U>(callback: (value: T) => U) => U[]",
+    "declaration_file": "lib.d.ts",
+    "signature_digest": "2a4fc05abc17216b5f78b70a9862f1ba4e9e66e572d95ee68579f801f16abe3e"
+  },
+  {
+    "source_kind": "global",
+    "source_name": "ReadonlyArray",
+    "export_path": ["map"],
+    "symbol_kind": "method",
+    "type_string": "<U>(callback: (value: T) => U) => U[]",
+    "declaration_file": "lib.d.ts",
+    "signature_digest": "7807241ac0924f4ec44a0b5d085bc0072458e7f40f0fe76d7c17153bf59b9cfd"
+  },
+  {
+    "source_kind": "module",
+    "source_name": "next/dynamic",
+    "export_path": ["default"],
+    "symbol_kind": "function",
+    "type_string": "(loader: () => unknown) => unknown",
+    "declaration_file": "next-dynamic.d.ts",
+    "signature_digest": "136ffae8c0d221bf9c8f24344489768c4190761d2445fb1db83637db1c7921d2"
+  },
+  {
+    "source_kind": "module",
+    "source_name": "react",
+    "export_path": ["Component"],
+    "symbol_kind": "class",
+    "type_string": "typeof Component",
+    "declaration_file": "react.d.ts",
+    "signature_digest": "1a1abfd545db8d313c360c5f4036071adc2fa259fda8cd710746fa9ed165f936"
+  },
+  {
+    "source_kind": "module",
+    "source_name": "react",
+    "export_path": ["createElement"],
+    "symbol_kind": "function",
+    "type_string": "(type: unknown, props: unknown) => unknown",
+    "declaration_file": "react.d.ts",
+    "signature_digest": "c7fd9c7ed6977b44cef35675ec68bf794577f587d55ce2ebe6e64249addc1000"
+  },
+  {
+    "source_kind": "module",
+    "source_name": "react",
+    "export_path": ["forwardRef"],
+    "symbol_kind": "function",
+    "type_string": "(render: unknown) => unknown",
+    "declaration_file": "react.d.ts",
+    "signature_digest": "a47df2a57427b421e9627713d631486d76fda38f9364270293d467f6cbae2f3a"
+  },
+  {
+    "source_kind": "module",
+    "source_name": "react",
+    "export_path": ["lazy"],
+    "symbol_kind": "function",
+    "type_string": "(loader: () => unknown) => unknown",
+    "declaration_file": "react.d.ts",
+    "signature_digest": "c2b6970e4b9be52581842a2426b8b311fe3ff64d9b9c617262e8677be33a6376"
+  },
+  {
+    "source_kind": "module",
+    "source_name": "react",
+    "export_path": ["memo"],
+    "symbol_kind": "function",
+    "type_string": "(component: unknown) => unknown",
+    "declaration_file": "react.d.ts",
+    "signature_digest": "90ff99f96e7779f65b9c9612a949a14f3a7de6db2071336096c2ab76a771c0d4"
+  }
+]

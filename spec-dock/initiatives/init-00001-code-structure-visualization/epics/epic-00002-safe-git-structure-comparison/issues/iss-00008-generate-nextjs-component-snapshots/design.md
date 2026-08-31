@@ -70,7 +70,13 @@ code-structure-viz diff --repo PATH --output-dir PATH [--domain DOMAIN] [--from 
 - `--format` 未指定は semantic JSON と PlantUML。`--stdout` は output directory requirement を解除しない。
 - analysis behavior を environment variable で変更しない。環境は executable discovery と locale-independent process setup にだけ使う。
 - `--repo`はexact Git root。repeatable `--project`はconfig `[next].projects[].root`を置換し、defaultは`.`。source/configはproject descriptorから解決し、monorepo/workspaceを自動探索しない。
-- Next targetは`path:REPO_REL_FILE_OR_DIR`または`component:EXPORTING_MODULE#EXPORTED_NAME`。後者はexport addressをcanonical declarationへ解決する。explicit target失敗はfallbackしない。
+- Next targetの公開文法は`path:REPO_REL_FILE_OR_DIR`だけである。これは内部
+  semantic Module/Component IDとは別の利用者向けアドレスであり、
+  `component:`、`module:`、`file:`形式は受理しない。file pathはfrozen file・
+  Module・Component集合へ、directory pathは全canonical descendant frozen集合へ
+  解決する。複数descendantは正常で、missing、project-scope ambiguity、
+  out-of-scope、選択集合のtainted/excluded/failed recordのいずれか一つでも
+  `CSV-NEXT-TARGET-001`・`payload_unavailable`・no-artifactとする。
 
 ### stdout selector and stream routing
 
@@ -248,6 +254,16 @@ target `node_modules`を読まずにReact/JSX/Nextのv1 acceptanceをTypeChecker
 
 ### ExportBindingResolution/v1
 
+The adapter first emits an independent complete `ExportObservation` stream;
+the public `ExportBindingMember` is a projection and is never the source of
+truth for coverage. Each observation carries `owner_module_id`, canonical
+`exported_name`, value/type `role`, `reexport`, a stable syntax identity,
+`resolution` (`component`, `value`, `type`, or `unknown`), and an optional
+`component_id`. Python checks the stream's canonical order and uniqueness,
+derives every public binding and export coverage count, and exact-compares
+both projections. Omission, duplicate syntax identity, and component
+substitution are rejected.
+
 | export pattern | owner | exported name | target | result |
 | --- | --- | --- | --- | --- |
 | `export function Button` / `export {Button}` | current Module | `Button` | canonical declaration Component | binding一件 |
@@ -302,13 +318,15 @@ overlapping rootsを禁止するため、各source moduleのowning projectは一
 | --- | --- | --- | --- |
 | `path:FILE` | selected project/source root内の`.ts/.tsx/.js/.jsx` exact frozen file | fileにComponent 0ならcomplete empty | missing/out-of-scopeはpayload unavailable |
 | `path:DIRECTORY` | frozen inventoryに存在するlexical directory subtree | subtreeにComponent 0ならcomplete empty | missing/out-of-scopeはpayload unavailable |
-| `component:MODULE#NAME` | MODULEは`.ts/.tsx/.js/.jsx` repository-relative path、`#`禁止。NAMEは`default`またはIdentifierName | N/A | missing/ambiguous/external/unresolvedはpayload unavailable |
 
 - path/file-directory判定はfrozen inventoryで行い、host filesystemを再参照しない。
-- component targetはexport bindingを辿り、canonical declaration Componentを一意に選ぶ。barrel cycleはvisited setで停止。
-- extensionless module、string-named export、path中`#`はv1 usage error。
+- directory targetは一致する全fileをcanonical path/ID順に含め、一部だけを選ぶ
+  shortcutや単一descendant前提を置かない。pathはrepository-relativeでNFC化し、
+  traversal・backslash・control文字・`#`を拒否する。
+- request、config、proofのtarget key/status/published IDsは同じ frozen SourceView
+  から独立再計算し、submitted listを先にsortしてから比較しない。
 - project overlapを禁止済みのためownershipは一意。source rootはowning project descriptor内だけで宣言し、同じresolved file/source rootを複数projectが宣言した場合は`CSV-NEXT-PROJECT-002` payload unavailable。
-- multiple targetsはcanonical target keyでdeduplicate/sortしたunion。入力順違いはsame bytes。一件でもresolution failureなら全target payload unavailable。
+- multiple targetsはcanonical target keyでdeduplicate/sortしたunion。入力順違いはsame bytes。一件でもresolution failureまたは選択集合のtaint/exclusion/failureがあれば全target payload unavailable。
 - targetなしは全applicable project。depthはtargetありのときだけ。
 
 ### SourceAcquisitionPlan/v1 and discovery closure
@@ -376,7 +394,7 @@ request required fields:
 | `trusted_type_environment` | schema/version/SHA-256 expected descriptor |
 | `projects` | sorted `{id,root,source_roots,config_path,config_digest,compiler_options,file_ids}`。projectごとにProgram一件 |
 | `files` | unique sorted `{id,path,project_id,roles,effective_role,size,sha256,content_base64}`。project ownershipは一件 |
-| `targets` | canonical target keys |
+| `targets` | public `path:<repository-relative-file-or-directory>` keys only; internal IDs are never request syntax |
 | `limits` | exact normalized analysis/process-relevant limits |
 
 response required fields:
@@ -387,7 +405,8 @@ response required fields:
 | `request_id` | requestとexact match |
 | `adapter_version` | expected exact match |
 | `trusted_type_environment_digest` | expected exact match |
-| `model` | projects/modules/components/members/relations/coverage/safe diagnostic codes |
+| `model` | projects/modules/components/members/relations/coverage/safe diagnostic codes。`coverage.counts.internal_entities` is exactly published Module + Component count |
+| `proof.export_observations` | complete independent owner/name/role/reexport/syntax/resolution observation stream; Python projects it into bindings and coverage |
 | `model_digest` | canonical `model` bytes SHA-256。Pythonが再計算 |
 
 Artifact digestはresponseに含めない。Python renderer/publication後にだけ計算する。
@@ -593,7 +612,7 @@ Next PlantUML v1はaliasを`N_M_<64hex>`/`N_C_<64hex>`に閉じ、label escaping
 
 - trusted pathは`/.code-structure-viz/trusted/v1/`配下だけ。target pathと交差しない。
 - reserved specifierは`react`、`react/jsx-runtime`、`react/jsx-dev-runtime`、`next/dynamic`。reserved globalは`JSX`と同梱standard lib global。
-- certified symbolはspecifier/global、export path、declaration file SHA-256、symbol kind、signature digestで一意。Component/wrapper/createElement/Array map認定はこのidentityだけを使う。
+- certified symbolはspecifier/global、export path、declaration file SHA-256、symbol kind、signature digestで一意。Component/wrapper/createElement/Array map認定はこのidentityだけを使う。PropsTypeIRのtrusted referenceも、TypeScript 5.9.2 AST/TypeCheckerから導出したこのcertified module/export集合（およびその集合を裏付けるbundled `typescript/lib` root）だけを受理する。
 - target ambient module、global augmentation、triple-slash type/lib reference、`paths` aliasがreserved specifier/globalをdeclare、merge、augment、redirectした場合は`CSV-NEXT-TRUST-002`、domain payload unavailable。symbol mergeを許さない。
 - target pathとtrusted virtual pathのNFC衝突は`CSV-NEXT-TRUST-003`、payload unavailable。
 - repository-local `baseUrl/paths`はreserved specifier以外だけを対象にし、frozen fileへ一意解決する場合だけ許可する。
@@ -672,7 +691,7 @@ module resolutionはvirtual inventoryだけを使う。relative/baseUrl/pathsに
 - `run_fingerprint = SHA256(canonical_json({source_view_fingerprint,source_plan_digest,domain_config_digest,projects,targets,limits,node_version,typescript_version,adapter_version,protocol,trusted_environment_digest}))`。
 - Artifact digestはpublished exact bytes、manifest digestはmanifest自身のdigest fieldを除いたcanonical bytesから計算する。
 
-snapshot/model/manifestは`identity_versions={module:1,component:1,member:1,relation:1,fact:1,props_ir:1}`と`semantic_compatibility_id`を持つ。compatibility IDはsemantic schema ID、identity versions、recognition/export/props/relation/fact/boundary algorithm version、TrustedTypeEnvironment `semantic_profile_id`のcanonical JSON SHA-256。content-only environment digest、adapter patch、Node patch、config/source digestはpreimageに入れない。identity/payload semanticsまたはtrusted certified signatureを変えるとalgorithm/profile versionを上げ、compatibility IDを変える。
+snapshot/model/manifestは`identity_versions={project:1,file:1,module:1,component:1,member:1,relation:1,fact:1,props_ir:1}`と`semantic_compatibility_id`を持つ。compatibility IDはsemantic schema ID、identity versions、recognition/export/props/relation/fact/boundary algorithm version、TrustedTypeEnvironment `semantic_profile_id`のcanonical JSON SHA-256。content-only environment digest、adapter patch、Node patch、config/source digestはpreimageに入れない。identity/payload semanticsまたはtrusted certified signatureを変えるとalgorithm/profile versionを上げ、compatibility IDを変える。
 
 request/response/modelは`additionalProperties:false`。modelは次のclosed collectionを持つ。
 
@@ -788,9 +807,8 @@ published subsetはtainted recordを除き、全refがun-tainted recordまたは
 | target | partial_safe permission |
 | --- | --- |
 | targetless | untainted independent subsetが上記proofを満たす場合 |
-| `path:FILE` | target fileのparse/read/identity taint不可。局所prop/flowだけ可 |
-| `path:DIRECTORY` | frozen subtree path setをidentityとし、failed file列挙 + 残りの独立proofがある場合 |
-| `component:` | declaration/export identity taint不可。局所prop/flow/derived boundaryだけ可 |
+| `path:FILE` | selected frozen file/Module/Component identityのtaintは不可。局所prop/flow/derived boundaryだけ可 |
+| `path:DIRECTORY` | 全descendantのfrozen file/Module/Component集合を同時に選び、いずれかのidentity taintは不可。局所prop/flow/derived boundaryだけ可 |
 
 `NextCoverageRecord`はdiscovered/published/excluded/failed counts、failed safe paths/reasons、affected IDs、taint frontier、opaque reason counts、unknown relation counts、correlation losses、non-component/type-only export counts、target completenessを持つ。source body/raw diagnosticは持たない。
 

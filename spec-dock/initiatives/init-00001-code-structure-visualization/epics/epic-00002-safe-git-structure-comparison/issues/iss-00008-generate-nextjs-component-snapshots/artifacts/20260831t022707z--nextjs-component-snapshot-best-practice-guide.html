@@ -358,7 +358,7 @@
         図を読み込んでいます。
       </div>
       <div class="callout warning">
-        <strong>現在の状態:</strong> これは Issue #8 のベストプラクティス提案と実装前契約を説明する資料です。プロダクトの Next 実装はまだ開始していません。ChatGPT Use Strict Round 6 は <code>review_status: fail</code>、P0=0、P1=9、P2=2 でした。指摘された契約 gaps は現在、schema・reference validator・fixture・test の data-only 修復として反映済みですが、修復後の fresh exact-SHA Strict review はまだ通過していません。そのため readiness は未確定です。実装開始を判定するには、固定SHAをGitHubへpushし、fresh Strictで P0=0 かつ P1=0 を確認する必要があります。
+        <strong>現在の状態:</strong> これは Issue #8 のベストプラクティス提案と実装前契約を説明する資料です。プロダクトの Next 実装はまだ開始していません。ChatGPT Use Strict Round 6 は <code>review_status: fail</code>、P0=0、P1=9、P2=2 でした。その後の Round 7 も <code>review_status: fail</code>、P0=0、P1=6、P2=0 でした。指摘された契約 gaps は現在、schema・reference validator・fixture・test の data-only 修復として反映済みですが、修復後の fresh exact-SHA Strict review はまだ通過していません。そのため readiness は未確定です。実装開始を判定するには、修復済みの固定SHAをGitHubへpushし、fresh Strictで P0=0 かつ P1=0 を確認する必要があります。
       </div>
     </header>
 
@@ -386,7 +386,7 @@
         <strong>位置づけ:</strong> この資料はゼロベース分析から得た設計候補です。2026-08-31に中心判断が承認され、canonical Requirement / Design / Planへ反映されました。最終authorityはcanonical文書であり、このHTML自体は説明用Artifactです。
       </div>
       <div class="callout">
-        <strong>契約の具体化:</strong> trusted declarationのshadowing拒否、有限なComponent認定とdefault/export規則、project別config/module resolution、control bytesを再読しないtwo-phase freeze、digest preimage、完全なProps型表現、partial-safeのtaint証明、公開schemaとoffline package contractまで正本で固定しました。Round 6の残存指摘も data-only 契約へ反映しました。後続の差分Issueでは、domain不在だけをempty-sideにし、target解析失敗をadded/removedへ誤変換しません。
+        <strong>契約の具体化:</strong> trusted declarationのshadowing拒否、有限なComponent認定とdefault/export規則、project別config/module resolution、control bytesを再読しないtwo-phase freeze、digest preimage、完全なProps型表現、partial-safeのtaint証明、公開schemaとoffline package contractまで正本で固定しました。Round 6/7の残存指摘も data-only 契約へ反映しました。後続の差分Issueでは、domain不在だけをempty-sideにし、target解析失敗をadded/removedへ誤変換しません。
       </div>
     </section>
 
@@ -481,7 +481,7 @@ end note
   --repo . \
   --domain next \
   --project apps/web \
-  --target component:apps/web/components/index.ts#Button \
+  --target path:apps/web/components/index.ts \
   --downstream-depth 2 \
   --output-dir /tmp/next-snapshot</code></pre>
       <div class="table-wrap">
@@ -860,17 +860,18 @@ stop
 
     <section>
       <h2>実装開始前の readiness gate</h2>
-      <p>この提案を「実装可能」と呼ぶ条件は、文章が揃うことではありません。machine-checkable な request/response、public semantic、run manifest、stdout、diagnostic、PlantUML の closed contractを実体化し、exact bytes と reference validator で相互投影を検証し、既存 Python/SQLAlchemy の全テストと Next の data-only contract vectors を clean checkout で通すことです。現在、Round 6 の9件のP1と2件のP2は契約・schema・fixture・testの data-only 修復として反映済みです。そのうえで修復後の GitHub 同一SHAを対象に fresh ChatGPT Use Strict を実行し、P0=0かつP1=0を確認する必要があります。</p>
+      <p>この提案を「実装可能」と呼ぶ条件は、文章が揃うことではありません。machine-checkable な request/response、public semantic、run manifest、stdout、diagnostic、PlantUML の closed contractを実体化し、exact bytes と reference validator で相互投影を検証し、既存 Python/SQLAlchemy の全テストと Next の data-only contract vectors を clean checkout で通すことです。Round 6 の9件のP1と2件のP2、続く Round 7 の6件のP1は、契約・schema・fixture・testの data-only 修復として反映済みです。そのうえで修復後の GitHub 同一SHAを対象に fresh ChatGPT Use Strict を実行し、P0=0かつP1=0を確認する必要があります。</p>
       <div class="callout warning">
-        <strong>Round 6の判定:</strong> 固定点の ChatGPT Use Strict は <code>review_status: fail</code>、P0=0、P1=9、P2=2 でした。P1/P2の修復は現在の data-only contracts に反映済みですが、fresh Strict は未通過です。したがって readiness は未確定であり、プロダクトの Next 実装も未着手です。このHTMLは実装着手やreadiness passを宣言するものではありません。
+        <strong>Strictの判定:</strong> Round 6 は <code>review_status: fail</code>（P0=0、P1=9、P2=2）、Round 7 は <code>review_status: fail</code>（P0=0、P1=6、P2=0）でした。修復は現在の data-only contracts に反映済みですが、fresh Strict は未通過です。したがって readiness は未確定であり、プロダクトの Next 実装も未着手です。このHTMLは実装着手やreadiness passを宣言するものではありません。
       </div>
-      <h3>Round 6 remediation：ローカル契約へ反映した項目</h3>
+      <h3>Round 6 / Round 7 remediation：ローカル契約へ反映した項目</h3>
       <ul>
         <li><strong>✓ taint の必須 edge:</strong> records・roots・closed rule/ownership tableからPythonが必須 causal edgeとtaint closureを独立導出し、submitted edgeと完全一致させます。frontier重複、edge omission、boundary role under-taintを拒否します。</li>
-        <li><strong>✓ explicit target:</strong> <code>component:&lt;path&gt;#&lt;name&gt;</code>、<code>module:&lt;path&gt;</code>、<code>file:&lt;path&gt;</code>へcanonicalizeし、proofのtarget key・status・published IDと完全一致させます。missing・extra・substitution・<code>failed</code> as resolvedを拒否します。</li>
-        <li><strong>✓ export witness:</strong> component export、non-component value export、type-only exportを一件ずつ witness 化し、coverage countをrecordsから再計算します。countだけの改変は通しません。</li>
-        <li><strong>✓ 22個のlimits:</strong> file/model/process/PropsTypeIR各上限の単位・計測時点・UTF-8・inclusive boundary・超過時 outcomeを固定し、集計配列・model countも再計算します。</li>
-        <li><strong>✓ trusted/runtime bytes:</strong> 実際の declaration/runtime fixture bytes の physical→virtual mapping、size、SHA-256、license、非循環 inventory attestationを known answer と照合し、shadowingを拒否します。</li>
+        <li><strong>✓ public target:</strong> 公開文法は <code>path:&lt;repository-relative-path&gt;</code> だけです。file は frozen file・Module・Component 集合へ、directory は全 canonical descendant 集合へ解決し、複数 descendant は正常です。missing・project-scope ambiguity・out-of-scope・選択集合の tainted/excluded/failed はすべて <code>CSV-NEXT-TARGET-001</code>、<code>payload_unavailable</code>、no-artifact とし、manifest/stdout の unavailable vector まで一致させます。内部 Module/Component IDや旧 <code>component:</code>・<code>module:</code>・<code>file:</code> 形式は受理しません。</li>
+        <li><strong>✓ export observation:</strong> public <code>ExportBinding</code> の前に、owner Module・canonical exported name・value/type role・re-export・stable syntax identity・resolution（component/value/type/unknown）・任意の Component IDを持つ完全な独立 observation streamを収集します。そこから binding、component/value/type coverageを導出し、 omission・duplicate・component substitution・count改変を拒否します。</li>
+        <li><strong>✓ 22個のlimits:</strong> file/model/process/PropsTypeIR各上限の単位・計測時点・UTF-8・inclusive boundary・超過時 outcomeを固定し、集計配列・model countも再計算します。<code>max_entities</code> は選択・公開された内部 Module + Componentだけ、全recordは <code>max_model_records</code> と分離し、500成功・501 unavailable・600 override成功・100001 record failureを非巨大allocationで検査します。</li>
+        <li><strong>✓ trusted/runtime bytes:</strong> 実際の declaration/runtime fixture bytes の physical→virtual mapping、size、SHA-256、license、非循環 inventory attestationを known answer と照合し、shadowingを拒否します。TypeScript 5.9.2 の Program が parse/semantic diagnostics 0であること、AST/TypeCheckerから導出した certified identity/signature digest が checked-in inventoryと一致することも gateにします。</li>
+        <li><strong>✓ root seeds と順序:</strong> failure rootのrecord_idsは証人にすぎず、root kindとrecordsから完全な必須seedを再導出します。export failureではtarget Component、incoming explicit re-export、barrel Module、dependent bindingまで含め、submitted causal edge・taint closureと完全一致させます。recognition evidence、diagnostic、target completeness、failed filesなどの配列は canonical JSON UTF-8 orderをsubmittedのまま比較します。</li>
         <li><strong>✓ stdout/status matrix:</strong> <code>None</code>、<code>manifest</code>、<code>next:semantic-json</code>、<code>next:plantuml</code>を、complete・not_applicable・partial_safe・payload_unavailable・fatal・interrupt・usageの全statusで exact bytes、publication、stderr、exitと検証します。</li>
         <li><strong>✓ external PlantUML relation:</strong> 外部 JSX render targetを redacted cloud の <code>X_&lt;64hex&gt;</code> で表し、external JSX goldenとmutationを追加します。</li>
         <li><strong>✓ compatibility identity:</strong> semantic compatibility preimageへ <code>project</code> と <code>file</code> の identity versionを含め、known-answer IDで固定します。併せて <code>head_commit</code> は40桁または64桁だけ、非空 role subsetは7通りだけを受理します。</li>
