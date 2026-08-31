@@ -362,7 +362,7 @@
     <section>
       <h2>先に結論</h2>
       <div class="callout success">
-        <strong>推奨:</strong> Python が Git から source bytes を一度だけ凍結し、その bytes だけを one-shot Node worker に渡します。Node は bundled TypeScript で意味解析し、Python が返却 JSON を不信入力として検証してから JSON・PlantUML・manifest を公開します。
+        <strong>推奨:</strong> Python が Git から source bytes を一度だけ凍結し、その bytes だけを one-shot Node worker に渡します。Node は bundled TypeScript と version/digest/license 固定の TrustedTypeEnvironment で意味解析し、Python が返却 JSON を不信入力として検証してから JSON・PlantUML・manifest を公開します。
       </div>
       <p>設計の中心は「Node を使うか」ではありません。<strong>誰が入力と公開結果を信頼するか</strong>です。Python core が source acquisition と publication を所有し、Node は閉じた解析 engine に限定します。</p>
       <div class="grid">
@@ -426,7 +426,7 @@ actor "coding agent" as User
 component "Python CLI / config" as CLI
 component "Applicability +\nSourceAcquisitionPlan" as Plan
 database "immutable SourceView\nGit-tracked bytes" as View
-component "one-shot Node worker\nbundled TypeScript" as Node
+component "one-shot Node worker\nbundled TypeScript + TrustedTypeEnvironment" as Node
 component "Python strict validator\nschema / ID / redaction" as Validator
 component "Semantic renderer\nJSON + PlantUML" as Renderer
 component "OutputTransaction\nbudget + no-replace" as Tx
@@ -462,7 +462,7 @@ end note
 
       <h3>責務の分け方</h3>
       <div class="decision"><strong>Python core</strong><span>applicability、project/target、Git read-only acquisition、SourceView、process 制御、strict validation、ID/count/digest 再計算、rendering、publication を所有します。</span></div>
-      <div class="decision"><strong>Node adapter</strong><span>bundled TypeScript と in-memory <code>CompilerHost</code> を使い、request 内の virtual files だけを semantic analysis します。</span></div>
+      <div class="decision"><strong>Node adapter</strong><span>bundled TypeScript、固定済み TrustedTypeEnvironment、in-memory <code>CompilerHost</code> を使い、request virtual files と同梱 declarations だけを semantic analysis します。</span></div>
       <div class="decision"><strong>Public Artifact</strong><span>Python が検証済みの semantic model から生成します。Node の raw stdout / stderr をそのまま公開しません。</span></div>
     </section>
 
@@ -730,7 +730,7 @@ Fatal --> [*]
         <article class="card"><h3><code>next.snapshot.puml</code></h3><p><code>code-structure-viz.plantuml/next/v1</code> の domain-specific visual vocabulary。</p></article>
         <article class="card"><h3>run manifest</h3><p>status、coverage、safe diagnostic、toolchain/config/source-plan version と digest、Artifact SHA-256。</p></article>
       </div>
-      <p>manifest には Node、TypeScript、adapter、protocol の exact version、project root と config の repository-relative path、source acquisition plan digest、target/depth/budget の requested/resolved 値を残します。source content 自体は残しません。</p>
+      <p>manifest には Node、TypeScript、TrustedTypeEnvironment、adapter、protocol の exact version/digest/license、project root と config の repository-relative path、source acquisition plan digest、target/depth/budget の requested/resolved 値を残します。source content 自体は残しません。</p>
       <p><code>--stdout next:semantic-json</code> のような available selector は、公開 file と完全に同じ bytes を出します。diagnostic は stderr だけです。requested formats は一つの transaction で all-or-none に公開し、既存 path は上書きしません。</p>
     </section>
 
@@ -813,7 +813,7 @@ stop
         <article class="card"><h3>セキュリティ</h3><p>execution trap、path escape、symlink、environment、redaction、Git state before/after。</p></article>
         <article class="card"><h3>再現性</h3><p>same input の exact-byte rerun、canonical ordering、digest、output collision、source drift。</p></article>
         <article class="card"><h3>optional runtime</h3><p>Next 不在時に Node probe なし。Python/SQLAlchemy install・run・golden に Node 依存や byte drift なし。</p></article>
-        <article class="card"><h3>packaging</h3><p>offline adapter、exact TypeScript、lockfile、license inventory、Node 22+ CI。</p></article>
+        <article class="card"><h3>packaging</h3><p>offline adapter、exact TypeScript、TrustedTypeEnvironment、lockfile、license inventory、Node 22+ CI。</p></article>
       </div>
       <div class="callout warning">
         <strong>停止条件:</strong> Node が frozen bytes 以外を読む、explicit target を fallback する、partial JSON と PlantUML が別 subset、budget を truncation で回避、既存 domain に Node 要件や byte drift を持ち込む場合は完了扱いにしません。

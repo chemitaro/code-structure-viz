@@ -5,7 +5,7 @@ ID: "iss-00009"
 関連GitHub: ["#9"]
 package_sequence_key: "ISSUE-06"
 状態: "draft"
-最終更新: "2026-08-24"
+最終更新: "2026-08-31"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -17,7 +17,7 @@ package_sequence_key: "ISSUE-06"
 
 coding agent が before/after Next.js semantic snapshot から component/props/import/render/boundary change と影響 context を比較できる。
 
-利用者 story: coding agent として、TS/TSX の textual diff ではなく exported component と static relation の意味変化を識別し、runtime tree を捏造せず review へ使いたい。
+利用者 story: coding agent として、TS/TSX の textual diff ではなく component declaration、export binding、static relation の意味変化を識別し、runtime tree を捏造せず review へ使いたい。
 
 この Issue は技術 layer の完成ではなく、利用者が command を実行して source acquisition、domain analysis、semantic JSON、PlantUML、diagnostic、acceptance evidence まで確認できる一つの vertical outcome を所有する。
 
@@ -43,7 +43,7 @@ coding agent が before/after Next.js semantic snapshot から component/props/i
 | --- | --- | --- |
 | I06-REQ-001 | CLI と observable outcome | coding agent が before/after Next.js semantic snapshot から component/props/import/render/boundary change と影響 context を比較できる。 |
 | I06-REQ-002 | source acquisition | ISSUE-02のnamed endpoint、`--to working-tree` start-HEAD anchor、read-only Git、freeze、fingerprint、metadata-only FileChangeSet、run-level changed-path gateを使い、両sideでISSUE-05 adapterを独立実行する。 |
-| I06-REQ-003 | semantic behavior | module/exported component/prop/import/relation/use client boundary の semantic delta を changed seed とする。format、comment、import order だけは seed にしない。 |
+| I06-REQ-003 | semantic behavior | Component declaration identity、ExportBinding、Prop、primitive import/render/wrapper/client-entry/router edge の semantic delta を changed seed とする。derived boundary role、format、comment、range、order、local alias、diagnostic だけは primary seed にしない。 |
 | I06-REQ-004 | Artifact/output | Next diff JSON は before/after adapter contract/version/config digest、component/member/relation change、matching evidence、impact context を持つ。 |
 | I06-REQ-005 | failure behavior | Next targetが片側だけに存在する場合はreal snapshotとcanonical empty-sideを比較して全added/removedとする。片側adapter/config/protocol/static analysis failureはdomain absenceやremoved/addedへ変換せずincompleteとする。 |
 | I06-REQ-006 | safety/determinism | 解析対象 module、plugin、migration、build script、application entry point を import または実行しない。 同じ source bytes、endpoint、resolved config、adapter version では entity・member・relation・diagnostic・Artifact path の順序と SHA-256 が決定的になる。 |
@@ -57,7 +57,7 @@ coding agent が before/after Next.js semantic snapshot から component/props/i
 ISSUE-02のnamed endpoint、`--to working-tree` start-HEAD anchor、read-only Git、freeze、fingerprint、metadata-only FileChangeSet、run-level changed-path gateを使い、両sideでISSUE-05 adapterを独立実行する。
 ### I06-REQ-003
 
-module/exported component/prop/import/relation/use client boundary の semantic delta を changed seed とする。format、comment、import order だけは seed にしない。
+Component declaration identity、ExportBinding、Prop、primitive import/render/wrapper/client-entry/router edge の semantic delta を changed seed とする。derived boundary role、format、comment、range、order、local alias、diagnostic だけは primary seed にしない。
 ### I06-REQ-004
 
 Next diff JSON は before/after adapter contract/version/config digest、component/member/relation change、matching evidence、impact context を持つ。
@@ -91,7 +91,11 @@ code-structure-viz diff --repo . --domain next --format semantic-json --stdout n
 
 ### semantic contract
 
-- module/exported component/prop/import/relation/use client boundaryのsemantic deltaをchanged seedとする。format、comment、import orderだけはseedにしない。
+- Componentのexact identityはISSUE-05 `ComponentDeclarationResolution/v1`が定めるdeclaration identityであり、export aliasやroute/range/order/diagnosticをidentityへ混ぜない。
+- `ExportBindingResolution/v1`のdirect/default/re-export/star bindingはComponentとは別memberとして比較する。barrel移動、alias変更、default/named再公開はExportBinding deltaであり、同じdeclaration Componentのremoved/addedへ変換しない。
+- Propとprimitive relation（value/type import、render、component_wrap、client_entry、router context）をprimary semantic deltaとする。`client_dependency`、`server_candidate`、dual role、`boundary_effect`はprimitive factから再計算するcontextであり、exact matchingまたはprimary seedにしない。
+- before/after各sideは自身の`SourceAcquisitionPlan/v1`、`domain_config_projection("next")`/digest、TrustedTypeEnvironment digest、adapter/protocol/model versionを所有し、他sideのconfigへ寄せない。
+- format、comment、range、order、local alias、diagnosticだけの変化はprimary seedにしない。
 
 | before domain evidence | after domain evidence | status | comparison / publication | exit |
 | --- | --- | --- | --- | --- |
@@ -102,7 +106,7 @@ code-structure-viz diff --repo . --domain next --format semantic-json --stdout n
 | target evidenceあり | いずれかのsideでacquisition/static analysis失敗 | `incomplete` / `payload_unavailable` | added/removedを推測せず、affected domain diff JSON/PlantUMLを公開しない。safe manifestへ`incomplete_kind: "payload_unavailable"`、`payload_available: false`、diagnostic/coverage/provenanceを記録する。 | 3 |
 
 - internal canonical empty-side は `code-structure-viz.empty-side/v1` の canonical UTF-8 JSONである。`domain`、`document_kind: "internal-diff-side"`、空の `entities`/`members`/`relations` を持ち、endpointやside名を含めない。同一domain/versionではSHA-256が一定で、manifestのbefore/after side descriptorに`kind: "canonical-empty-side"`として記録する。standalone snapshot、semantic Artifact、empty diagramとして公開しない。
-- component identity/matchingはexact identityを優先し、rename evidence、structural fingerprint、unique candidateを満たすときだけmovedとする。
+- component matchingはdeclaration exact identityを最優先する。exact identityが片側に存在しない場合だけ、rename evidence、structural fingerprint、unique candidateをすべて満たす高信頼候補をmovedとする。ExportBinding、route、range、order、diagnostic、derived boundary roleはmoved判定のidentity/evidenceに使わない。
 - impact graphはbefore/after static relation unionで、removed componentはbefore edgeを使う。nonliteral dynamic behaviorはunknownでruntime relationを捏造しない。
 
 ### output contract
@@ -118,8 +122,8 @@ code-structure-viz diff --repo . --domain next --format semantic-json --stdout n
 
 | incomplete_kind | 判定条件 | affected domain payload | manifest / sibling | exit |
 | --- | --- | --- | --- | --- |
-| `partial_safe` | failure が局所的に隔離でき、残る subset が semantic に安全で、coverage と diagnostic が欠落範囲を明示し、全 requested payload が redaction を満たし、entity budget 内である。 | status `incomplete` の requested semantic JSON と PlantUML を安全 subset として公開する。truncation や failure entity の added/removed 推測はしない。 | `payload_available: true`、`incomplete_kind`、coverage、diagnostic、Artifact descriptor を記録する。all-domain は健全 sibling とともに保持する。 | 3 |
-| `payload_unavailable` | safe subset がない、global source acquisition/protocol/schema/security/unsafe-path failure、entity budget 超過、または diff のいずれかの side acquisition/static analysis failureである。 | affected domain の semantic JSON と PlantUML を公開しない。 | run-level fatalでない限りsafe core/aggregate manifestに `payload_available: false`、`incomplete_kind`、coverage/diagnostic/countを記録し、健全 siblingを保持する。 | 3 |
+| `partial_safe` | failure が局所的に隔離でき、残る subset が semantic に安全で、coverage と diagnostic が欠落範囲を明示し、全 requested payload が redaction を満たし、entity budget 内である。 | status `incomplete` の requested semantic JSON と PlantUML を安全 subset として公開する。truncation や failure entity の added/removed 推測はしない。 | `payload_available: true`、`incomplete_kind`、coverage、diagnostic、Artifact descriptor を記録する。 | 3 |
+| `payload_unavailable` | safe subset がない、global source acquisition/protocol/schema/security/unsafe-path failure、entity budget 超過、または diff のいずれかの side acquisition/static analysis failureである。 | affected domain の semantic JSON と PlantUML を公開しない。 | run-level fatalでない限りsafe core manifestに `payload_available: false`、`incomplete_kind`、coverage/diagnostic/countを記録する。 | 3 |
 
 snapshot の一部 file parse/read/type-resolution failure は、失敗 file を隔離し安全 subset と欠落 coverageを証明できる場合だけ `partial_safe` になれる。diff は before/after のどちらか一方でも source acquisition または static analysis が失敗した時点で `payload_unavailable` とし、added/removed を生成しない。both-side snapshot が完全に成立した後の局所的な context failureだけが、上の全条件を満たす場合に限り `partial_safe` になれる。
 
@@ -149,7 +153,7 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 | available `DOMAIN:FORMAT` | 対象 Artifact の exact bytes | diagnostic のみ | 0 または `partial_safe` の3 | output-dir へ通常公開 |
 | available `manifest` | final run manifest の exact bytes | diagnostic のみ | 0 または3 | output-dir へ通常公開 |
 | domain not_applicable | `stdout_result/v1` 1行、`domain_status: not_applicable`、`stable_reason: domain_not_applicable` | diagnostic のみ | 0 | domain payload なし、manifest は通常規則 |
-| domain payload_unavailable | `stdout_result/v1` 1行、`domain_status: incomplete`、`stable_reason: domain_payload_unavailable` | diagnostic のみ | 3 | affected payload なし、safe manifest/sibling は通常規則 |
+| domain payload_unavailable | `stdout_result/v1` 1行、`domain_status: incomplete`、`stable_reason: domain_payload_unavailable` | diagnostic のみ | 3 | affected payload なし、safe manifest は通常規則 |
 | run fatal または final manifest 不在 | `stdout_result/v1` 1行、`run_status: fatal`、reason は `run_fatal` または `final_manifest_unavailable` | diagnostic のみ | 1 | final manifestを含めrun-level Artifactなし |
 | handled interrupt | `stdout_result/v1` 1行、`run_status: interrupted`、`stable_reason: run_interrupted` | diagnostic のみ | 130 | staging cleanup |
 | duplicate/invalid/unselected-domain/unrequested-format | 空 | usage diagnostic | 2 | Artifactなし |

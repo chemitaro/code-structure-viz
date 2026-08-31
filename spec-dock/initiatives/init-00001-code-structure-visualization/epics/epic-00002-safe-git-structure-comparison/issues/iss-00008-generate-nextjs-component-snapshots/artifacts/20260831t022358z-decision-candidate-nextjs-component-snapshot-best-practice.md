@@ -26,6 +26,12 @@ failure contract には現行 canonical 文書との差分があるため、採�
 canonical Requirement / Design / Planへ反映し、commit/push後にChatGPT Use Strictでレビューする方針を承認した。
 authorityは反映先canonical docsにあり、本Artifactの`authority: draft`は変更しない。
 
+**Strict review correction (2026-08-31):** first Strict reviewは、bundled TypeScript standard libraryだけでは
+`React.FC`、class component、`memo`/`forwardRef`/`lazy`、`next/dynamic`の採用subsetを閉じて解析できないと判定した。
+修復後の正本は、version/digest/license固定の`TrustedTypeEnvironment/v1`、closed declaration/export resolution、
+source acquisition plan、private protocol、PropsTypeIR、relation/boundary algorithm、failure/packaging matrixを定義する
+canonical Designである。本候補内のより粗い記述と競合する場合はcanonical Requirement / Design / Planを優先する。
+
 ## 読み方と規範語
 
 - `MUST` / `MUST NOT`: 採用後の v1 contract に必要な条件。

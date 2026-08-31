@@ -44,13 +44,13 @@ CLI request -> safe source acquisition -> domain semantic analysis
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
 | I05-PLAN-000 | approved decision-candidateをRequirement/Design/Planへ反映し、current implementation truthとplanned pathを整合させてStrict spec reviewを通す。 | I05-DES-001〜007 |
-| I05-PLAN-001 | identity/export、project/target、protocol、type IR、relations/boundary、outcome/publicationのI05-AT-001〜008 fixtures/schemaを先に固定する。 | I05-DES-001〜007 |
+| I05-PLAN-001 | identity/export、project/target、protocol、type IR、relations/boundary、outcome/publication、TrustedTypeEnvironment、packaging/regressionのI05-AT-001〜011 fixtures/schemaを先に固定する。 | I05-DES-001〜007 |
 | I05-PLAN-002 | domain-owned SourceAcquisitionPlan、Next config/project/target parser、frozen-bytes request、hardened one-shot Node boundaryを実装する。 | I05-DES-002, I05-DES-006 |
 | I05-PLAN-003 | declaration identity、bindings、Component recognition、closed props IR、two-plane relations、positive-evidence boundaryを実装する。 | I05-DES-003 |
 | I05-PLAN-004 | untrusted response strict validation/ID再計算、semantic JSON、PlantUML、manifest、closed registry/publicationを接続する。 | I05-DES-004 |
 | I05-PLAN-005 | intentional unknown、partial_safe、payload_unavailable、explicit target all-or-nothing、entity/transport/type limitsをoutcomeへ接続する。 | I05-DES-005 |
 | I05-PLAN-006 | non-execution/redaction、determinism、Node optionality、offline bundle、lock/license、resource cap、CI、full regressionを完了する。 | I05-DES-006 |
-| I05-PLAN-007 | stdout selector grammar、stream routing、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを実装・検証する。 | I05-DES-007 |
+| I05-PLAN-007 | parserに部分実装済みのNext stdout syntaxをdomain/format/schema/stream pathと一貫して有効化し、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを検証する。 | I05-DES-007 |
 
 ## 実装step
 
@@ -71,6 +71,8 @@ CLI request -> safe source acquisition -> domain semantic analysis
 - client entry/dependency/server candidate/dual role/boundary effectをfixture化する。
 - targetless/path/component target/depth/missing/ambiguous/out-of-scopeをfixture化する。
 - not_applicable、complete empty、complete+diagnostic、partial_safe、payload_unavailable、usage/fatal/interrupt、entity/transport limits、stdout selectorをtable-drivenに固定する。
+- TrustedTypeEnvironment、private request/response、PropsTypeIR、PlantUML、diagnostic、wheel/sdist/offline、domain config/source projectionのpositive/negative fixturesを固定する。
+- candidate source/process/type/flow limitsをboundary fixtureでcalibrateし、normative defaultをconfig/schema/manifestへ固定するまでproduction implementation gateを開かない。
 
 ### I05-PLAN-002 bridge and adapter boundary
 
@@ -89,6 +91,7 @@ new planned modules（実装開始時にcurrent build/package layoutを再確認
 - `src/code_structure_viz/adapters/next/protocol.py`
 - `adapters/next/package.json`、`package-lock.json`、`tsconfig.json`
 - `adapters/next/src/analyze.ts::analyzeRepository`
+- `src/code_structure_viz/_next_runtime/`（compiled adapter、TypeScript libs、TrustedTypeEnvironment wheel resources）
 
 explicit project rootのdirect Next dependencyをPythonで判定し、不在を証明した場合はNode processを起動しない。domain-owned planでprogram/control/context bytesを一度だけ凍結し、Nodeへtarget path/cwdを渡さない。stdin/stdout exact one JSON、fixed argv/private cwd/minimal env、process/time/byte/memory capを実装する。
 
@@ -113,7 +116,7 @@ explicit project rootのdirect Next dependencyをPythonで判定し、不在を�
 
 ### I05-PLAN-007 stdout selector and stream contract
 
-- CLI parserは`--stdout`を高々1回だけ受理し、`manifest | DOMAIN:FORMAT`のclosed grammar、selected domain、requested formatをsource acquisition前に検証する。invalid/duplicate/unselected/unrequestedはexit 2、stdout空、Artifactなしとする。
+- current CLI parserがsyntax上受理済みの`next:semantic-json|next:plantuml`を重複実装せず、NextのDomainName、selected domain/requested format compatibility、schema、stream pathと一貫して有効化する。`--stdout`は高々1回、invalid/duplicate/unselected/unrequestedはsource acquisition前にexit 2、stdout空、Artifactなしとする。
 - publication後はavailable selectorの公開fileをexact bytesで複製する。unavailable selectorは`stdout-result/v1` 1行、selectorなしは`run-summary/v1` 1行をcanonical key orderで出す。diagnosticはstderrだけへ出し、`--output-dir` publicationを維持する。
 - complete、not_applicable、partial_safe、payload_unavailable、run fatal、handled interrupt、manifest unavailableをtable-driven fixtureで固定し、source/secret/absolute pathがstdoutへ漏れないことをnegative scanする。
 
@@ -135,6 +138,9 @@ explicit project rootのdirect Next dependencyをPythonで判定し、不在を�
 | I05-AT-006 | Node optionality | tests/acceptance/next/test_optionality.py | uv run pytest tests/acceptance/next/test_optionality.py -q |
 | I05-AT-007 | entity budget publication and diff-only option rejection | tests/acceptance/next/test_snapshot_budget.py | uv run pytest tests/acceptance/next/test_snapshot_budget.py -q |
 | I05-AT-008 | stdout selector matrix | tests/acceptance/next/test_stdout_selector.py | uv run pytest tests/acceptance/next/test_stdout_selector.py -q |
+| I05-AT-009 | TrustedTypeEnvironment / no target types | tests/acceptance/next/test_trusted_type_environment.py | uv run pytest tests/acceptance/next/test_trusted_type_environment.py -q |
+| I05-AT-010 | closed contracts / wheel/sdist / offline/license | tests/packaging/test_next_distribution.py | uv run pytest tests/contracts/next tests/packaging/test_next_distribution.py -q |
+| I05-AT-011 | Python/SQLAlchemy byte compatibility | tests/regression/test_next_domain_compatibility.py | uv run pytest tests/regression/test_next_domain_compatibility.py -q |
 
 ### issue gate commands
 
@@ -147,6 +153,11 @@ uv run pytest tests/security/test_next_static_boundary.py -q
 uv run pytest tests/acceptance/next/test_optionality.py -q
 uv run pytest tests/acceptance/next/test_snapshot_budget.py -q
 uv run pytest tests/acceptance/next/test_stdout_selector.py -q
+uv run pytest tests/acceptance/next/test_trusted_type_environment.py -q
+uv run pytest tests/contracts/next tests/packaging/test_next_distribution.py -q
+uv run pytest tests/regression/test_next_domain_compatibility.py -q
+uv build
+./spec-dock/scripts/spec-dock validate
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
@@ -157,11 +168,11 @@ uv run pytest
 | Requirement | Design | Plan | acceptance | test |
 | --- | --- | --- | --- | --- |
 | I05-REQ-001 | I05-DES-001 | I05-PLAN-001 | I05-AC-001 | I05-AT-001 |
-| I05-REQ-002 | I05-DES-002 | I05-PLAN-002 | I05-AC-002, I05-AC-004, I05-AC-006 | I05-AT-002, I05-AT-004, I05-AT-006 |
+| I05-REQ-002 | I05-DES-002 | I05-PLAN-002 | I05-AC-002, I05-AC-004, I05-AC-006, I05-AC-009 | I05-AT-002, I05-AT-004, I05-AT-006, I05-AT-009 |
 | I05-REQ-003 | I05-DES-003 | I05-PLAN-003 | I05-AC-001, I05-AC-003 | I05-AT-001, I05-AT-003 |
-| I05-REQ-004 | I05-DES-004 | I05-PLAN-004 | I05-AC-001, I05-AC-002 | I05-AT-001, I05-AT-002 |
+| I05-REQ-004 | I05-DES-004 | I05-PLAN-004 | I05-AC-001, I05-AC-002, I05-AC-010 | I05-AT-001, I05-AT-002, I05-AT-010 |
 | I05-REQ-005 | I05-DES-005 | I05-PLAN-005 | I05-AC-003, I05-AC-004, I05-AC-007 | I05-AT-003, I05-AT-004, I05-AT-007 |
-| I05-REQ-006 | I05-DES-006 | I05-PLAN-006 | I05-AC-005, I05-AC-006 | I05-AT-005, I05-AT-006 |
+| I05-REQ-006 | I05-DES-006 | I05-PLAN-006 | I05-AC-005, I05-AC-006, I05-AC-009, I05-AC-010, I05-AC-011 | I05-AT-005, I05-AT-006, I05-AT-009, I05-AT-010, I05-AT-011 |
 | I05-REQ-007 | I05-DES-007 | I05-PLAN-007 | I05-AC-008 | I05-AT-008 |
 
 ### regression boundary
@@ -182,7 +193,7 @@ uv run pytest
 
 ## exit / handoff
 
-- I05-AC-001〜I05-AC-008 の acceptance evidence が揃う。
+- I05-AC-001〜I05-AC-011のacceptance evidenceが揃う。
 - Requirement→Design→Plan→test trace に gap がない。
 - planned path honesty を review し、実装時点の実在 path/symbol と差異があれば Design/Plan を先に更新する。
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。

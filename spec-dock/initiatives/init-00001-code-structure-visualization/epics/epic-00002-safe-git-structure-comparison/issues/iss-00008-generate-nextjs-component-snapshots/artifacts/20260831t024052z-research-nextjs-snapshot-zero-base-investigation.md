@@ -22,6 +22,12 @@ Issue #8 の仕様を一度白紙に戻し、current repository の code、tests
 この Artifact は `authority: evidence` であり、canonical Requirement / Design / Plan の代替ではない。
 調査時点の commit は再現用 evidence であり、仕様の恒久 authority ではない。
 
+**Post-investigation correction (Strict round 1, 2026-08-31):** 調査から導いた「target `node_modules`/typesを
+参照しない」境界は維持する一方、bundled TypeScript standard libraryだけでは採用したReact/Next subsetの
+declaration sourceが不足する。修復後のcanonical Designは、version/digest/license固定の
+`TrustedTypeEnvironment/v1`、closed identity/export/source/protocol/type/relation/failure/packaging contractを正本とする。
+本調査の候補値や粗い契約がcanonical docsと競合する場合は後者を優先する。
+
 ## Question
 
 - Next.js component snapshot を既存 CodeStructureViz core に追加するとき、次を同時に満たす最小で安全な

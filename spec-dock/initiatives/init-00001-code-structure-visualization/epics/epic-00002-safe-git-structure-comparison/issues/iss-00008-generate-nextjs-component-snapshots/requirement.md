@@ -42,7 +42,7 @@ coding agent が first-party TypeScript adapter を通じ、Next.js repository �
 | ID | 観測面 | 要件 |
 | --- | --- | --- |
 | I05-REQ-001 | CLI と observable outcome | coding agent が明示した Next project/targetについて、module、component declaration、export binding、props、static relation、client boundaryをJSONとPlantUMLで取得できる。 |
-| I05-REQ-002 | source acquisition | Python coreはapplicabilityをNode起動前に判定し、domain-owned planでGit source bytesを一度だけ凍結する。one-shot first-party Node adapterはstdinで渡されたvirtual filesとbundled TypeScriptだけを解析し、target repositoryを直接読まない。Node.js 22 LTS以上はapplicable Next runだけで要求する。 |
+| I05-REQ-002 | source acquisition | Python coreはapplicabilityをNode起動前に判定し、domain-owned planでGit source bytesを一度だけ凍結する。one-shot first-party Node adapterはstdin virtual files、bundled TypeScript、versioned closed TrustedTypeEnvironmentだけを解析し、target repositoryを直接読まない。Node.js 22 LTS以上はapplicable Next runだけで要求する。 |
 | I05-REQ-003 | semantic behavior | Component identityはphysical declaration moduleとdeclaration keyで安定化し、export/re-export/aliasは別bindingとして保持する。propsはclosed normalized type IR、relationはmodule/componentの二平面、client boundaryはpositive evidenceに基づくfact/roleとして表現する。 |
 | I05-REQ-004 | Artifact/output | Node adapterは`code-structure-viz.next-adapter/v1`のexact one response JSONを返し、Python coreがuntrusted responseのschema/path/ref/redaction/order/ID/count/digestを検証・再計算して`code-structure-viz.semantic/v1`と`code-structure-viz.plantuml/next/v1`を生成する。 |
 | I05-REQ-005 | failure behavior | non-literal dynamic behaviorはrelationを捏造せずunknown diagnosticとcoverage limitationにする。Node/protocol/static analysis failureはincomplete、entity budget超過はdomain incomplete exit 3でaffected semantic JSON/PlantUMLを公開しない。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`指定はusage error、exit 2とする。 |
@@ -54,7 +54,7 @@ coding agent が first-party TypeScript adapter を通じ、Next.js repository �
 coding agent が first-party TypeScript adapter を通じ、Next.js repository の module、exported component、props、static relation、client boundary を JSON と PlantUML で取得できる。
 ### I05-REQ-002
 
-Python coreは明示project rootの`package.json`にあるdirect `next` dependencyからapplicabilityを判定し、domain-owned acquisition planでGit source bytesを一度だけ凍結する。one-shot first-party Node adapterはstdinで渡されたvirtual filesとbundled TypeScriptだけを解析する。Node.js 22 LTS以上はapplicable Next runだけで要求する。
+Python coreは明示project rootの`package.json`にあるdirect `next` dependencyからapplicabilityを判定し、domain-owned acquisition planでGit source bytesを一度だけ凍結する。one-shot first-party Node adapterはstdin virtual files、bundled TypeScript、versioned closed TrustedTypeEnvironmentだけを解析する。Node.js 22 LTS以上はapplicable Next runだけで要求する。
 ### I05-REQ-003
 
 Component identityはrepository-relative physical declaration moduleとdeclaration key。named bindingまたはmodule-local `@anonymous-default` slotを使う。export/re-export/alias/defaultは`ExportBindingMember`、route pathとrouter contextはattributeとし、identityに含めない。
@@ -89,7 +89,7 @@ code-structure-viz snapshot --repo . --domain next --format semantic-json --stdo
 - domain-owned immutable SourceAcquisitionPlanに従い、Python coreがprogram/control/context bytesを一度だけSourceViewへ凍結する。Nodeへtarget root path/cwdを渡さない。
 - program filesはTS/TSX/JS/JSX、`.d.ts`はcontext-only。`.git`、`node_modules`、`.next`、`out`、`dist`、`build`、`coverage`はhard exclude。test/spec/storyはdefault excludeにしない。
 - config lookupは`tsconfig.json`、`jsconfig.json`、versioned built-in safe configの順。repository-local `extends`、`baseUrl`、`paths`だけをfrozen SourceView内で解決し、package-based extendsやtarget `node_modules`を暗黙に読まない。
-- one-shot Node adapterはrequest virtual filesとbundled TypeScript standard libraryだけを読むin-memory CompilerHostを使う。Node.js 22 LTS以上はapplicable runだけで要求する。
+- one-shot Node adapterはrequest virtual files、bundled TypeScript standard library、`code-structure-viz.next-trusted-types/v1`だけを読むin-memory CompilerHostを使う。TrustedTypeEnvironmentはminimal JSX/React/Next wrapper declarations、exact version/digest/licenseを持ち、target type roots/node_modules/networkを参照しない。Node.js 22 LTS以上はapplicable runだけで要求する。
 - transport/processはfile/total/file-count/stdout/stderr/time/memoryに有限上限を持ち、超過時はsilent truncationせず`payload_unavailable`とする。候補値は4 MiB/file、64 MiB total、20,000 files、16 MiB stdout、64 KiB stderr capture、60秒、512 MiB old-space。
 
 ### semantic contract
@@ -117,10 +117,10 @@ code-structure-viz snapshot --repo . --domain next --format semantic-json --stdo
 
 `incomplete` は `incomplete_kind` により次の二種類へ分ける。`not_applicable`、run-level fatal、usage error と混同しない。
 
-| incomplete_kind | 判定条件 | affected domain payload | manifest / sibling | exit |
+| incomplete_kind | 判定条件 | affected domain payload | single-domain manifest | exit |
 | --- | --- | --- | --- | --- |
-| `partial_safe` | failure が局所的に隔離でき、残る subset が semantic に安全で、coverage と diagnostic が欠落範囲を明示し、全 requested payload が redaction を満たし、entity budget 内である。 | status `incomplete` の requested semantic JSON と PlantUML を安全 subset として公開する。truncation や failure entity の added/removed 推測はしない。 | `payload_available: true`、`incomplete_kind`、coverage、diagnostic、Artifact descriptor を記録する。all-domain は健全 sibling とともに保持する。 | 3 |
-| `payload_unavailable` | safe subset がない、global source acquisition/protocol/schema/security/unsafe-path failure、entity budget 超過、または diff のいずれかの side acquisition/static analysis failureである。 | affected domain の semantic JSON と PlantUML を公開しない。 | run-level fatalでない限りsafe core/aggregate manifestに `payload_available: false`、`incomplete_kind`、coverage/diagnostic/countを記録し、健全 siblingを保持する。 | 3 |
+| `partial_safe` | failure が局所的に隔離でき、残る subset が semantic に安全で、coverage と diagnostic が欠落範囲を明示し、全 requested payload が redaction を満たし、explicit target completenessとentity budgetを満たす。 | status `incomplete` の requested semantic JSON と PlantUML を同じ安全 subset として公開する。truncationをしない。 | `payload_available: true`、`incomplete_kind`、coverage、diagnostic、Artifact descriptorを記録する。 | 3 |
+| `payload_unavailable` | safe subset がない、explicit target failure、global config/program/Node/protocol/schema/security/identity failure、source/transport/entity budget超過。 | affected domain の semantic JSON と PlantUML を公開しない。 | run-level fatalでない限りsingle-domain manifestに`payload_available: false`、`incomplete_kind`、coverage/diagnostic/countを記録する。 | 3 |
 
 snapshot の一部 file parse/read/type-resolution failure は、失敗 file を隔離し安全 subset と欠落 coverageを証明できる場合だけ `partial_safe` になれる。diff は before/after のどちらか一方でも source acquisition または static analysis が失敗した時点で `payload_unavailable` とし、added/removed を生成しない。both-side snapshot が完全に成立した後の局所的な context failureだけが、上の全条件を満たす場合に限り `partial_safe` になれる。
 
@@ -150,7 +150,7 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 | available `DOMAIN:FORMAT` | 対象 Artifact の exact bytes | diagnostic のみ | 0 または `partial_safe` の3 | output-dir へ通常公開 |
 | available `manifest` | final run manifest の exact bytes | diagnostic のみ | 0 または3 | output-dir へ通常公開 |
 | domain not_applicable | `stdout_result/v1` 1行、`domain_status: not_applicable`、`stable_reason: domain_not_applicable` | diagnostic のみ | 0 | domain payload なし、manifest は通常規則 |
-| domain payload_unavailable | `stdout_result/v1` 1行、`domain_status: incomplete`、`stable_reason: domain_payload_unavailable` | diagnostic のみ | 3 | affected payload なし、safe manifest/sibling は通常規則 |
+| domain payload_unavailable | `stdout_result/v1` 1行、`domain_status: incomplete`、`stable_reason: domain_payload_unavailable` | diagnostic のみ | 3 | affected payloadなし、single-domain safe manifest |
 | run fatal または final manifest 不在 | `stdout_result/v1` 1行、`run_status: fatal`、reason は `run_fatal` または `final_manifest_unavailable` | diagnostic のみ | 1 | final manifestを含めrun-level Artifactなし |
 | handled interrupt | `stdout_result/v1` 1行、`run_status: interrupted`、`stable_reason: run_interrupted` | diagnostic のみ | 130 | staging cleanup |
 | duplicate/invalid/unselected-domain/unrequested-format | 空 | usage diagnostic | 2 | Artifactなし |
@@ -206,8 +206,11 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 | I05-AC-006 | explicit project rootsだけを対象とし、direct `next` dependencyがない場合はNode probeなしnot_applicable、applicableでComponent 0はcomplete empty、malformed evidenceはpayload_unavailableとする。 | I05-AT-006 |
 | I05-AC-007 | selected internal Module+Componentが501 entitiesならdomain `incomplete_kind: payload_unavailable`・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid 600 overrideはrequested/resolved/count付きで成功する。snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`はexit 2・Artifactなしとする。 | I05-AT-007 |
 | I05-AC-008 | stdout selectorのvalid/invalid/duplicate/domain/format、exact-byte、not_applicable/payload_unavailable/fatal/interrupt result、selectorなしsummaryをtable-drivenに満たす。 | I05-AT-008 |
+| I05-AC-009 | target `node_modules`/type roots/networkなしでTrustedTypeEnvironmentによりReact.FC、class、memo/forwardRef/lazy、next/dynamicの採用subsetを解析し、environment version/digest/licenseをmanifestへ記録する。 | I05-AT-009 |
+| I05-AC-010 | Next semantic/private protocol/diagnostic/manifest/stdout/PlantUML/writerのclosed schema/grammar/pathをmutation testで固定し、wheel/sdistにcompiled runtime/trusted declarations/lock/licenseを正しく収録してcheckout外offline Next runが成功する。 | I05-AT-010 |
+| I05-AC-011 | domain config/source-plan projectionにより、Next追加前後で既存Python/SQLAlchemyのsource/config/run fingerprint、semantic JSON、PlantUML、manifest、stdout、stderrがbyte-for-byte不変である。 | I05-AT-011 |
 
-- **I05-AC-001〜I05-AC-008 がすべて満たされ、planned test command が clean checkout で成功すること。**
+- **I05-AC-001〜I05-AC-011がすべて満たされ、planned test commandがclean checkoutで成功すること。**
 - Requirement、Design、Plan の trace table が一致し、unresolved acceptance gap がないこと。
 - release boundary: Next snapshot preview。Python/SQLAlchemyのinstall/runtime requirementへNodeを持ち込まないoptional adapter separationを完成させる。
 

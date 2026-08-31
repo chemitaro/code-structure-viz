@@ -5,7 +5,7 @@ ID: "iss-00009"
 関連GitHub: ["#9"]
 package_sequence_key: "ISSUE-06"
 状態: "draft"
-最終更新: "2026-08-24"
+最終更新: "2026-08-31"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -35,7 +35,7 @@ package_sequence_key: "ISSUE-06"
 ### Current（canonical specification state）
 
 - 本 Issue の canonical state は stable scope ID と repository-relative Requirement/Design/Plan path、accepted ADR、interviewで識別する。採用・実装開始時に HEAD と configured upstream を再検証し、current commit SHA を本文へ固定しない。
-- production package、CLI、domain adapter、schema implementation、acceptance fixturesは未実装であり、以下のpath/symbolはすべてplannedである。
+- production Python package、snapshot/diff CLI、common schema/writer/source infrastructureは実装済みである。Next snapshot/diff adapter、Next schema、Next acceptance fixturesは未実装であり、以下のNext固有path/symbolはplannedである。
 - 本Designは親の横断contractをslice固有の構造へ具体化し、依存Issueのpublic contractを変更せずに後続sliceへ渡す。
 
 ### Target
@@ -110,7 +110,7 @@ render_plantuml(DomainResult, VisualVocabulary) -> bytes
 
 - `partial_safe` は isolated failure set、safe subset、explicit coverage frontier、safe diagnostics、redaction pass、entity-budget pass、requested renderer passをすべて満たす場合だけ生成する。requested domain payload と manifest descriptor を同一 transaction で公開する。
 - `payload_unavailable` は safe subset不在、global acquisition/protocol/schema/security/unsafe-path failure、entity overrun、または diff side failureで生成する。affected payload descriptorは空とし、safe core manifestだけを許す。
-- all-domain `RunOutcome` はどちらもoverall `incomplete`/exit 3へ集約するが、`partial_safe` payloadと健全 siblingを捨てない。run-level fatalだけがfinal manifestを含む全stagingを破棄する。
+- 本IssueのNext単独runはどちらも`incomplete`/exit 3へ写像する。run-level fatalだけがfinal manifestを含む全stagingを破棄する。all-domain aggregationとhealthy sibling保持はISSUE-07が所有する。
 
 serializer と manifest builder は `incomplete_kind` と `payload_available` の整合を検証する。`partial_safe` なのにrequested descriptorが欠ける状態、`payload_unavailable` なのにaffected descriptorがある状態はinternal contract failureとしてpublication前に拒否する。
 
@@ -125,9 +125,19 @@ ISSUE-02のendpoint/freeze/FileChangeSet/changed-path contractをconsumeし、IS
 
 `NextSide`はreal snapshot、canonical empty-side、analysis-failedのunion。empty-sideは`code-structure-viz.empty-side/v1` domain `next`のcanonical digestでstandalone publishしない。before-only/after-onlyは全removed/added、both-absentはnot_applicable、adapter/config/protocol/static-analysis failureを含むpairはincompleteでaffected diff payloadなし。
 
-### semantic diff and unknown
+### ISSUE-05 handoff and semantic diff
 
-component/prop/import/JSX render/use-client boundary deltaだけをseedにする。impact graphはbefore/after static relation unionで、removed componentはbefore edgeを使う。nonliteral dynamic behaviorはunknownでruntime relationを生成しない。matchingはexact identityまたはhigh-confidence unique candidateだけ。
+各sideはISSUE-05のversioned contractをそのまま消費する。
+
+- Componentのprimary keyは`ComponentDeclarationResolution/v1`が生成するdeclaration identityである。export alias、route、range、order、diagnosticはidentityへ含めない。
+- `ExportBindingResolution/v1`のdirect/default/re-export/star bindingはComponentと別memberとして比較する。barrel移動、export alias変更、default/named再公開はbinding deltaであり、同じdeclaration Componentのremoved/addedを生成しない。
+- Propとprimitive relation（value/type import、render、component_wrap、client_entry、router context）をprimary delta/seedにする。
+- `BoundaryRolePropagation/v1`が導出する`client_dependency`、`server_candidate`、dual role、`boundary_effect`はcontextとして再計算する。derived role単独の変化をmatching keyやprimary seedにしない。
+- exact declaration identityが片側に存在しない場合だけ、rename evidence、structural fingerprint、unique candidateをすべて満たす候補をmovedとする。ExportBinding、route、range、order、diagnostic、derived roleはmoved evidenceに使わない。
+- 各sideは独立した`SourceAcquisitionPlan/v1`、`domain_config_projection("next")`/digest、TrustedTypeEnvironment digest、adapter/protocol/model versionを持つ。一方のcompiler/config/type environmentを他方へ適用しない。
+- sideのsource acquisition、protocol、schema、config、TrustedTypeEnvironment、static analysisが失敗した場合はdiff payloadをunavailableとし、canonical empty-side、removed/added、movedを捏造しない。
+
+impact graphはbefore/after primitive static relation unionで、removed componentはbefore edgeを使う。nonliteral dynamic behaviorはunknownでruntime relationを生成しない。
 
 ### budget, hunk safety, publication
 
