@@ -17,8 +17,8 @@
     "identity_versions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["module", "component", "member", "relation", "fact", "props_ir"],
-      "properties": {"module": {"const": 1}, "component": {"const": 1}, "member": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "props_ir": {"const": 1}}
+      "required": ["project", "file", "module", "component", "member", "relation", "fact", "props_ir"],
+      "properties": {"project": {"const": 1}, "file": {"const": 1}, "module": {"const": 1}, "component": {"const": 1}, "member": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "props_ir": {"const": 1}}
     },
     "algorithm_versions": {
       "type": "object",

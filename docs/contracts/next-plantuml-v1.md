@@ -48,7 +48,7 @@ N_C_<64hex> .. "prop <escaped-name>" <<prop>> : <member-id>|optional=<bool>|read
 N_M_<64hex> .. "export <escaped-name>" <<export_binding>> : <member-id>|role=value|reexport=<bool>
 N_M_<64hex> .. "import <escaped-name>" <<import_binding>> : <member-id>|role=<value|type>|source=<descriptor>
 N_M_<64hex> --> N_M_<64hex> : <static_import|literal_dynamic_import>|role=<value|type>|reexport=<bool>|boundary=<none|server_to_client_entry>
-N_C_<64hex> ..> N_C_<64hex> : jsx_render|occurrences=<count>|contexts=<csv>
+N_C_<64hex> ..> N_C_<64hex>|X_<64hex> : jsx_render|occurrences=<count>|contexts=<csv>
 N_C_<64hex> ..> N_C_<64hex> : component_wrap|occurrences=<count>|contexts=<csv>
 @enduml
 ```
@@ -78,7 +78,10 @@ Static and dynamic lines carry role, re-export, and boundary facets. A literal
 dynamic import is always `role=value|reexport=false|boundary=none`.
 `server_to_client_entry` appears only on an internal static value edge from a
 server candidate to a client-entry module. It does not create a second edge.
-Render/wrap rows carry occurrence count and canonical context CSV.
+Render/wrap rows carry occurrence count and canonical context CSV. JSX renders
+may target an external/unresolved redacted cloud (`X_<64hex>`) using the same
+external target descriptor as imports; the source component and the cloud are
+the only graph endpoints.
 
 Each external/unresolved target is one redacted `cloud`, keyed by the
 SHA-256 of its canonical target descriptor. Its safe package specifier and
@@ -111,6 +114,7 @@ The parser rejects unknown aliases, duplicate aliases, dangling containment or
 relation targets, out-of-order rows, missing legend/status, unsafe labels, and
 any statement outside the templates above. Goldens cover complete-empty,
 complete non-empty, partial-safe, internal boundary crossing, dual-role,
-external literal dynamic import, member facets, and malicious quote/newline/
+external literal dynamic import, external JSX render, member facets, and
+malicious quote/newline/
 markup labels. The exact-byte golden and parser must agree before a renderer
 change can be accepted.

@@ -77,9 +77,19 @@ fingerprint.
 Every frozen file has a unique canonical role tuple in wire order
 `control`, `context`, `program`.  The effective role is selected separately
 by precedence `control > context > program`; it is never derived from the
-last array element.  Program suffixes are `.js/.jsx/.ts/.tsx`, declaration
+last array element.  There are seven valid non-empty role subsets, and each
+must carry the matching effective role.  Program suffixes are `.js/.jsx/.ts/.tsx`, declaration
 files are context-only, and fixed hard exclusions are applied before the
 request is built.
+
+Explicit targets are canonicalized before they enter the request: a component
+is `component:<repository-relative-path>#<identifier>`, a module is
+`module:<repository-relative-path>`, and a file is
+`file:<repository-relative-path>`. Paths and identifiers are NFC-normalized,
+bounded to 1--4096 characters (component identifiers to 256 characters), and
+may not contain traversal, backslash, control characters, or a second `#`.
+The response proof must contain exactly one sorted resolution row per request
+target, with IDs independently resolved against the published model.
 
 The adapter receives exactly `canonical_json(request)` as UTF-8 stdin, with no
 BOM and no implicit source path/cwd.  Its byte length is inclusive of the

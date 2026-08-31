@@ -8,7 +8,7 @@
   "properties": {
     "schema": {"const": "code-structure-viz.domain-config/next/v1"},
     "projects": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/project"}},
-    "targets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+    "targets": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/target_key"}},
     "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
     "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
     "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},
@@ -19,6 +19,7 @@
   },
   "$defs": {
     "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
+    "target_key": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?:component:[^#]+#[^#]+|module:[^#]+|file:[^#]+)$"},
     "compiler_options": {
       "type": "object", "additionalProperties": false,
       "required": ["allow_js", "check_js", "jsx", "module", "module_resolution", "base_url", "paths"],
@@ -43,7 +44,7 @@
       "properties": {
         "schema": {"const": "code-structure-viz.next-snapshot-request/v1"},
         "projects": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/project"}},
-        "targets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+        "targets": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/target_key"}},
         "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
         "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
         "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},

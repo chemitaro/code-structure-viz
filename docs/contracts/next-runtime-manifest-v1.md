@@ -4,17 +4,20 @@
 unit inventory. `members` are sorted by safe wheel-relative path and unique;
 `licenses` are sorted by `(ecosystem,name,version,license_id)` and unique.
 Member paths are confined to `src/code_structure_viz/_next_runtime/` and may
-not contain traversal segments. Each member and license carries a SHA-256
-digest, while the manifest has no untracked files.
+not contain traversal segments. Each member carries the physical fixture path,
+the virtual runtime path, its actual UTF-8 byte size, and its SHA-256 digest;
+the manifest has no untracked files. The physical-to-virtual mapping is
+closed and is validated against the checked-in fixture bytes, so a path
+substitution cannot pass by changing only metadata.
 
 The v1 filesystem set is exact, not a minimum:
 
-| path | role |
-| --- | --- |
-| `src/code_structure_viz/_next_runtime/adapter.js` | `adapter` |
-| `src/code_structure_viz/_next_runtime/manifest.json` | `manifest` |
-| `src/code_structure_viz/_next_runtime/trusted.d.ts` | `trusted_declaration` |
-| `src/code_structure_viz/_next_runtime/typescript-lib.d.ts` | `typescript_lib` |
+| checked-in fixture bytes | virtual path | role |
+| --- | --- | --- |
+| `tests/fixtures/next_runtime/adapter.js` | `src/code_structure_viz/_next_runtime/adapter.js` | `adapter` |
+| `tests/fixtures/next_runtime/manifest.json` | `src/code_structure_viz/_next_runtime/manifest.json` | `manifest` |
+| `tests/fixtures/next_runtime/trusted.d.ts` | `src/code_structure_viz/_next_runtime/trusted.d.ts` | `trusted_declaration` |
+| `tests/fixtures/next_runtime/typescript-lib.d.ts` | `src/code_structure_viz/_next_runtime/typescript-lib.d.ts` | `typescript_lib` |
 
 The data-only validator requires exactly these four paths and four distinct
 roles. Removal, addition, duplicate path, role substitution, unsafe path, or
@@ -37,6 +40,12 @@ build_input_digest  = SHA-256(canonical-json({members, licenses}))
 build_output_digest = SHA-256(canonical-json({members}))
 manifest_sha256     = SHA-256(canonical-json(manifest without manifest_sha256))
 ```
+
+`inventory_attestation` repeats the exact sorted `members` array and carries
+`SHA-256(canonical-json({members}))`. The manifest digest deliberately excludes
+only `manifest_sha256`; it includes the attestation, while the attestation
+does not include the manifest digest. This acyclic construction permits an
+independent known-answer check for every member's real bytes, size, and hash.
 
 Canonical JSON is UTF-8, NFC-normalized, sorted object keys, compact
 separators, and no floating-point values. The data-only vectors in

@@ -31,7 +31,7 @@ plus Python-entity, wrong-status, and unknown-root mutations.
 - IDs use a kind prefix and SHA-256 of canonical JSON identity bytes.
 - Collections are unique and sorted by UTF-8 ID bytes.
 
-`identity_versions` is `{module:1,component:1,member:1,relation:1,fact:1,props_ir:1}`. `semantic_compatibility_id` is the SHA-256 of the canonical
+`identity_versions` is `{project:1,file:1,module:1,component:1,member:1,relation:1,fact:1,props_ir:1}`. `semantic_compatibility_id` is the SHA-256 of the canonical
 preimage `{semantic_schema,identity_versions,algorithm_versions,semantic_profile_id}`.
 The descriptor carries fixed algorithm
 versions for recognition, export, props, relation, fact, and boundary
@@ -41,6 +41,11 @@ are required; the value is not a self-reported opaque token.
 ## Members, relations, and facts
 
 - Members are `export_binding`, `import_binding`, or `prop`.
+- Every `export_binding` has an explicit `resolution_kind`: `component` carries
+  a Component ID, `value` denotes a non-component runtime value, and `type`
+  denotes a type-only export. The proof carries one exact resolution witness
+  per export; `non_component_value_export_count` and `type_only_export_count`
+  are recomputed from these records.
 - Module relations are `static_import` and `literal_dynamic_import`.
 - Component relations are `jsx_render` and internal-only `component_wrap`.
 - Direct `client_entry` and `router_context` are Facts. Derived boundary roles remain Module facets.
@@ -68,7 +73,7 @@ request_id))`; the response must echo that exact ID and its `model_digest` is
 
 ## Partial-safe proof
 
-The Node response includes the complete discovered record set, typed taints, failure roots, causal edges, target-resolution witnesses, and exclusions. `collection`, taint kind, exclusion reason, and propagation rule are closed vocabularies. Python applies the normative taint rules, derives the published subset, checks taint closure, that every discovered record is exactly published/excluded/failed once, that every published reference is untainted or a closed frontier, that target witnesses agree with published IDs, and that coverage counts equal the proof decomposition. Counts alone are not evidence. The validator contract is versioned as `code-structure-viz.next-reference-validation/v1` and lives in `tests/contracts/next_reference_validation.py` until production code owns it.
+The Node response includes the complete discovered record set, typed taints, failure roots, causal edges, target-resolution witnesses, export-resolution witnesses, and exclusions. `collection`, taint kind, exclusion reason, and propagation rule are closed vocabularies. Python derives the mandatory causal edges and taint fixed point from the records, roots, and closed rule/ownership table; adapter-provided edges, taints, and counts are not trusted. It checks that every discovered record is exactly published/excluded/failed once, that every published reference is untainted or a closed frontier, that request target keys/status/IDs equal the independently resolved model, and that coverage counts equal the proof decomposition. Counts alone are not evidence. The validator contract is versioned as `code-structure-viz.next-reference-validation/v1` and lives in `tests/contracts/next_reference_validation.py` until production code owns it.
 
 ## PropsTypeIR/v1
 
@@ -99,7 +104,10 @@ specifiers (`react`, `react/jsx-runtime`, `react/jsx-dev-runtime`,
 manifest SHA-256 over the descriptor without its `sha256` field. A target
 declaration, augmentation, or path redirect for one of those namespaces is a
 trust failure; target paths are also compared after NFC normalization against
-the trusted virtual paths.
+the trusted virtual paths. Each physical fixture's UTF-8 bytes, size, and
+SHA-256 are checked against the physical-to-virtual mapping; certified symbol
+signature digests are reproducible from their declaration metadata. The
+anti-shadowing witness covers all seven reserved names.
 
 ## Exact identity preimages
 
@@ -134,7 +142,7 @@ only private `content_base64` is omitted from the public model projection.
 ## Role, relation, and fact invariants
 
 The canonical role-array order is `control`, `context`, `program`; effective
-precedence is a separate `control > context > program` mapping. All eight
+precedence is a separate `control > context > program` mapping. All seven
 non-empty role subsets are valid only with the matching effective role.
 
 `static_import` and `literal_dynamic_import` are independent discriminated
@@ -190,6 +198,13 @@ may contain only `complete` diagnostics, while partial snapshots may contain
 only `partial_safe` diagnostics. Unknown codes, severity/ref/status mutations,
 and the historical FLOW fixture's wrong path reference are rejected.
 
+Explicit targets use only canonical keys `component:<path>#<name>`,
+`module:<path>`, or `file:<path>` (NFC, repository-relative, 1--4096
+characters).
+The adapter must return exactly one resolution row per requested key, sorted
+and duplicate-free; Python resolves the keys against the published model and
+rejects missing, extra, substituted, or `failed`-as-resolved rows.
+
 `ResolvedNextConfig` and `NextSnapshotRequest` are defined in
 `docs/contracts/next-config-v1.md`. The domain manifest and root manifest
 carry exact projections, recomputed project/config/source-plan/run digests,
@@ -201,5 +216,9 @@ The complete status vector ties the domain manifest, root run status/exit,
 run-summary, stdout result, published bytes, artifact SHA/size, and stderr
 diagnostics. Complete and `partial_safe` selectors return the exact published
 bytes; `not_applicable` and `payload_unavailable` return only a typed
+unavailable result. `--stdout` omitted (`None`) returns the canonical run
+summary, `manifest` returns the exact committed manifest bytes, and
+`next:semantic-json`/`next:plantuml` return the selected artifact or a typed
 unavailable result. Fatal and interrupt runs have no manifest and cannot be
-reinterpreted as a domain result.
+reinterpreted as a domain result; usage exits with code 2, no manifest/domain,
+and an empty stdout stream.

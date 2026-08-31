@@ -8,9 +8,9 @@
     "type": {"const": "run_summary"},
     "schema": {"const": "code-structure-viz.run-summary/v1"},
     "run_status": {
-      "enum": ["complete", "not_applicable", "incomplete", "fatal", "interrupted"]
+      "enum": ["complete", "not_applicable", "incomplete", "fatal", "usage", "interrupted"]
     },
-    "exit_code": {"enum": [0, 1, 3, 130]},
+    "exit_code": {"enum": [0, 1, 2, 3, 130]},
     "domains": {
       "type": "array",
       "maxItems": 1,
@@ -61,6 +61,14 @@
       "properties": {
         "run_status": {"const": "fatal"},
         "exit_code": {"const": 1},
+        "domains": {"maxItems": 0},
+        "manifest": {"type": "null"}
+      }
+    },
+    {
+      "properties": {
+        "run_status": {"const": "usage"},
+        "exit_code": {"const": 2},
         "domains": {"maxItems": 0},
         "manifest": {"type": "null"}
       }

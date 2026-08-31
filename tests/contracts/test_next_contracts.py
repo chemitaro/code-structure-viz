@@ -8,18 +8,33 @@ from typing import Any, cast
 import pytest
 from jsonschema import ValidationError  # type: ignore[import-untyped]
 
+from code_structure_viz.artifacts.streams import StdoutEmitter
+from code_structure_viz.cli.parser import DomainFormatSelector, ManifestSelector
+from code_structure_viz.core.outcomes import RunOutcome
 from tests.contracts.next_reference_validation import (
     COLLECTIONS,
+    LIMIT_CONTRACTS,
     ROLE_ORDER,
     ROLE_PRECEDENCE,
+    RUNTIME_PHYSICAL_TO_VIRTUAL,
     RUNTIME_REQUIRED_PATHS,
+    TRUSTED_PROFILE_CERTIFIED_SYMBOLS,
+    TRUSTED_PROFILE_FILE_LICENSES,
+    TRUSTED_PROFILE_FILE_SHA256,
+    TRUSTED_PROFILE_FILE_SIZES,
     TRUSTED_PROFILE_LICENSE_DIGEST,
     TRUSTED_PROFILE_LICENSES,
+    TRUSTED_PROFILE_PHYSICAL_TO_VIRTUAL,
+    TRUSTED_PROFILE_SHADOWING_WITNESS,
     VALIDATOR_SCHEMA,
+    _derived_taint_fixed_point,
     assert_encoded_stdin_boundary,
+    assert_limit_boundary,
     canonical_json_bytes,
+    derive_required_causal_edges,
     digest,
     encoded_request_bytes,
+    expected_export_resolution_witness,
     project_config_digest,
     recompute_compatibility_id,
     recompute_record_id,
@@ -446,6 +461,7 @@ def _model() -> dict[str, Any]:
             "exported_name": "default",
             "role": "value",
             "target_component_id": component_one["id"],
+            "resolution_kind": "component",
             "reexport": False,
         },
         {
@@ -654,18 +670,55 @@ def _complete_proof(model: dict[str, Any]) -> dict[str, Any]:
         "failure_roots": [],
         "causal_edges": [],
         "target_resolutions": [],
+        "export_resolution_witness": expected_export_resolution_witness(model),
         "excluded": [],
         "failed": [],
     }
 
 
-def _response(model: dict[str, Any], proof: dict[str, Any] | None = None) -> dict[str, Any]:
+def _discovered_index(proof: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
+    discovered: dict[str, dict[str, dict[str, Any]]] = {
+        collection: {} for collection in COLLECTIONS
+    }
+    for item in proof["discovered_records"]:
+        discovered[item["collection"]][item["record"]["id"]] = item
+    return discovered
+
+
+def _materialize_single_root_taints(proof: dict[str, Any]) -> None:
+    """Populate one root's labels from the independently generated edge witness."""
+
+    discovered = _discovered_index(proof)
+    edges = derive_required_causal_edges(proof, discovered)
+    proof["causal_edges"] = edges
+    adjacency: dict[str, set[str]] = {}
+    for edge in edges:
+        adjacency.setdefault(edge["source_id"], set()).add(edge["record_id"])
+    root = proof["failure_roots"][0]
+    reachable: set[str] = set()
+    pending = [root["id"]]
+    while pending:
+        source_id = pending.pop()
+        for record_id in adjacency.get(source_id, set()):
+            if record_id not in reachable:
+                reachable.add(record_id)
+                pending.append(record_id)
+    for item in proof["discovered_records"]:
+        item["taints"] = [root["kind"]] if item["record"]["id"] in reachable else []
+
+
+def _response(
+    model: dict[str, Any],
+    proof: dict[str, Any] | None = None,
+    request: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     descriptor = _descriptor()
     trusted_environment_digest = _trusted_environment()["sha256"]
+    request_value = request or _request()
     return {
         "schema": "code-structure-viz.next-adapter-response/v1",
         "protocol": "code-structure-viz.next-adapter/v1",
-        "request_id": _request()["request_id"],
+        "request_id": request_value["request_id"],
         "adapter_version": "1.0.0",
         "trusted_type_environment_digest": trusted_environment_digest,
         "semantic_compatibility_id": descriptor["compatibility_id"],
@@ -673,13 +726,26 @@ def _response(model: dict[str, Any], proof: dict[str, Any] | None = None) -> dic
         "identity_versions": descriptor["identity_versions"],
         "limits": _next_limits(),
         "model": model,
-        "proof": proof or _complete_proof(model),
+        "proof": proof if proof is not None else _complete_proof(model),
         "model_digest": digest(model),
     }
 
 
 def _trusted_environment() -> dict[str, Any]:
     value = _next_trusted_environment()
+    value["license_inventory_digest"] = TRUSTED_PROFILE_LICENSE_DIGEST
+    value["files"] = [
+        {
+            "physical_path": physical_path,
+            "virtual_path": virtual_path,
+            "size_bytes": TRUSTED_PROFILE_FILE_SIZES[virtual_path],
+            "sha256": TRUSTED_PROFILE_FILE_SHA256[virtual_path],
+            "license_id": TRUSTED_PROFILE_FILE_LICENSES[virtual_path],
+        }
+        for physical_path, virtual_path in TRUSTED_PROFILE_PHYSICAL_TO_VIRTUAL
+    ]
+    value["certified_symbols"] = copy.deepcopy(list(TRUSTED_PROFILE_CERTIFIED_SYMBOLS))
+    value["anti_shadowing_witness"] = list(TRUSTED_PROFILE_SHADOWING_WITNESS)
     value["sha256"] = digest({key: item for key, item in value.items() if key != "sha256"})
     return value
 
@@ -968,26 +1034,73 @@ def _stdout_result_for_domain(
     }
 
 
+def _run_summary_value(run_status: str, domain: dict[str, Any] | None = None) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": run_status,
+        "exit_code": {
+            "complete": 0,
+            "not_applicable": 0,
+            "incomplete": 3,
+            "fatal": 1,
+            "usage": 2,
+            "interrupted": 130,
+        }[run_status],
+        "domains": [],
+        "manifest": None,
+    }
+    if domain is not None:
+        summary["domains"] = [
+            {
+                "domain": "next",
+                "status": domain["status"],
+                **(
+                    {"incomplete_kind": domain["incomplete_kind"]}
+                    if domain["status"] == "incomplete"
+                    else {}
+                ),
+            }
+        ]
+        summary["manifest"] = "run-manifest.json"
+    return summary
+
+
+def _diagnostic_jsonl(diagnostics: list[dict[str, Any]]) -> bytes:
+    return b"".join(canonical_json_bytes(item) + b"\n" for item in diagnostics)
+
+
 def _runtime_manifest() -> dict[str, Any]:
-    members = [
-        {
-            "path": path,
-            "size_bytes": index + 1,
-            "sha256": chr(ord("a") + index) * 64,
-            "role": role,
-        }
-        for index, (path, role) in enumerate(sorted(RUNTIME_REQUIRED_PATHS.items()))
-    ]
+    members: list[dict[str, Any]] = []
+    for physical_path, path in RUNTIME_PHYSICAL_TO_VIRTUAL:
+        content = (ROOT / physical_path).read_bytes()
+        members.append(
+            {
+                "physical_path": physical_path,
+                "path": path,
+                "size_bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "role": RUNTIME_REQUIRED_PATHS[path],
+            }
+        )
+    members.sort(key=lambda item: item["path"])
     licenses = copy.deepcopy(list(TRUSTED_PROFILE_LICENSES))
     manifest: dict[str, Any] = {
         "schema": "code-structure-viz.next-runtime-manifest/v1",
         "members": members,
         "licenses": licenses,
         "license_inventory_digest": TRUSTED_PROFILE_LICENSE_DIGEST,
+        "inventory_attestation": {
+            "schema": "code-structure-viz.next-runtime-inventory/v1",
+            "members": members,
+            "sha256": digest({"members": members}),
+        },
     }
     manifest["build_input_digest"] = digest({"members": members, "licenses": licenses})
     manifest["build_output_digest"] = digest({"members": members})
-    manifest["manifest_sha256"] = digest(manifest)
+    manifest["manifest_sha256"] = digest(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
     return manifest
 
 
@@ -1444,18 +1557,39 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         "client_entry": False,
         "derived_roles": [],
     }
+    extra_import: dict[str, Any] = {
+        "kind": "import_binding",
+        "id": "",
+        "owner_id": extra_module["id"],
+        "local_component_id": None,
+        "imported_name": "default",
+        "role": "value",
+        "source": {"kind": "internal", "module_id": _id("module", "3")},
+    }
+    extra_import["id"] = recompute_record_id(extra_import)
+    extra_import_alias = copy.deepcopy(extra_import)
+    extra_import_alias["imported_name"] = "PropsView"
+    extra_import_alias["id"] = recompute_record_id(extra_import_alias)
     partial_proof = _complete_proof(partial_model)
     partial_proof["discovered_records"].extend(
         [
             {"collection": "files", "record": extra_file, "taints": ["parse_file"]},
             {"collection": "modules", "record": extra_module, "taints": ["parse_file"]},
+            {"collection": "members", "record": extra_import, "taints": ["parse_file"]},
+            {"collection": "members", "record": extra_import_alias, "taints": ["parse_file"]},
         ]
     )
     partial_proof["excluded"] = [
-        {"collection": "files", "record_id": extra_file["id"], "reason": "tainted"}
+        {"collection": "files", "record_id": extra_file["id"], "reason": "tainted"},
+        {"collection": "members", "record_id": extra_import["id"], "reason": "tainted"},
+        {
+            "collection": "members",
+            "record_id": extra_import_alias["id"],
+            "reason": "tainted",
+        },
     ]
     partial_proof["failed"] = [
-        {"collection": "modules", "record_id": extra_module["id"], "reason": "parse_file"}
+        {"collection": "modules", "record_id": extra_module["id"], "reason": "parse_file"},
     ]
     partial_proof["failure_roots"] = [
         {
@@ -1463,20 +1597,21 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
             "collection": "files",
             "kind": "parse_file",
             "path_ref": "src/Unused.tsx",
+            "record_ids": [extra_file["id"]],
         }
     ]
-    partial_proof["causal_edges"] = [
-        {
-            "source_id": "next:failure:" + "0" * 64,
-            "record_id": extra_file["id"],
-            "rule": "file_all_records",
-        },
-        {
-            "source_id": "next:failure:" + "0" * 64,
-            "record_id": extra_module["id"],
-            "rule": "file_all_records",
-        },
-    ]
+    _materialize_single_root_taints(partial_proof)
+    tainted_ids = {
+        item["record"]["id"] for item in partial_proof["discovered_records"] if item["taints"]
+    }
+    partial_model["coverage"]["affected_ids"] = sorted(tainted_ids)
+    partial_model["coverage"]["taint_frontier"] = [_id("module", "3")]
+    partial_model["coverage"]["counts"]["discovered"] += 2
+    partial_model["coverage"]["counts"]["excluded"] = 3
+    partial_model["coverage"]["counts"]["failed"] = 1
+    target_request = _request()
+    target_request["targets"] = ["component:src/Button.tsx#Button"]
+    target_request["request_id"] = recompute_request_id(target_request)
     partial_proof["target_resolutions"] = [
         {
             "target_key": "component:src/Button.tsx#Button",
@@ -1491,12 +1626,14 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
             "record_ids": [_id("component", "5")],
         }
     ]
-    partial_response = _response(partial_model, partial_proof)
+    partial_response = _response(partial_model, partial_proof, target_request)
     _validator("next-adapter-response-v1.schema.json").validate(partial_response)
+    validate_response_envelope(partial_response, target_request)
     validate_proof(
         partial_response["proof"],
         partial_response["model"],
         {"component:src/Button.tsx#Button": (_id("component", "5"),)},
+        request_targets=target_request["targets"],
     )
 
     broken_proof = copy.deepcopy(partial_response["proof"])
@@ -1517,6 +1654,26 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
             partial_response["model"],
             {"component:src/Button.tsx#Button": (_id("component", "5"),)},
         )
+
+    missing_target = copy.deepcopy(partial_response)
+    missing_target["proof"]["target_resolutions"] = []
+    with pytest.raises(AssertionError):
+        validate_response_envelope(missing_target, target_request)
+    extra_target = copy.deepcopy(partial_response)
+    extra_target["proof"]["target_resolutions"].append(
+        {"target_key": "module:src/Missing.tsx", "status": "failed", "record_ids": []}
+    )
+    extra_target["proof"]["target_resolutions"].sort(key=canonical_json_bytes)
+    with pytest.raises(AssertionError):
+        validate_response_envelope(extra_target, target_request)
+    failed_as_resolved = copy.deepcopy(partial_response)
+    failed_as_resolved["proof"]["target_resolutions"][0] = {
+        "target_key": "component:src/Button.tsx#Button",
+        "status": "failed",
+        "record_ids": [],
+    }
+    with pytest.raises(AssertionError):
+        validate_response_envelope(failed_as_resolved, target_request)
 
     missing_taint = copy.deepcopy(partial_response["proof"])
     next(
@@ -1548,6 +1705,11 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     with pytest.raises(AssertionError):
         validate_proof(illegal_root_edge, partial_response["model"])
 
+    omitted_edge = copy.deepcopy(partial_response["proof"])
+    omitted_edge["causal_edges"].pop()
+    with pytest.raises(AssertionError):
+        validate_proof(omitted_edge, partial_response["model"])
+
     illegal_type_root = copy.deepcopy(partial_response["proof"])
     illegal_type_root["failure_roots"].append(
         {
@@ -1555,6 +1717,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
             "collection": "members",
             "kind": "type_symbol",
             "path_ref": "src/Unused.tsx",
+            "record_ids": [extra_module["id"]],
         }
     )
     illegal_type_root["causal_edges"].append(
@@ -1588,6 +1751,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
             "collection": "files",
             "kind": "read_file",
             "path_ref": "src/Unused.tsx",
+            "record_ids": [extra_file["id"]],
         }
     )
     vacuous_root["failure_roots"].sort(key=canonical_json_bytes)
@@ -1595,9 +1759,14 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         validate_proof(vacuous_root, partial_response["model"])
 
     wrong_frontier = copy.deepcopy(partial_response["model"])
-    wrong_frontier["coverage"]["taint_frontier"] = [_id("module", "3")]
+    wrong_frontier["coverage"]["taint_frontier"] = [_id("module", "4")]
     with pytest.raises(AssertionError):
         validate_proof(partial_response["proof"], wrong_frontier)
+
+    duplicate_frontier = copy.deepcopy(partial_response["model"])
+    duplicate_frontier["coverage"]["taint_frontier"] = [_id("module", "3")] * 2
+    with pytest.raises(AssertionError):
+        validate_proof(partial_response["proof"], duplicate_frontier)
 
     wrong_count = copy.deepcopy(partial_response["model"])
     wrong_count["coverage"]["counts"]["failed"] += 1
@@ -1623,6 +1792,121 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         validate_response_envelope(wrong_descriptor, request)
 
 
+def test_export_resolution_witness_covers_components_values_and_types() -> None:
+    model = _model()
+    for exported_name, role, resolution_kind in (
+        ("renderValue", "value", "value"),
+        ("Props", "type", "type"),
+    ):
+        export: dict[str, Any] = {
+            "kind": "export_binding",
+            "id": "",
+            "owner_id": _id("module", "3"),
+            "exported_name": exported_name,
+            "role": role,
+            "target_component_id": None,
+            "resolution_kind": resolution_kind,
+            "reexport": False,
+        }
+        export["id"] = recompute_record_id(export)
+        model["members"].append(export)
+    model["members"].sort(key=lambda record: record["id"])
+    model["coverage"]["counts"]["members"] = len(model["members"])
+    model["coverage"]["counts"]["published"] += 2
+    model["coverage"]["counts"]["discovered"] += 2
+    model["coverage"]["non_component_value_export_count"] = 1
+    model["coverage"]["type_only_export_count"] = 1
+
+    validate_model(model)
+    assert model["coverage"]["non_component_value_export_count"] == 1
+    assert model["coverage"]["type_only_export_count"] == 1
+    proof = _complete_proof(model)
+    assert proof["export_resolution_witness"] == expected_export_resolution_witness(model)
+    validate_proof(proof, model)
+
+    wrong_value_count = copy.deepcopy(model)
+    wrong_value_count["coverage"]["non_component_value_export_count"] = 2
+    with pytest.raises(AssertionError):
+        validate_proof(_complete_proof(wrong_value_count), wrong_value_count)
+    wrong_type_count = copy.deepcopy(model)
+    wrong_type_count["coverage"]["type_only_export_count"] = 2
+    with pytest.raises(AssertionError):
+        validate_proof(_complete_proof(wrong_type_count), wrong_type_count)
+
+    missing_witness = copy.deepcopy(proof)
+    missing_witness["export_resolution_witness"].pop()
+    with pytest.raises(AssertionError):
+        validate_proof(missing_witness, model)
+    substituted_witness = copy.deepcopy(proof)
+    component_witness = next(
+        item
+        for item in substituted_witness["export_resolution_witness"]
+        if item["resolution"] == "component"
+    )
+    component_witness["component_id"] = _id("component", "6")
+    with pytest.raises(AssertionError):
+        validate_proof(substituted_witness, model)
+
+
+def test_taint_edges_are_derived_for_boundary_and_shared_frontier() -> None:
+    model = _model()
+    boundary_relation: dict[str, Any] = {
+        "kind": "static_import",
+        "id": "",
+        "source_id": _id("module", "4"),
+        "target": {"kind": "internal", "module_id": _id("module", "3")},
+        "role": "value",
+        "reexport": False,
+        "boundary_effect": "server_to_client_entry",
+    }
+    boundary_relation["id"] = recompute_record_id(boundary_relation)
+    model["relations"].append(boundary_relation)
+    model["relations"].sort(key=lambda record: record["id"])
+    model["coverage"]["counts"]["relations"] += 1
+    model["coverage"]["counts"]["published"] += 1
+    model["coverage"]["counts"]["discovered"] += 1
+    model["modules"][1]["derived_roles"] = ["server_candidate"]
+    validate_model(model)
+
+    proof = _complete_proof(model)
+    proof["failure_roots"] = [
+        {
+            "id": "next:failure:" + "b" * 64,
+            "collection": "modules",
+            "kind": "boundary_derivation",
+            "path_ref": None,
+            "record_ids": [_id("module", "4")],
+        }
+    ]
+    discovered = _discovered_index(proof)
+    edges = derive_required_causal_edges(proof, discovered)
+    _materialize_single_root_taints(proof)
+    tainted = _derived_taint_fixed_point(proof, discovered)
+    assert boundary_relation["id"] in tainted
+    assert {
+        (edge["rule"], edge["record_id"])
+        for edge in edges
+        if edge["source_id"] == proof["failure_roots"][0]["id"]
+    } == {("boundary_closure", _id("module", "4"))}
+    assert any(
+        edge["rule"] == "boundary_closure" and edge["record_id"] == boundary_relation["id"]
+        for edge in edges
+    )
+    omitted_boundary_edge = copy.deepcopy(proof)
+    omitted_boundary_edge["causal_edges"] = [
+        edge
+        for edge in omitted_boundary_edge["causal_edges"]
+        if not (edge["rule"] == "boundary_closure" and edge["record_id"] == boundary_relation["id"])
+    ]
+    with pytest.raises(AssertionError):
+        _derived_taint_fixed_point(omitted_boundary_edge, discovered)
+
+    shared_frontier = {
+        edge["record_id"] for edge in edges if edge["record_id"] == _id("module", "3")
+    }
+    assert shared_frontier == {_id("module", "3")}
+
+
 def test_limits_are_one_resolved_record_across_all_projections() -> None:
     limits = _next_limits()
     validate_limits(limits)
@@ -1638,6 +1922,17 @@ def test_limits_are_one_resolved_record_across_all_projections() -> None:
     mutated["max_flow_visits"] += 1
     with pytest.raises(AssertionError):
         validate_limits_consistency(limits, mutated)
+
+
+def test_every_normative_limit_has_an_inclusive_arithmetic_boundary() -> None:
+    limits = _next_limits()
+    assert set(LIMIT_CONTRACTS) == set(limits)
+    for name, contract in LIMIT_CONTRACTS.items():
+        limit = limits[name]
+        assert contract["encoding"] in {"utf8", "not_applicable"}
+        assert contract["inclusive"] is True
+        assert contract["outcome"] in {"partial_safe", "payload_unavailable"}
+        assert_limit_boundary(limit, at_limit=True, over_limit=False)
 
 
 def test_role_precedence_and_exact_encoded_request_boundaries_cover_every_subset() -> None:
@@ -1802,6 +2097,117 @@ def test_next_run_manifest_status_matrix_and_public_stream_extensions(status: st
         )
 
 
+@pytest.mark.parametrize(
+    ("status", "overrun"),
+    [
+        ("complete", False),
+        ("not_applicable", False),
+        ("incomplete", False),
+        ("incomplete", True),
+    ],
+)
+@pytest.mark.parametrize(
+    "selector",
+    [None, "manifest", "next:semantic-json", "next:plantuml"],
+)
+def test_next_stdout_matrix_has_exact_bytes_for_core_outcomes(
+    status: str, overrun: bool, selector: str | None
+) -> None:
+    domain = _domain(status, overrun=overrun)
+    manifest = _run_manifest(domain)
+    published = _published_bytes(domain)
+    validate_domain_manifest(domain)
+    validate_run_manifest(manifest, domain, published)
+    summary = _run_summary_value(status, domain)
+    _validator("run-summary-v1.schema.json").validate(summary)
+    _validator("run-manifest-v1.schema.json").validate(manifest)
+
+    if selector is None:
+        stdout = canonical_json_bytes(summary) + b"\n"
+    elif selector == "manifest":
+        stdout = canonical_json_bytes(manifest) + b"\n"
+    else:
+        stream = _stdout_result_for_domain(domain, manifest, selector)
+        _validator("stdout-result-v1.schema.json").validate(stream)
+        if stream["availability"]:
+            artifact_path = (
+                "next.snapshot.semantic.json"
+                if selector.endswith("semantic-json")
+                else "next.snapshot.puml"
+            )
+            stdout = published[artifact_path]
+        else:
+            stdout = canonical_json_bytes(stream) + b"\n"
+        validate_run_status_vector(
+            manifest,
+            summary,
+            stream,
+            published,
+            stdout,
+            manifest["diagnostics"],
+        )
+    assert stdout.endswith(b"\n")
+    stderr = _diagnostic_jsonl(manifest["diagnostics"])
+    assert stderr == _diagnostic_jsonl(sorted(manifest["diagnostics"], key=canonical_json_bytes))
+    assert stderr == _diagnostic_jsonl(domain["diagnostics"])
+
+
+@pytest.mark.parametrize("run_status", ["fatal", "interrupted"])
+@pytest.mark.parametrize(
+    "selector",
+    [None, "manifest", "next:semantic-json", "next:plantuml"],
+)
+def test_next_stdout_matrix_is_manifest_free_for_fatal_and_interrupt(
+    run_status: str, selector: str | None
+) -> None:
+    summary = _run_summary_value(run_status)
+    _validator("run-summary-v1.schema.json").validate(summary)
+    if selector is None:
+        stdout = canonical_json_bytes(summary) + b"\n"
+    else:
+        stable_reason = (
+            "run_interrupted"
+            if run_status == "interrupted"
+            else "final_manifest_unavailable"
+            if selector == "manifest"
+            else "run_fatal"
+        )
+        stream: dict[str, Any] = {
+            "type": "stdout_result",
+            "schema": "code-structure-viz.stdout-result/v1",
+            "selector": selector,
+            "availability": False,
+            "run_status": run_status,
+            "stable_reason": stable_reason,
+            "artifact": None,
+        }
+        _validator("stdout-result-v1.schema.json").validate(stream)
+        stdout = canonical_json_bytes(stream) + b"\n"
+        validate_run_status_vector(None, summary, stream, {}, stdout, [])
+    assert stdout.endswith(b"\n")
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [None, "manifest", "next:semantic-json", "next:plantuml"],
+)
+def test_next_stdout_matrix_usage_is_empty_and_manifest_free(selector: str | None) -> None:
+    summary = _run_summary_value("usage")
+    _validator("run-summary-v1.schema.json").validate(summary)
+    selected = (
+        None
+        if selector is None
+        else ManifestSelector()
+        if selector == "manifest"
+        else DomainFormatSelector(
+            domain="next",
+            format=selector.removeprefix("next:"),  # type: ignore[arg-type]
+        )
+    )
+    assert StdoutEmitter().render(RunOutcome.usage(), selected, ROOT) == b""
+    validate_run_status_vector(None, summary, None, {}, b"", [])
+
+
 def test_entity_budget_overrun_is_payload_unavailable_without_artifacts() -> None:
     domain = _domain("incomplete", overrun=True)
     validate_domain_manifest(domain)
@@ -1940,14 +2346,21 @@ def test_runtime_unavailable_is_a_manifest_only_payload_unavailable_vector() -> 
 def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests() -> None:
     environment = _trusted_environment()
     assert environment["sha256"] == (
-        "d6355bba7aaab204f0472c5995ed7596e5df917b0e13b987bb974bd7e221a22f"
+        "fbfe3b060b508dcbaef636330f63a1039646ffbe9c301751c8bd0b415406f85e"
     )
     validate_trusted_environment(environment)
     validate_trusted_environment(environment, ["src/Button.tsx"])
-    validate_no_trusted_shadowing(
+    assert validate_no_trusted_shadowing(
         [{"source_kind": "module", "source_name": "app-local", "operation": "declare"}],
         environment,
-    )
+    ) == [
+        {
+            "source_kind": "module",
+            "source_name": "app-local",
+            "operation": "declare",
+            "decision": "allow",
+        }
+    ]
     with pytest.raises(AssertionError):
         validate_no_trusted_shadowing(
             [{"source_kind": "global", "source_name": "JSX", "operation": "augment"}],
@@ -1957,13 +2370,13 @@ def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests()
 
     runtime = _runtime_manifest()
     assert runtime["build_input_digest"] == (
-        "42a0a845694ca16df72dcea376126507cf5deec96a6ec2270b6f3196c18f5a9c"
+        "5e43a79f64dbcea5c4be8c268f0d888dfa91d714be88951895ab8cc1b5a22d00"
     )
     assert runtime["build_output_digest"] == (
-        "042996ed2951442d76c950dd900be9bb890e9eb18ae3d05b23ebfe2685595b3e"
+        "b866a8e7ee775ee3143b272824a55d4e5332a532d08860254b5398cff25026f1"
     )
     assert runtime["manifest_sha256"] == (
-        "c1851c21cef3680ae9b728a9b934e0fc64d73628ee0161ce3ed7d07d32928f00"
+        "8b43890131639a685f064b361e97c98798fd09736129e95420215aac441164ab"
     )
     assert runtime["build_input_digest"] == digest(
         {"members": runtime["members"], "licenses": runtime["licenses"]}
@@ -1991,6 +2404,14 @@ def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests()
     missing_member["members"].pop()
     with pytest.raises(AssertionError):
         validate_runtime_manifest(missing_member)
+    changed_member_bytes = copy.deepcopy(runtime)
+    changed_member_bytes["members"][0]["sha256"] = "0" * 64
+    with pytest.raises(AssertionError):
+        validate_runtime_manifest(changed_member_bytes)
+    changed_attestation = copy.deepcopy(runtime)
+    changed_attestation["inventory_attestation"]["sha256"] = "0" * 64
+    with pytest.raises(AssertionError):
+        validate_runtime_manifest(changed_attestation)
     extra_member = copy.deepcopy(runtime)
     extra_member["members"].append(
         {
@@ -2110,16 +2531,42 @@ def test_plantuml_exact_bytes_and_control_character_golden() -> None:
     }
     boundary_relation["id"] = recompute_record_id(boundary_relation)
     rich["relations"].append(boundary_relation)
+    external_jsx: dict[str, Any] = {
+        "kind": "jsx_render",
+        "id": "",
+        "source_id": _id("component", "5"),
+        "target": {
+            "kind": "external",
+            "safe_specifier": "react",
+            "exported_name": "memo",
+        },
+        "occurrence_count": 2,
+        "contexts": ["direct"],
+    }
+    external_jsx["id"] = recompute_record_id(external_jsx)
+    rich["relations"].append(external_jsx)
     rich["relations"].sort(key=lambda record: record["id"])
     rich["coverage"]["counts"]["relations"] = len(rich["relations"])
-    rich["coverage"]["counts"]["published"] += 2
-    rich["coverage"]["counts"]["discovered"] += 2
+    rich["coverage"]["counts"]["published"] += 3
+    rich["coverage"]["counts"]["discovered"] += 3
     validate_model(rich)
     rich_output = render_plantuml(rich)
     validate_plantuml_contract(rich_output, rich)
     assert b"literal_dynamic_import" in rich_output
     assert b"boundary=server_to_client_entry" in rich_output
     assert b'cloud "external:react#lazy" as X_' in rich_output
+    assert b"..> X_" in rich_output
+    assert b"jsx_render|occurrences=2|contexts=direct" in rich_output
+
+    external_jsx_mutation = copy.deepcopy(rich)
+    jsx_relation = next(
+        relation
+        for relation in external_jsx_mutation["relations"]
+        if relation["kind"] == "jsx_render" and relation["target"]["kind"] == "external"
+    )
+    jsx_relation["target"]["safe_specifier"] = "react-dom"
+    with pytest.raises(AssertionError):
+        validate_model(external_jsx_mutation)
 
     external_import = next(
         member for member in rich["members"] if member["kind"] == "import_binding"
@@ -2141,7 +2588,7 @@ def test_compatibility_descriptor_known_answer_is_content_independent() -> None:
     descriptor = _descriptor()
     validate_compatibility_descriptor(descriptor)
     assert descriptor["compatibility_id"] == (
-        "08e1262b7b6e8dddab2e31afc1ba36e868d1021c5cd147eaed17c779bf63f9da"
+        "28fa8dfaef26afad655f7bc915308b87e4bd026c5720834c2d3a5b6e48ef06c5"
     )
     assert descriptor["compatibility_id"] == recompute_compatibility_id(descriptor)
     changed_content = copy.deepcopy(descriptor)

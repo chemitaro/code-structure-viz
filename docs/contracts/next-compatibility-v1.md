@@ -2,7 +2,8 @@
 
 `code-structure-viz.next-semantic-compatibility/v1` is a closed descriptor,
 not a caller-supplied label. It contains the public semantic schema ID, the
-six identity versions, the recognition/export/props/relation/fact/boundary
+eight identity versions (project, file, module, component, member, relation,
+fact, and PropsTypeIR), the recognition/export/props/relation/fact/boundary
 algorithm versions, and the trusted semantic profile ID.
 
 The compatibility ID is the digest of this exact preimage (the descriptor's

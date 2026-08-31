@@ -358,7 +358,7 @@
         図を読み込んでいます。
       </div>
       <div class="callout warning">
-        <strong>現在の状態:</strong> これは Issue #8 のベストプラクティス提案と実装前契約を説明する資料です。プロダクトの Next 実装はまだ開始していません。ChatGPT Use Strict Round 5 は P0=0、P1=11、P2=1 で失敗しており、実装開始ゲートは未通過です。以下の設計を実装可能と判定するには、P1の契約 gapsを解消し、固定SHAをGitHubへpushしたうえでStrictのP0/P1=0を確認する必要があります。
+        <strong>現在の状態:</strong> これは Issue #8 のベストプラクティス提案と実装前契約を説明する資料です。プロダクトの Next 実装はまだ開始していません。ChatGPT Use Strict Round 6 は <code>review_status: fail</code>、P0=0、P1=9、P2=2 でした。指摘された契約 gaps は現在、schema・reference validator・fixture・test の data-only 修復として反映済みですが、修復後の fresh exact-SHA Strict review はまだ通過していません。そのため readiness は未確定です。実装開始を判定するには、固定SHAをGitHubへpushし、fresh Strictで P0=0 かつ P1=0 を確認する必要があります。
       </div>
     </header>
 
@@ -386,7 +386,7 @@
         <strong>位置づけ:</strong> この資料はゼロベース分析から得た設計候補です。2026-08-31に中心判断が承認され、canonical Requirement / Design / Planへ反映されました。最終authorityはcanonical文書であり、このHTML自体は説明用Artifactです。
       </div>
       <div class="callout">
-        <strong>Strictレビュー後の具体化:</strong> trusted declarationのshadowing拒否、有限なComponent認定とdefault/export規則、project別config/module resolution、control bytesを再読しないtwo-phase freeze、digest preimage、完全なProps型表現、partial-safeのtaint証明、公開schemaとoffline package contractまで正本で固定しました。後続の差分Issueでは、domain不在だけをempty-sideにし、target解析失敗をadded/removedへ誤変換しません。
+        <strong>契約の具体化:</strong> trusted declarationのshadowing拒否、有限なComponent認定とdefault/export規則、project別config/module resolution、control bytesを再読しないtwo-phase freeze、digest preimage、完全なProps型表現、partial-safeのtaint証明、公開schemaとoffline package contractまで正本で固定しました。Round 6の残存指摘も data-only 契約へ反映しました。後続の差分Issueでは、domain不在だけをempty-sideにし、target解析失敗をadded/removedへ誤変換しません。
       </div>
     </section>
 
@@ -648,6 +648,7 @@ end note
         </table>
       </div>
       <p>event handler、render prop の未実行 body、任意 helper、non-literal import、ambiguous symbol から relation を作りません。Component return、concise arrow、class <code>render()</code>、single-assignment const、conditional、array、safe <code>map</code>/<code>flatMap</code>、exact React <code>createElement</code> だけを bounded に追います。<code>static_import</code> の type-only edge は存在を記録できますが、実行時の value graph や client boundary を意味しません。<code>literal_dynamic_import</code> は static re-export と混同しない独立の value relation です。</p>
+      <p>解決できない外部の JSX 先は、対象コードを読み込まず、redacted cloud の <code>X_&lt;64hex&gt;</code> として表します。これは import だけでなく <code>jsx_render</code> にも同じ規則を適用します。外部 JSX の正常例と改変例を exact golden で検査し、実在しないローカル target を作りません。</p>
     </section>
 
     <section>
@@ -680,8 +681,8 @@ end note
       <p>diagnostic があるかどうかではなく、v1 が約束した意味を欠落させたかで結果を分類します。intentional unsupported を unknown として完全に表現できる場合は、diagnostic があっても complete です。</p>
 
       <h3><code>partial_safe</code> は独立した証明で決める</h3>
-      <p>adapter が「partial」と自己申告しただけでは、payload を公開する根拠になりません。Node response は untrusted input として扱い、Python が全 discovered record、failure root、taint の伝播、causal edge、explicit target witness、collection count を受け取って独立に再計算します。失敗が file/component/prop/relation の局所集合へ閉じ、identity・参照・target completeness・redaction・entity budgetを保ち、欠落coverageを数式で説明できるときだけ <code>partial_safe</code> を認めます。</p>
-      <p>Python はその証明から安全な subset を一つ作り、JSON と PlantUML の両方へ同じ projection を渡します。したがって、adapter の <code>coverage</code> や <code>status</code> の値だけを転記して成功扱いにはしません。証明材料が不足する、global failureである、explicit targetを解決できない、または budget を超えた場合は <code>payload_unavailable</code> とし、safe manifestだけを残します。</p>
+      <p>adapter が「partial」と自己申告しただけでは、payload を公開する根拠になりません。Node response は untrusted input として扱い、Python が全 discovered record、failure root、taint の伝播、causal edge、explicit target witness、collection count を受け取って独立に再計算します。さらに records・roots・closed rule/ownership table から必須 causal edge と taint closure を独立導出し、submitted edge と完全一致させます。frontier は集合として重複を除き、edge omission・shared frontier・boundary role under-taint は拒否します。</p>
+      <p>Python はその証明から安全な subset を一つ作り、JSON と PlantUML の両方へ同じ projection を渡します。したがって、adapter の <code>coverage</code> や <code>status</code> の値だけを転記して成功扱いにはしません。証明材料が不足する、global failureである、または budget を超えた場合は <code>payload_unavailable</code> とし、safe manifestだけを残します。explicit target は canonical key を model から独立解決し、proof の key・status・published ID と一行ずつ完全一致させます。missing、extra、substitution、<code>failed</code> as resolved はすべて拒否します。</p>
 
       <script type="text/plain"
               class="plantuml-source"
@@ -762,13 +763,13 @@ Fatal --> [*]
         <article class="card"><h3>run manifest</h3><p>status、coverage、safe diagnostic、toolchain/config/source-plan version と digest、Artifact SHA-256。</p></article>
       </div>
       <p>manifest には Node、TypeScript、TrustedTypeEnvironment、adapter、protocol の exact version/digest/license、project root と config の repository-relative path、source acquisition plan digest、target/depth/budget の requested/resolved 値を残します。source content 自体は残しません。</p>
-      <p><code>--stdout next:semantic-json</code> のような available selector は、公開 file と完全に同じ bytes を出します。diagnostic は stderr だけです。requested formats は一つの transaction で all-or-none に公開し、既存 path は上書きしません。</p>
+      <p>stdout の selector は、未指定の <code>None</code>（canonical run summary）、<code>manifest</code>（確定した manifest bytes）、<code>next:semantic-json</code>、<code>next:plantuml</code> の四つを固定します。complete、not_applicable、partial_safe、payload_unavailable、fatal、interrupt、usage の全 status について、公開物・exit code・stderr・stdout の exact bytes を matrix で検証します。available selector は公開 file と完全に同じ bytes を出し、unavailable status は typed result、fatal/interrupt は manifestなし、usage は exit 2 かつ空 stdout です。diagnostic は stderr だけで、requested formats は一つの transaction で all-or-none に公開し、既存 path は上書きしません。</p>
 
-      <h3>limits、diagnostic、provenance は一つの契約から投影する</h3>
-      <p>resource limits は request、adapter response、Python validator、run manifest、run fingerprint で別々に定義しません。Python が解決した一つの <code>limits</code> record（file数、file/total bytes、encoded stdin、JSON/string/array、model records、stdout/stderr、timeout、V8 old-space）を全 projection と digest preimageへ伝播します。どこか一つだけの上限変更で、同じ入力の結果が黙って変わらないようにします。</p>
+      <h3>22個のlimits、diagnostic、provenance は一つの契約から投影する</h3>
+      <p>22個の resource limits は request、adapter response、Python validator、run manifest、run fingerprint で別々に定義しません。Python が解決した一つの <code>limits</code> record（file数、file/total bytes、encoded stdin、JSON/string/array、model records、stdout/stderr、timeout、V8 old-space、PropsTypeIR）を全 projection と digest preimageへ伝播します。各上限には対象・計測時点・UTF-8 byteかどうか・境界値を含め、値がちょうど上限なら受理し、1超過時の outcome を固定します。どこか一つだけの上限変更や集計値の改変で、同じ入力の結果が黙って変わらないようにします。</p>
       <p>diagnostic code の単一 authority は <code>schemas/next-diagnostic-catalog-v1.json</code> です。各 code の severity、recoverability、固定 message、domain、許可する path/symbol reference、outcome を catalog から投影し、adapter の自由文や raw compiler text は公開しません。catalogにない code、誤ったseverity、statusとの不整合は契約違反です。</p>
-      <p><code>TrustedTypeEnvironment</code> は target package の型を借りる仕組みではなく、bundled declaration と certified symbol の semantic profile です。runtime manifest には exact schema/version、TypeScript version、各 virtual file の SHA-256、license inventory digest、reserved module/global、certified symbol を記録します。target側の shadowing、ambient augmentation、path alias、trusted pathとの衝突は fail-closed で拒否します。</p>
-      <p><code>semantic_compatibility_id</code> は、semantic schema、identity versions、recognition/export/props/relation/fact/boundary algorithm version、trusted semantic profile ID の canonical descriptorから Python が再計算します。source content digestやNodeのpatch versionだけで意味互換性を変えたことにはしません。Issue #9 はこのIDを前提に、Component identityではなく primitive facts、typed members、relation、coverage を差分の入力として使います。domain不在だけを empty-side とし、target解析失敗を added/removed へ変換しません。</p>
+      <p><code>TrustedTypeEnvironment</code> は target package の型を借りる仕組みではなく、bundled declaration と certified symbol の semantic profile です。実際に同梱した declaration bytes と runtime fixture bytes を読み、physical→virtual mapping、size、SHA-256、非循環 inventory attestation、license digest、reserved module/global、certified symbol を known answer と照合します。target側の shadowing、ambient augmentation、path alias、trusted pathとの衝突は fail-closed で拒否します。</p>
+      <p><code>semantic_compatibility_id</code> は、semantic schema、<code>project</code> と <code>file</code> を含む identity versions、recognition/export/props/relation/fact/boundary algorithm version、trusted semantic profile ID の canonical descriptorから Python が再計算します。source content digestやNodeのpatch versionだけで意味互換性を変えたことにはしません。Issue #9 はこのIDを前提に、Component identityではなく primitive facts、typed members、relation、coverage を差分の入力として使います。domain不在だけを empty-side とし、target解析失敗を added/removed へ変換しません。</p>
     </section>
 
     <section>
@@ -859,25 +860,27 @@ stop
 
     <section>
       <h2>実装開始前の readiness gate</h2>
-      <p>この提案を「実装可能」と呼ぶ条件は、文章が揃うことではありません。machine-checkable な request/response、public semantic、run manifest、stdout、diagnostic、PlantUML の closed contractを実体化し、exact bytes と reference validator で相互投影を検証し、既存 Python/SQLAlchemy の全テストと Next の data-only contract vectors を clean checkout で通すことです。そのうえで GitHubへpushした同一SHAを対象に ChatGPT Use Strict を実行し、P0=0かつP1=0を確認します。</p>
+      <p>この提案を「実装可能」と呼ぶ条件は、文章が揃うことではありません。machine-checkable な request/response、public semantic、run manifest、stdout、diagnostic、PlantUML の closed contractを実体化し、exact bytes と reference validator で相互投影を検証し、既存 Python/SQLAlchemy の全テストと Next の data-only contract vectors を clean checkout で通すことです。現在、Round 6 の9件のP1と2件のP2は契約・schema・fixture・testの data-only 修復として反映済みです。そのうえで修復後の GitHub 同一SHAを対象に fresh ChatGPT Use Strict を実行し、P0=0かつP1=0を確認する必要があります。</p>
       <div class="callout warning">
-        <strong>Round 5の判定:</strong> P0=0、P1=11、P2=1、<code>review_status: fail</code> です。P0は解消しましたが、P1が残っているため、実装開始は停止中です。このHTMLは実装着手やreadiness passを宣言するものではありません。
+        <strong>Round 6の判定:</strong> 固定点の ChatGPT Use Strict は <code>review_status: fail</code>、P0=0、P1=9、P2=2 でした。P1/P2の修復は現在の data-only contracts に反映済みですが、fresh Strict は未通過です。したがって readiness は未確定であり、プロダクトの Next 実装も未着手です。このHTMLは実装着手やreadiness passを宣言するものではありません。
       </div>
-      <h3>Round 5で残ったP1の確認項目</h3>
+      <h3>Round 6 remediation：ローカル契約へ反映した項目</h3>
       <ul>
-        <li><strong>□ minimum mypy gate:</strong> Python側の新しい契約・validator境界をminimum mypyで検査し、型検査の対象と失敗条件を固定する。</li>
-        <li><strong>□ role / encoded-size:</strong> file role の <code>control &gt; context &gt; program</code> と encoded/decoded size limitsを、requestからmanifestまで同じ値で検証する。</li>
-        <li><strong>□ canonical ID / request-response projection:</strong> kind別ID、canonical preimage、request/response/modelの相互投影と再計算をpositive/negative vectorで固定する。</li>
-        <li><strong>□ relation / fact invariants:</strong> two-plane relation、typed target、occurrence集約、direct Factのkind/value連動、参照存在・ownershipをreference validatorで検証する。</li>
-        <li><strong>□ Props canonicalization / limits:</strong> 全PropsTypeIR variant、default evidence、redaction、overload/correlation、depth・node・collection limitをclosed schemaとvectorで固定する。</li>
-        <li><strong>□ taint closure:</strong> failure rootからaffected record、coverage、target witness、count、subsetまでのtaint閉包をPythonが再計算し、partial-safeの根拠にする。</li>
-        <li><strong>□ manifest projection:</strong> request/config/source/status/budget/toolchain/trusted profileをrun-manifestのNext branchへ完全投影し、projection漏れを拒否する。</li>
-        <li><strong>□ stdout cross-artifact equality:</strong> available selectorのstdoutと公開Artifactのbytesを完全一致させ、unavailable result・summary・stderrの分離を全statusで検証する。</li>
-        <li><strong>□ diagnostic catalog projection:</strong> catalogのcode・severity・recoverability・message・domain・reference permission・outcomeと、public diagnosticsの投影を一致させる。</li>
-        <li><strong>□ exact trusted/runtime profile:</strong> TrustedTypeEnvironment、compiled runtime、TypeScript、license、reserved symbol/path、digest preimageのexact setとshadow/augmentation拒否を検証する。</li>
-        <li><strong>□ PlantUML doc / renderer equality:</strong> documented line grammar、escaping、alias、marker、ordering、complete-empty/partial/attack vectorsと、writer/browser rendererの出力を一致させる。</li>
+        <li><strong>✓ taint の必須 edge:</strong> records・roots・closed rule/ownership tableからPythonが必須 causal edgeとtaint closureを独立導出し、submitted edgeと完全一致させます。frontier重複、edge omission、boundary role under-taintを拒否します。</li>
+        <li><strong>✓ explicit target:</strong> <code>component:&lt;path&gt;#&lt;name&gt;</code>、<code>module:&lt;path&gt;</code>、<code>file:&lt;path&gt;</code>へcanonicalizeし、proofのtarget key・status・published IDと完全一致させます。missing・extra・substitution・<code>failed</code> as resolvedを拒否します。</li>
+        <li><strong>✓ export witness:</strong> component export、non-component value export、type-only exportを一件ずつ witness 化し、coverage countをrecordsから再計算します。countだけの改変は通しません。</li>
+        <li><strong>✓ 22個のlimits:</strong> file/model/process/PropsTypeIR各上限の単位・計測時点・UTF-8・inclusive boundary・超過時 outcomeを固定し、集計配列・model countも再計算します。</li>
+        <li><strong>✓ trusted/runtime bytes:</strong> 実際の declaration/runtime fixture bytes の physical→virtual mapping、size、SHA-256、license、非循環 inventory attestationを known answer と照合し、shadowingを拒否します。</li>
+        <li><strong>✓ stdout/status matrix:</strong> <code>None</code>、<code>manifest</code>、<code>next:semantic-json</code>、<code>next:plantuml</code>を、complete・not_applicable・partial_safe・payload_unavailable・fatal・interrupt・usageの全statusで exact bytes、publication、stderr、exitと検証します。</li>
+        <li><strong>✓ external PlantUML relation:</strong> 外部 JSX render targetを redacted cloud の <code>X_&lt;64hex&gt;</code> で表し、external JSX goldenとmutationを追加します。</li>
+        <li><strong>✓ compatibility identity:</strong> semantic compatibility preimageへ <code>project</code> と <code>file</code> の identity versionを含め、known-answer IDで固定します。併せて <code>head_commit</code> は40桁または64桁だけ、非空 role subsetは7通りだけを受理します。</li>
       </ul>
-      <p>この11項目と全テスト、clean GitHub StrictのP0/P1=0が揃うまで、次の行程は仕様契約の修復です。実装開始後も、Strict passはIssue完了の証明ではなく、別途production acceptanceを確認する入口です。</p>
+      <h3>まだ完了していない gate</h3>
+      <ul>
+        <li><strong>□ fresh exact-SHA Strict:</strong> data-only 修復後の同一GitHub SHAを ChatGPT Use Strict で再レビューし、<code>review_status: pass</code>、P0=0、P1=0を確認する。</li>
+        <li><strong>□ production implementation:</strong> Strict pass後に初めて、hardened Node adapter、Python integration、publicationを実装し、production acceptanceを別途証明する。</li>
+      </ul>
+      <p>ローカル契約の修復と全テストの成功は、fresh Strict passやIssue完了を意味しません。上の gate が揃うまで、この資料の状態は「実装前・readiness未確定」です。</p>
     </section>
 
     <section>

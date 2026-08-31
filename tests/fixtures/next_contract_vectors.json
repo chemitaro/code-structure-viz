@@ -20,8 +20,15 @@
     "plantuml-complete-non-empty",
     "plantuml-partial-safe",
     "plantuml-external-dynamic",
+    "plantuml-external-jsx",
     "nfc-canonical-digest",
-    "compatibility-known-answer"
+    "compatibility-known-answer",
+    "export-resolution-witness",
+    "limits-inclusive-boundaries",
+    "runtime-inventory-attestation",
+    "stdout-all-selectors",
+    "head-commit-known-lengths",
+    "taint-boundary-closure"
   ],
   "negative": [
     "cross-domain",
@@ -42,6 +49,17 @@
     "runtime-http-url",
     "compatibility-mismatch",
     "plantuml-injection",
-    "plantuml-facet-mutation"
+    "plantuml-facet-mutation",
+    "taint-omitted-edge",
+    "taint-shared-frontier-duplicate",
+    "taint-boundary-underflow",
+    "target-missing-resolution",
+    "target-extra-resolution",
+    "target-substituted-id",
+    "target-failed-as-resolved",
+    "export-witness-count-mutation",
+    "runtime-member-byte-mutation",
+    "runtime-attestation-mutation",
+    "head-commit-invalid-length"
   ]
 }

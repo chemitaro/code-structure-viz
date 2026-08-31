@@ -46,7 +46,7 @@
     "request": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/snapshot_request"},
     "config": {"$ref": "urn:code-structure-viz:schema:next-config-v1"},
     "projects": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/project"}},
-    "targets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+    "targets": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"}},
     "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},
     "toolchain": {"$ref": "#/$defs/toolchain"},
     "trusted_environment": {"$ref": "urn:code-structure-viz:schema:next-trusted-type-environment-v1"},
@@ -64,7 +64,7 @@
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"},
-    "source": {"type": "object", "additionalProperties": false, "required": ["schema", "kind", "head_commit", "fingerprint", "file_count"], "properties": {"schema": {"const": "code-structure-viz.source-view/v1"}, "kind": {"enum": ["working-tree", "commit"]}, "head_commit": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{40,64}$"}, {"type": "null"}]}, "fingerprint": {"$ref": "#/$defs/digest"}, "file_count": {"type": "integer", "minimum": 0}}},
+    "source": {"type": "object", "additionalProperties": false, "required": ["schema", "kind", "head_commit", "fingerprint", "file_count"], "properties": {"schema": {"const": "code-structure-viz.source-view/v1"}, "kind": {"enum": ["working-tree", "commit"]}, "head_commit": {"anyOf": [{"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}, {"type": "null"}]}, "fingerprint": {"$ref": "#/$defs/digest"}, "file_count": {"type": "integer", "minimum": 0}}},
     "budget": {"type": "object", "additionalProperties": false, "required": ["name", "requested", "resolved", "actual", "source"], "properties": {"name": {"const": "max_entities"}, "requested": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 100000}, {"type": "null"}]}, "resolved": {"type": "integer", "minimum": 1, "maximum": 100000}, "actual": {"oneOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]}, "source": {"enum": ["builtin", "repository", "explicit", "cli"]}}},
     "toolchain": {
       "type": "object",

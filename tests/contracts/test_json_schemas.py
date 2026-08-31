@@ -169,6 +169,8 @@ def _next_compatibility_descriptor() -> dict[str, object]:
         "schema": "code-structure-viz.next-semantic-compatibility/v1",
         "semantic_schema": "code-structure-viz.semantic/v1",
         "identity_versions": {
+            "project": 1,
+            "file": 1,
             "module": 1,
             "component": 1,
             "member": 1,
@@ -221,22 +223,30 @@ def _next_trusted_environment() -> dict[str, object]:
         ),
         "files": [
             {
+                "physical_path": "tests/fixtures/next_trusted_profile/jsx-runtime.d.ts",
                 "virtual_path": "/.code-structure-viz/trusted/v1/jsx-runtime.d.ts",
+                "size_bytes": 1,
                 "sha256": "1" * 64,
                 "license_id": "MIT",
             },
             {
+                "physical_path": "tests/fixtures/next_trusted_profile/lib.d.ts",
                 "virtual_path": "/.code-structure-viz/trusted/v1/lib.d.ts",
+                "size_bytes": 1,
                 "sha256": "2" * 64,
                 "license_id": "Apache-2.0",
             },
             {
+                "physical_path": "tests/fixtures/next_trusted_profile/next-dynamic.d.ts",
                 "virtual_path": "/.code-structure-viz/trusted/v1/next-dynamic.d.ts",
+                "size_bytes": 1,
                 "sha256": "3" * 64,
                 "license_id": "MIT",
             },
             {
+                "physical_path": "tests/fixtures/next_trusted_profile/react.d.ts",
                 "virtual_path": "/.code-structure-viz/trusted/v1/react.d.ts",
+                "size_bytes": 1,
                 "sha256": "4" * 64,
                 "license_id": "MIT",
             },
@@ -248,6 +258,19 @@ def _next_trusted_environment() -> dict[str, object]:
             "next/dynamic",
         ],
         "reserved_global_names": ["Array", "JSX", "ReadonlyArray"],
+        "anti_shadowing_witness": [
+            {"source_kind": "module", "source_name": "react", "decision": "reserved"},
+            {"source_kind": "module", "source_name": "react/jsx-runtime", "decision": "reserved"},
+            {
+                "source_kind": "module",
+                "source_name": "react/jsx-dev-runtime",
+                "decision": "reserved",
+            },
+            {"source_kind": "module", "source_name": "next/dynamic", "decision": "reserved"},
+            {"source_kind": "global", "source_name": "Array", "decision": "reserved"},
+            {"source_kind": "global", "source_name": "JSX", "decision": "reserved"},
+            {"source_kind": "global", "source_name": "ReadonlyArray", "decision": "reserved"},
+        ],
         "certified_symbols": [
             {
                 "source_kind": "global",
@@ -368,6 +391,8 @@ def _next_trusted_environment() -> dict[str, object]:
 
 def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras() -> None:
     identity_versions = {
+        "project": 1,
+        "file": 1,
         "module": 1,
         "component": 1,
         "member": 1,
@@ -502,6 +527,20 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
     with pytest.raises(ValidationError):
         domain_validator.validate({**domain, "incomplete_kind": "partial_safe"})
 
+    for validator, value in (
+        (semantic_validator, semantic),
+        (domain_validator, domain),
+    ):
+        for length in (40, 64):
+            candidate = cast(dict[str, Any], deepcopy(value))
+            candidate["source"]["head_commit"] = "a" * length
+            validator.validate(candidate)
+        for length in (39, 41, 63, 65):
+            candidate = cast(dict[str, Any], deepcopy(value))
+            candidate["source"]["head_commit"] = "a" * length
+            with pytest.raises(ValidationError):
+                validator.validate(candidate)
+
 
 def test_diagnostic_schema_accepts_exact_vector_and_rejects_extra_field() -> None:
     value = {
@@ -569,6 +608,17 @@ def test_diagnostic_schema_accepts_diff_diagnostic_vectors(
                 "schema": "code-structure-viz.run-summary/v1",
                 "run_status": "fatal",
                 "exit_code": 1,
+                "domains": [],
+                "manifest": None,
+            },
+        ),
+        (
+            "run-summary-v1.schema.json",
+            {
+                "type": "run_summary",
+                "schema": "code-structure-viz.run-summary/v1",
+                "run_status": "usage",
+                "exit_code": 2,
                 "domains": [],
                 "manifest": None,
             },
@@ -1115,6 +1165,22 @@ def test_manifest_schema_accepts_every_reviewed_golden(path: Path) -> None:
     value = json.loads(path.read_text(encoding="utf-8"))
 
     _validator("run-manifest-v1.schema.json").validate(value)
+
+
+def test_run_manifest_head_commit_accepts_only_full_hash_lengths() -> None:
+    value = json.loads(
+        (SEMANTIC_GOLDEN_ROOT / "whole" / "run-manifest.json").read_text(encoding="utf-8")
+    )
+    validator = _validator("run-manifest-v1.schema.json")
+    for length in (40, 64):
+        candidate = deepcopy(value)
+        candidate["source"]["head_commit"] = "a" * length
+        validator.validate(candidate)
+    for length in (39, 41, 63, 65):
+        candidate = deepcopy(value)
+        candidate["source"]["head_commit"] = "a" * length
+        with pytest.raises(ValidationError):
+            validator.validate(candidate)
 
 
 @pytest.mark.parametrize(

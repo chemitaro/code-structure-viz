@@ -72,8 +72,8 @@
     "identity_versions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["module", "component", "member", "relation", "fact", "props_ir"],
-      "properties": {"module": {"const": 1}, "component": {"const": 1}, "member": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "props_ir": {"const": 1}}
+      "required": ["project", "file", "module", "component", "member", "relation", "fact", "props_ir"],
+      "properties": {"project": {"const": 1}, "file": {"const": 1}, "module": {"const": 1}, "component": {"const": 1}, "member": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "props_ir": {"const": 1}}
     },
     "source": {
       "type": "object",
@@ -82,7 +82,7 @@
       "properties": {
         "schema": {"const": "code-structure-viz.source-view/v1"},
         "kind": {"enum": ["working-tree", "commit"]},
-        "head_commit": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{40,64}$"}, {"type": "null"}]},
+        "head_commit": {"anyOf": [{"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}, {"type": "null"}]},
         "fingerprint": {"$ref": "#/$defs/digest"},
         "file_count": {"type": "integer", "minimum": 0}
       }
@@ -177,16 +177,23 @@
     "export_member": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "id", "owner_id", "exported_name", "role", "target_component_id", "reexport"],
+      "required": ["kind", "id", "owner_id", "exported_name", "role", "target_component_id", "resolution_kind", "reexport"],
       "properties": {
         "kind": {"const": "export_binding"},
         "id": {"$ref": "#/$defs/member_id"},
         "owner_id": {"$ref": "#/$defs/module_id"},
         "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]},
-        "role": {"const": "value"},
-        "target_component_id": {"$ref": "#/$defs/component_id"},
+        "role": {"enum": ["value", "type"]},
+        "target_component_id": {"anyOf": [{"$ref": "#/$defs/component_id"}, {"type": "null"}]},
+        "resolution_kind": {"enum": ["component", "value", "type"]},
         "reexport": {"type": "boolean"}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"resolution_kind": {"const": "component"}}}, "then": {"required": ["target_component_id"], "properties": {"role": {"const": "value"}, "target_component_id": {"type": "string"}}}},
+        {"if": {"properties": {"resolution_kind": {"enum": ["value", "type"]}}}, "then": {"properties": {"target_component_id": {"type": "null"}}}},
+        {"if": {"properties": {"resolution_kind": {"const": "value"}}}, "then": {"properties": {"role": {"const": "value"}}}},
+        {"if": {"properties": {"resolution_kind": {"const": "type"}}}, "then": {"properties": {"role": {"const": "type"}}}}
+      ]
     },
     "import_member": {
       "type": "object",
@@ -322,7 +329,7 @@
       }
     },
     "correlation_loss": {"type": "object", "additionalProperties": false, "required": ["component_id", "prop_ids", "signature_count"], "properties": {"component_id": {"$ref": "#/$defs/component_id"}, "prop_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/member_id"}}, "signature_count": {"type": "integer", "minimum": 2}}},
-    "target_completeness": {"type": "object", "additionalProperties": false, "required": ["target_key", "status", "record_ids"], "properties": {"target_key": {"type": "string", "minLength": 1}, "status": {"enum": ["complete", "failed"]}, "record_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}}},
+    "target_completeness": {"type": "object", "additionalProperties": false, "required": ["target_key", "status", "record_ids"], "properties": {"target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"}, "status": {"enum": ["complete", "failed"]}, "record_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}}},
     "diagnostic": {
       "type": "object",
       "additionalProperties": false,

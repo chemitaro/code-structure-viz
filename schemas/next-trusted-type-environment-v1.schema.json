@@ -4,7 +4,7 @@
   "title": "CodeStructureViz Next trusted type environment manifest v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "environment_version", "semantic_profile_id", "typescript_version", "license_inventory_digest", "files", "reserved_module_specifiers", "reserved_global_names", "certified_symbols", "sha256"],
+  "required": ["schema", "environment_version", "semantic_profile_id", "typescript_version", "license_inventory_digest", "files", "reserved_module_specifiers", "reserved_global_names", "certified_symbols", "anti_shadowing_witness", "sha256"],
   "properties": {
     "schema": {"const": "code-structure-viz.next-trusted-types/v1"},
     "environment_version": {"type": "string", "minLength": 1},
@@ -15,14 +15,20 @@
     "reserved_module_specifiers": {"type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": {"enum": ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "next/dynamic"]}},
     "reserved_global_names": {"type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": {"enum": ["Array", "JSX", "ReadonlyArray"]}},
     "certified_symbols": {"type": "array", "minItems": 14, "maxItems": 14, "uniqueItems": true, "items": {"$ref": "#/$defs/symbol"}},
+    "anti_shadowing_witness": {"type": "array", "minItems": 7, "maxItems": 7, "uniqueItems": true, "items": {"$ref": "#/$defs/shadowing_witness"}},
     "sha256": {"$ref": "#/$defs/digest"}
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "file": {
       "type": "object", "additionalProperties": false,
-      "required": ["virtual_path", "sha256", "license_id"],
-      "properties": {"virtual_path": {"type": "string", "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)/\\.code-structure-viz/trusted/v1/[A-Za-z0-9._/-]+\\.d\\.ts$"}, "sha256": {"$ref": "#/$defs/digest"}, "license_id": {"enum": ["MIT", "Apache-2.0"]}}
+      "required": ["physical_path", "virtual_path", "size_bytes", "sha256", "license_id"],
+      "properties": {"physical_path": {"type": "string", "pattern": "^tests/fixtures/next_trusted_profile/[A-Za-z0-9._-]+\\.d\\.ts$"}, "virtual_path": {"type": "string", "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)/\\.code-structure-viz/trusted/v1/[A-Za-z0-9._/-]+\\.d\\.ts$"}, "size_bytes": {"type": "integer", "minimum": 1}, "sha256": {"$ref": "#/$defs/digest"}, "license_id": {"enum": ["MIT", "Apache-2.0"]}}
+    },
+    "shadowing_witness": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_kind", "source_name", "decision"],
+      "properties": {"source_kind": {"enum": ["module", "global"]}, "source_name": {"type": "string", "minLength": 1}, "decision": {"const": "reserved"}}
     },
     "symbol": {
       "type": "object", "additionalProperties": false,
