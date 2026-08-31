@@ -45,6 +45,14 @@ package_sequence_key: "ISSUE-05"
 - source/body/secret を漏らさず、failure と coverage を manifest で agent が機械判定できる。
 - downstream Issue はこの Design の stable interface だけへ依存し、内部 class layout を fork しない。
 
+### Round 8 review state
+
+ChatGPT Use Strict Round 8 は `review_status: fail`、P0=0、P1=4、P2=0 だった。
+4件の修復は、root run manifestのNext branch、凍結source bytesによる独立export
+census、response検証後のEntityBudgetGate、program-only semantic ownershipとして、
+このDesignとdata-only contractへ反映する。fresh exact-SHA Strictは未実行・未通過で、
+readinessは未確定である。production Next adapter/CLIは未実装のまま維持する。
+
 ## 責務・Interface
 
 ### planned component responsibilities
@@ -72,11 +80,15 @@ code-structure-viz diff --repo PATH --output-dir PATH [--domain DOMAIN] [--from 
 - `--repo`はexact Git root。repeatable `--project`はconfig `[next].projects[].root`を置換し、defaultは`.`。source/configはproject descriptorから解決し、monorepo/workspaceを自動探索しない。
 - Next targetの公開文法は`path:REPO_REL_FILE_OR_DIR`だけである。これは内部
   semantic Module/Component IDとは別の利用者向けアドレスであり、
-  `component:`、`module:`、`file:`形式は受理しない。file pathはfrozen file・
-  Module・Component集合へ、directory pathは全canonical descendant frozen集合へ
-  解決する。複数descendantは正常で、missing、project-scope ambiguity、
-  out-of-scope、選択集合のtainted/excluded/failed recordのいずれか一つでも
-  `CSV-NEXT-TARGET-001`・`payload_unavailable`・no-artifactとする。
+  `component:`、`module:`、`file:`形式は受理しない。file pathは、対応する
+  frozen Fileが`program` roleかつsuffix `.ts`、`.tsx`、`.js`、`.jsx`の場合だけ
+  File・Module・Component集合へ解決する。`.d.ts`、`package.json`、
+  `tsconfig.json`、`jsconfig.json`はcontext/control provenanceでありdirect target
+  にはできない。directory pathは全canonical descendant frozen集合へ解決し、
+  context/control Fileをprovenanceに残してもsemantic childは作らない。複数descendant
+  は正常で、missing、project-scope ambiguity、out-of-scope、選択集合の
+  tainted/excluded/failed recordのいずれか一つでも`CSV-NEXT-TARGET-001`・
+  `payload_unavailable`・no-artifactとする。
 
 ### stdout selector and stream routing
 
@@ -256,13 +268,17 @@ target `node_modules`を読まずにReact/JSX/Nextのv1 acceptanceをTypeChecker
 
 The adapter first emits an independent complete `ExportObservation` stream;
 the public `ExportBindingMember` is a projection and is never the source of
-truth for coverage. Each observation carries `owner_module_id`, canonical
-`exported_name`, value/type `role`, `reexport`, a stable syntax identity,
-`resolution` (`component`, `value`, `type`, or `unknown`), and an optional
-`component_id`. Python checks the stream's canonical order and uniqueness,
-derives every public binding and export coverage count, and exact-compares
-both projections. Omission, duplicate syntax identity, and component
-substitution are rejected.
+truth for coverage. Python owns a checked-in frozen UTF-8 source-byte census
+fixture and a closed deterministic scanner. Each observation carries the
+repository-relative `owner_file_path`, exact `byte_start`/`byte_end`,
+`token_identity`, `syntax_kind`, canonical `exported_name`, value/type `role`,
+`reexport`, and `star`; TypeChecker resolution is one of `component`, `value`,
+`type`, or `unknown`, with an optional `component_id`. Node observations must
+exact-match the census syntax identity and Python cross-checks resolution
+against the model/TypeChecker witness. Python derives every public binding and
+export coverage count, and exact-compares both projections. Omission, duplicate
+syntax identity, coordinated observation/binding/count omission, star/type
+conflict, and component substitution are rejected.
 
 | export pattern | owner | exported name | target | result |
 | --- | --- | --- | --- | --- |
@@ -316,8 +332,8 @@ overlapping rootsを禁止するため、各source moduleのowning projectは一
 
 | target | grammar / resolution | selected zero | failure |
 | --- | --- | --- | --- |
-| `path:FILE` | selected project/source root内の`.ts/.tsx/.js/.jsx` exact frozen file | fileにComponent 0ならcomplete empty | missing/out-of-scopeはpayload unavailable |
-| `path:DIRECTORY` | frozen inventoryに存在するlexical directory subtree | subtreeにComponent 0ならcomplete empty | missing/out-of-scopeはpayload unavailable |
+| `path:FILE` | selected project/source root内で、program roleかつ`.ts/.tsx/.js/.jsx`のexact frozen file | fileにComponent 0ならcomplete empty | missing/out-of-scope、`.d.ts`/control direct targetは`CSV-NEXT-TARGET-001` payload unavailable |
+| `path:DIRECTORY` | frozen inventoryに存在するlexical directory subtree。program fileのsemantic childrenを全件選択し、context/control Fileはprovenanceに限定 | subtreeにComponent 0ならcomplete empty | missing/out-of-scope、選択集合のtaint/exclusion/failureは`CSV-NEXT-TARGET-001` payload unavailable |
 
 - path/file-directory判定はfrozen inventoryで行い、host filesystemを再参照しない。
 - directory targetは一致する全fileをcanonical path/ID順に含め、一部だけを選ぶ
@@ -818,6 +834,8 @@ production adapter実装前のcontract-authoring commitで次を実ファイル�
 
 - `semantic-v1.schema.json`: domain enumに`next`、上記Project/Module/Component/Member/Relation/Fact/Coverage discriminated branchを追加。既存Python/SQLAlchemy branchは変更しない。
 - `run-manifest-v1.schema.json`: Next domain descriptor内だけにsource plan/config/run fingerprint、projects、targets、toolchain、trusted environment、limits、coverageを追加。
+- Next snapshotのroot `request.targets`はdomain-discriminatedなunique path-string arrayとして`next_request.targets`、`next_config.targets`、resolved config、domain targetsと同じcanonical bytesへ投影する。共通Python/SQLAlchemyのobject target grammarは変更しない。
+- `tests/fixtures/next_export_census.json`は凍結source bytesを入力とするPython-owned census fixtureとし、source syntax identityの完全性をNode observationと照合する。
 - diagnostic catalog: `CSV-NEXT-*`ごとにexact code、severity、recoverable、path/symbol permission、fixed message templateをregistry/docs/schemaへ一件ずつ定義する。
 - PlantUML grammar: one statement/line、UTF-8 LF、start/title/legend/packages/entities/members/relations/end固定順。identifierはdigest alias、displayはNFC escape済み。backslash、LF/CR/tab、quote、PlantUML control characterをescapeし、raw source/literalを入力にしない。
 - Next projection canonical JSONは`schema,projects,targets,depth,limits,trusted_environment_digest`だけをclosed orderで持つ。
@@ -874,7 +892,7 @@ Python bridgeはprotocol family `code-structure-viz.next-adapter/v1`の`next-ada
 
 ### entity budget and publication
 
-`EntityBudgetGate`はselected internal Module+Component countをrender前にdefault 500と比較する。501以上はdomain `incomplete/payload_unavailable` exit 3、affected JSON/PlantUMLなし、safe run manifestへrequested/resolved/count/diagnosticを記録する。member/relation/external/frontier/project descriptorは数えない。valid overrideは通常公開、invalid valueはexit 2。snapshot pipelineは`ChangedPathAdmissionGate`を構築・実行せず、diff専用optionはusage error、Artifactなし。OutputTransactionはabsolute path/protocol noise/unsafe fieldをpublish前に拒否する。
+responseの構造・参照・`max_model_records`検証を先に完了し、その後render/publication直前に独立`EntityBudgetGate`を一度だけ適用する。Gateはsubmitted countを信用せず、selected/published internal Module+Componentのactualを再計算する。501以上はdomain `incomplete/payload_unavailable`、`CSV-NEXT-LIMIT-005`、exit 3、affected JSON/PlantUMLなし、safe run manifestのrequested/resolved/actual countとunavailable stdoutを記録する。member/relation/external/frontier/project descriptorは数えない。500は受理し、600 overrideで501は受理する。all-record 100001は別の`max_model_records` failureとして扱う。invalid valueはexit 2。snapshot pipelineは`ChangedPathAdmissionGate`を構築・実行せず、diff専用optionはusage error、Artifactなし。OutputTransactionはabsolute path/protocol noise/unsafe fieldをpublish前に拒否する。
 
 ### determinism and optionality
 

@@ -1,0 +1,17 @@
+{
+  "schema": "code-structure-viz.next-export-census/v1",
+  "files": [
+    {
+      "path": "src/Button.tsx",
+      "content_base64": "ZXhwb3J0IGRlZmF1bHQgQnV0dG9uOwpleHBvcnQgY29uc3QgcmVuZGVyVmFsdWUgPSAxOwpleHBvcnQgdHlwZSBQcm9wcyA9IHsgdGl0bGU6IHN0cmluZyB9OwpleHBvcnQgKiBmcm9tICIuL090aGVyIjsK"
+    },
+    {
+      "path": "src/Card.tsx",
+      "content_base64": "Y29uc3QgQ2FyZCA9IDE7Cg=="
+    },
+    {
+      "path": "src/types.d.ts",
+      "content_base64": "ZXhwb3J0IGludGVyZmFjZSBQcm9wcyB7fQo="
+    }
+  ]
+}

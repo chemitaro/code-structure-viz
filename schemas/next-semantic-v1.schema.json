@@ -183,17 +183,11 @@
         "id": {"$ref": "#/$defs/member_id"},
         "owner_id": {"$ref": "#/$defs/module_id"},
         "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]},
-        "role": {"enum": ["value", "type"]},
-        "target_component_id": {"anyOf": [{"$ref": "#/$defs/component_id"}, {"type": "null"}]},
-        "resolution_kind": {"enum": ["component", "value", "type"]},
+        "role": {"const": "value"},
+        "target_component_id": {"$ref": "#/$defs/component_id"},
+        "resolution_kind": {"const": "component"},
         "reexport": {"type": "boolean"}
-      },
-      "allOf": [
-        {"if": {"properties": {"resolution_kind": {"const": "component"}}}, "then": {"required": ["target_component_id"], "properties": {"role": {"const": "value"}, "target_component_id": {"type": "string"}}}},
-        {"if": {"properties": {"resolution_kind": {"enum": ["value", "type"]}}}, "then": {"properties": {"target_component_id": {"type": "null"}}}},
-        {"if": {"properties": {"resolution_kind": {"const": "value"}}}, "then": {"properties": {"role": {"const": "value"}}}},
-        {"if": {"properties": {"resolution_kind": {"const": "type"}}}, "then": {"properties": {"role": {"const": "type"}}}}
-      ]
+      }
     },
     "import_member": {
       "type": "object",

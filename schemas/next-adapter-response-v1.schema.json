@@ -119,17 +119,25 @@
     "export_observation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["owner_module_id", "exported_name", "role", "reexport", "syntax_identity", "resolution", "component_id"],
+      "required": ["owner_module_id", "owner_file_path", "byte_start", "byte_end", "token_identity", "syntax_identity", "syntax_kind", "exported_name", "role", "reexport", "star", "resolution", "component_id"],
       "properties": {
         "owner_module_id": {"type": "string", "pattern": "^next:module:[0-9a-f]{64}$"},
-        "exported_name": {"anyOf": [{"type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"}, {"const": "default"}]},
+        "owner_file_path": {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/path"},
+        "byte_start": {"type": "integer", "minimum": 0},
+        "byte_end": {"type": "integer", "minimum": 1},
+        "token_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "syntax_identity": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
+        "syntax_kind": {"enum": ["default_export", "named_export", "type_export", "reexport", "export_all"]},
+        "exported_name": {"anyOf": [{"type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"}, {"const": "default"}, {"const": "*"}]},
         "role": {"enum": ["value", "type"]},
         "reexport": {"type": "boolean"},
-        "syntax_identity": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
+        "star": {"type": "boolean"},
         "resolution": {"enum": ["component", "value", "type", "unknown"]},
         "component_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]}
       },
       "allOf": [
+        {"if": {"properties": {"star": {"const": true}}}, "then": {"properties": {"syntax_kind": {"const": "export_all"}, "exported_name": {"const": "*"}, "reexport": {"const": true}, "resolution": {"const": "unknown"}, "component_id": {"type": "null"}}}},
+        {"if": {"properties": {"star": {"const": false}}}, "then": {"not": {"properties": {"exported_name": {"const": "*"}}}}},
         {"if": {"properties": {"resolution": {"const": "component"}}}, "then": {"properties": {"role": {"const": "value"}, "component_id": {"type": "string"}}}},
         {"if": {"properties": {"resolution": {"enum": ["value", "type", "unknown"]}}}, "then": {"properties": {"component_id": {"type": "null"}}}},
         {"if": {"properties": {"resolution": {"const": "value"}}}, "then": {"properties": {"role": {"const": "value"}}}},

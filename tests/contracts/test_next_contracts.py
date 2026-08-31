@@ -36,6 +36,7 @@ from tests.contracts.next_reference_validation import (
     digest,
     encoded_request_bytes,
     entity_budget_allowed,
+    entity_budget_gate,
     expected_export_observations,
     expected_export_resolution_witness,
     internal_entity_count,
@@ -91,10 +92,14 @@ def _id(kind: str, digit: str) -> str:
     known: dict[tuple[str, str], dict[str, Any]] = {
         ("project", "0"): {"root": "."},
         ("file", "1"): {"project_id": project_id, "path": "src/Button.tsx"},
-        ("file", "2"): {"project_id": project_id, "path": "src/types.d.ts"},
+        ("file", "2"): {"project_id": project_id, "path": "src/Card.tsx"},
+        ("file", "c"): {"project_id": project_id, "path": "src/types.d.ts"},
         ("file", "e"): {"project_id": project_id, "path": "src/Unused.tsx"},
+        ("file", "p"): {"project_id": project_id, "path": "package.json"},
+        ("file", "t"): {"project_id": project_id, "path": "tsconfig.json"},
+        ("file", "j"): {"project_id": project_id, "path": "jsconfig.json"},
         ("module", "3"): {"project_id": project_id, "path": "src/Button.tsx"},
-        ("module", "4"): {"project_id": project_id, "path": "src/types.d.ts"},
+        ("module", "4"): {"project_id": project_id, "path": "src/Card.tsx"},
         ("module", "f"): {"project_id": project_id, "path": "src/Unused.tsx"},
         (
             "component",
@@ -107,8 +112,8 @@ def _id(kind: str, digit: str) -> str:
             "component",
             "6",
         ): {
-            "module_id": raw("module", {"project_id": project_id, "path": "src/types.d.ts"}),
-            "declaration_key": "PropsView",
+            "module_id": raw("module", {"project_id": project_id, "path": "src/Card.tsx"}),
+            "declaration_key": "Card",
         },
         (
             "member",
@@ -123,11 +128,11 @@ def _id(kind: str, digit: str) -> str:
             "8",
         ): {
             "owner_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
-            "imported_name": "PropsView",
+            "imported_name": "Card",
             "role": "value",
             "source": {
                 "kind": "internal",
-                "module_id": raw("module", {"project_id": project_id, "path": "src/types.d.ts"}),
+                "module_id": raw("module", {"project_id": project_id, "path": "src/Card.tsx"}),
             },
         },
         (
@@ -153,7 +158,7 @@ def _id(kind: str, digit: str) -> str:
             "source_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
             "target": {
                 "kind": "internal",
-                "module_id": raw("module", {"project_id": project_id, "path": "src/types.d.ts"}),
+                "module_id": raw("module", {"project_id": project_id, "path": "src/Card.tsx"}),
             },
             "role": "value",
             "reexport": False,
@@ -179,9 +184,9 @@ def _id(kind: str, digit: str) -> str:
                     "component",
                     {
                         "module_id": raw(
-                            "module", {"project_id": project_id, "path": "src/types.d.ts"}
+                            "module", {"project_id": project_id, "path": "src/Card.tsx"}
                         ),
-                        "declaration_key": "PropsView",
+                        "declaration_key": "Card",
                     },
                 ),
             },
@@ -194,10 +199,8 @@ def _id(kind: str, digit: str) -> str:
             "source_id": raw(
                 "component",
                 {
-                    "module_id": raw(
-                        "module", {"project_id": project_id, "path": "src/types.d.ts"}
-                    ),
-                    "declaration_key": "PropsView",
+                    "module_id": raw("module", {"project_id": project_id, "path": "src/Card.tsx"}),
+                    "declaration_key": "Card",
                 },
             ),
             "target_component_id": raw(
@@ -243,7 +246,7 @@ def _id(kind: str, digit: str) -> str:
             "f",
         ): {
             "kind": "router_context",
-            "owner_id": raw("module", {"project_id": project_id, "path": "src/types.d.ts"}),
+            "owner_id": raw("module", {"project_id": project_id, "path": "src/Card.tsx"}),
             "value": "none",
         },
     }
@@ -282,7 +285,7 @@ def _descriptor() -> dict[str, Any]:
 def _project() -> dict[str, Any]:
     project = _next_project()
     project["id"] = _id("project", "0")
-    project["file_ids"] = [_id("file", "1"), _id("file", "2")]
+    project["file_ids"] = [_id("file", "1"), _id("file", "2"), _id("file", "c")]
     project["config_digest"] = project_config_digest(project)
     return project
 
@@ -423,8 +426,19 @@ def _type_ir(module_id: str) -> dict[str, Any]:
 
 
 def _model() -> dict[str, Any]:
-    file_one = _file("1", "src/Button.tsx", "program", b"export default Button;\n")
-    file_two = _file("2", "src/types.d.ts", "context", b"export interface Props {}\n")
+    file_one = _file(
+        "1",
+        "src/Button.tsx",
+        "program",
+        (
+            b"export default Button;\n"
+            b"export const renderValue = 1;\n"
+            b"export type Props = { title: string };\n"
+            b'export * from "./Other";\n'
+        ),
+    )
+    file_two = _file("2", "src/Card.tsx", "program", b"const Card = 1;\n")
+    file_three = _file("c", "src/types.d.ts", "context", b"export interface Props {}\n")
     module_one = {
         "kind": "module",
         "id": _id("module", "3"),
@@ -438,7 +452,7 @@ def _model() -> dict[str, Any]:
         "kind": "module",
         "id": _id("module", "4"),
         "project_id": _id("project", "0"),
-        "path": "src/types.d.ts",
+        "path": "src/Card.tsx",
         "router_context": "none",
         "client_entry": False,
         "derived_roles": [],
@@ -455,7 +469,7 @@ def _model() -> dict[str, Any]:
         "kind": "component",
         "id": _id("component", "6"),
         "module_id": module_two["id"],
-        "declaration_key": "PropsView",
+        "declaration_key": "Card",
         "recognition_evidence": ["trusted_callable"],
         "props_state": "no_props",
     }
@@ -475,7 +489,7 @@ def _model() -> dict[str, Any]:
             "id": _id("member", "8"),
             "owner_id": module_one["id"],
             "local_component_id": component_two["id"],
-            "imported_name": "PropsView",
+            "imported_name": "Card",
             "role": "value",
             "source": {"kind": "internal", "module_id": module_two["id"]},
         },
@@ -540,7 +554,7 @@ def _model() -> dict[str, Any]:
     model: dict[str, Any] = {
         "schema": "code-structure-viz.next-model/v1",
         "projects": [_project()],
-        "files": [file_one, file_two],
+        "files": [file_one, file_two, file_three],
         "modules": [module_one, module_two],
         "components": [component_one, component_two],
         "members": members,
@@ -555,6 +569,8 @@ def _model() -> dict[str, Any]:
     counts["published"] = sum(len(model[collection]) for collection in COLLECTIONS)
     counts["internal_entities"] = len(model["modules"]) + len(model["components"])
     counts["discovered"] = counts["published"]
+    model["coverage"]["non_component_value_export_count"] = 1
+    model["coverage"]["type_only_export_count"] = 1
     for collection in COLLECTIONS:
         model[collection].sort(key=lambda record: record["id"])
     for project in model["projects"]:
@@ -639,9 +655,19 @@ def _request() -> dict[str, Any]:
     model = _model()
     trusted_environment_digest = _trusted_environment()["sha256"]
     project = copy.deepcopy(model["projects"][0])
-    contents = [b"export default Button;\n", b"export interface Props {}\n"]
+    contents = {
+        "src/Button.tsx": (
+            b"export default Button;\n"
+            b"export const renderValue = 1;\n"
+            b"export type Props = { title: string };\n"
+            b'export * from "./Other";\n'
+        ),
+        "src/Card.tsx": b"const Card = 1;\n",
+        "src/types.d.ts": b"export interface Props {}\n",
+    }
     files = []
-    for file_record, content in zip(model["files"], contents, strict=True):
+    for file_record in model["files"]:
+        content = contents[file_record["path"]]
         files.append(
             {
                 **file_record,
@@ -788,13 +814,18 @@ def _public_diagnostic(
 
 
 def _domain(
-    status: str = "complete", *, overrun: bool = False, runtime_unavailable: bool = False
+    status: str = "complete",
+    *,
+    overrun: bool = False,
+    runtime_unavailable: bool = False,
+    targets: list[str] | None = None,
 ) -> dict[str, Any]:
     model = _model()
     descriptor = _descriptor()
     environment = _trusted_environment()
-    config = _config_projection(projects=model["projects"])
-    snapshot_request = _snapshot_request(projects=model["projects"])
+    target_values = list(targets or [])
+    config = _config_projection(projects=model["projects"], targets=target_values)
+    snapshot_request = _snapshot_request(projects=model["projects"], targets=target_values)
     entity_count: int | None
     payload_available: bool
     incomplete_kind: str | None
@@ -859,12 +890,12 @@ def _domain(
             "kind": "working-tree",
             "head_commit": None,
             "fingerprint": "b" * 64,
-            "file_count": 2,
+            "file_count": len(model["files"]),
         },
         "request": snapshot_request,
         "config": config,
         "projects": [copy.deepcopy(model["projects"][0])],
-        "targets": [],
+        "targets": target_values,
         "formats": ["semantic-json", "plantuml"],
         "toolchain": {
             "node": {
@@ -915,6 +946,15 @@ def _domain(
     value["request"]["run_fingerprint"] = value["run_fingerprint"]
     if actual is not None:
         value["coverage"]["counts"]["internal_entities"] = actual
+    resolutions = resolve_target_resolutions(target_values, model)
+    value["coverage"]["target_completeness"] = [
+        {
+            "target_key": item["target_key"],
+            "status": "complete" if item["status"] == "resolved" else "failed",
+            "record_ids": item["record_ids"],
+        }
+        for item in resolutions
+    ]
     return value
 
 
@@ -938,7 +978,7 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
     }
     base["request"] = {
         "projects": ["."],
-        "targets": [],
+        "targets": domain["targets"],
         "formats": ["semantic-json", "plantuml"],
         "upstream_depth": 1,
         "downstream_depth": 1,
@@ -953,7 +993,7 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
         "resolved": {
             "next": {
                 "projects": ["."],
-                "targets": [],
+                "targets": domain["targets"],
                 "formats": ["semantic-json", "plantuml"],
                 "trusted_environment_digest": domain["trusted_environment"]["sha256"],
             },
@@ -1570,7 +1610,15 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
 
     response = _response(_model())
     _validator("next-adapter-response-v1.schema.json").validate(response)
-    validate_response_envelope(response, request)
+    assert validate_response_envelope(response, request) == {
+        "actual": 4,
+        "resolved": 500,
+        "allowed": True,
+        "payload_available": True,
+        "outcome": "complete",
+        "diagnostic_code": None,
+        "artifact_paths": ["next.snapshot.semantic.json", "next.snapshot.puml"],
+    }
     validate_model(response["model"])
     validate_proof(response["proof"], response["model"])
 
@@ -1833,81 +1881,111 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         validate_response_envelope(wrong_descriptor, request)
 
 
-def test_export_resolution_witness_covers_components_values_and_types() -> None:
+def test_export_resolution_witness_uses_complete_source_census_and_coverage_only_rows() -> None:
     model = _model()
-    for exported_name, role, resolution_kind in (
-        ("renderValue", "value", "value"),
-        ("Props", "type", "type"),
-    ):
-        export: dict[str, Any] = {
-            "kind": "export_binding",
-            "id": "",
-            "owner_id": _id("module", "3"),
-            "exported_name": exported_name,
-            "role": role,
-            "target_component_id": None,
-            "resolution_kind": resolution_kind,
-            "reexport": False,
-        }
-        export["id"] = recompute_record_id(export)
-        model["members"].append(export)
-    model["members"].sort(key=lambda record: record["id"])
-    model["coverage"]["counts"]["members"] = len(model["members"])
-    model["coverage"]["counts"]["published"] += 2
-    model["coverage"]["counts"]["discovered"] += 2
-    model["coverage"]["non_component_value_export_count"] = 1
-    model["coverage"]["type_only_export_count"] = 1
-
     validate_model(model)
+    proof = _complete_proof(model)
+    validate_proof(proof, model)
+    assert {item["resolution"] for item in proof["export_observations"]} == {
+        "component",
+        "value",
+        "type",
+        "unknown",
+    }
     assert model["coverage"]["non_component_value_export_count"] == 1
     assert model["coverage"]["type_only_export_count"] == 1
-    proof = _complete_proof(model)
     assert proof["export_resolution_witness"] == expected_export_resolution_witness(model)
-    validate_proof(proof, model)
 
-    wrong_value_count = copy.deepcopy(model)
-    wrong_value_count["coverage"]["non_component_value_export_count"] = 2
-    with pytest.raises(AssertionError):
-        validate_proof(_complete_proof(wrong_value_count), wrong_value_count)
-    wrong_type_count = copy.deepcopy(model)
-    wrong_type_count["coverage"]["type_only_export_count"] = 2
-    with pytest.raises(AssertionError):
-        validate_proof(_complete_proof(wrong_type_count), wrong_type_count)
+    for mutation in (
+        "missing_observation",
+        "duplicate_observation",
+        "substituted_observation",
+        "star_resolution_conflict",
+        "value_resolution_conflict",
+    ):
+        candidate = copy.deepcopy(proof)
+        if mutation == "missing_observation":
+            candidate["export_observations"].pop()
+        elif mutation == "duplicate_observation":
+            candidate["export_observations"].append(
+                copy.deepcopy(candidate["export_observations"][0])
+            )
+            candidate["export_observations"].sort(key=canonical_json_bytes)
+        elif mutation == "substituted_observation":
+            component = next(
+                item
+                for item in candidate["export_observations"]
+                if item["resolution"] == "component"
+            )
+            component["component_id"] = _id("component", "6")
+        else:
+            if mutation == "star_resolution_conflict":
+                star = next(item for item in candidate["export_observations"] if item["star"])
+                star["resolution"] = "component"
+                star["component_id"] = _id("component", "5")
+            else:
+                value = next(
+                    item
+                    for item in candidate["export_observations"]
+                    if item["resolution"] == "value"
+                )
+                value["resolution"] = "unknown"
+        with pytest.raises(AssertionError):
+            validate_proof(candidate, model)
 
-    missing_witness = copy.deepcopy(proof)
-    missing_witness["export_resolution_witness"].pop()
-    with pytest.raises(AssertionError):
-        validate_proof(missing_witness, model)
-    substituted_witness = copy.deepcopy(proof)
-    component_witness = next(
-        item
-        for item in substituted_witness["export_resolution_witness"]
-        if item["resolution"] == "component"
-    )
-    component_witness["component_id"] = _id("component", "6")
-    with pytest.raises(AssertionError):
-        validate_proof(substituted_witness, model)
+    for field in ("non_component_value_export_count", "type_only_export_count"):
+        candidate = copy.deepcopy(model)
+        candidate["coverage"][field] += 1
+        with pytest.raises(AssertionError):
+            validate_proof(_complete_proof(candidate), candidate)
 
-    missing_observation = copy.deepcopy(proof)
-    missing_observation["export_observations"].pop()
+    missing_binding = copy.deepcopy(model)
+    missing_binding["members"] = [
+        member for member in missing_binding["members"] if member["kind"] != "export_binding"
+    ]
+    missing_binding["coverage"]["counts"]["members"] -= 1
+    missing_binding["coverage"]["counts"]["published"] -= 1
+    missing_binding["coverage"]["counts"]["discovered"] -= 1
     with pytest.raises(AssertionError):
-        validate_proof(missing_observation, model)
-    duplicate_observation = copy.deepcopy(proof)
-    duplicate_observation["export_observations"].append(
-        copy.deepcopy(duplicate_observation["export_observations"][0])
-    )
-    duplicate_observation["export_observations"].sort(key=canonical_json_bytes)
-    with pytest.raises(AssertionError):
-        validate_proof(duplicate_observation, model)
-    substituted_observation = copy.deepcopy(proof)
+        validate_proof(_complete_proof(missing_binding), missing_binding)
+
+    # Removing the same component observation, public binding, and coverage
+    # record must still fail: the Python-owned source census is independent of
+    # all three submitted projections.
     component_observation = next(
-        item
-        for item in substituted_observation["export_observations"]
-        if item["resolution"] == "component"
+        item for item in proof["export_observations"] if item["resolution"] == "component"
     )
-    component_observation["component_id"] = _id("component", "6")
+    component_member_id = next(
+        member["id"]
+        for member in model["members"]
+        if member["kind"] == "export_binding"
+        and member["owner_id"] == component_observation["owner_module_id"]
+        and member["exported_name"] == component_observation["exported_name"]
+    )
+    coordinated_model = copy.deepcopy(model)
+    coordinated_model["members"] = [
+        member for member in coordinated_model["members"] if member["id"] != component_member_id
+    ]
+    for count_name in ("members", "published", "discovered"):
+        coordinated_model["coverage"]["counts"][count_name] -= 1
+    coordinated_proof = copy.deepcopy(proof)
+    coordinated_proof["export_observations"] = [
+        item
+        for item in coordinated_proof["export_observations"]
+        if item["syntax_identity"] != component_observation["syntax_identity"]
+    ]
+    coordinated_proof["export_resolution_witness"] = [
+        item
+        for item in coordinated_proof["export_resolution_witness"]
+        if item["member_id"] != component_member_id
+    ]
+    coordinated_proof["discovered_records"] = [
+        item
+        for item in coordinated_proof["discovered_records"]
+        if item["record"]["id"] != component_member_id
+    ]
     with pytest.raises(AssertionError):
-        validate_proof(substituted_observation, model)
+        validate_proof(coordinated_proof, coordinated_model)
 
 
 def test_public_targets_are_path_only_and_resolve_frozen_file_or_directory_sets() -> None:
@@ -1930,6 +2008,7 @@ def test_public_targets_are_path_only_and_resolve_frozen_file_or_directory_sets(
                 [
                     _id("file", "1"),
                     _id("file", "2"),
+                    _id("file", "c"),
                     _id("module", "3"),
                     _id("module", "4"),
                     _id("component", "5"),
@@ -1941,6 +2020,22 @@ def test_public_targets_are_path_only_and_resolve_frozen_file_or_directory_sets(
     assert resolve_target_resolutions(["path:src/Missing.tsx"], all_records) == [
         {"target_key": "path:src/Missing.tsx", "status": "failed", "record_ids": []}
     ]
+    assert resolve_target_resolutions(["path:src/types.d.ts"], all_records) == [
+        {"target_key": "path:src/types.d.ts", "status": "failed", "record_ids": []}
+    ]
+    control_records = {collection: list(records) for collection, records in all_records.items()}
+    for digit, control_path in (
+        ("p", "package.json"),
+        ("t", "tsconfig.json"),
+        ("j", "jsconfig.json"),
+    ):
+        control_records["files"].append(_file(digit, control_path, "control", b"{}\n"))
+    control_records["files"].sort(key=lambda record: record["id"])
+    for control_path in ("package.json", "tsconfig.json", "jsconfig.json"):
+        target_key = "path:" + control_path
+        assert resolve_target_resolutions([target_key], control_records) == [
+            {"target_key": target_key, "status": "failed", "record_ids": []}
+        ]
     unavailable = resolve_target_resolutions(
         ["path:src/Button.tsx"],
         all_records,
@@ -2361,6 +2456,49 @@ def test_next_run_manifest_status_matrix_and_public_stream_extensions(status: st
         )
 
 
+def test_next_non_empty_run_manifest_discriminates_path_targets_and_projections() -> None:
+    domain = _domain(targets=["path:src", "path:src/Button.tsx"])
+    manifest = _run_manifest(domain)
+    validate_domain_manifest(domain)
+    validate_run_manifest(manifest, domain, _published_bytes(domain))
+    _validator("run-manifest-v1.schema.json").validate(manifest)
+    assert manifest["request"]["targets"] == manifest["next_request"]["targets"]
+    assert manifest["request"]["targets"] == manifest["config"]["resolved"]["next"]["targets"]
+    assert manifest["request"]["targets"] == manifest["domains"][0]["targets"]
+
+    mutations: list[tuple[dict[str, Any], bool]] = []
+    object_target = copy.deepcopy(manifest)
+    object_target["request"]["targets"] = [{"kind": "path", "value": "src/Button.tsx"}]
+    mutations.append((object_target, True))
+    mixed_targets = copy.deepcopy(manifest)
+    mixed_targets["request"]["targets"] = [
+        "path:src",
+        {"kind": "path", "value": "src/Button.tsx"},
+    ]
+    mutations.append((mixed_targets, True))
+    old_target = copy.deepcopy(manifest)
+    old_target["request"]["targets"] = ["module:" + _id("module", "3")]
+    mutations.append((old_target, True))
+    class_target = copy.deepcopy(manifest)
+    class_target["request"]["targets"] = ["class:src.Button"]
+    mutations.append((class_target, True))
+    module_object_target = copy.deepcopy(manifest)
+    module_object_target["request"]["targets"] = [{"kind": "module", "value": "src.Button"}]
+    mutations.append((module_object_target, True))
+    permuted = copy.deepcopy(manifest)
+    permuted["request"]["targets"].reverse()
+    mutations.append((permuted, False))
+    duplicate = copy.deepcopy(manifest)
+    duplicate["request"]["targets"].append("path:src")
+    mutations.append((duplicate, True))
+    for mutation, schema_rejects in mutations:
+        with pytest.raises((AssertionError, ValidationError)):
+            validate_run_manifest(mutation, domain, _published_bytes(domain))
+        if schema_rejects:
+            with pytest.raises(ValidationError):
+                _validator("run-manifest-v1.schema.json").validate(mutation)
+
+
 @pytest.mark.parametrize(
     ("status", "overrun"),
     [
@@ -2507,6 +2645,49 @@ def test_entity_budget_overrun_is_payload_unavailable_without_artifacts() -> Non
         canonical_json_bytes(stream) + b"\n",
         manifest["diagnostics"],
     )
+
+
+def test_direct_context_target_is_manifest_and_stdout_payload_unavailable() -> None:
+    domain = _domain("incomplete", targets=["path:src/types.d.ts"])
+    domain["payload_available"] = False
+    domain["entity_count"] = None
+    domain["incomplete_kind"] = "payload_unavailable"
+    domain["artifact_paths"] = []
+    domain["budget"]["actual"] = None
+    domain["diagnostics"] = [_public_diagnostic("CSV-NEXT-TARGET-001", path="src/types.d.ts")]
+    validate_domain_manifest(domain)
+    manifest = _run_manifest(domain)
+    published: dict[str, bytes] = {}
+    validate_run_manifest(manifest, domain, published)
+    _validator("next-domain-manifest-v1.schema.json").validate(domain)
+    _validator("run-manifest-v1.schema.json").validate(manifest)
+    stream = _stdout_result_for_domain(domain, manifest, "next:semantic-json")
+    _validator("stdout-result-v1.schema.json").validate(stream)
+    assert stream["availability"] is False
+    assert stream["artifact"] is None
+    assert stream["domain_status"] == "incomplete"
+    assert canonical_json_bytes(stream) + b"\n" == (
+        b'{"artifact":null,"availability":false,"domain_status":"incomplete",'
+        b'"schema":"code-structure-viz.stdout-result/v1",'
+        b'"selector":"next:semantic-json","stable_reason":"domain_payload_unavailable",'
+        b'"type":"stdout_result"}\n'
+    )
+
+
+def test_entity_budget_gate_composes_entity_and_model_record_boundaries() -> None:
+    for actual, resolved, allowed in ((500, 500, True), (501, 500, False), (501, 600, True)):
+        outcome = entity_budget_gate(actual, resolved)
+        assert outcome["actual"] == actual
+        assert outcome["resolved"] == resolved
+        assert outcome["allowed"] is allowed
+        assert outcome["payload_available"] is allowed
+        assert outcome["outcome"] == ("complete" if allowed else "payload_unavailable")
+        assert outcome["diagnostic_code"] == (None if allowed else "CSV-NEXT-LIMIT-005")
+        assert outcome["artifact_paths"] == (
+            ["next.snapshot.semantic.json", "next.snapshot.puml"] if allowed else []
+        )
+    assert model_record_budget_allowed(100000, 100000)
+    assert not model_record_budget_allowed(100001, 100000)
 
 
 def test_whole_run_validator_rejects_projection_and_artifact_mutations() -> None:

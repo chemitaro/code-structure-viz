@@ -41,6 +41,14 @@ CLI request -> safe source acquisition -> domain semantic analysis
 - TypeScript fixtures、protocol golden、renderer golden、security trapsはcontract固定後に並行できる。
 - stop condition: adapter protocol、static semantics、not_applicable/incomplete、entity budget、optional Node、determinismが成立するまでNext diffへ進まない。
 
+### Round 8 review state
+
+ChatGPT Use Strict Round 8 は `review_status: fail`、P0=0、P1=4、P2=0 だった。
+実装開始前に、root manifestのNext path-only projection、Python-owned frozen export
+census、response検証後の独立EntityBudgetGate、program-only semantic ownershipを
+data-only contractへ反映する。修復後のfresh exact-SHA Strictは未実行・未通過で、
+readinessは未確定、production adapter/CLIは未着手のままとする。
+
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
 | I05-PLAN-000 | implementation判断を残さないfield-level identity/source/protocol/type/taint/public schema/config/package contractをcanonical Designへ固定する。 | I05-DES-001〜007 |
@@ -69,9 +77,10 @@ CLI request -> safe source acquisition -> domain semantic analysis
 - inline/interface/alias/import/destructured/FC/class/forwardRef/generic/union/intersection propsとcomplexity opaqueをfixture化する。
 - static/literal dynamic/render conditional/collection/createElement、ambiguous/nonliteral unknownをfixture化する。
 - client entry/dependency/server candidate/dual role/boundary effectをfixture化する。
-- targetless/path(file+directory complete descendants)/depth/missing/project-scope ambiguity/out-of-scope/tainted-selectionをfixture化する。公開target文法は`path:<repository-relative-path>`だけとし、内部component/module/file keyを受理しない。
+- targetless/path(file+directory complete descendants)/depth/missing/project-scope ambiguity/out-of-scope/tainted-selectionをfixture化する。公開target文法は`path:<repository-relative-path>`だけとし、内部component/module/file keyを受理しない。snapshot+next root manifestはNext request/domain/resolved-configと同じunique canonical path-string setへ投影し、module/class/object/mixed/old/permutation/duplicate mutationを拒否する。
 - not_applicable、complete empty、complete+diagnostic、partial_safe、payload_unavailable、usage/fatal/interrupt、entity/transport limits、stdout selectorをtable-drivenに固定する。
-- TrustedTypeEnvironment、private request/response、独立export observation、PropsTypeIR、PlantUML、diagnostic、wheel/sdist/offline、domain config/source projectionのpositive/negative fixturesを固定する。TypeScript 5.9.2 Programのparse/semantic diagnostics 0とAST/TypeChecker certified inventoryをNode contract gateで検証する。
+- TrustedTypeEnvironment、private request/response、Python-owned frozen UTF-8 source bytes/export syntax census、独立export observation、PropsTypeIR、PlantUML、diagnostic、wheel/sdist/offline、domain config/source projectionのpositive/negative fixturesを固定する。censusはowner file、exact byte span/token identity、syntax kind、exported name、role、re-export/starを閉じて導出し、Node syntax identityとexact比較する。TypeScript 5.9.2 Programのparse/semantic diagnostics 0とAST/TypeChecker certified inventoryをNode contract gateで検証する。
+- public Moduleはprogram roleかつ`.ts/.tsx/.js/.jsx`のFileだけから生成し、`.d.ts`、`package.json`、`tsconfig.json`、`jsconfig.json` direct targetとsemantic childをnegative vectorで固定する。directoryはcontext/control provenanceを許すがsemantic childを増やさない。
 - production adapterを追加せず、`tests/contracts/next_reference_validation.py` のdata-only validator、`tests/contracts/test_next_contracts.py` のmutation/golden vectors、`tests/fixtures/next_contract_vectors.json` のPLAN-008 indexで、JSON Schemaでは表現できないownership、taint closure、digest、order、status、renderer、compatibility invariantを実行可能にする。
 - Designで固定したv1 normative source/process/type/flow limitをboundary fixtureで検証し、変更が必要ならproduction実装前にcanonical DesignとStrict gateを更新する。
 
@@ -114,7 +123,7 @@ explicit project rootのdirect Next dependencyをPythonで判定し、不在を�
 
 - intentional unsupportedをunknownとして完全表現できる場合はcomplete+diagnostic。promised semanticsの局所欠落はsafe subset/exact coverage/same-renderer-subset/redaction/target/budgetをすべて証明した場合だけpartial_safe。
 - explicit target、malformed applicability/config、global Program、Node/protocol/schema/security/identity/limit failureはpayload unavailableとし、not_applicable/fallbackへ変換しない。
-- default 500はselected internal Module+Componentだけを数え、501以上はexit 3/affected payloadなし/safe manifest countあり。valid overrideはnormal、invalid valueはexit 2。
+- model structural/reference validationは`max_model_records`を適用してactual internal Module+Component countを返す。publication直前の独立EntityBudgetGateがselected/published Module+Componentだけを数え、default 500は受理、501は`CSV-NEXT-LIMIT-005`付きexit 3/affected payloadなし/actual付きmanifest-only、600 overrideで501は成功とする。100001 total model recordsはentity budgetと別の`max_model_records` failureとして固定し、invalid valueはexit 2。
 
 ### I05-PLAN-004 Artifact publication
 

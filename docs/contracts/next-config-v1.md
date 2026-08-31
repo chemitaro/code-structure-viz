@@ -1,5 +1,10 @@
 # Next configuration and request projection v1
 
+Round 8 review state: `review_status: fail` (P0=0, P1=4, P2=0). The
+domain-discriminated manifest target projection and program-only target rules
+below are local data-only remediations; fresh exact-SHA Strict is pending and
+production implementation has not started.
+
 Issue #8 uses one canonical configuration value object and one canonical
 snapshot request projection.  The same values are copied into the domain
 manifest and the root run manifest; a consumer must not reconstruct Next
@@ -37,6 +42,15 @@ projections for the existing root registry: projects are root paths there,
 while the complete project/compiler/source-plan information is in the Next
 fields.  `domains[0].config` and `domains[0].request` must equal these Next
 fields exactly.
+
+For `command.name=snapshot` and `command.domain=next`, the root
+`request.targets` is a domain-discriminated projection: it is the same unique,
+canonical, sorted array of `path:<repository-relative-path>` strings as
+`next_request.targets`, `next_config.targets`, `config.resolved.next.targets`,
+and `domains[0].targets`. The common run-manifest schema still accepts the
+legacy object target grammar for Python and SQLAlchemy; it is not a Next target
+grammar. Python reference validation performs the exact projection and
+ordering comparison because JSON Schema cannot express that join.
 
 ## Digest preimages
 
@@ -85,11 +99,13 @@ request is built.
 Explicit targets are canonicalized before they enter the request using only
 `path:<repository-relative-path>`. This is a public address, distinct from
 internal Module/Component IDs and semantic keys; `component:`, `module:`, and
-`file:` are not public syntax. A file path resolves its frozen file, Module,
-and Component set. A directory path resolves the complete canonical descendant
-set, so multiple descendants are expected and are not ambiguous. Paths are
-NFC-normalized, bounded to 1--4096 characters, and reject traversal,
-backslashes, control characters, and `#`.
+`file:` are not public syntax. A file path resolves its frozen File and the
+Module/Component set only when the file has program role and an exact
+`.ts/.tsx/.js/.jsx` suffix. A directory path resolves the complete canonical
+descendant set; context/control files may remain as File provenance, but they
+never contribute semantic Modules or children. Multiple descendants are
+expected and are not ambiguous. Paths are NFC-normalized, bounded to 1--4096
+characters, and reject traversal, backslashes, control characters, and `#`.
 
 Missing path, project-scope ambiguity, out-of-scope path, or any selected
 tainted/excluded/failed record makes the whole domain

@@ -2,6 +2,11 @@
 
 Status: pre-implementation normative contract for Issue #8.
 
+Round 8 review state: ChatGPT Use Strict returned `review_status: fail` with
+P0=0, P1=4, P2=0. The four findings are reflected below and in the data-only
+schemas/reference vectors; a fresh exact-SHA Strict review is pending, so
+readiness is unconfirmed and the production adapter/CLI remains unimplemented.
+
 The machine-readable authority is:
 
 - `schemas/next-semantic-v1.schema.json`
@@ -44,16 +49,20 @@ are required; the value is not a self-reported opaque token.
 ## Members, relations, and facts
 
 - Members are `export_binding`, `import_binding`, or `prop`.
-- Every `export_binding` has an explicit `resolution_kind`: `component` carries
-  a Component ID, `value` denotes a non-component runtime value, and `type`
-  denotes a type-only export. Before that public projection, the adapter emits
-  a complete independent `export_observations` stream. Each observation has
-  the owner Module, canonical exported name, value/type role, re-export bit,
-  stable syntax identity, resolution (`component|value|type|unknown`), and
-  optional Component ID. Python derives and exact-compares public bindings,
-  resolution witnesses, and `non_component_value_export_count`/
-  `type_only_export_count`; omitted, duplicated, or substituted observations
-  are rejected.
+- An `export_binding` is public only when one value export resolves uniquely to
+  a Component; it carries that Component ID and never represents a value-only
+  or type-only export. Before that projection, the adapter emits a complete
+  independent `export_observations` stream. Python owns a frozen UTF-8 source
+  byte fixture and a closed syntax census over repository-relative owner file,
+  exact byte start/end span, token identity, syntax kind, canonical exported
+  name, value/type role, re-export bit, and star bit. Node observations must
+  exact-equal this census on syntax identity. Their
+  `component|value|type|unknown` resolution and optional Component ID are then
+  cross-checked against the model/TypeChecker witness. Python derives and
+  exact-compares public bindings, resolution witnesses, and
+  `non_component_value_export_count`/`type_only_export_count`; omitted,
+  duplicated, coordinated observation/binding/count omissions, star/type
+  conflicts, or component substitutions are rejected.
 - Module relations are `static_import` and `literal_dynamic_import`.
 - Component relations are `jsx_render` and internal-only `component_wrap`.
 - Direct `client_entry` and `router_context` are Facts. Derived boundary roles remain Module facets.
@@ -78,6 +87,13 @@ base64 alphabet and checks `len(decoded) == size_bytes == digest preimage`.
 The request envelope ID is `SHA-256(canonical-json(request without
 request_id))`; the response must echo that exact ID and its `model_digest` is
 `SHA-256(canonical-json(model))`.
+
+Only a frozen file with `program` role and exact suffix `.ts`, `.tsx`, `.js`, or
+`.jsx` (explicitly excluding `.d.ts`) may own a public Module. Components,
+members, relations, and facts descend only from those program Modules. A direct
+`.d.ts`, `package.json`, `tsconfig.json`, or `jsconfig.json` target therefore
+fails with `CSV-NEXT-TARGET-001` and `payload_unavailable`; a directory may
+retain context/control Files as provenance without creating semantic children.
 
 ## Partial-safe proof
 
@@ -219,7 +235,14 @@ semantic and PlantUML pair must use the same validated subset.
 `coverage.counts.internal_entities` is recomputed as the number of published
 internal Modules plus Components only. Members, relations, facts, projects,
 external frontiers, and proof-only records do not consume `max_entities`; the
-complete all-record cap is the separate `max_model_records` limit.
+complete all-record cap is the separate `max_model_records` limit. Structural
+model validation applies only `max_model_records` and returns the recomputed
+entity count. An independent `EntityBudgetGate` runs after response
+validation and before publication; an overrun emits `CSV-NEXT-LIMIT-005`,
+records the actual count, produces a manifest-only `payload_unavailable`
+outcome, and publishes no artifacts. Boundary vectors cover 500 success, 501
+unavailable, 501 under a 600 override, and a compositional 100001-record
+model-cap failure.
 
 ## Diagnostics, config, and status cross-checks
 
@@ -234,8 +257,10 @@ and the historical FLOW fixture's wrong path reference are rejected.
 Explicit targets use only the public canonical key
 `path:<repository-relative-file-or-directory>` (NFC, 1--4096 characters).
 Internal Module/Component IDs are not public target syntax. A file resolves
-its frozen file/Module/Component set; a directory resolves its complete
-canonical descendant frozen set, and multiple descendants are normal. Missing,
+its frozen file/Module/Component set only when the direct file is a program
+file; a directory resolves its complete canonical descendant frozen set, and
+multiple descendants are normal. A direct context/control file is not a
+semantic target and fails even when frozen. Missing,
 project-scope ambiguity, out-of-scope, or any selected tainted/excluded/failed
 record is `CSV-NEXT-TARGET-001`, `payload_unavailable`, and no artifact.
 The adapter must return exactly one canonical resolution row per requested key,

@@ -97,17 +97,30 @@ code-structure-viz snapshot --repo . --domain next --format semantic-json --stdo
 `--target`、resolved config、private requestで公開するtargetは
 `path:<repository-relative-path>`だけとする。これは内部のModule/Component
 IDやsemantic keyとは別の利用者向けアドレスであり、`component:`、`module:`、
-`file:`形式は公開しない。frozen SourceViewのfile pathはそのfile・Module・
-Component集合へ解決し、directory pathは全canonical descendant集合へ解決する。
+`file:`形式は公開しない。frozen SourceViewのfile pathは、対応するFileが
+`program` roleかつsuffix `.ts`、`.tsx`、`.js`、`.jsx` のときだけ、そのfile・
+Module・Component集合へ解決する。`.d.ts`、`package.json`、`tsconfig.json`、
+`jsconfig.json` はcontext/control provenanceであり、direct targetにはできない。
+directory pathは全canonical descendant集合へ解決する。
 directoryの複数descendantは正常で、曖昧さではない。missing、project-scope
 ambiguity、out-of-scope、または選択集合のtainted/excluded/failed recordが一つでも
 あれば、domain全体を`CSV-NEXT-TARGET-001`・`payload_unavailable`・no-artifact
 とし、manifest/stdoutのunavailable vectorをexactに出す。
 
+### Round 8 review state
+
+ChatGPT Use Strict Round 8 は `review_status: fail`、P0=0、P1=4、P2=0 だった。
+4件は、(1) Next root manifestのpath-only domain branch、(2) frozen source bytesから
+独立導出する完全なexport syntax census、(3) response validation後に適用する
+`EntityBudgetGate`、(4) program fileだけをsemantic ownerとするtarget/module境界、
+としてdata-only schema・reference validator・fixture・testへ反映した。fresh
+exact-SHA Strictはまだ実行・通過しておらず、readinessは未確定である。製品の
+Next adapter/CLI実装は開始していない。
+
 ### semantic contract
 
 - entityはphysical-path `ModuleEntity`とdeclaration-anchored `ComponentEntity`。named declarationまたは`@anonymous-default`でComponentを識別し、range/export/route/wrapper/propsをidentityに含めない。
-- memberは`ExportBindingMember`、`ImportBindingMember`、`PropMember`。barrel/re-export/aliasはbindingを増やすがComponentを複製しない。export/route rootからproven render/wrapperで到達するlocal Componentだけを`reachable_local`として含める。
+- memberは`ExportBindingMember`、`ImportBindingMember`、`PropMember`。barrel/re-export/aliasはbindingを増やすがComponentを複製しない。adapterは凍結UTF-8 source bytesからowner file、byte span、token identity、syntax kind、exported name、value/type role、re-export/starを持つ完全な独立observationを返し、Pythonがcensusとresolution（component/value/type/unknown）を照合する。public `ExportBindingMember`はvalue exportが一意なComponentへ解決した場合だけで、value/type/unknownはcoverage-onlyとする。export/route rootからproven render/wrapperで到達するlocal Componentだけを`reachable_local`として含める。
 - Component認定はsafe React callable/construct signature、closed React class provenance、recognized UI route default、proven JSX output-flow、closed wrapper allowlistのpositive evidenceを要求し、PascalCaseだけで認定しない。
 - propsはTypeCheckerのeffective signatureから取得し、primitive/type-parameter/redacted-literal/reference/array/tuple/union/intersection/function/object/opaqueのclosed type IRへ正規化する。literal value、function parameter名、generic名を公開せず、complexity limitはtruncationではなくopaque+coverageで表す。
 - relationはmodule planeの`static_import`/`literal_dynamic_import`とcomponent planeの`jsx_render`/`component_wrap`を分離する。lexical scanやruntime tree推測をせず、return outputへ流れるbounded expressionだけを追う。
@@ -118,7 +131,7 @@ ambiguity、out-of-scope、または選択集合のtainted/excluded/failed recor
 - private adapter protocolは`code-structure-viz.next-adapter/v1`、public filesは`next.snapshot.semantic.json`と`next.snapshot.puml`、PlantUML contractは`code-structure-viz.plantuml/next/v1`とする。
 - Python coreはadapter responseをuntrusted inputとして検証し、ID/count/digestを再計算してpublic payloadをrenderする。protocol noise、closed schema mismatch、unsafe path/ref/redactionはresponse全体を拒否する。
 - manifestはNode/TypeScript/adapter/protocol version、project/config path、source acquisition plan/config/source digest、coverage、diagnostic、target/depth/budget、Artifact hashをsafe metadataとして記録する。
-- entity budgetはselected internal Module+Componentだけを数え、member/relation/external/frontier/project descriptorを数えない。
+- entity budgetはselected internal Module+Componentだけを数え、member/relation/external/frontier/project descriptorを数えない。responseの構造・参照・`max_model_records`検証が成功した後、Pythonの独立`EntityBudgetGate`がactualを再計算してpublicationを判定する。超過は`CSV-NEXT-LIMIT-005`付き`payload_unavailable`、actualを残すmanifest-onlyであり、semantic JSON/PlantUMLを公開しない。
 - Next project不在を証明できた場合はNodeを要求せずnot_applicable。applicable projectでComponent 0はcomplete empty。applicableでNode/adapter unavailableはpayload_unavailable、exit 3。
 
 ### snapshot and diff option separation
@@ -201,7 +214,7 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 - complete/partialはdiagnostic有無ではなくpromised v1 semanticsの欠落で決める。intentional unsupportedをunknownとして完全表現できる場合はdiagnostic付きcompleteを許す。
 - TypeScript parse/type resolutionの局所failureをfile/component/relation単位で隔離し、安全subset、exact coverage、全requested rendererの同一subset、safe diagnostic、redaction、explicit target completeness、entity-budget passを証明できる場合だけ`partial_safe` JSON+PlantUML+manifestを公開する。証明できない場合は`payload_unavailable` manifest-onlyとする。
 - Node起動不能、adapter stdoutのprotocol外text、global schema mismatch、security invariant violation、unexpected absolute pathはresponse全体を拒否し`payload_unavailable`とする。局所的なalias/relation unresolvedは安全subsetとcoverageを証明できる場合だけ`partial_safe`を許す。
-- explicit project/targetのmissing、project-scope ambiguity、out-of-scope、または選択集合のtainted/excluded/failed recordは全projectへfallbackせず`CSV-NEXT-TARGET-001`の`payload_unavailable`とする。
+- explicit project/targetのmissing、project-scope ambiguity、out-of-scope、control/context direct target、または選択集合のtainted/excluded/failed recordは全projectへfallbackせず`CSV-NEXT-TARGET-001`の`payload_unavailable`とする。directoryはcontrol/context File provenanceを保持してもsemantic childを作らない。
 - entity-per-diagram budgetはselected internal Module+Componentのdomain-local gateでdefault 500。overrideなしで501以上のdomainは`incomplete/payload_unavailable`、exit 3とし、切り捨てず、そのdomainのsemantic JSONとPlantUMLを公開しない。safe run manifestにrequested/resolved limit、actual count、diagnosticを記録する。
 - malformed manifest/configでNext不在を証明できない場合はnot_applicableへ変換せずpayload_unavailableとする。
 - stop condition: first-party adapter protocol、TS/TSX coverage、JS/JSX safe subset、client boundary、Node optionality、entity budgetがacceptanceで成立するまでNext diffへ進まない。
@@ -216,7 +229,7 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 | I05-AC-004 | typed taint propagationとPython再計算可能なcount/ref/target proofを満たす場合だけ`partial_safe` JSON+PlantUML+manifest、満たさないglobal/identity/limit/target failureは`payload_unavailable` manifest-only、exit 3とする。failure-root seed、causal edge、frontierはrecordsから独立導出し、submitted witnessと完全一致させる。 | I05-AT-004 |
 | I05-AC-005 | target path/cwd/node_modules/network/npm/npx/build/config/plugin/application moduleを利用せず、literal/body/comment/secret/absolute path/raw compiler textをoutput/diagnosticへ出さない。 | I05-AT-005 |
 | I05-AC-006 | explicit project rootsだけを対象とし、direct `next` dependencyがない場合はNode probeなしnot_applicable、applicableでComponent 0はcomplete empty、malformed evidenceはpayload_unavailableとする。 | I05-AT-006 |
-| I05-AC-007 | selected/published internal Module+Componentが501 entitiesならdomain `incomplete_kind: payload_unavailable`・exit 3・affected JSON/PlantUMLなし・manifest countあり、valid 600 overrideはrequested/resolved/count付きで成功する。all-record capは`max_model_records`として別に再計算し、snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`はexit 2・Artifactなしとする。 | I05-AT-007 |
+| I05-AC-007 | valid responseの後にselected/published internal Module+Componentを独立再計算し、501 entitiesならdomain `incomplete_kind: payload_unavailable`・`CSV-NEXT-LIMIT-005`・exit 3・affected JSON/PlantUMLなし・actual count付きmanifestとunavailable stdoutを出し、valid 600 overrideはrequested/resolved/count付きで成功する。all-record capは`max_model_records`として別に再計算し、snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`はexit 2・Artifactなしとする。 | I05-AT-007 |
 | I05-AC-008 | stdout selectorのvalid/invalid/duplicate/domain/format、exact-byte、not_applicable/payload_unavailable/fatal/interrupt result、selectorなしsummaryをtable-drivenに満たす。 | I05-AT-008 |
 | I05-AC-009 | target `node_modules`/type roots/networkなしでTrustedTypeEnvironmentを使い、reserved module/global/pathのshadow/augmentation/mergeをfail-closedで拒否し、実fixture bytesのmanifest/version/digest/license、TypeScript 5.9.2 Programのparse/semantic diagnostics 0、AST/TypeChecker由来certified symbolを検証する。 | I05-AT-009 |
 | I05-AC-010 | Next semantic/private protocol/diagnostic/manifest/stdout/PlantUML/writerのclosed schema/grammar/pathをmutation testで固定し、wheel/sdistにcompiled runtime/trusted declarations/lock/licenseを正しく収録してcheckout外offline Next runが成功する。 | I05-AT-010 |

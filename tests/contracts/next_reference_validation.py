@@ -454,6 +454,136 @@ SOURCE_PLAN_HARD_EXCLUSIONS = (".git", "node_modules", ".next", "out", "dist", "
 SOURCE_PLAN_CONTROL_PATHS = ("package.json", "tsconfig.json", "jsconfig.json")
 SOURCE_PLAN_VERSION = "1"
 PUBLIC_TARGET_RE = re.compile(r"^path:([^#]+)$")
+EXPORT_CENSUS_PATH = REPO_ROOT / "tests/fixtures/next_export_census.json"
+EXPORT_CENSUS_SCHEMA = "code-structure-viz.next-export-census/v1"
+_IDENTIFIER_RE = r"[A-Za-z_$][A-Za-z0-9_$]*"
+
+
+def _is_program_file(file_record: dict[str, Any]) -> bool:
+    """Return whether a frozen file can own semantic Next records."""
+
+    path = file_record["path"]
+    return (
+        "program" in file_record["roles"]
+        and not path.endswith(".d.ts")
+        and path.endswith(SOURCE_PLAN_PROGRAM_SUFFIXES)
+    )
+
+
+def load_export_census_fixture() -> tuple[dict[str, Any], ...]:
+    """Load and validate the immutable source bytes used by the reference census."""
+
+    payload = json.loads(EXPORT_CENSUS_PATH.read_text(encoding="utf-8"))
+    assert set(payload) == {"schema", "files"}
+    assert payload["schema"] == EXPORT_CENSUS_SCHEMA
+    files = cast(list[dict[str, Any]], payload["files"])
+    assert files
+    paths = [item["path"] for item in files]
+    assert paths == sorted(paths)
+    assert len(paths) == len(set(paths))
+    result: list[dict[str, Any]] = []
+    for item in files:
+        assert set(item) == {"path", "content_base64"}
+        _assert_path(item["path"])
+        encoded = item["content_base64"]
+        content = base64.b64decode(encoded, validate=True)
+        assert base64.b64encode(content).decode("ascii") == encoded
+        content.decode("utf-8")
+        result.append({"path": item["path"], "content": content})
+    return tuple(result)
+
+
+def scan_export_syntax_census() -> list[dict[str, Any]]:
+    """Derive a closed export syntax census from fixture bytes, never from model rows."""
+
+    rows: list[dict[str, Any]] = []
+    for fixture in load_export_census_fixture():
+        path = cast(str, fixture["path"])
+        content = cast(bytes, fixture["content"])
+        offset = 0
+        for line in content.splitlines(keepends=True):
+            statement_bytes = line.rstrip(b"\r\n")
+            statement = statement_bytes.decode("utf-8")
+            match = re.fullmatch(rf"export[ \t]+default[ \t]+({_IDENTIFIER_RE})[ \t]*;?", statement)
+            syntax_kind = "default_export"
+            exported_name = "default"
+            role = "value"
+            reexport = False
+            star = False
+            if match is None:
+                match = re.fullmatch(
+                    rf"export[ \t]+(?:const|let|var|function|class)[ \t]+({_IDENTIFIER_RE})(?:.*)?",
+                    statement,
+                )
+                syntax_kind = "named_export"
+                exported_name = match.group(1) if match is not None else ""
+            if match is None:
+                match = re.fullmatch(
+                    rf"export[ \t]+(?:type|interface)[ \t]+({_IDENTIFIER_RE})(?:.*)?",
+                    statement,
+                )
+                syntax_kind = "type_export"
+                exported_name = match.group(1) if match is not None else ""
+                role = "type"
+            if match is None:
+                match = re.fullmatch(
+                    r"export[ \t]+\*[ \t]+from[ \t]+(?:\"[^\"\n]+\"|'[^'\n]+')[ \t]*;?",
+                    statement,
+                )
+                syntax_kind = "export_all"
+                exported_name = "*"
+                role = "value"
+                reexport = True
+                star = True
+            if match is None:
+                match = re.fullmatch(
+                    rf"export[ \t]+\{{[ \t]*({_IDENTIFIER_RE})"
+                    rf"(?:[ \t]+as[ \t]+({_IDENTIFIER_RE}|default))?"
+                    r"[ \t]*\}[ \t]+from[ \t]+(?:\"[^\"\n]+\"|'[^'\n]+')[ \t]*;?",
+                    statement,
+                )
+                syntax_kind = "reexport"
+                exported_name = (
+                    match.group(2)
+                    if match is not None and match.group(2)
+                    else match.group(1)
+                    if match is not None
+                    else ""
+                )
+                role = "value"
+                reexport = True
+            if match is not None and exported_name:
+                byte_start = offset
+                byte_end = offset + len(statement_bytes)
+                token_identity = digest(
+                    {
+                        "owner_file_path": path,
+                        "byte_start": byte_start,
+                        "byte_end": byte_end,
+                        "token_bytes_sha256": hashlib.sha256(statement_bytes).hexdigest(),
+                    }
+                )
+                rows.append(
+                    {
+                        "owner_file_path": path,
+                        "byte_start": byte_start,
+                        "byte_end": byte_end,
+                        "token_identity": token_identity,
+                        "syntax_identity": (
+                            f"export:{path}:{byte_start}:{byte_end}:{syntax_kind}:{exported_name}"
+                        ),
+                        "syntax_kind": syntax_kind,
+                        "exported_name": exported_name,
+                        "role": role,
+                        "reexport": reexport,
+                        "star": star,
+                    }
+                )
+            offset += len(line)
+    rows.sort(key=canonical_json_bytes)
+    assert len({row["token_identity"] for row in rows}) == len(rows)
+    return rows
+
 
 # The propagation vocabulary is closed.  A failure root first reaches its
 # declared seed records (or every record on its path for a file failure), then
@@ -654,7 +784,7 @@ def validate_request_envelope(request: dict[str, Any]) -> None:
     validate_encoded_stdin_size(request)
 
 
-def validate_response_envelope(response: dict[str, Any], request: dict[str, Any]) -> None:
+def validate_response_envelope(response: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     assert response["protocol"] == request["protocol"] == "code-structure-viz.next-adapter/v1"
     assert response["request_id"] == request["request_id"]
     assert response["adapter_version"] == request["adapter_version"]
@@ -678,12 +808,12 @@ def validate_response_envelope(response: dict[str, Any], request: dict[str, Any]
         for file_record in request["files"]
     ]
     assert model["files"] == request_files
-    validate_model(
+    actual_entities = validate_model(
         model,
-        max_entities=request["limits"]["max_entities"],
         max_model_records=request["limits"]["max_model_records"],
     )
     validate_proof(response["proof"], model, request_targets=request["targets"])
+    return entity_budget_gate(actual_entities, request["limits"]["max_entities"])
 
 
 def recompute_run_fingerprint(
@@ -857,7 +987,14 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
     if value["budget"]["actual"] is not None:
         assert value["budget"]["actual"] == coverage_internal_entities
         if value["budget"]["actual"] > value["budget"]["resolved"]:
+            assert value["status"] == "incomplete"
             assert value["incomplete_kind"] == "payload_unavailable"
+            assert value["payload_available"] is False
+            assert value["entity_count"] is None
+            assert value["artifact_paths"] == []
+            assert any(
+                diagnostic["code"] == "CSV-NEXT-LIMIT-005" for diagnostic in value["diagnostics"]
+            )
         else:
             assert value["entity_count"] == value["budget"]["actual"]
             if value["payload_available"]:
@@ -931,6 +1068,27 @@ def entity_budget_allowed(measured: int, resolved: int) -> bool:
     """Apply the inclusive max_entities boundary to internal entities."""
 
     return measured >= 0 and resolved >= 1 and measured <= resolved
+
+
+def entity_budget_gate(measured: int, resolved: int) -> dict[str, Any]:
+    """Compose a valid model's publication decision at the entity boundary."""
+
+    allowed = entity_budget_allowed(measured, resolved)
+    return {
+        "actual": measured,
+        "resolved": resolved,
+        "allowed": allowed,
+        "payload_available": allowed,
+        "outcome": "complete" if allowed else "payload_unavailable",
+        "diagnostic_code": None if allowed else "CSV-NEXT-LIMIT-005",
+        "artifact_paths": ["next.snapshot.semantic.json", "next.snapshot.puml"] if allowed else [],
+    }
+
+
+def compose_entity_budget_outcome(measured: int, resolved: int) -> dict[str, Any]:
+    """Return the manifest-facing status fields produced by EntityBudgetGate."""
+
+    return entity_budget_gate(measured, resolved)
 
 
 def model_record_budget_allowed(measured: int, limit: int) -> bool:
@@ -1076,6 +1234,11 @@ def resolve_target_resolutions(
         ]
         project_ids = {record["project_id"] for record in matching_files}
         if not matching_files or len(project_ids) != 1:
+            matching: list[str] = []
+            status = "failed"
+        elif exact_files and not _is_program_file(exact_files[0]):
+            # A direct context/control file is provenance only.  It cannot be
+            # addressed as a semantic Next target even when it is frozen.
             matching = []
             status = "failed"
         else:
@@ -1084,6 +1247,14 @@ def resolve_target_resolutions(
                 record
                 for record in collections["modules"].values()
                 if (record["project_id"], record["path"]) in file_keys
+                and _is_program_file(
+                    next(
+                        file
+                        for file in collections["files"].values()
+                        if file["project_id"] == record["project_id"]
+                        and file["path"] == record["path"]
+                    )
+                )
             ]
             module_ids = {record["id"] for record in matching_modules}
             matching_components = [
@@ -1534,11 +1705,11 @@ def validate_semantic_snapshot(value: dict[str, Any]) -> None:
         "coverage": value["coverage"],
         "diagnostics": value["diagnostics"],
     }
-    validate_model(
+    actual_entities = validate_model(
         model,
-        max_entities=value["request"]["limits"]["max_entities"],
         max_model_records=value["request"]["limits"]["max_model_records"],
     )
+    assert entity_budget_allowed(actual_entities, value["request"]["limits"]["max_entities"])
     expected_projects = [
         {
             "root": project["root"],
@@ -2123,9 +2294,8 @@ def _derived_taint_fixed_point(
 def validate_model(
     model: dict[str, Any],
     *,
-    max_entities: int = DEFAULT_MAX_ENTITIES,
     max_model_records: int = LIMIT_DEFAULTS["max_model_records"],
-) -> None:
+) -> int:
     collections = _validate_model_collections(model)
     project_records = collections["projects"]
     file_records = collections["files"]
@@ -2174,17 +2344,17 @@ def validate_model(
     for project_id, project in project_records.items():
         assert project["file_ids"] == sorted(files_by_project[project_id])
 
+    files_by_key = {(file["project_id"], file["path"]): file for file in file_records.values()}
+    assert len(files_by_key) == len(file_records)
     for module in module_records.values():
         assert module["kind"] == "module"
         assert module["project_id"] in project_records
         _assert_path(module["path"])
         assert module["derived_roles"] == sorted(module["derived_roles"])
         assert len(module["derived_roles"]) == len(set(module["derived_roles"]))
-        assert any(
-            file_record["project_id"] == module["project_id"]
-            and file_record["path"] == module["path"]
-            for file_record in file_records.values()
-        )
+        owner_file = files_by_key.get((module["project_id"], module["path"]))
+        assert owner_file is not None
+        assert _is_program_file(owner_file)
     _assert_unique([(module["project_id"], module["path"]) for module in module_records.values()])
     for component in component_records.values():
         assert component["kind"] == "component"
@@ -2357,12 +2527,12 @@ def validate_model(
         assert counts[collection] == len(collections[collection])
         assert counts[collection] <= LIMIT_DEFAULTS["max_collection_items"]
     assert counts["internal_entities"] == len(module_records) + len(component_records)
-    assert counts["internal_entities"] <= max_entities
     assert counts["published"] == sum(len(collections[collection]) for collection in COLLECTIONS)
     assert counts["published"] <= counts["discovered"]
     assert counts["discovered"] <= max_model_records
     assert counts["excluded"] >= 0
     assert counts["failed"] >= 0
+    return len(module_records) + len(component_records)
 
 
 def validate_request_files(request: dict[str, Any]) -> None:
@@ -2428,22 +2598,89 @@ def validate_request_files(request: dict[str, Any]) -> None:
         assert project["file_ids"] == sorted(files_by_project[project["id"]])
 
 
-def expected_export_resolution_witness(model: dict[str, Any]) -> list[dict[str, Any]]:
-    """Project every export binding into an independently checkable witness."""
+def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Bind frozen source syntax rows to model modules without reading bindings."""
 
-    witnesses = []
-    for member in model["members"]:
-        if member["kind"] != "export_binding":
+    files_by_path = {(file["project_id"], file["path"]): file for file in model["files"]}
+    modules_by_path = {module["path"]: module for module in model["modules"]}
+    assert len(modules_by_path) == len(model["modules"])
+    fixture_by_path = {item["path"]: item for item in load_export_census_fixture()}
+    for module in model["modules"]:
+        file = files_by_path.get((module["project_id"], module["path"]))
+        assert file is not None
+        assert _is_program_file(file)
+        fixture = fixture_by_path.get(module["path"])
+        assert fixture is not None
+        content = cast(bytes, fixture["content"])
+        assert file["size_bytes"] == len(content)
+        assert file["sha256"] == hashlib.sha256(content).hexdigest()
+
+    components_by_module: dict[str, list[dict[str, Any]]] = {}
+    for component_record in model["components"]:
+        components_by_module.setdefault(component_record["module_id"], []).append(component_record)
+    for components in components_by_module.values():
+        components.sort(key=canonical_json_bytes)
+
+    observations: list[dict[str, Any]] = []
+    for syntax in scan_export_syntax_census():
+        module = modules_by_path.get(syntax["owner_file_path"])
+        if module is None:
+            # Context/control fixture bytes are intentionally scanned but have
+            # no semantic Module owner and therefore no export observation.
             continue
+        candidates = components_by_module.get(module["id"], [])
+        component: dict[str, Any] | None = None
+        if syntax["role"] == "value" and not syntax["star"]:
+            if syntax["exported_name"] == "default" and len(candidates) == 1:
+                component = candidates[0]
+            else:
+                component = next(
+                    (
+                        candidate
+                        for candidate in candidates
+                        if candidate["declaration_key"] == syntax["exported_name"]
+                    ),
+                    None,
+                )
+        resolution = (
+            "component"
+            if component is not None
+            else ("type" if syntax["role"] == "type" else "unknown" if syntax["star"] else "value")
+        )
+        observations.append(
+            {
+                "owner_module_id": module["id"],
+                **syntax,
+                "resolution": resolution,
+                "component_id": component["id"] if component is not None else None,
+            }
+        )
+    observations.sort(key=canonical_json_bytes)
+    return observations
+
+
+def expected_export_resolution_witness(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the TypeChecker resolution witness for public component bindings."""
+
+    public = _export_binding_projection_from_observations(_export_census_for_model(model))
+    members = {
+        (
+            member["owner_id"],
+            member["exported_name"],
+            member["role"],
+        ): member
+        for member in model["members"]
+        if member["kind"] == "export_binding"
+    }
+    witnesses = []
+    for binding in public:
+        member = members.get((binding["owner_id"], binding["exported_name"], binding["role"]))
+        assert member is not None
         witnesses.append(
             {
                 "member_id": member["id"],
-                "resolution": member["resolution_kind"],
-                "component_id": (
-                    member["target_component_id"]
-                    if member["resolution_kind"] == "component"
-                    else None
-                ),
+                "resolution": "component",
+                "component_id": binding["target_component_id"],
             }
         )
     witnesses.sort(key=canonical_json_bytes)
@@ -2451,35 +2688,9 @@ def expected_export_resolution_witness(model: dict[str, Any]) -> list[dict[str, 
 
 
 def expected_export_observations(model: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build the independent export-observation fixture projection.
+    """Build observations from the frozen source census, not public bindings."""
 
-    The adapter will collect this observation stream directly from the
-    TypeScript checker.  The public ExportBinding is a later projection of
-    the stream; keeping the fields separate lets the reference validator
-    reject omitted observations, duplicate syntax identities, and component
-    substitutions.
-    """
-
-    observations: list[dict[str, Any]] = []
-    for member in model["members"]:
-        if member["kind"] != "export_binding":
-            continue
-        observations.append(
-            {
-                "owner_module_id": member["owner_id"],
-                "exported_name": member["exported_name"],
-                "role": member["role"],
-                "reexport": member["reexport"],
-                "syntax_identity": (
-                    f"export-declaration:{member['owner_id']}:{member['exported_name']}"
-                    f":{member['role']}:{'reexport' if member['reexport'] else 'local'}"
-                ),
-                "resolution": member["resolution_kind"],
-                "component_id": member["target_component_id"],
-            }
-        )
-    observations.sort(key=canonical_json_bytes)
-    return observations
+    return _export_census_for_model(model)
 
 
 def _export_binding_projection_from_observations(
@@ -2490,15 +2701,15 @@ def _export_binding_projection_from_observations(
     projected: list[dict[str, Any]] = []
     for observation in observations:
         resolution = observation["resolution"]
-        if resolution == "unknown":
-            # Unknown observations are evidence of an unsupported export but
-            # cannot become a falsely resolved public binding.
+        if resolution != "component":
+            # Only a value export resolved to one Component is public.  Value,
+            # type, and unknown observations remain coverage-only evidence.
             continue
-        target_component_id = observation["component_id"] if resolution == "component" else None
+        target_component_id = observation["component_id"]
         identity = {
             "owner_id": observation["owner_module_id"],
             "exported_name": observation["exported_name"],
-            "role": observation["role"],
+            "role": "value",
         }
         projected.append(
             {
@@ -2509,9 +2720,9 @@ def _export_binding_projection_from_observations(
                 ),
                 "owner_id": observation["owner_module_id"],
                 "exported_name": observation["exported_name"],
-                "role": observation["role"],
+                "role": "value",
                 "target_component_id": target_component_id,
-                "resolution_kind": resolution,
+                "resolution_kind": "component",
                 "reexport": observation["reexport"],
             }
         )
@@ -2520,14 +2731,52 @@ def _export_binding_projection_from_observations(
 
 
 def validate_export_observations(observations: list[dict[str, Any]], model: dict[str, Any]) -> None:
-    """Validate an independent complete export-observation collection."""
+    """Validate the complete source census and its independent resolution."""
 
     modules = {item["id"]: item for item in model["modules"]}
     components = {item["id"]: item for item in model["components"]}
+    expected = expected_export_observations(model)
+    syntax_fields = (
+        "owner_file_path",
+        "byte_start",
+        "byte_end",
+        "token_identity",
+        "syntax_identity",
+        "syntax_kind",
+        "exported_name",
+        "role",
+        "reexport",
+        "star",
+        "resolution",
+        "component_id",
+    )
+    assert [
+        tuple(observation[field] for field in syntax_fields) for observation in observations
+    ] == [tuple(observation[field] for field in syntax_fields) for observation in expected]
     assert observations == sorted(observations, key=canonical_json_bytes)
     observation_keys: list[tuple[str, str, str, str]] = []
     for observation in observations:
         assert observation["owner_module_id"] in modules
+        assert observation["owner_file_path"] == modules[observation["owner_module_id"]]["path"]
+        assert 0 <= observation["byte_start"] < observation["byte_end"]
+        assert observation["syntax_kind"] in {
+            "default_export",
+            "named_export",
+            "type_export",
+            "reexport",
+            "export_all",
+        }
+        assert re.fullmatch(r"[0-9a-f]{64}", observation["token_identity"])
+        if observation["star"]:
+            assert observation["syntax_kind"] == "export_all"
+            assert observation["exported_name"] == "*"
+            assert observation["reexport"] is True
+            assert observation["resolution"] == "unknown"
+            assert observation["component_id"] is None
+        else:
+            assert observation["exported_name"] == "default" or re.fullmatch(
+                r"[A-Za-z_$][A-Za-z0-9_$]*", observation["exported_name"]
+            )
         assert (
             unicodedata.normalize("NFC", observation["exported_name"])
             == observation["exported_name"]
@@ -2547,6 +2796,7 @@ def validate_export_observations(observations: list[dict[str, Any]], model: dict
         if resolution == "component":
             assert observation["role"] == "value"
             assert observation["component_id"] in components
+            assert observation["star"] is False
         else:
             assert observation["component_id"] is None
         if resolution == "value":
@@ -2836,14 +3086,10 @@ def validate_proof(
         if "target" in relation
     )
     assert coverage["non_component_value_export_count"] == sum(
-        member["resolution_kind"] == "value"
-        for member in model["members"]
-        if member["kind"] == "export_binding" and member["role"] == "value"
+        observation["resolution"] == "value" for observation in proof["export_observations"]
     )
     assert coverage["type_only_export_count"] == sum(
-        member["resolution_kind"] == "type"
-        for member in model["members"]
-        if member["kind"] == "export_binding"
+        observation["resolution"] == "type" for observation in proof["export_observations"]
     )
 
 

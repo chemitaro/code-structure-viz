@@ -1,5 +1,10 @@
 # Next resolved limits v1
 
+Round 8 review state: `review_status: fail` (P0=0, P1=4, P2=0). The
+independent entity publication gate and response-to-outcome vectors below are
+local data-only remediations; fresh exact-SHA Strict is pending and readiness
+is unconfirmed.
+
 `schemas/next-limits-v1.schema.json` is the single resolved limits record for
 the Next snapshot boundary. The same record is copied byte-for-byte into the
 adapter request, resolved config, request fingerprint descriptor, response,
@@ -39,6 +44,16 @@ total-RSS promise.
 | `max_signatures_per_component` | 16 | signatures per component | validator before signature visit | N/A | `partial_safe` |
 | `max_flow_visits` | 10,000 | flow visits per component | flow traversal before node visit | N/A | `partial_safe` |
 | `max_alias_edges` | 64 | alias edges per module | alias graph before edge append | N/A | `partial_safe` |
+
+`max_entities` is applied by an independent `EntityBudgetGate` after the
+response model and proof have passed structural validation and immediately
+before publication. The gate recomputes
+`actual = published modules + published components`; it does not trust the
+submitted summary count. `actual <= resolved` publishes normally, while an
+overrun records `CSV-NEXT-LIMIT-005`, keeps the actual count in the domain
+manifest, returns `payload_unavailable`, and publishes neither semantic JSON
+nor PlantUML. `max_model_records` remains the structural all-record boundary;
+its first over-limit value is independently composable with the entity gate.
 
 The executable boundary vectors in `tests/contracts/test_next_contracts.py`
 exercise `limit-1`, `limit`, and `limit+1` arithmetically for every row, so

@@ -28,7 +28,11 @@
     "runtime-inventory-attestation",
     "stdout-all-selectors",
     "head-commit-known-lengths",
-    "taint-boundary-closure"
+    "taint-boundary-closure",
+    "run-manifest-next-non-empty-path-targets",
+    "export-source-census",
+    "entity-budget-composition",
+    "program-file-semantic-ownership"
   ],
   "negative": [
     "cross-domain",
@@ -60,6 +64,17 @@
     "export-witness-count-mutation",
     "runtime-member-byte-mutation",
     "runtime-attestation-mutation",
-    "head-commit-invalid-length"
+    "head-commit-invalid-length",
+    "run-manifest-next-object-target",
+    "run-manifest-next-mixed-target",
+    "run-manifest-next-old-target",
+    "run-manifest-next-target-permutation",
+    "run-manifest-next-duplicate-target",
+    "export-census-coordinated-omission",
+    "export-census-duplicate",
+    "export-census-type-value-conflict",
+    "export-census-unknown-star-conflict",
+    "export-census-component-substitution",
+    "program-context-direct-target"
   ]
 }
