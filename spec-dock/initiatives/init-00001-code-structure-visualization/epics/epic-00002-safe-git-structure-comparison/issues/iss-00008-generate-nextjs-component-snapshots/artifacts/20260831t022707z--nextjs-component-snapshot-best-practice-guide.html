@@ -1,0 +1,1114 @@
+<!doctype html>
+<html lang="ja" data-plantuml-status="pending" data-plantuml-contract="2">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Issue #8 Next.js Component Snapshot ベストプラクティス設計ガイド</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: #f3f6fb;
+      --surface: #ffffff;
+      --text: #182230;
+      --muted: #536273;
+      --border: #d8e0ea;
+      --accent: #175cd3;
+      --success: #067647;
+      --success-bg: #ecfdf3;
+      --error: #b42318;
+      --error-bg: #fef3f2;
+      --code-bg: #101828;
+      --code-text: #f2f4f7;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+      line-height: 1.75;
+    }
+
+    main {
+      width: min(100% - 24px, 960px);
+      margin: 0 auto;
+      padding: max(24px, env(safe-area-inset-top)) 0 max(48px, env(safe-area-inset-bottom));
+    }
+
+    header, section {
+      margin-top: 20px;
+      padding: 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 6px 24px rgb(16 24 40 / 8%);
+    }
+
+    header { margin-top: 0; }
+    h1, h2 { line-height: 1.4; }
+    h1 { margin: 0 0 12px; font-size: clamp(1.6rem, 5vw, 2.25rem); }
+    h2 { margin: 0 0 8px; font-size: clamp(1.2rem, 4vw, 1.5rem); }
+    p { margin: 8px 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .plantuml-status {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: var(--success-bg);
+      color: var(--success);
+      font-weight: 700;
+    }
+
+    .plantuml-status.error { background: var(--error-bg); color: var(--error); }
+    .plantuml-diagram {
+      position: relative;
+      min-height: 160px;
+      margin-top: 14px;
+      padding: 14px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #ffffff;
+      color: #182230;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .plantuml-diagram[data-zoom-ready="true"] { cursor: zoom-in; }
+    .plantuml-diagram[data-zoom-ready="true"]:focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    .diagram-zoom-hint {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--accent);
+      box-shadow: 0 2px 8px rgb(16 24 40 / 14%);
+      font-size: 0.78rem;
+      font-weight: 700;
+      pointer-events: none;
+    }
+
+    .plantuml-diagram svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 0 auto;
+    }
+
+    details { margin-top: 12px; }
+    summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+    pre {
+      margin: 10px 0 0;
+      padding: 14px;
+      overflow-x: auto;
+      border-radius: 10px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-size: 0.8rem;
+      line-height: 1.55;
+      white-space: pre;
+    }
+
+    .muted { color: var(--muted); }
+    .lede { font-size: 1.08rem; }
+    .eyebrow {
+      margin: 0 0 6px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 2px; }
+    .pill {
+      display: inline-flex;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+    h3 { margin: 24px 0 6px; line-height: 1.5; }
+    ul, ol { padding-left: 1.4rem; }
+    li + li { margin-top: 5px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .card, .callout {
+      padding: 15px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--surface) 92%, var(--background));
+    }
+    .card h3 { margin-top: 0; }
+    .callout { margin-top: 14px; border-left: 5px solid var(--accent); }
+    .callout strong { color: var(--accent); }
+    .warning { border-left-color: #d97706; }
+    .warning strong { color: #b45309; }
+    .success { border-left-color: var(--success); }
+    .success strong { color: var(--success); }
+    .table-wrap { margin-top: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.91rem; }
+    th, td { padding: 10px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: color-mix(in srgb, var(--surface) 80%, var(--accent)); }
+    code:not(pre code) {
+      padding: 0.12em 0.35em;
+      border-radius: 5px;
+      background: color-mix(in srgb, var(--surface) 85%, var(--accent));
+      overflow-wrap: anywhere;
+    }
+    .decision {
+      display: grid;
+      grid-template-columns: minmax(110px, 0.28fr) 1fr;
+      gap: 12px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .decision:last-child { border-bottom: 0; }
+    .decision > strong { color: var(--accent); }
+    .flow {
+      padding: 12px 14px;
+      overflow-x: auto;
+      border-radius: 10px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.83rem;
+      white-space: pre;
+    }
+    @media (max-width: 640px) {
+      .decision { grid-template-columns: 1fr; gap: 2px; }
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    body.diagram-zoom-open { overflow: hidden; }
+
+    .diagram-zoom-dialog[hidden] { display: none !important; }
+    .diagram-zoom-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+      background: rgb(3 10 21 / 78%);
+    }
+
+    .diagram-zoom-panel {
+      display: flex;
+      flex-direction: column;
+      width: min(1800px, 100%);
+      height: min(1200px, 100%);
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+    }
+
+    .diagram-zoom-header {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      margin: 0;
+      padding: 6px 8px;
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      border-radius: 0;
+      background: var(--surface);
+      box-shadow: none;
+    }
+
+    .diagram-zoom-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .diagram-zoom-controls button {
+      display: inline-grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .diagram-zoom-controls button svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentcolor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .diagram-zoom-controls button:hover,
+    .diagram-zoom-controls button:focus-visible {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .diagram-zoom-controls button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .diagram-zoom-level {
+      min-width: 3.5rem;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+
+    #diagram-zoom-reset {
+      width: auto;
+      min-width: 58px;
+      padding-inline: 8px;
+    }
+
+    .diagram-zoom-viewport {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      background: #ffffff;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .diagram-zoom-canvas {
+      width: max-content;
+      min-width: 100%;
+      min-height: 100%;
+      padding: 24px;
+    }
+
+    .diagram-zoom-canvas svg {
+      display: block;
+      max-width: none;
+      height: auto;
+      margin: 0;
+    }
+
+    @media (max-width: 640px) {
+      .diagram-zoom-dialog { padding: 0; }
+      .diagram-zoom-panel { border-radius: 0; }
+      .diagram-zoom-canvas { padding: 16px; }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #0c111d;
+        --surface: #161b26;
+        --text: #f5f7fa;
+        --muted: #b9c2cf;
+        --border: #333b48;
+        --success-bg: #053321;
+        --error-bg: #55160c;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Issue #8 · Design candidate · 2026-08-31</p>
+      <h1>Next.js Component Snapshot<br>ベストプラクティス設計ガイド</h1>
+      <p class="lede">Next.js のコードを実行せず、coding agent が component 構造を安全・決定的に理解するための推奨設計です。実装方法だけでなく、identity、失敗、セキュリティ、Issue #9 の diff への引き継ぎまで一続きで説明します。</p>
+      <div class="pill-row">
+        <span class="pill">snapshot-only</span>
+        <span class="pill">static analysis</span>
+        <span class="pill">immutable input</span>
+        <span class="pill">Node optional</span>
+        <span class="pill">approved candidate / canonical反映済み</span>
+      </div>
+      <div id="plantuml-status" class="plantuml-status" role="status" aria-live="polite">
+        図を読み込んでいます。
+      </div>
+    </header>
+
+    <section>
+      <h2>先に結論</h2>
+      <div class="callout success">
+        <strong>推奨:</strong> Python が Git から source bytes を一度だけ凍結し、その bytes だけを one-shot Node worker に渡します。Node は bundled TypeScript で意味解析し、Python が返却 JSON を不信入力として検証してから JSON・PlantUML・manifest を公開します。
+      </div>
+      <p>設計の中心は「Node を使うか」ではありません。<strong>誰が入力と公開結果を信頼するか</strong>です。Python core が source acquisition と publication を所有し、Node は閉じた解析 engine に限定します。</p>
+      <div class="grid">
+        <article class="card">
+          <h3>安全性</h3>
+          <p>対象 repository の build、config、plugin、package script、application module、<code>node_modules</code> を実行・参照しません。</p>
+        </article>
+        <article class="card">
+          <h3>意味の正しさ</h3>
+          <p>字面の AST scan ではなく TypeChecker と限定的な output-flow を使い、証明できない関係は unknown にします。</p>
+        </article>
+        <article class="card">
+          <h3>diff の安定性</h3>
+          <p>Component 本体と export binding を分け、barrel や alias の変更を Component の消滅・新規作成にしません。</p>
+        </article>
+      </div>
+      <div class="callout warning">
+        <strong>位置づけ:</strong> この資料はゼロベース分析から得た設計候補です。2026-08-31に中心判断が承認され、canonical Requirement / Design / Planへ反映されました。最終authorityはcanonical文書であり、このHTML自体は説明用Artifactです。
+      </div>
+    </section>
+
+    <section>
+      <h2>何を作るのか</h2>
+      <p>利用者は一つの CLI command で Next.js project の静的 snapshot を取得します。対象は module、component、公開 export、props、静的 relation、client boundary です。</p>
+      <div class="flow">CLI request
+  → safe source acquisition
+  → TypeScript semantic analysis
+  → validated semantic model
+  → next.snapshot.semantic.json + next.snapshot.puml
+  → run-manifest / stdout / exit code</div>
+      <h3>対象</h3>
+      <ul>
+        <li>App Router と Pages Router の TS/TSX、safe JS/JSX subset</li>
+        <li>direct export、default export、barrel re-export、alias</li>
+        <li>TypeChecker で得られる effective props signature</li>
+        <li>static import、literal dynamic import、証明可能な JSX render</li>
+        <li><code>"use client"</code> という正の証拠と、そこから導ける境界 role</li>
+      </ul>
+      <h3>対象外</h3>
+      <ul>
+        <li>Next build、React rendering、RSC Flight、hydration、browser 実行</li>
+        <li>runtime component tree、実行時 conditional branch、custom HOC の一般推論</li>
+        <li>workspace/package manager の自動探索、route selector、temporal diff</li>
+        <li>source snippet、comment、literal default value、secret-like value の出力</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>全体アーキテクチャと trust boundary</h2>
+      <p>対象 repository の path を Node に渡すと、解析時点の source drift、symlink、package resolution、target <code>node_modules</code> への暗黙依存が増えます。そこで、Python が必要な bytes を先に固定し、Node には virtual filesystem だけを見せます。</p>
+
+      <script type="text/plain"
+              class="plantuml-source"
+              id="source-trust-flow"
+              data-target="diagram-trust-flow">
+@startuml
+title 推奨 trust boundary と処理の流れ
+left to right direction
+
+actor "coding agent" as User
+component "Python CLI / config" as CLI
+component "Applicability +\nSourceAcquisitionPlan" as Plan
+database "immutable SourceView\nGit-tracked bytes" as View
+component "one-shot Node worker\nbundled TypeScript" as Node
+component "Python strict validator\nschema / ID / redaction" as Validator
+component "Semantic renderer\nJSON + PlantUML" as Renderer
+component "OutputTransaction\nbudget + no-replace" as Tx
+
+User --> CLI : snapshot --domain next
+CLI --> Plan : project / target を確定
+Plan --> View : source を一度だけ凍結
+View --> Node : stdin JSON\nbase64 bytes only
+Node --> Validator : untrusted adapter/v1 JSON
+Validator --> Renderer : validated model
+Renderer --> Tx : requested payloads
+Tx --> User : Artifact + manifest
+
+note bottom of Node
+target repository path/cwd、node_modules、
+npm、network は利用しない
+end note
+note bottom of Tx
+source drift と既存 path 衝突を検査し、
+全 format を atomic に公開する
+end note
+@enduml
+      </script>
+
+      <div id="diagram-trust-flow" class="plantuml-diagram">
+        trust boundary 図を描画しています。
+      </div>
+
+      <details>
+        <summary>PlantUMLソースを確認する</summary>
+        <pre data-source-copy="source-trust-flow"></pre>
+      </details>
+
+      <h3>責務の分け方</h3>
+      <div class="decision"><strong>Python core</strong><span>applicability、project/target、Git read-only acquisition、SourceView、process 制御、strict validation、ID/count/digest 再計算、rendering、publication を所有します。</span></div>
+      <div class="decision"><strong>Node adapter</strong><span>bundled TypeScript と in-memory <code>CompilerHost</code> を使い、request 内の virtual files だけを semantic analysis します。</span></div>
+      <div class="decision"><strong>Public Artifact</strong><span>Python が検証済みの semantic model から生成します。Node の raw stdout / stderr をそのまま公開しません。</span></div>
+    </section>
+
+    <section>
+      <h2>project をどう選ぶか</h2>
+      <p><code>--repo</code> は引き続き正確な Git root を指します。monorepo 内の Next project は、曖昧な自動探索ではなく <code>--project</code> または config で明示します。</p>
+      <pre><code>code-structure-viz snapshot \
+  --repo . \
+  --domain next \
+  --project apps/web \
+  --target component:apps/web/components/index.ts#Button \
+  --downstream-depth 2 \
+  --output-dir /tmp/next-snapshot</code></pre>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>判断</th><th>推奨 contract</th><th>理由</th></tr></thead>
+          <tbody>
+            <tr><td>default</td><td><code>[next].project_roots=["."]</code></td><td>単一 project は追加指定なしで扱える。</td></tr>
+            <tr><td>monorepo</td><td><code>--project apps/web</code> を repeatable に指定</td><td>unrelated package を誤って拾わない。</td></tr>
+            <tr><td>applicable</td><td>project root 直下 <code>package.json</code> が <code>dependencies.next</code> または <code>devDependencies.next</code> を直接持つ</td><td>config や directory 名を実行・推測しない。</td></tr>
+            <tr><td>shared source</td><td><code>[next].source_roots</code> で repository-local path を明示</td><td>project root 外も opt-in で凍結できる。</td></tr>
+            <tr><td>config</td><td><code>tsconfig.json</code> → <code>jsconfig.json</code> → built-in safe config</td><td>決定的な優先順を持つ。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><code>next.config.*</code>、<code>app/</code> directory、import の字面、lockfile の間接 entry は applicability evidence にしません。Next project がないと証明できた場合は Node を探さず <code>not_applicable</code>、Next project はあるが Component が 0 件なら <code>complete empty</code> です。</p>
+    </section>
+
+    <section>
+      <h2>identity：Component と export を分ける</h2>
+      <p>ここが設計上もっとも重要な判断です。export 名を Component 本体の identity にすると、barrel の移動や alias 変更だけで Component が「削除＋追加」されたように見えます。</p>
+      <div class="callout">
+        <strong>推奨:</strong> Component は宣言 module と declaration key で識別し、どの module から何という名前で公開されるかは <code>ExportBindingMember</code> として別に表現します。
+      </div>
+
+      <script type="text/plain"
+              class="plantuml-source"
+              id="source-domain-model"
+              data-target="diagram-domain-model">
+@startuml
+title Next snapshot の identity と ownership
+hide empty members
+
+class ProjectDescriptor <<descriptor>> {
+  project_root
+  config_path
+  coverage
+}
+class ModuleEntity <<entity>> {
+  id = hash(physical_path)
+  router_context
+  boundary_roles
+}
+class ComponentEntity <<entity>> {
+  id = hash(module_id, declaration_key)
+  declaration_key
+  exposure
+}
+class ExportBindingMember <<member>> {
+  exported_name
+  target_id
+}
+class ImportBindingMember <<member>> {
+  imported_name
+  role
+}
+class PropMember <<member>> {
+  name
+  optional
+  normalized_type
+}
+class StaticImport <<relation>>
+class JsxRender <<relation>>
+
+ProjectDescriptor "1" o-- "*" ModuleEntity
+ModuleEntity "1" *-- "*" ComponentEntity
+ModuleEntity "1" *-- "*" ExportBindingMember
+ModuleEntity "1" *-- "*" ImportBindingMember
+ComponentEntity "1" *-- "*" PropMember
+ModuleEntity --> StaticImport
+ComponentEntity --> JsxRender
+ExportBindingMember --> ComponentEntity : declaration を参照
+
+note right of ComponentEntity
+export alias、barrel、route、range、props は
+Component identity に含めない
+end note
+@enduml
+      </script>
+
+      <div id="diagram-domain-model" class="plantuml-diagram">
+        domain model 図を描画しています。
+      </div>
+
+      <details>
+        <summary>PlantUMLソースを確認する</summary>
+        <pre data-source-copy="source-domain-model"></pre>
+      </details>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>概念</th><th>identity に入れる</th><th>identity に入れない</th></tr></thead>
+          <tbody>
+            <tr><td>Module</td><td>repository-relative physical module path</td><td>route、router kind、<code>use client</code>、range</td></tr>
+            <tr><td>Component</td><td>Module ID + binding name、または <code>@anonymous-default</code></td><td>exported name、barrel path、wrapper、props、range</td></tr>
+            <tr><td>Export binding</td><td>owner Module + exported name</td><td>source order、range、quote style</td></tr>
+            <tr><td>Prop</td><td>Component ID + prop name</td><td>type、optional、default evidence、range</td></tr>
+            <tr><td>Relation</td><td>source、kind、target、semantic role</td><td>occurrence order、local alias、syntax spelling</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>barrel、render、client boundary の見え方</h2>
+      <p>module dependency と component render は別の graph plane にします。Module が Component を所有する関係は zero-hop であり、import relation から全 Component へ暗黙に fan-out しません。</p>
+
+      <script type="text/plain"
+              class="plantuml-source"
+              id="source-static-graph"
+              data-target="diagram-static-graph">
+@startuml
+title barrel と client boundary を分離した静的 graph
+left to right direction
+
+component "app/page.tsx\nserver_candidate" as Page
+component "components/index.ts\nbarrel" as Barrel
+component "components/button.tsx\nclient_entry" as ButtonModule
+rectangle "Page component" as PageComponent
+rectangle "Button component" as ButtonComponent
+
+Page --> Barrel : static_import
+Barrel --> ButtonModule : static re-export
+PageComponent --> ButtonComponent : jsx_render
+Page -[#d97706,dashed]-> ButtonModule : boundary_effect facet
+Page *-- PageComponent
+ButtonModule *-- ButtonComponent
+
+note bottom of Barrel
+barrel は export binding を持つが
+Button component を複製しない
+end note
+note bottom of ButtonModule
+client_entry は exact use client directive
+から得る正の証拠
+end note
+@enduml
+      </script>
+
+      <div id="diagram-static-graph" class="plantuml-diagram">
+        static graph 図を描画しています。
+      </div>
+
+      <details>
+        <summary>PlantUMLソースを確認する</summary>
+        <pre data-source-copy="source-static-graph"></pre>
+      </details>
+
+      <h3>relation の閉じた vocabulary</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>relation</th><th>source → target</th><th>成立条件</th></tr></thead>
+          <tbody>
+            <tr><td><code>static_import</code></td><td>Module → Module / external</td><td>TypeChecker / resolver で静的 value import を確認。</td></tr>
+            <tr><td><code>literal_dynamic_import</code></td><td>Module → Module / external</td><td>specifier が literal で一意に解決可能。</td></tr>
+            <tr><td><code>jsx_render</code></td><td>Component → Component / external</td><td>Component の return output-flow に入り symbol が解決可能。</td></tr>
+            <tr><td><code>component_wrap</code></td><td>Component → Component</td><td><code>memo</code>、<code>forwardRef</code>、<code>lazy</code>、限定的 <code>next/dynamic</code>。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>event handler、render prop の未実行 body、任意 helper、non-literal import、ambiguous symbol から relation を作りません。Component return、concise arrow、class <code>render()</code>、single-assignment const、conditional、array、safe <code>map</code>/<code>flatMap</code>、exact React <code>createElement</code> だけを bounded に追います。</p>
+    </section>
+
+    <section>
+      <h2>props を安全に正規化する</h2>
+      <p>props は TypeChecker の effective call / construct signature を起点にします。ただし <code>typeToString()</code> や source の型表記をそのまま public contract にすると、compiler version、alias、format、literal value に引きずられます。</p>
+      <h3>閉じた type IR</h3>
+      <p><code>primitive</code>、ordinal 化した <code>type_parameter</code>、value を隠した <code>redacted_literals</code>、repository/external reference、array、tuple、union、intersection、parameter name を持たない function、object、<code>opaque</code> だけに正規化します。</p>
+      <ul>
+        <li>Unicode NFC、canonical sort、deduplicate、generic parameter の alpha-normalize を行います。</li>
+        <li><code>children</code> と <code>ref</code> は effective public signature に実在するときだけ出します。</li>
+        <li>default value は出さず、必要なら <code>has_direct_default</code> のような redacted evidence だけにします。</li>
+        <li>候補上限は depth 16、1 prop 512 nodes、union/intersection 64 members、nested properties 256、component signatures 16 です。</li>
+        <li>上限到達時は途中で切らず、該当 subtree を <code>opaque(type_complexity_limit)</code> にして coverage を partial にします。</li>
+        <li><code>any</code> は open-world なので partial。正確な <code>unknown</code> / <code>never</code> は complete にできます。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>client/server は二値ではない</h2>
+      <p><code>"use client"</code> がないだけで server と断定してはいけません。静的 snapshot では、正の証拠と到達可能性を複数 role として表現します。</p>
+      <div class="decision"><strong>client_entry</strong><span>directive prologue に exact <code>"use client"</code> / <code>'use client'</code> がある直接 fact。</span></div>
+      <div class="decision"><strong>client_dependency</strong><span><code>client_entry</code> から internal static value import / re-export で到達可能。</span></div>
+      <div class="decision"><strong>server_candidate</strong><span>closed App Router UI entry seed から client entry の直前まで static value edge で到達可能。runtime server の断定ではありません。</span></div>
+      <div class="decision"><strong>unknown</strong><span>上記の正の証拠がない状態。Pages Router も自動 server 扱いしません。</span></div>
+      <p>同じ Module が異なる entry context から <code>client_dependency</code> と <code>server_candidate</code> の両方になることを許します。type-only import、dynamic import、JSX relation、external/unresolved edge は role propagation に使いません。境界 crossing は underlying import edge の <code>boundary_effect</code> facet であり、重複 relation ではありません。</p>
+    </section>
+
+    <section>
+      <h2>失敗を「安全に成功」に見せない</h2>
+      <p>diagnostic があるかどうかではなく、v1 が約束した意味を欠落させたかで結果を分類します。intentional unsupported を unknown として完全に表現できる場合は、diagnostic があっても complete です。</p>
+
+      <script type="text/plain"
+              class="plantuml-source"
+              id="source-outcomes"
+              data-target="diagram-outcomes">
+@startuml
+title Next snapshot outcome と publication
+[*] --> Preflight
+Preflight --> UsageError : CLI/config invalid
+Preflight --> NotApplicable : Next project 不在を証明
+Preflight --> Acquire : applicable
+Acquire --> Fatal : Git/SourceView integrity
+Acquire --> Analyze : frozen input 完成
+Analyze --> PayloadUnavailable : global/protocol/security/target/budget failure
+Analyze --> PartialSafe : 局所欠落と安全 subset を証明
+Analyze --> Complete : promised semantics をすべて表現
+
+state "not_applicable\nexit 0\nmanifest" as NotApplicable
+state "complete / empty\nexit 0\npayload + manifest" as Complete
+state "partial_safe\nexit 3\npayload + manifest" as PartialSafe
+state "payload_unavailable\nexit 3\nmanifest only" as PayloadUnavailable
+state "usage error\nexit 2\nArtifact 0" as UsageError
+state "fatal\nexit 1\nArtifact 0" as Fatal
+
+NotApplicable --> [*]
+Complete --> [*]
+PartialSafe --> [*]
+PayloadUnavailable --> [*]
+UsageError --> [*]
+Fatal --> [*]
+@enduml
+      </script>
+
+      <div id="diagram-outcomes" class="plantuml-diagram">
+        outcome state 図を描画しています。
+      </div>
+
+      <details>
+        <summary>PlantUMLソースを確認する</summary>
+        <pre data-source-copy="source-outcomes"></pre>
+      </details>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>条件</th><th>結果</th><th>公開</th><th>exit</th></tr></thead>
+          <tbody>
+            <tr><td>Next project がないと証明</td><td><code>not_applicable</code></td><td>manifest</td><td>0</td></tr>
+            <tr><td>applicable、Component 0、解析完了</td><td><code>complete empty</code></td><td>empty JSON / PlantUML + manifest</td><td>0</td></tr>
+            <tr><td>closed v1 の intentional unsupported を unknown として完全表現</td><td><code>complete</code> + diagnostic</td><td>payload + manifest</td><td>0</td></tr>
+            <tr><td>局所欠落、安全 subset と coverage を全 format で証明</td><td><code>partial_safe</code></td><td>JSON + PlantUML + manifest</td><td>3</td></tr>
+            <tr><td>explicit target、config、Program、Node、protocol、schema、security、identity、budget failure</td><td><code>payload_unavailable</code></td><td>safe manifest only</td><td>3</td></tr>
+            <tr><td>CLI grammar、unknown config key、invalid value</td><td>usage error</td><td>なし</td><td>2</td></tr>
+            <tr><td>Git/SourceView、source drift、serializer/transaction invariant</td><td>fatal</td><td>なし</td><td>1</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>explicit target は all-or-nothing です。一つでも missing、ambiguous、out-of-scope なら全 project へ fallback せず、domain payload を公開しません。entity budget 500 の場合、selected internal Module + Component が 501 なら切り捨てず manifest-only にします。</p>
+    </section>
+
+    <section>
+      <h2>公開するファイルと provenance</h2>
+      <div class="grid">
+        <article class="card"><h3><code>next.snapshot.semantic.json</code></h3><p><code>code-structure-viz.semantic/v1</code> envelope 内の validated semantic facts。</p></article>
+        <article class="card"><h3><code>next.snapshot.puml</code></h3><p><code>code-structure-viz.plantuml/next/v1</code> の domain-specific visual vocabulary。</p></article>
+        <article class="card"><h3>run manifest</h3><p>status、coverage、safe diagnostic、toolchain/config/source-plan version と digest、Artifact SHA-256。</p></article>
+      </div>
+      <p>manifest には Node、TypeScript、adapter、protocol の exact version、project root と config の repository-relative path、source acquisition plan digest、target/depth/budget の requested/resolved 値を残します。source content 自体は残しません。</p>
+      <p><code>--stdout next:semantic-json</code> のような available selector は、公開 file と完全に同じ bytes を出します。diagnostic は stderr だけです。requested formats は一つの transaction で all-or-none に公開し、既存 path は上書きしません。</p>
+    </section>
+
+    <section>
+      <h2>process と supply-chain の安全策</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>risk</th><th>必須対策</th></tr></thead>
+          <tbody>
+            <tr><td>shell / argument injection</td><td>fixed argv、<code>shell=false</code>、fixed adapter entrypoint。</td></tr>
+            <tr><td>target filesystem 読み取り</td><td>private empty cwd、in-memory CompilerHost、request 外 path を解決しない。</td></tr>
+            <tr><td>environment injection</td><td>minimal env、<code>NODE_OPTIONS</code> / <code>NODE_PATH</code> を除去。</td></tr>
+            <tr><td>package execution</td><td>npm/npx/network/target node_modules/Next config/plugin/script を使わない。</td></tr>
+            <tr><td>resource exhaustion</td><td>file/total/stdout/stderr/time/memory cap、process group termination、truncation なし。</td></tr>
+            <tr><td>protocol confusion</td><td>exact one JSON、closed schema、version check、stdout noise は全 response reject。</td></tr>
+            <tr><td>data leak</td><td>Python が path/ref/redaction を検証し、raw compiler text や literal を公開しない。</td></tr>
+            <tr><td>supply-chain drift</td><td>compiled adapter + exact TypeScript + lockfile + license inventory を一体で bundle。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>候補上限は 1 file 4 MiB、total 64 MiB、20,000 files、stdout 16 MiB、stderr capture 64 KiB、60 秒、Node old-space 512 MiB です。実測で調整可能ですが、silent truncation と unlimited は不可です。</p>
+    </section>
+
+    <section>
+      <h2>実装順序</h2>
+      <p>まず仕様を採用し、次に acceptance contract を固定します。adapter を先に書くと、identity や failure semantics が実装都合で固まりやすいためです。</p>
+
+      <script type="text/plain"
+              class="plantuml-source"
+              id="source-roadmap"
+              data-target="diagram-roadmap">
+@startuml
+title Issue #8 推奨 implementation roadmap
+start
+:0. candidate の人間承認;
+:canonical Requirement / Design / Plan 更新;
+:independent strict spec review;
+:1. CLI・schema・protocol・outcome fixture;
+:2. SourceAcquisitionPlan と project/target parser;
+:Python / SQLAlchemy の byte regression 確認;
+:3. hardened one-shot Node runner;
+:4. TypeScript semantic analyzer;
+:identity → props → relations → client roles;
+:5. Python validator と JSON / PlantUML renderer;
+:6. registry・manifest・stdout・atomic publication;
+:7. security・limits・offline packaging・license;
+:deterministic golden と full regression;
+:Issue #9 へ primitive identity/facts を handoff;
+stop
+@enduml
+      </script>
+
+      <div id="diagram-roadmap" class="plantuml-diagram">
+        implementation roadmap 図を描画しています。
+      </div>
+
+      <details>
+        <summary>PlantUMLソースを確認する</summary>
+        <pre data-source-copy="source-roadmap"></pre>
+      </details>
+
+      <h3>現在のコードで再確認する主な場所</h3>
+      <ul>
+        <li><code>src/code_structure_viz/source/source_view.py</code></li>
+        <li><code>src/code_structure_viz/source/targets.py</code></li>
+        <li><code>src/code_structure_viz/core/config.py</code></li>
+        <li><code>src/code_structure_viz/core/domains.py</code></li>
+        <li><code>src/code_structure_viz/application/snapshot_domain.py</code></li>
+        <li><code>src/code_structure_viz/artifacts/writer.py</code>、<code>manifest.py</code>、<code>streams.py</code></li>
+        <li><code>tests/contracts/test_json_schemas.py</code> と既存 Python / SQLAlchemy golden</li>
+      </ul>
+      <p>canonical 文書に記載された <code>adapters/next/...</code> は planned path です。実装開始時に current tree と整合させ、存在しない symbol を実装済みとして扱いません。</p>
+    </section>
+
+    <section>
+      <h2>acceptance で証明すること</h2>
+      <div class="grid">
+        <article class="card"><h3>意味</h3><p>App/Pages、named/default/barrel、props variants、static/dynamic/render、client roles、target/depth。</p></article>
+        <article class="card"><h3>空と失敗</h3><p>not applicable、complete empty、partial safe、payload unavailable、usage、fatal、interrupt。</p></article>
+        <article class="card"><h3>セキュリティ</h3><p>execution trap、path escape、symlink、environment、redaction、Git state before/after。</p></article>
+        <article class="card"><h3>再現性</h3><p>same input の exact-byte rerun、canonical ordering、digest、output collision、source drift。</p></article>
+        <article class="card"><h3>optional runtime</h3><p>Next 不在時に Node probe なし。Python/SQLAlchemy install・run・golden に Node 依存や byte drift なし。</p></article>
+        <article class="card"><h3>packaging</h3><p>offline adapter、exact TypeScript、lockfile、license inventory、Node 22+ CI。</p></article>
+      </div>
+      <div class="callout warning">
+        <strong>停止条件:</strong> Node が frozen bytes 以外を読む、explicit target を fallback する、partial JSON と PlantUML が別 subset、budget を truncation で回避、既存 domain に Node 要件や byte drift を持ち込む場合は完了扱いにしません。
+      </div>
+    </section>
+
+    <section>
+      <h2>この候補を採用する際の四つの判断</h2>
+      <ol>
+        <li>Component identity を export site から declaration site へ移し、export binding を分離する。</li>
+        <li>monorepo project root を自動探索せず、CLI / config で明示する。</li>
+        <li>Node に target repository path を渡さず、Python が凍結した bytes だけを渡す。</li>
+        <li>client/server を排他的分類ではなく、positive-evidence role として表現する。</li>
+      </ol>
+      <p>この四点とfailure matrix、数値limit、acceptance traceはcanonical Requirement / Design / Planへ反映済みです。commit/push後のChatGPT Use Strict reviewを通過して初めてimplementation-readyと判定します。このHTMLとcompanion Markdownはevidenceであり、それ自体はcanonical specificationではありません。</p>
+    </section>
+  </main>
+
+  <div id="diagram-zoom-dialog" class="diagram-zoom-dialog" hidden>
+    <section class="diagram-zoom-panel"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="diagram-zoom-title">
+      <h2 id="diagram-zoom-title" class="visually-hidden">図を拡大表示</h2>
+      <header class="diagram-zoom-header">
+        <div class="diagram-zoom-controls" aria-label="図の拡大率を操作する">
+          <button type="button" id="diagram-zoom-out" aria-label="図を縮小する" title="縮小">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>
+          </button>
+          <button type="button" id="diagram-zoom-reset" aria-label="100%に戻す" title="100%に戻す">
+            <span id="diagram-zoom-level" class="diagram-zoom-level" aria-live="polite">100%</span>
+          </button>
+          <button type="button" id="diagram-zoom-in" aria-label="図を拡大する" title="拡大">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+          </button>
+          <button type="button" id="diagram-zoom-close" aria-label="拡大表示を閉じる" title="閉じる">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+          </button>
+        </div>
+      </header>
+      <div id="diagram-zoom-viewport" class="diagram-zoom-viewport" tabindex="0">
+        <div id="diagram-zoom-canvas" class="diagram-zoom-canvas"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const sources = [...document.querySelectorAll(".plantuml-source")];
+      const status = document.getElementById("plantuml-status");
+
+      window.__plantumlDocumentState = {
+        expected: sources.length,
+        rendered: 0,
+        errors: [],
+        completed: false
+      };
+
+      window.__plantumlFail = message => {
+        const state = window.__plantumlDocumentState;
+        state.errors.push(String(message));
+        state.completed = true;
+        document.documentElement.dataset.plantumlStatus = "error";
+        status.className = "plantuml-status error";
+        status.textContent = `図の描画に失敗しました: ${message}`;
+      };
+
+      for (const output of document.querySelectorAll("[data-source-copy]")) {
+        const source = document.getElementById(output.dataset.sourceCopy);
+        if (source) output.textContent = source.textContent.trim();
+      }
+
+      document.documentElement.dataset.plantumlStatus = "running";
+    })();
+  </script>
+
+  <script
+    src="https://unpkg.com/@plantuml/core@1.2026.6/viz-global.js"
+    onerror="window.__plantumlFail('viz-global.jsを読み込めませんでした。')"></script>
+
+  <script type="module">
+    const state = window.__plantumlDocumentState;
+    const status = document.getElementById("plantuml-status");
+    const zoomDialog = document.getElementById("diagram-zoom-dialog");
+    const zoomTitle = document.getElementById("diagram-zoom-title");
+    const zoomViewport = document.getElementById("diagram-zoom-viewport");
+    const zoomCanvas = document.getElementById("diagram-zoom-canvas");
+    const zoomLevelOutput = document.getElementById("diagram-zoom-level");
+    const zoomOutButton = document.getElementById("diagram-zoom-out");
+    const zoomInButton = document.getElementById("diagram-zoom-in");
+    const zoomResetButton = document.getElementById("diagram-zoom-reset");
+    const zoomCloseButton = document.getElementById("diagram-zoom-close");
+    let zoomLevel = 1;
+    let zoomBaseWidth = 0;
+    let zoomedSvg = null;
+    let zoomReturnFocus = null;
+
+    const diagramTitle = sourceElement => {
+      const titleLine = sourceElement.textContent.match(/^\s*title\s+(.+)$/m);
+      return titleLine?.[1]?.trim() || "図を拡大表示";
+    };
+
+    const applyDiagramZoom = () => {
+      if (!zoomedSvg || zoomBaseWidth <= 0) return;
+      zoomedSvg.style.width = `${Math.round(zoomBaseWidth * zoomLevel)}px`;
+      zoomedSvg.style.height = "auto";
+      zoomLevelOutput.value = `${Math.round(zoomLevel * 100)}%`;
+      zoomLevelOutput.textContent = zoomLevelOutput.value;
+      zoomResetButton.setAttribute("aria-label", `100%に戻す（現在${zoomLevelOutput.value}）`);
+      zoomOutButton.disabled = zoomLevel <= 0.5;
+      zoomInButton.disabled = zoomLevel >= 3;
+    };
+
+    const setDiagramZoom = nextLevel => {
+      zoomLevel = Math.min(3, Math.max(0.5, nextLevel));
+      applyDiagramZoom();
+    };
+
+    const closeDiagramZoom = () => {
+      if (zoomDialog.hidden) return;
+      zoomDialog.hidden = true;
+      document.body.classList.remove("diagram-zoom-open");
+      zoomCanvas.replaceChildren();
+      zoomedSvg = null;
+      zoomBaseWidth = 0;
+      zoomReturnFocus?.focus();
+      zoomReturnFocus = null;
+    };
+
+    const openDiagramZoom = (target, sourceElement) => {
+      const sourceSvg = target.querySelector("svg");
+      if (!sourceSvg) return;
+
+      zoomReturnFocus = target;
+      zoomedSvg = sourceSvg.cloneNode(true);
+      zoomedSvg.removeAttribute("height");
+      zoomedSvg.style.maxWidth = "none";
+      const viewBoxWidth = zoomedSvg.viewBox?.baseVal?.width || 0;
+      const declaredWidth = Number.parseFloat(zoomedSvg.getAttribute("width")) || 0;
+      zoomBaseWidth = Math.max(viewBoxWidth, declaredWidth, sourceSvg.getBoundingClientRect().width);
+      zoomLevel = 1;
+      zoomTitle.textContent = diagramTitle(sourceElement);
+      zoomCanvas.replaceChildren(zoomedSvg);
+      zoomDialog.hidden = false;
+      document.body.classList.add("diagram-zoom-open");
+      zoomViewport.scrollTo({ top: 0, left: 0 });
+      applyDiagramZoom();
+      zoomCloseButton.focus();
+    };
+
+    const prepareDiagramZoom = (target, sourceElement) => {
+      target.dataset.zoomReady = "true";
+      target.tabIndex = 0;
+      target.setAttribute("role", "button");
+      target.setAttribute("aria-label", `${diagramTitle(sourceElement)}を拡大表示する`);
+      const hint = document.createElement("span");
+      hint.className = "diagram-zoom-hint";
+      hint.textContent = "クリックして拡大";
+      hint.setAttribute("aria-hidden", "true");
+      target.append(hint);
+      target.addEventListener("click", () => openDiagramZoom(target, sourceElement));
+      target.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openDiagramZoom(target, sourceElement);
+        }
+      });
+    };
+
+    const focusableZoomElements = () => [...zoomDialog.querySelectorAll(
+      'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    )].filter(element => !element.hidden && element.getClientRects().length > 0);
+
+    zoomOutButton.addEventListener("click", () => setDiagramZoom(zoomLevel - 0.25));
+    zoomInButton.addEventListener("click", () => setDiagramZoom(zoomLevel + 0.25));
+    zoomResetButton.addEventListener("click", () => setDiagramZoom(1));
+    zoomCloseButton.addEventListener("click", closeDiagramZoom);
+    zoomDialog.addEventListener("click", event => {
+      if (event.target === zoomDialog) closeDiagramZoom();
+    });
+    document.addEventListener("keydown", event => {
+      if (zoomDialog.hidden) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDiagramZoom();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = focusableZoomElements();
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && (document.activeElement === first || !zoomDialog.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !zoomDialog.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+
+    try {
+      const { renderToString } = await import(
+        "https://unpkg.com/@plantuml/core@1.2026.6/plantuml.js"
+      );
+
+      const renderDiagram = lines => new Promise((resolve, reject) => {
+        renderToString(
+          lines,
+          svg => resolve(svg),
+          message => reject(new Error(message))
+        );
+      });
+
+      const normalizeDiagnosticText = value => String(value ?? "").replace(/\s+/g, " ").trim();
+
+      const inspectRenderedSvg = svgMarkup => {
+        const parsed = new DOMParser().parseFromString(svgMarkup, "image/svg+xml");
+        const root = parsed.documentElement;
+        if (!root || root.localName.toLowerCase() === "parsererror" || parsed.querySelector("parsererror")) {
+          throw new Error("PlantUMLが不正なSVGを返しました。");
+        }
+        if (root.localName.toLowerCase() !== "svg") {
+          throw new Error("PlantUMLの描画結果がSVGではありません。");
+        }
+
+        const fullText = normalizeDiagnosticText(root.textContent);
+        const diagramType = root.getAttribute("data-diagram-type")?.toLowerCase() ?? "";
+        const hasKnownErrorText = /Syntax Error\?|An error has occurred/i.test(fullText);
+        const hasDiagnosticStructure = /PlantUML version\b/i.test(fullText)
+          && /\[From [^\]]*\(line \d+\)\s*\]/i.test(fullText)
+          && /@startuml/i.test(fullText);
+
+        if (diagramType === "error" || hasKnownErrorText || hasDiagnosticStructure) {
+          const diagnosticLines = [...root.querySelectorAll("text")]
+            .filter(element => {
+              const presentation = [
+                element.getAttribute("fill"),
+                element.getAttribute("style"),
+                element.getAttribute("text-decoration")
+              ].filter(Boolean).join(" ").toLowerCase().replace(/\s+/g, "");
+              return /(?:fill:)?(?:#ff0000|#f00|red|rgb\(255,0,0\))/.test(presentation)
+                || presentation.includes("wavy");
+            })
+            .map(element => normalizeDiagnosticText(element.textContent))
+            .filter(Boolean);
+          const reason = [...new Set(diagnosticLines)].join(" / ").slice(0, 500)
+            || (hasKnownErrorText
+              ? fullText.match(/Syntax Error\?|An error has occurred/i)?.[0]
+              : "PlantUMLの診断画面が返されました。");
+          throw new Error(`PlantUMLの診断SVGが検出されました: ${reason}`);
+        }
+
+        return root;
+      };
+
+      for (const sourceElement of document.querySelectorAll(".plantuml-source")) {
+        const target = document.getElementById(sourceElement.dataset.target);
+        if (!target) {
+          state.errors.push(`${sourceElement.id}: 描画先がありません。`);
+          continue;
+        }
+
+        try {
+          const lines = sourceElement.textContent.trim().split(/\r?\n/);
+          const svgMarkup = await renderDiagram(lines);
+          const svg = inspectRenderedSvg(svgMarkup);
+          target.replaceChildren(document.importNode(svg, true));
+          prepareDiagramZoom(target, sourceElement);
+          target.dataset.plantumlStatus = "success";
+          state.rendered += 1;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          state.errors.push(`${sourceElement.id}: ${message}`);
+          target.dataset.plantumlStatus = "error";
+          target.textContent = `この図の描画に失敗しました: ${message}`;
+        }
+      }
+
+      state.completed = true;
+      if (state.rendered === state.expected && state.errors.length === 0) {
+        document.documentElement.dataset.plantumlStatus = "success";
+        status.textContent = `図を${state.rendered}件すべて描画できました。`;
+      } else {
+        document.documentElement.dataset.plantumlStatus = "error";
+        status.className = "plantuml-status error";
+        status.textContent = `図を${state.rendered}件描画し、${state.errors.length}件のエラーが発生しました。`;
+      }
+    } catch (error) {
+      window.__plantumlFail(error instanceof Error ? error.message : String(error));
+    }
+  </script>
+</body>
+</html>

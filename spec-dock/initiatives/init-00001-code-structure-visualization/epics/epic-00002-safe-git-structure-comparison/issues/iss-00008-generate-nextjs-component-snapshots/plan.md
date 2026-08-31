@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-08-24"
+最終更新: "2026-08-31"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -37,51 +37,79 @@ CLI request -> safe source acquisition -> domain semantic analysis
 ## 順序・依存
 
 - declared dependency: ISSUE-01。
-- execution order: I05-PLAN-001 → 002 → 003 → 005 → 004 → 007 → 006。Node optionality/applicabilityをprocess起動前に固定する。
+- execution order: I05-PLAN-000 → 001 → 002 → 003 → 005 → 004 → 007 → 006。canonical adoptionとacceptance fixtureを先行し、Node optionality/applicabilityをprocess起動前に固定する。
 - TypeScript fixtures、protocol golden、renderer golden、security trapsはcontract固定後に並行できる。
 - stop condition: adapter protocol、static semantics、not_applicable/incomplete、entity budget、optional Node、determinismが成立するまでNext diffへ進まない。
 
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
-| I05-PLAN-001 | I05-AT-001〜007のprotocol/status/publication fixturesを先に固定する。 | I05-DES-001 |
-| I05-PLAN-002 | Python bridge、versioned protocol、first-party TypeScript adapter process boundaryを実装する。 | I05-DES-002 |
-| I05-PLAN-003 | Next module/component/props/static relation/client-boundary canonical modelを実装する。 | I05-DES-003 |
-| I05-PLAN-004 | adapter response validation、semantic JSON、PlantUML、manifest publicationを接続する。 | I05-DES-004 |
-| I05-PLAN-005 | dynamic unknown、protocol/static failure、entity gateをstatus/exit/publicationへ接続する。 | I05-DES-005 |
-| I05-PLAN-006 | build非実行、redaction、determinism、Node optionality、lock/license/offline/CIを完了する。 | I05-DES-006 |
+| I05-PLAN-000 | approved decision-candidateをRequirement/Design/Planへ反映し、current implementation truthとplanned pathを整合させてStrict spec reviewを通す。 | I05-DES-001〜007 |
+| I05-PLAN-001 | identity/export、project/target、protocol、type IR、relations/boundary、outcome/publicationのI05-AT-001〜008 fixtures/schemaを先に固定する。 | I05-DES-001〜007 |
+| I05-PLAN-002 | domain-owned SourceAcquisitionPlan、Next config/project/target parser、frozen-bytes request、hardened one-shot Node boundaryを実装する。 | I05-DES-002, I05-DES-006 |
+| I05-PLAN-003 | declaration identity、bindings、Component recognition、closed props IR、two-plane relations、positive-evidence boundaryを実装する。 | I05-DES-003 |
+| I05-PLAN-004 | untrusted response strict validation/ID再計算、semantic JSON、PlantUML、manifest、closed registry/publicationを接続する。 | I05-DES-004 |
+| I05-PLAN-005 | intentional unknown、partial_safe、payload_unavailable、explicit target all-or-nothing、entity/transport/type limitsをoutcomeへ接続する。 | I05-DES-005 |
+| I05-PLAN-006 | non-execution/redaction、determinism、Node optionality、offline bundle、lock/license、resource cap、CI、full regressionを完了する。 | I05-DES-006 |
 | I05-PLAN-007 | stdout selector grammar、stream routing、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを実装・検証する。 | I05-DES-007 |
 
 ## 実装step
 
+### I05-PLAN-000 canonical adoption and Strict specification gate
+
+- `20260831t024052z-research-nextjs-snapshot-zero-base-investigation.md`のsource facts、
+  `20260831t022358z-decision-candidate-nextjs-component-snapshot-best-practice.md`のapproved decisions、
+  人間向けHTMLのvisual explanationをcanonical R/D/Pへ反映する。
+- current production package/core pathsを`未実装`とするstale記述を修正し、existing extension pointとnew planned pathを分離する。
+- SpecDock validation、clean commit/push、exact upstream SHA binding後にChatGPT Use StrictでP0/P1とcontract gapをレビューする。
+- review findingをcanonical authorityとcurrent sourceに照合し、必要な修復をcommit/pushして再度Strict reviewする。review passはIssue実装完了ではない。
+
 ### I05-PLAN-001 acceptance-first contract
 
-- App/Pages Router、protocol、safe JS/JSX、Node/protocol failures、static safety、no-target optionality、entity budgetとsnapshotへの`--max-changed-paths` rejection fixturesを先に固定する。
+- App/Pages Router、named/default/anonymous default、barrel/re-export/alias、reachable/unreachable local Componentをfixture化する。
+- inline/interface/alias/import/destructured/FC/class/forwardRef/generic/union/intersection propsとcomplexity opaqueをfixture化する。
+- static/literal dynamic/render conditional/collection/createElement、ambiguous/nonliteral unknownをfixture化する。
+- client entry/dependency/server candidate/dual role/boundary effectをfixture化する。
+- targetless/path/component target/depth/missing/ambiguous/out-of-scopeをfixture化する。
+- not_applicable、complete empty、complete+diagnostic、partial_safe、payload_unavailable、usage/fatal/interrupt、entity/transport limits、stdout selectorをtable-drivenに固定する。
 
 ### I05-PLAN-002 bridge and adapter boundary
 
-planned modules（canonical specification 時点では未実装。実装開始時に HEAD と configured upstream を再検証し、実在 path/symbol と差異があれば Design/Plan を先に更新する）:
+existing extension points:
+
+- `src/code_structure_viz/source/source_view.py`
+- `src/code_structure_viz/source/targets.py`
+- `src/code_structure_viz/core/config.py`
+- `src/code_structure_viz/core/domains.py`
+- `src/code_structure_viz/application/snapshot_domain.py`
+- `src/code_structure_viz/application/snapshot.py`
+
+new planned modules（実装開始時にcurrent build/package layoutを再確認する）:
 
 - `src/code_structure_viz/adapters/next/bridge.py::NextAdapterBridge`
 - `src/code_structure_viz/adapters/next/protocol.py`
 - `adapters/next/package.json`、`package-lock.json`、`tsconfig.json`
 - `adapters/next/src/analyze.ts::analyzeRepository`
 
-static target evidence不在ではNode processを起動しない。stdin/stdout exact one JSON、version/schema validation、stderr diagnostic separationを実装する。
+explicit project rootのdirect Next dependencyをPythonで判定し、不在を証明した場合はNode processを起動しない。domain-owned planでprogram/control/context bytesを一度だけ凍結し、Nodeへtarget path/cwdを渡さない。stdin/stdout exact one JSON、fixed argv/private cwd/minimal env、process/time/byte/memory capを実装する。
 
 ### I05-PLAN-003 Next semantic model
 
-- `adapters/next/src/model.ts`をplanned targetとし、module path+exported name identity、props、static/literal-dynamic imports、JSX render、use-client boundary、alias resolutionをcanonicalizeする。
-- nonliteral dynamic behaviorはunknown coverageでruntime treeを生成しない。
+- physical-path Module、declaration-key Component、Export/Import binding、Prop identityをcanonicalizeし、barrel/aliasでComponentを複製しない。
+- positive evidenceによるComponent recognition、closed wrapper allowlist、effective signatureからのclosed props IRを実装する。
+- module/component two-plane graphとbounded JSX output-flowを実装し、event handler/render prop/arbitrary helper/nonliteral dynamicからedgeを捏造しない。
+- direct client/router factsとclient dependency/server candidate derived rolesを実装し、no directiveをserverと断定しない。
 
 ### I05-PLAN-005 failure and entity gate
 
-- target evidenceありのNode/config/protocol/static-analysis failureをincompleteにし、not_applicableへ変換しない。
-- default 500 overrunはexit 3/affected payloadなし/safe manifest countあり、valid overrideはnormal、invalid valueはexit 2。
+- intentional unsupportedをunknownとして完全表現できる場合はcomplete+diagnostic。promised semanticsの局所欠落はsafe subset/exact coverage/same-renderer-subset/redaction/target/budgetをすべて証明した場合だけpartial_safe。
+- explicit target、malformed applicability/config、global Program、Node/protocol/schema/security/identity/limit failureはpayload unavailableとし、not_applicable/fallbackへ変換しない。
+- default 500はselected internal Module+Componentだけを数え、501以上はexit 3/affected payloadなし/safe manifest countあり。valid overrideはnormal、invalid valueはexit 2。
 
 ### I05-PLAN-004 Artifact publication
 
-- validated adapter responseをdomain `next` semantic/v1へmapし、Next PlantUML、coverage/diagnostic、manifest descriptorをOutputTransactionへ接続する。
-- literal/source/absolute path/protocol noiseをpublish前にrejectする。
+- adapter responseをuntrusted inputとしてclosed schema/path/ref/redaction/order/ID/count/digest/target completenessをPythonで検証・再計算する。
+- `next.snapshot.semantic.json`と`next.snapshot.puml`を同一validated modelからrenderし、Next coverage/provenance、manifest descriptor、stdout paths、writer final path/PlantUML validationをclosed registryへ追加する。
+- literal/source/comment/secret/absolute path/raw compiler text/protocol noiseをpublish前にrejectする。
 
 ### I05-PLAN-007 stdout selector and stream contract
 
@@ -91,7 +119,9 @@ static target evidence不在ではNode processを起動しない。stdin/stdout 
 
 ### I05-PLAN-006 hardening and handoff
 
-- build/config/plugin/application execution traps、same-input adapter/output equality、core-only install without Node、Next-enabled offline npm/lock/license、Node 22/latest CIを通してISSUE-06へhand offする。
+- target cwd/node_modules/network/npm/npx/build/config/plugin/application execution traps、same-input adapter/output equality、core-only install without Node、Next-enabled offline bundle/lock/license、Node 22/latest CIを通す。
+- current security testのsubprocess allowlistをexact Git runner + exact Next runnerへ狭く更新し、任意subprocessを許可しない。
+- Python/SQLAlchemyのsemantic/PlantUML/manifest/stdout golden bytesを維持してIssue #9へhandoffする。
 
 ## 検証
 

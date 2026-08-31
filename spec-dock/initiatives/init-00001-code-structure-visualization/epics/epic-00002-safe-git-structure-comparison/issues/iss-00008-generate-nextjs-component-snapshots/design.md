@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-08-24"
+最終更新: "2026-08-31"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -22,12 +22,12 @@ package_sequence_key: "ISSUE-05"
 
 | Design ID | Requirement trace | 判断 |
 | --- | --- | --- |
-| I05-DES-001 | I05-REQ-001 | Next snapshot application serviceがapplicability、bridge、adapter、per-domain outputをone runで調整する。 |
-| I05-DES-002 | I05-REQ-002 | first-party Node processをversioned stdin/stdout protocolでisolateし、target evidence不在時は起動しない。 |
-| I05-DES-003 | I05-REQ-003 | module path + exported component name identityとprops/static relations/client boundaryをNext adapterが所有する。 |
-| I05-DES-004 | I05-REQ-004 | next-adapter/v1 responseをvalidateしてsemantic/v1 domain `next`へlossless mappingする。 |
-| I05-DES-005 | I05-REQ-005 | dynamic unknown、protocol/static-analysis failure、domain-local entity overrunをtyped incompleteへ写像する。 |
-| I05-DES-006 | I05-REQ-006 | build/config/plugin/application non-execution、literal/path redaction、protocol determinism、optional Node separationを検証する。 |
+| I05-DES-001 | I05-REQ-001 | explicit project/targetをdomain-awareに解決し、Next snapshotを既存one-run outcome/publication pipelineへ接続する。 |
+| I05-DES-002 | I05-REQ-002 | domain-owned SourceAcquisitionPlanでPythonがbytesを一度だけ凍結し、one-shot Node workerはvirtual filesとbundled TypeScriptだけを解析する。 |
+| I05-DES-003 | I05-REQ-003 | declaration Componentとexport bindingを分離し、closed props IR、two-plane static relation、positive-evidence boundary fact/roleをNext semanticsとする。 |
+| I05-DES-004 | I05-REQ-004 | `next-adapter/v1` responseをuntrusted inputとしてPythonがstrict validate/recomputeし、public semantic/PlantUML/manifestをPython側でrenderする。 |
+| I05-DES-005 | I05-REQ-005 | promised semanticsの欠落に基づきcomplete/partial_safe/payload_unavailableを分類し、explicit target、budget、transport failureをfail-closedにする。 |
+| I05-DES-006 | I05-REQ-006 | fixed process boundary、in-memory CompilerHost、finite limits、redaction、offline bundle、Node optionality、same-input determinismを検証する。 |
 | I05-DES-007 | I05-REQ-007 | closed stdout selectorをsource acquisition前に検証し、publication後exact bytesまたはtyped unavailable resultをstderr diagnosticsと分離して出す。 |
 
 ## Current / Target
@@ -35,7 +35,8 @@ package_sequence_key: "ISSUE-05"
 ### Current（canonical specification state）
 
 - 本 Issue の canonical state は stable scope ID と repository-relative Requirement/Design/Plan path、accepted ADR、interviewで識別する。採用・実装開始時に HEAD と configured upstream を再検証し、current commit SHA を本文へ固定しない。
-- production package、CLI、domain adapter、schema implementation、acceptance fixturesは未実装であり、以下のpath/symbolはすべてplannedである。
+- Python package、CLI、Git/SourceView、config/targets、outcomes、Python/SQLAlchemy adapter、schema、manifest、stdout/writer、tests/goldenは実装済み。Next production adapter、Node workspace、protocol/schema、fixtures/goldenは未実装である。
+- current closed registriesは`python/sqlalchemy`を所有し、source candidate/target/configはPython semanticsへ具体依存する。Nextはこれらをopen-endedにせずclosed branchとして追加する。
 - 本Designは親の横断contractをslice固有の構造へ具体化し、依存Issueのpublic contractを変更せずに後続sliceへ渡す。
 
 ### Target
@@ -50,24 +51,26 @@ package_sequence_key: "ISSUE-05"
 
 | planned path / symbol | 状態 | 責務 |
 | --- | --- | --- |
-| src/code_structure_viz/adapters/next/bridge.py::NextAdapterBridge（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| src/code_structure_viz/adapters/next/protocol.py（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/package.json と package-lock.json（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/tsconfig.json（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/src/analyze.ts::analyzeRepository（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/src/model.ts（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/src/render.ts（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
+| `src/code_structure_viz/source/source_view.py`（existing） | existing extension | domain-owned acquisition planを受け、既存Git/source safetyでbytesを凍結する。 |
+| `src/code_structure_viz/source/targets.py`（existing） | existing extension | Python grammarを維持し、Next project/path/component selectorへdomain-aware routingする。 |
+| `src/code_structure_viz/core/config.py`（existing） | existing extension | closed `[next]` config、value source、digestを追加する。 |
+| `src/code_structure_viz/core/domains.py`、`application/snapshot_domain.py`（existing） | existing extension | Nextをsnapshot registryへだけ追加する。 |
+| `src/code_structure_viz/artifacts/`、`core/outcomes.py`（existing） | existing extension | Next coverage/path/schema/stream/writer/publication invariantを追加する。 |
+| `src/code_structure_viz/adapters/next/`（planned） | new | applicability、protocol、hardened runner、response validator/mapperを所有する。 |
+| first-party Node workspace（planned、exact pathはbuild設定確認後に固定） | new | compiled adapter、TypeScript analyzer/model、in-memory CompilerHost、lock/licenseを所有する。 |
 
 ### common command interface
 
 ```text
-code-structure-viz snapshot --repo PATH --output-dir PATH [--domain DOMAIN] [--target SELECTOR] [--format FORMAT] [--config PATH] [--stdout SELECTOR]
+code-structure-viz snapshot --repo PATH --output-dir PATH [--domain DOMAIN] [--project RELATIVE_DIR] [--target SELECTOR] [--format FORMAT] [--config PATH] [--stdout SELECTOR]
 code-structure-viz diff --repo PATH --output-dir PATH [--domain DOMAIN] [--from ENDPOINT] [--to ENDPOINT] [--format FORMAT] [--config PATH] [--stdout SELECTOR]
 ```
 
 - `--output-dir` は必須。writer は existing file を置換せず、全 payload を staging 後に公開する。
 - `--format` 未指定は semantic JSON と PlantUML。`--stdout` は output directory requirement を解除しない。
 - analysis behavior を environment variable で変更しない。環境は executable discovery と locale-independent process setup にだけ使う。
+- `--repo`はexact Git root。repeatable `--project`はconfig `[next].project_roots`を置換し、defaultは`.`。monorepo/workspaceを自動探索しない。
+- Next targetは`path:REPO_REL_FILE_OR_DIR`または`component:EXPORTING_MODULE#EXPORTED_NAME`。後者はexport addressをcanonical declarationへ解決する。explicit target失敗はfallbackしない。
 
 ### stdout selector and stream routing
 
@@ -120,42 +123,125 @@ render_plantuml(DomainResult, VisualVocabulary) -> bytes
 
 serializer と manifest builder は `incomplete_kind` と `payload_available` の整合を検証する。`partial_safe` なのにrequested descriptorが欠ける状態、`payload_unavailable` なのにaffected descriptorがある状態はinternal contract failureとしてpublication前に拒否する。
 
+## Adopted Next v1 semantics
+
+### Project applicability and source plan
+
+- selected project root直下`package.json`のdirect `dependencies.next`または`devDependencies.next`がnon-empty stringの場合だけapplicableとする。
+- `next.config.*`、directory名、source import、lockfile indirect entryはapplicability evidenceにしない。
+- applicable project 0かつexplicit targetなしはNode probeなし`not_applicable`。applicableでComponent 0は`complete empty`。malformed manifest/configはabsenceを証明できないため`payload_unavailable`。
+- immutable `SourceAcquisitionPlan`はproject roots、program/context/control files、include roots、hard exclusions、finite limits、plan versionを持つ。
+- program filesは`.ts/.tsx/.js/.jsx`、`.d.ts`はcontext-only。hard excludeは`.git`、`node_modules`、`.next`、`out`、`dist`、`build`、`coverage`。
+- test/spec/storyはdefault excludeにしない。config lookupは`tsconfig.json`、`jsconfig.json`、versioned built-in safe configの順。
+- repository-local `extends/baseUrl/paths`だけをfrozen SourceView内で解決し、package-based extends/target node_modulesを暗黙に読まない。
+- Python coreがplanに従いsource bytesを一度だけ凍結し、Node requestへrepository-relative path、base64 content、digest、project/config/target/limitだけを渡す。target root path/cwdを渡さない。
+
+### Process and toolchain boundary
+
+- one request/one response/one process。fixed executable/compiled entrypoint argv、`shell=false`、private empty cwd、minimal envを使う。
+- `NODE_OPTIONS`/`NODE_PATH`を除去し、npm/npx/network/target node_modules、Next config、plugin、build/migration/package/application moduleを利用しない。
+- custom in-memory `CompilerHost`はrequest virtual filesとbundled TypeScript libだけを読む。
+- compiled first-party adapter、exact TypeScript runtime、lockfile、license inventoryを一つのcompatibility unitとしてbundleする。
+- Node 22 LTS以上はapplicable Next runだけで必要とし、Python/SQLAlchemy core install/run/testへ持ち込まない。
+
+candidate finite limitsは4 MiB/file、64 MiB total、20,000 files、16 MiB stdout、64 KiB stderr capture、60秒、512 MiB old-space。実測で採用値を調整できるが、unbounded/silent truncationは不可。
+
+### Identity and members
+
+- `ProjectDescriptor`はgrouping/provenanceでentity budget外。
+- `ModuleEntity` identityはrepository-relative physical module path。route/router/boundary/rangeはattribute。
+- `ComponentEntity` identityはModule ID + declaration key。named bindingまたはmodule-local `@anonymous-default`を使い、range/export/barrel/route/wrapper/propsを含めない。
+- `ExportBindingMember` identityはowner Module + exported nameで、target declaration Component IDをpayloadに持つ。barrel/re-export/aliasはbindingを増やすがComponentを複製しない。
+- `ImportBindingMember`はowner Module + origin/imported name/type-value role。local alias/order/rangeはidentity外。
+- `PropMember` identityはComponent ID + prop name。type/optional/default evidence/rangeはpayload。
+- exported/route rootからproven renderまたはsupported wrapperで到達するmodule-local Componentだけを`reachable_local`として含め、unreachable localは省く。
+- IDはversioned kind + canonical identity JSONのSHA-256で作り、Pythonが再計算する。
+
+### Component recognition and props
+
+- PascalCaseだけでComponentと認定しない。safe React-compatible callable/construct signature、closed React class provenance、recognized UI route default、proven JSX output-flow、closed wrapper originのpositive evidenceを要求する。
+- v1 wrapper allowlistは`memo`、`forwardRef`、`lazy`、literal-pattern `next/dynamic`。custom HOCはunknown/coverage limitation。
+- propsはTypeCheckerのeffective call/construct signatureから取得し、source spelling/`typeToString()` raw textをpublic contractにしない。
+- closed type IRはprimitive、ordinal type parameter、redacted literals、repository/external reference、array、tuple、union、intersection、parameter-name-free function、object、opaque。
+- NFC、canonical sort/dedup、generic alpha-normalizationを行い、literal value/function parameter名を出さない。`children`/`ref`はpublic signatureに実在するときだけ。
+- candidate complexity limitsはdepth 16、nodes/prop 512、union/intersection 64、nested properties 256、signatures/component 16。over-limit subtreeはtruncationせずopaque + partial coverage。
+
+### Two-plane relations
+
+| kind | source | target | plane |
+| --- | --- | --- | --- |
+| `static_import` | Module | Module/external | module |
+| `literal_dynamic_import` | Module | Module/external | module |
+| `jsx_render` | Component | Component/external | component |
+| `component_wrap` | Component | Component | component |
+
+containmentはownership/zero-hopで、import/render planeを暗黙fan-outしない。relation identityはsource/kind/target/semantic role。range/order/local alias/syntaxはpayload。
+
+JSX relationはComponent return、concise arrow、class render、single-assignment constへのbounded backward flowをrootにし、JSX children、conditional/logical、array、安全なArray/ReadonlyArray map/flatMap、exact React `createElement`を閉じて追う。event handler、render prop/function child、arbitrary helper、ambiguous symbol、runtime resultはedgeにしない。nonliteral importはedgeなし+unknown coverage。externalはfrontierで止める。
+
+downstreamはsource→dependency/render target、upstreamはreverse。depth traversalはinternal entityだけ。
+
+### Positive-evidence client boundary
+
+- direct `client_entry`: exact directive prologue。
+- direct `router_context`: `app_ui`、`pages_ui`、`pages_api`、`app_route_handler`、`none`。
+- derived `client_dependency`: client_entryからinternal static value import/re-exportで到達。
+- derived `server_candidate`: closed App Router UI seedからclient entry直前まで到達。runtime server claimではない。
+- `unknown`: positive evidenceなし。Pages Routerも自動server扱いしない。
+- 同一Moduleのclient_dependency/server_candidate dual roleを許す。type-only/dynamic/JSX/external/unresolved edgeはpropagationに使わない。
+- boundary crossingはunderlying value edgeの`boundary_effect` facetでduplicate traversal edgeを作らない。Issue #9はprimitive fact/edgeをprimary diffにする。
+
+### Adapter validation and public contracts
+
+Node stdoutはexact one `code-structure-viz.next-adapter/v1` JSON document。Pythonはprotocol version、closed schema、path containment、ref integrity、duplicate/enum、redaction、NFC/order、ID、count/coverage/digest、explicit target completeness、renderer subset consistencyを検証・再計算する。validation failureはpartialへdowngradeせずresponse全体を拒否する。
+
+public paths/contracts:
+
+- `next.snapshot.semantic.json` / existing `code-structure-viz.semantic/v1`
+- `next.snapshot.puml` / `code-structure-viz.plantuml/next/v1`
+- existing `code-structure-viz.run-manifest/v1`
+
+manifestはNode/TypeScript/adapter/protocol version、project/config path、source plan/config/source digest、target/depth/budget requested/resolved、coverage、safe diagnostic、Artifact path/size/SHA-256を持つ。
+
+closed domain/schema/artifact/stream/writer/outcome registryへNext branchを明示追加し、`additionalProperties: false`やallowlistを緩めない。
+
 ## data / failure
 
 ### adapter protocol and semantic model
 
-Python bridgeは`code-structure-viz.next-adapter/v1` requestをstdinへ送り、stdoutのexact one JSON documentをvalidateする。adapterはTypeScript compiler APIだけを使い、build/config plugin/applicationを実行しない。responseのmodule/export/component/prop/import/render/client-boundary recordsをdomain `next` snapshotへcanonical mapする。
+Python bridgeはfrozen SourceView bytesを`code-structure-viz.next-adapter/v1` requestとしてstdinへ送り、stdoutのexact one JSON documentをuntrusted inputとしてvalidateする。adapterはin-memory TypeScript compiler APIだけを使い、target filesystem/build/config/plugin/applicationを実行しない。Pythonはresponseのpath/ref/redaction/order/ID/count/digestを検証・再計算してdomain `next` snapshotへmapする。
 
 ### applicability and failure
 
-- static Next target evidence不在は`not_applicable`でNode probeなし。
-- target evidenceがあるNode missing、protocol noise/schema mismatch、tsconfig resolution/static analysis failureは`incomplete`。safe partial snapshotをpublishする場合はstatus/coverage/diagnosticをpayloadへ明示する。
+- explicit project rootsにdirect Next dependencyがないと証明できた場合は`not_applicable`でNode probeなし。applicable projectのComponent 0は`complete empty`。
+- malformed applicability/config evidence、explicit target failure、Node missing、protocol noise/schema mismatch、global TypeScript Program/security/identity failureは`payload_unavailable`。safe partial snapshotはpromised semanticsの欠落が局所化され、全rendererで同じsubset/coverageを証明できる場合だけ。
 - nonliteral dynamic behaviorはunknown diagnosticとcoverage countで、runtime tree/relationを作らない。
 
 ### entity budget and publication
 
-`EntityBudgetGate`（planned）はNext diagram entity countをrender前にdefault 500と比較する。超過はdomain incomplete exit 3、affected JSON/PlantUMLなし、safe run manifestへrequested/resolved/count/diagnosticを記録する。valid overrideは通常公開、invalid valueはexit 2。snapshot pipelineは`ChangedPathAdmissionGate`を構築・実行せず、diff専用`--max-changed-paths`を受けた場合はusage error、exit 2、Artifactなしとする。OutputTransactionはabsolute path/protocol noise/unsafe fieldをpublish前に拒否する。
+`EntityBudgetGate`はselected internal Module+Component countをrender前にdefault 500と比較する。501以上はdomain `incomplete/payload_unavailable` exit 3、affected JSON/PlantUMLなし、safe run manifestへrequested/resolved/count/diagnosticを記録する。member/relation/external/frontier/project descriptorは数えない。valid overrideは通常公開、invalid valueはexit 2。snapshot pipelineは`ChangedPathAdmissionGate`を構築・実行せず、diff専用optionはusage error、Artifactなし。OutputTransactionはabsolute path/protocol noise/unsafe fieldをpublish前に拒否する。
 
 ### determinism and optionality
 
-same source bytes、tsconfig aliases、compiler/adapter/contract version、resolved configではresponse orderingとpublished digestが一致する。Node/npm dependencyはNext applicable runにだけ必要で、core-only install/testから分離する。
+same frozen source bytes、source plan、project/target、resolved config、Node/TypeScript/adapter/protocol versionではresponse orderingとpublished digestが一致する。Node dependencyはNext applicable runにだけ必要で、npm/network runtime requirementを持たずcore-only install/testから分離する。
 
 ## 変更対象
 
 | planned file | planned change | 存在確認 |
 | --- | --- | --- |
-| src/code_structure_viz/adapters/next/bridge.py::NextAdapterBridge（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| src/code_structure_viz/adapters/next/protocol.py（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/package.json と package-lock.json（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/tsconfig.json（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/src/analyze.ts::analyzeRepository（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/src/model.ts（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
-| adapters/next/src/render.ts（planned） | planned | この Issue の implementation target。baseline commit には未実装。 |
+| `src/code_structure_viz/source/source_view.py` | existing extension | domain-owned acquisition planを追加し、Python/SQLAlchemy bytesを維持する。 |
+| `src/code_structure_viz/source/targets.py` | existing extension | domain-aware Next path/component targetを追加し、Python grammarを維持する。 |
+| `src/code_structure_viz/core/config.py` | existing extension | closed `[next]` project/source/config/limit fieldsとprovenanceを追加する。 |
+| `src/code_structure_viz/core/domains.py` / `application/snapshot_domain.py` | existing extension | Nextをsnapshotへだけ登録する。 |
+| `src/code_structure_viz/application/snapshot.py` / `core/outcomes.py` | existing extension | applicability、runner、Next outcome/path invariantを接続する。 |
+| `src/code_structure_viz/artifacts/manifest.py` / `streams.py` / `writer.py` | existing extension | Next coverage/provenance、stdout paths、final paths、PlantUML validationを追加する。 |
+| `src/code_structure_viz/adapters/next/` | new planned | applicability、protocol、hardened runner、validator/mapper。 |
+| first-party Node workspace | new planned | compiled adapter、analyzer/model、TypeScript bundle、lock/license。exact pathはbuild設定確認後に固定する。 |
 
 追加で planned:
 
-- tests/fixtures/generate-nextjs-component-snapshots/ に source-only fixture を置き、fixture の application code を実行しない。
-- docs/contracts/ に schema と CLI behavior を配置する。これらはplanned implementation targetであり、本Designは実装済みとは扱わない。
+- `tests/fixtures/next_snapshot/`にsource-only fixtureを置き、fixture application/package/config codeを実行しない。
+- `tests/acceptance/next/`、`tests/contracts/next/`、`tests/security/test_next_static_boundary.py`とgolden/schemaを配置する。
 - lockfile と license inventory を同じ Issue の acceptance に含める。
 
 変更しない領域:
@@ -176,9 +262,9 @@ same source bytes、tsconfig aliases、compiler/adapter/contract version、resol
 
 | Test ID | 分類 | planned test file | command |
 | --- | --- | --- | --- |
-| I05-AT-001 | normal | tests/acceptance/next/test_snapshot_cli.py | uv run pytest tests/acceptance/next/test_snapshot_cli.py -q |
-| I05-AT-002 | protocol | tests/contracts/next/test_adapter_protocol.py | uv run pytest tests/contracts/next/test_adapter_protocol.py -q |
-| I05-AT-003 | safe subset | adapters/next/test/safe-subset.test.ts | npm --prefix adapters/next test -- safe-subset |
+| I05-AT-001 | identity/exports/props/relations/boundary/targets | tests/acceptance/next/test_snapshot_cli.py | uv run pytest tests/acceptance/next/test_snapshot_cli.py -q |
+| I05-AT-002 | frozen request/protocol/Python strict validation | tests/contracts/next/test_adapter_protocol.py | uv run pytest tests/contracts/next/test_adapter_protocol.py -q |
+| I05-AT-003 | JS/JSX/wrappers/type IR/output-flow safe subset | Node adapter tests（exact commandはworkspace確定時に固定） | runtime package managerを呼ばないcompiled artifactとunit fixtureを検証 |
 | I05-AT-004 | incomplete class matrix | tests/acceptance/next/test_adapter_failures.py | partial_safe JSON+PlantUML+manifest、payload_unavailable manifest-only、protocol/schema/security、exit 3 |
 | I05-AT-005 | security | tests/security/test_next_static_boundary.py | uv run pytest tests/security/test_next_static_boundary.py -q |
 | I05-AT-006 | optionality | tests/acceptance/next/test_optionality.py | uv run pytest tests/acceptance/next/test_optionality.py -q |
@@ -188,7 +274,7 @@ same source bytes、tsconfig aliases、compiler/adapter/contract version、resol
 - unit testはdomain parser/matcher/serializerとcanonicalizationのpure functionを対象にする。
 - integration testはtemporary Git repositoryまたはimmutable source fixtureを使い、Git stateとsource bytesのbefore/afterを比較する。
 - acceptance testは実CLI process、output directory、manifest/checksum、exit code、stdout/stderr、published file setを観測する。
-- security testはimport/build/plugin/DB execution trap、source/secret/literal/absolute path/raw hunkのnegative scan、unsafe symlink、Git mutation allowlistを検査する。
+- security testはtarget cwd/node_modules/network/npm/npx/import/build/config/plugin execution trap、source/secret/literal/comment/absolute path/raw compiler textのnegative scan、unsafe symlink/path escape、Git mutation allowlistを検査する。current subprocess allowlistはexact Git runner + exact Next runnerへ狭く更新し、任意subprocessを許可しない。
 - table-driven casesはstatusだけでなくpublication、manifest presence/absence、digest、requested/resolved budget values、actual countsまでassertする。
 
 ## risk
@@ -196,9 +282,10 @@ same source bytes、tsconfig aliases、compiler/adapter/contract version、resol
 - Python/Node 二 runtime で protocol drift が起きる。versioned schema、golden fixtures、strict parser で境界を固定する。
 - Next/React static patterns は幅広い。初期 release は根拠のある static subset を列挙し、runtime tree を推測しない。
 - Node を core 必須にすると Python/SQLAlchemy 利用を壊す。applicability preflight 後だけ adapter を要求する。
+- bundled TypeScriptとtarget expectation、package-based tsconfig extendsを閉じることによるcoverage低下、candidate resource/type limitsの実測不足をacceptanceで評価する。
 
 - Re-evaluation trigger: security/privacy incident、target repository の不可逆変更、secret leak、rollback に incident response が必要な設計へ変わる場合は Planning Level を `critical` に上げる。
-- Stop condition: first-party adapter protocol、TS/TSX coverage、JS/JSX safe subset、client boundary、Node optionality が acceptance で成立するまで Next diff へ進まない。
+- Stop condition: declaration identity/export binding、frozen-bytes-only Node、closed props IR、two-plane relations、positive-evidence boundary、complete/partial/unavailable、finite limits、offline bundle、Node optionalityがacceptanceで成立するまでNext diffへ進まない。
 
 ```plantuml
 @startuml
@@ -206,19 +293,21 @@ title Next.js component snapshot の adapter 境界
 left to right direction
 actor "coding agent" as Agent
 component "Python snapshot CLI" as CLI
-component "NextAdapterBridge" as Bridge
-component "repository-owned TypeScript adapter" as Adapter
+database "immutable SourceView" as View
+component "NextAdapterRunner / strict validator" as Bridge
+component "one-shot TypeScript adapter\nin-memory CompilerHost" as Adapter
 component "TypeScript compiler API" as Compiler
 component "component JSON / PlantUML" as Output
 Agent -> CLI : next domain を指定する
-CLI -> Bridge : versioned request JSON
-Bridge -> Adapter : stdin で request を渡す
+CLI -> View : source bytesを一度だけ凍結
+View -> Bridge : virtual filesとdigest
+Bridge -> Adapter : stdinでversioned request
 Adapter -> Compiler : TS/TSX と safe JS/JSX を解析する
 Compiler --> Adapter : symbol と static relation
-Adapter --> Bridge : versioned response JSON
-Bridge -> Output : common envelope へ格納する
+Adapter --> Bridge : untrusted exact-one response JSON
+Bridge -> Output : validate/recompute後にrender
 Output --> Agent : manifest 付き Artifact
 @enduml
 ```
 
-Next 固有 semantics は repository-owned TypeScript adapter が所有し、Python core とは versioned JSON だけで接続します。
+Next固有semanticsはfirst-party TypeScript adapterが所有する。source bytes、process trust、public validation/rendering、outcome/publicationはPython coreが所有し、両者はversioned private JSONで接続する。
