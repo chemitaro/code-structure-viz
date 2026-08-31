@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-export-graph-raw-v1",
+  "title": "CodeStructureViz raw Next export graph fixture v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "modules", "edges"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-export-graph-raw/v1"},
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/module"}
+    },
+    "edges": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/edge"}
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"
+    },
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "exports"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "exports": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/export"}
+        }
+      }
+    },
+    "export": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "resolution", "target_declaration_key"],
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "resolution": {"enum": ["component", "value", "type", "unknown"]},
+        "target_declaration_key": {
+          "anyOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"resolution": {"const": "component"}}},
+          "then": {"required": ["target_declaration_key"], "properties": {"target_declaration_key": {"type": "string"}}}
+        },
+        {
+          "if": {"properties": {"resolution": {"enum": ["value", "type", "unknown"]}}},
+          "then": {"properties": {"target_declaration_key": {"type": "null"}}}
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_file_path", "source_specifier", "imported_name", "exported_name"],
+      "properties": {
+        "owner_file_path": {"$ref": "#/$defs/path"},
+        "source_specifier": {"type": "string", "minLength": 2, "maxLength": 4096, "pattern": "^\\."},
+        "imported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"const": "*"}]},
+        "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"const": "*"}]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"imported_name": {"const": "*"}}},
+          "then": {"properties": {"exported_name": {"const": "*"}}}
+        },
+        {
+          "if": {"properties": {"imported_name": {"not": {"const": "*"}}}},
+          "then": {"properties": {"exported_name": {"not": {"const": "*"}}}}
+        }
+      ]
+    }
+  }
+}

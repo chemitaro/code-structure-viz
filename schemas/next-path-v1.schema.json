@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-path-v1",
+  "title": "CodeStructureViz canonical non-root POSIX path value v1",
+  "description": "A repository-relative NFC UTF-8 path value. The root sentinel '.' is a context-specific value and is declared by the containing schema.",
+  "type": "string",
+  "additionalProperties": false,
+  "minLength": 1,
+  "maxLength": 4096,
+  "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
+}

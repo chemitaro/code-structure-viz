@@ -28,8 +28,10 @@ from tests.contracts.next_reference_validation import (
     TRUSTED_PROFILE_SHADOWING_WITNESS,
     VALIDATOR_SCHEMA,
     _derived_taint_fixed_point,
+    _scan_export_file,
     assert_encoded_stdin_boundary,
     assert_limit_boundary,
+    bounded_decode_json,
     canonical_json_bytes,
     canonical_target_key,
     capture_adapter_stderr,
@@ -46,6 +48,7 @@ from tests.contracts.next_reference_validation import (
     load_export_census_fixture,
     load_export_graph_cases,
     load_export_graph_fixture,
+    load_export_graph_raw_fixture,
     model_record_budget_allowed,
     project_config_digest,
     recompute_compatibility_id,
@@ -54,6 +57,7 @@ from tests.contracts.next_reference_validation import (
     recompute_request_id,
     recompute_run_fingerprint,
     render_plantuml,
+    render_public_diagnostic_stderr,
     resolve_target_resolutions,
     scan_export_syntax_census,
     source_plan_descriptor,
@@ -318,6 +322,7 @@ def _config_projection(
     source_plan_file_role_map: list[dict[str, Any]] | None = None,
     source_plan_local_extends: list[dict[str, Any]] | None = None,
     source_plan_control_paths: list[dict[str, Any]] | None = None,
+    limits: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     config_projects = sorted(
         [_config_project(project) for project in (projects or [_project()])],
@@ -330,7 +335,7 @@ def _config_projection(
         "upstream_depth": 1,
         "downstream_depth": 1,
         "formats": list(formats or ["semantic-json", "plantuml"]),
-        "limits": _next_limits(),
+        "limits": copy.deepcopy(limits or _next_limits()),
         "trusted_environment_digest": _trusted_environment()["sha256"],
         "source_plan_digest": "0" * 64,
         "domain_config_digest": "0" * 64,
@@ -357,12 +362,14 @@ def _snapshot_request(
     formats: list[str] | None = None,
     source_plan_digest: str | None = None,
     run_fingerprint: str = "e" * 64,
+    limits: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     projection = _config_projection(
         projects=projects,
         targets=targets,
         formats=formats,
         source_plan_digest_value=source_plan_digest,
+        limits=limits,
     )
     return {
         "schema": "code-structure-viz.next-snapshot-request/v1",
@@ -842,19 +849,37 @@ def _domain(
     overrun: bool = False,
     runtime_unavailable: bool = False,
     targets: list[str] | None = None,
+    formats: list[str] | None = None,
+    max_entities: int = 500,
 ) -> dict[str, Any]:
     model = _model()
     descriptor = _descriptor()
     environment = _trusted_environment()
     target_values = list(targets or [])
-    config = _config_projection(projects=model["projects"], targets=target_values)
-    snapshot_request = _snapshot_request(projects=model["projects"], targets=target_values)
+    format_values = list(formats or ["semantic-json", "plantuml"])
+    limits = _next_limits(max_entities=max_entities)
+    config = _config_projection(
+        projects=model["projects"], targets=target_values, formats=format_values, limits=limits
+    )
+    snapshot_request = _snapshot_request(
+        projects=model["projects"],
+        targets=target_values,
+        formats=format_values,
+        limits=limits,
+    )
+    artifact_for_format = {
+        "semantic-json": "next.snapshot.semantic.json",
+        "plantuml": "next.snapshot.puml",
+    }
+    selected_artifacts = [artifact_for_format[format_name] for format_name in format_values]
     entity_count: int | None
     payload_available: bool
     incomplete_kind: str | None
     artifact_paths: list[str]
     diagnostics: list[dict[str, Any]]
     actual: int | None
+    measured_actual = 501 if overrun else 4
+    budget_overrun = measured_actual > max_entities
     if runtime_unavailable:
         assert status == "incomplete"
         assert not overrun
@@ -865,12 +890,13 @@ def _domain(
         diagnostics = [_public_diagnostic("CSV-NEXT-NODE-001")]
         actual = None
     elif status == "complete":
-        entity_count = 4
+        assert not budget_overrun
+        entity_count = measured_actual
         payload_available = True
         incomplete_kind = None
-        artifact_paths = ["next.snapshot.semantic.json", "next.snapshot.puml"]
+        artifact_paths = selected_artifacts
         diagnostics = []
-        actual = 4
+        actual = measured_actual
     elif status == "not_applicable":
         entity_count = 0
         payload_available = False
@@ -879,17 +905,17 @@ def _domain(
         diagnostics = [_public_diagnostic("CSV-NEXT-APPLICABILITY-001")]
         actual = 0
     else:
-        entity_count = None if overrun else 4
-        payload_available = not overrun
-        incomplete_kind = "payload_unavailable" if overrun else "partial_safe"
-        artifact_paths = [] if overrun else ["next.snapshot.semantic.json", "next.snapshot.puml"]
+        entity_count = None if budget_overrun else measured_actual
+        payload_available = not budget_overrun
+        incomplete_kind = "payload_unavailable" if budget_overrun else "partial_safe"
+        artifact_paths = [] if budget_overrun else selected_artifacts
         diagnostics = [
             _public_diagnostic(
-                "CSV-NEXT-LIMIT-005" if overrun else "CSV-NEXT-FLOW-001",
-                symbol=None if overrun else _id("component", "5"),
+                "CSV-NEXT-LIMIT-005" if budget_overrun else "CSV-NEXT-FLOW-001",
+                symbol=None if budget_overrun else _id("component", "5"),
             )
         ]
-        actual = 501 if overrun else 4
+        actual = measured_actual
     value: dict[str, Any] = {
         "domain": "next",
         "status": status,
@@ -898,7 +924,7 @@ def _domain(
         "budget": {
             "name": "max_entities",
             "requested": None,
-            "resolved": 500,
+            "resolved": max_entities,
             "actual": actual,
             "source": "builtin",
             "outcome": (
@@ -928,7 +954,7 @@ def _domain(
         "config": config,
         "projects": [copy.deepcopy(model["projects"][0])],
         "targets": target_values,
-        "formats": ["semantic-json", "plantuml"],
+        "formats": format_values,
         "toolchain": {
             "node": {
                 "status": (
@@ -955,7 +981,7 @@ def _domain(
             "protocol": "code-structure-viz.next-adapter/v1",
         },
         "trusted_environment": environment,
-        "limits": _next_limits(),
+        "limits": limits,
         "coverage": copy.deepcopy(model["coverage"]),
         "artifact_paths": artifact_paths,
         "diagnostics": diagnostics,
@@ -1005,13 +1031,16 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
     base["command"] = {
         "name": "snapshot",
         "domain": "next",
-        "formats": ["semantic-json", "plantuml"],
-        "stdout_selector": "next:semantic-json",
+        "formats": domain["formats"],
+        "stdout_selector": f"next:{domain['formats'][0]}",
     }
+    root_projects = sorted(
+        (project["root"] for project in domain["projects"]), key=canonical_json_bytes
+    )
     base["request"] = {
-        "projects": ["."],
+        "projects": root_projects,
         "targets": domain["targets"],
-        "formats": ["semantic-json", "plantuml"],
+        "formats": domain["formats"],
         "upstream_depth": 1,
         "downstream_depth": 1,
     }
@@ -1024,9 +1053,9 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
         "sha256": "8" * 64,
         "resolved": {
             "next": {
-                "projects": ["."],
+                "projects": root_projects,
                 "targets": domain["targets"],
-                "formats": ["semantic-json", "plantuml"],
+                "formats": domain["formats"],
                 "trusted_environment_digest": domain["trusted_environment"]["sha256"],
             },
             "traversal": {"upstream_depth": 1, "downstream_depth": 1},
@@ -1085,8 +1114,9 @@ def _published_bytes(domain: dict[str, Any]) -> dict[str, bytes]:
 def _stdout_result_for_domain(
     domain: dict[str, Any],
     manifest: dict[str, Any],
-    selector: str = "next:semantic-json",
+    selector: str | None = None,
 ) -> dict[str, Any]:
+    selector = selector or f"next:{domain['formats'][0]}"
     if domain["payload_available"]:
         format_name = selector.removeprefix("next:")
         artifact = next(item for item in manifest["artifacts"] if item["format"] == format_name)
@@ -1650,6 +1680,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         "original_outcome": "complete",
         "outcome": "complete",
         "diagnostic_code": None,
+        "requested_formats": ["semantic-json", "plantuml"],
         "artifact_paths": ["next.snapshot.semantic.json", "next.snapshot.puml"],
     }
     validate_model(response["model"])
@@ -1743,6 +1774,13 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     partial_response = _response(partial_model, partial_proof, target_request)
     _validator("next-adapter-response-v1.schema.json").validate(partial_response)
     validate_response_envelope(partial_response, target_request)
+    partial_decision = validate_response_envelope(partial_response, target_request)
+    assert partial_decision["original_outcome"] == "partial_safe"
+    assert partial_decision["outcome"] == "partial_safe"
+    assert partial_decision["artifact_paths"] == [
+        "next.snapshot.semantic.json",
+        "next.snapshot.puml",
+    ]
     validate_proof(
         partial_response["proof"],
         partial_response["model"],
@@ -2048,6 +2086,35 @@ def test_export_scanner_closes_unicode_bom_crlf_comments_and_reexport_forms() ->
     assert len({row["syntax_identity"] for row in rows}) == len(rows)
 
 
+def test_export_scanner_is_module_level_and_handles_async_generics_and_false_positives() -> None:
+    source = (
+        b"const jsx = <div>export default false</div>;\n"
+        b"const object = { export: 1 };\n"
+        b"const member = object.export;\n"
+        b"const regex = /export default/;\n"
+        b'const text = "export default";\n'
+        b"const template = `export default`;\n"
+        b"// export default\n"
+        b"export async function AsyncPage<T>() { return <span>export</span>; }\n"
+        b"export default async function DefaultPage<T>() { return 1; }\n"
+        b"export type Result<T> = { value: T };\n"
+        b"export { type Result as PublicResult };\n"
+    )
+    rows = _scan_export_file("src/scanner.tsx", source)
+    assert [(row["syntax_kind"], row["exported_name"], row["role"]) for row in rows] == [
+        ("named_export", "AsyncPage", "value"),
+        ("default_export", "default", "value"),
+        ("type_export", "Result", "type"),
+        ("named_export", "PublicResult", "type"),
+    ]
+    assert all(row["byte_end"] <= len(source) for row in rows)
+    assert all(row["byte_start"] < row["byte_end"] for row in rows)
+    with pytest.raises(AssertionError):
+        _scan_export_file("src/invalid.ts", b"export const first = 1\nexport const second = 2;")
+    with pytest.raises(AssertionError):
+        _scan_export_file("src/invalid.ts", b'export * from "./other"')
+
+
 def test_reexport_graph_recomputes_alias_star_cycle_and_conflict_witnesses() -> None:
     cases = {case["name"]: case for case in load_export_graph_cases()}
     assert set(cases) == {"alias", "conflict", "cycle", "star"}
@@ -2094,6 +2161,51 @@ def test_reexport_graph_recomputes_alias_star_cycle_and_conflict_witnesses() -> 
     mutated[0]["resolution"] = "component"
     assert mutated != conflict["witnesses"]
     assert len(conflict["witnesses"]) != 1
+
+
+def test_main_reexport_witness_comes_from_raw_declarations_and_edges() -> None:
+    raw = load_export_graph_raw_fixture()
+    _validator("next-export-graph-raw-v1.schema.json").validate(
+        {
+            "schema": "code-structure-viz.next-export-graph-raw/v1",
+            **raw,
+        }
+    )
+    assert all(
+        set(edge) == {"owner_file_path", "source_specifier", "imported_name", "exported_name"}
+        for edge in raw["edges"]
+    )
+    result = recompute_export_graph_case(raw)
+    star = [
+        witness
+        for witness in result["witnesses"]
+        if witness["owner_file_path"] == "src/ExportReexport.ts" and witness["imported_name"] == "*"
+    ]
+    assert [witness["exported_name"] for witness in star] == [
+        "LocalValue",
+        "Props",
+        "Unicode表示",
+    ]
+    model = _model()
+    expected = expected_export_reexport_witness(model)
+    assert expected == [
+        {
+            "syntax_identity": next(
+                row
+                for row in scan_export_syntax_census()
+                if row["owner_file_path"] == "src/Button.tsx" and row["star"]
+            )["syntax_identity"],
+            "source_specifier": "./Other",
+            "imported_name": "*",
+            "resolved_source_module_id": None,
+            "expanded_exported_name": None,
+            "target_declaration_id": None,
+            "resolution": "unknown",
+        }
+    ]
+    mutated = copy.deepcopy(raw)
+    mutated["edges"] = mutated["edges"][1:]
+    assert recompute_export_graph_case(mutated) != result
 
 
 def test_source_plan_descriptor_hashes_every_resolved_field_and_known_mutations() -> None:
@@ -2863,7 +2975,12 @@ def test_direct_context_target_is_manifest_and_stdout_payload_unavailable() -> N
 
 def test_entity_budget_gate_composes_entity_and_model_record_boundaries() -> None:
     for actual, resolved, allowed in ((500, 500, True), (501, 500, False), (501, 600, True)):
-        outcome = entity_budget_gate(actual, resolved)
+        outcome = entity_budget_gate(
+            actual,
+            resolved,
+            original_outcome="complete",
+            requested_formats=["semantic-json", "plantuml"],
+        )
         assert outcome["actual"] == actual
         assert outcome["resolved"] == resolved
         assert outcome["allowed"] is allowed
@@ -2879,19 +2996,89 @@ def test_entity_budget_gate_composes_entity_and_model_record_boundaries() -> Non
 
 
 def test_entity_budget_gate_preserves_partial_safe_and_overrun_is_unavailable() -> None:
-    partial = entity_budget_gate(500, 500, original_outcome="partial_safe")
+    partial = entity_budget_gate(
+        500,
+        500,
+        original_outcome="partial_safe",
+        requested_formats=["semantic-json"],
+    )
     assert partial["allowed"] is True
     assert partial["payload_available"] is True
     assert partial["original_outcome"] == "partial_safe"
     assert partial["outcome"] == "partial_safe"
-    overridden = entity_budget_gate(501, 600, original_outcome="partial_safe")
+    overridden = entity_budget_gate(
+        501,
+        600,
+        original_outcome="partial_safe",
+        requested_formats=["plantuml"],
+    )
     assert overridden["allowed"] is True
     assert overridden["outcome"] == "partial_safe"
-    overrun = entity_budget_gate(501, 500, original_outcome="partial_safe")
+    overrun = entity_budget_gate(
+        501,
+        500,
+        original_outcome="partial_safe",
+        requested_formats=["semantic-json", "plantuml"],
+    )
     assert overrun["allowed"] is False
     assert overrun["payload_available"] is False
     assert overrun["outcome"] == "payload_unavailable"
     assert overrun["original_outcome"] == "partial_safe"
+
+
+@pytest.mark.parametrize(
+    ("formats", "expected_paths"),
+    [
+        (["semantic-json"], ["next.snapshot.semantic.json"]),
+        (["plantuml"], ["next.snapshot.puml"]),
+        (["semantic-json", "plantuml"], ["next.snapshot.semantic.json", "next.snapshot.puml"]),
+    ],
+)
+def test_entity_budget_gate_publishes_only_requested_formats(
+    formats: list[str], expected_paths: list[str]
+) -> None:
+    decision = entity_budget_gate(
+        4,
+        500,
+        original_outcome="complete",
+        requested_formats=formats,
+    )
+    assert decision["requested_formats"] == formats
+    assert decision["artifact_paths"] == expected_paths
+
+
+def test_round10_path_value_contract_rejects_aliases_and_counts_path_bytes() -> None:
+    assert canonical_target_key("path:.") == "path:."
+    assert canonical_target_key("path:src/Button.tsx") == "path:src/Button.tsx"
+    accepted = "a" * 4096
+    assert canonical_target_key(f"path:{accepted}") == f"path:{accepted}"
+    for invalid in (
+        "path:",
+        "path:a//b",
+        "path:a/./b",
+        "path:a/../b",
+        "path:a/",
+        "path:a\\b",
+        "path:a\x00b",
+        "path:e\u0301.txt",
+        f"path:{accepted}a",
+    ):
+        with pytest.raises(AssertionError):
+            canonical_target_key(invalid)
+
+
+def test_program_file_requires_exactly_one_module_for_file_and_directory_targets() -> None:
+    model = _model()
+    model["modules"] = [module for module in model["modules"] if module["path"] != "src/Card.tsx"]
+    model["modules"].sort(key=lambda record: record["id"])
+    resolution = resolve_target_resolutions(["path:src/Card.tsx"], model)
+    assert resolution == [{"target_key": "path:src/Card.tsx", "status": "failed", "record_ids": []}]
+    directory_resolution = resolve_target_resolutions(["path:src"], model)
+    assert directory_resolution == [
+        {"target_key": "path:src", "status": "failed", "record_ids": []}
+    ]
+    with pytest.raises(AssertionError):
+        validate_model(model)
 
 
 def test_array_and_adapter_stderr_limits_have_independent_incremental_boundaries() -> None:
@@ -2921,6 +3108,67 @@ def test_array_and_adapter_stderr_limits_have_independent_incremental_boundaries
     assert exceeded["partial_disposed"] is True
     assert exceeded["manifest_stderr_bytes"] == 0
     assert exceeded["diagnostic_code"] == "CSV-NEXT-LIMIT-003"
+
+
+def test_public_diagnostic_stderr_is_utf8_jsonl_all_or_none() -> None:
+    diagnostic = _public_diagnostic("CSV-NEXT-TARGET-001", path="src/表示.tsx")
+    gate = render_public_diagnostic_stderr([diagnostic], limit=10_000)
+    assert gate["allowed"] is True
+    assert gate["encoded_bytes"] == len(gate["payload"])
+    assert gate["emitted_bytes"] == gate["encoded_bytes"]
+    assert gate["partial_write_bytes"] == 0
+    assert gate["manifest_diagnostics"] == [diagnostic]
+    assert gate["payload"].endswith(b"\n")
+
+    exact = render_public_diagnostic_stderr([diagnostic], limit=gate["encoded_bytes"])
+    assert exact["allowed"] is True
+    over = render_public_diagnostic_stderr([diagnostic], limit=gate["encoded_bytes"] - 1)
+    assert over["allowed"] is False
+    assert over["encoded_bytes"] == gate["encoded_bytes"]
+    assert over["emitted_bytes"] == 0
+    assert over["partial_write_bytes"] == 0
+    assert over["payload"] == b""
+    assert over["raw_disposed"] is True
+    assert over["partial_disposed"] is True
+    assert over["manifest_only"] is True
+    assert over["diagnostic_code"] == "CSV-NEXT-LIMIT-003"
+    assert [item["code"] for item in over["manifest_diagnostics"]] == ["CSV-NEXT-LIMIT-003"]
+
+
+def test_bounded_decoder_rejects_duplicates_depth_strings_and_aggregate_before_materializing() -> (
+    None
+):
+    allowed = bounded_decode_json(b'{"items":[1,2],"nested":{"ok":true}}')
+    assert allowed["allowed"] is True
+    assert allowed["materialized"] is False
+    duplicate = bounded_decode_json(b'{"items":1,"items":2}')
+    assert duplicate["allowed"] is False
+    assert duplicate["reason"] == "duplicate_object_key"
+
+    nested = bounded_decode_json(b"[" * 65 + b"0" + b"]" * 65)
+    assert nested["allowed"] is False
+    assert nested["reason"] == "max_json_nesting"
+    long_string = bounded_decode_json(b'{"value":"abcd"}', limits={"max_json_string_bytes": 3})
+    assert long_string["allowed"] is False
+    assert long_string["reason"] == "max_json_string_bytes"
+    per_array = bounded_decode_json(b"[0,1,2]", limits={"max_array_items": 2})
+    assert per_array["allowed"] is False
+    assert per_array["reason"] == "max_array_items"
+
+    aggregate_payload = (
+        b'{"first":['
+        + b"0," * 50_000
+        + b"0],"
+        + b'"second":['
+        + b"0," * 49_999
+        + b"0],"
+        + b'"last":[0]}'
+    )
+    aggregate = bounded_decode_json(aggregate_payload)
+    assert aggregate["allowed"] is False
+    assert aggregate["reason"] == "max_total_array_items"
+    assert aggregate["total_array_items"] == 100_001
+    assert aggregate["materialized"] is False
 
 
 def test_whole_run_validator_rejects_projection_and_artifact_mutations() -> None:

@@ -1,10 +1,11 @@
 # Next resolved limits v1
 
-Round 9 review state: `review_status: fail` (P0=0, P1=7, P2=1). The
-independent entity publication gate, separate stderr/array counters, and
+Round 10 review state: `review_status: fail` (P0=0, P1=8, P2=0). Pass A entity
+gate and Pass B public stderr/bounded decoder remediations are locally reflected.
+The independent entity publication gate, separate stderr/array counters, and
 response-to-outcome vectors below are local data-only remediations; fresh
 exact-SHA Strict is pending, readiness is unconfirmed, and production
-implementation has not started.
+implementation has not started. Fresh Strict remains pending.
 
 `schemas/next-limits-v1.schema.json` is the single resolved limits record for
 the Next snapshot boundary. The same record is copied byte-for-byte into the
@@ -58,6 +59,12 @@ manifest, returns `payload_unavailable`, and publishes neither semantic JSON
 nor PlantUML. `max_model_records` remains the structural all-record boundary;
 its first over-limit value is independently composable with the entity gate.
 
+The gate receives an explicitly derived pre-budget outcome; there is no
+implicit `complete` default. A valid `partial_safe` result remains
+`partial_safe` under an allowed budget, including an explicit override. Only
+an entity overrun becomes `payload_unavailable`. Artifact paths are selected
+from the requested formats, so an unrequested renderer is never published.
+
 `max_array_items` limits each individual JSON array, while
 `max_total_array_items` counts all nested response-array items in a streaming
 counter. `max_collection_items` applies only to each semantic model
@@ -71,6 +78,21 @@ the counter is incremental in UTF-8 bytes, equality is accepted, and the first
 byte over the limit terminates the process group, disposes raw and partial
 adapter stderr, emits only stable `CSV-NEXT-LIMIT-003`, and projects zero raw
 stderr bytes into the manifest. Neither bound exposes adapter text.
+
+The public renderer applies the same all-or-none rule to diagnostics: it encodes
+the complete canonical JSONL stream (`canonical JSON` plus one `LF` per line)
+before writing. The exact limit is accepted; one byte over it writes zero
+partial bytes, returns `CSV-NEXT-LIMIT-003`, and projects only that catalog
+diagnostic into the manifest. Multibyte UTF-8 characters count as encoded bytes.
+The reference function `render_public_diagnostic_stderr` and its vectors keep
+this public gate separate from child capture.
+
+Before response object materialization, `bounded_decode_json` streams the real
+UTF-8 response bytes and counts duplicate object keys, parser nesting, decoded
+string bytes, each array, and the aggregate of all array items. A response with
+100,001 aggregate items fails even when every individual array has at most
+100,000 items; the returned counter is `materialized=false` and no partial
+response is retained.
 
 The executable boundary vectors in `tests/contracts/test_next_contracts.py`
 exercise `limit-1`, `limit`, and `limit+1` arithmetically for every row, so

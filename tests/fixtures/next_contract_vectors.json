@@ -39,7 +39,15 @@
     "array-aggregate-bound",
     "source-acquisition-plan-v1",
     "surface-order-by-domain",
-    "program-file-semantic-ownership"
+    "program-file-semantic-ownership",
+    "round10-project-correspondence",
+    "round10-entity-budget-composition",
+    "round10-canonical-path-value",
+    "round10-program-file-module-bijection",
+    "round10-export-module-lexical-grammar",
+    "round10-reexport-independent-raw-graph",
+    "round10-public-stderr-jsonl-gate",
+    "round10-response-bounded-decoder"
   ],
   "negative": [
     "cross-domain",
@@ -91,6 +99,15 @@
     "array-aggregate-pre-materialization",
     "source-plan-field-mutation",
     "surface-order-mutation",
-    "program-context-direct-target"
+    "program-context-direct-target",
+    "round10-project-order-mutation",
+    "round10-budget-outcome-default-upgrade",
+    "round10-path-alias",
+    "round10-program-file-missing-module",
+    "round10-export-non-module-false-positive",
+    "round10-reexport-main-witness-mutation",
+    "round10-public-stderr-limit-plus-one-no-partial",
+    "round10-response-duplicate-key",
+    "round10-response-aggregate-pre-materialization"
   ]
 }

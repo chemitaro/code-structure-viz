@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-08-31"
+最終更新: "2026-09-01"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -65,6 +65,47 @@ SpecDock/HTML検証、clean exact-SHA Strict passを経て初めてproduction実
 | P1-5 array boundary | total array aggregate、individual array、semantic collectionを分離し、individual内でもaggregate 100001をpre-materializationで拒否する。 |
 | P1-6 source plan | closed SourceAcquisitionPlan/v1 schema/descriptorを追加し、control/extends/file roles/projects/suffixes/exclusions/limits/trusted digestを全hash、known-answer mutationを持つ。 |
 | P1-7 ordering / P2-1 target prose | input/config/source-planはNFC UTF-8 root-path、semantic recordsはrecord-ID order。public component selectorは削除し、pathから解決したinternal Component seedだけを扱う。 |
+
+### Round 10 review state and two-pass remediation
+
+ChatGPT Use Strict Round 10 は `review_status: fail`、P0=0、P1=8、P2=0 だった。
+証拠と8件の要求は `20260901t000000z-disc-strict-spec-review-round-10.md` に固定する。
+fresh exact-SHA Strictは未実行・未通過、readinessは未確定、production adapter/CLIは未着手
+である。Pass Aではproject surface order、outcome-preserving EntityBudgetGate、canonical
+path、File→Module完全性を実装前validator/schema/testへ反映した。Pass Bではclosed export
+grammar、独立re-export witness、public diagnostic stderr、bounded response decoderを
+validator/schema/fixture/testへ反映した。focused/full quality gates後にfresh Strictへ
+戻すが、現時点ではfresh exact-SHA Strict未実行・未通過、readiness未確定である。
+
+Pass Bの実行条件:
+
+- scannerはmodule-level深さ0だけを対象に、async declaration、generic/type span、semicolon
+  とASI終端、JSX/property/regex/template/string/comment false positive除外、NFC/CRLF/BOM、
+  exact byte spanを閉じたfixtureから再計算する。
+- raw export declarations/edgesから独立graphを再計算し、explicit alias、star 0..N/default
+  exclusion、cycle/conflictをmain response witnessへ統合する。public ExportBindingから
+  witnessを導出せず、component resolution/count mutationも拒否する。
+- public stderrはcanonical diagnostic JSONLのUTF-8 encoded bytesをwrite前に一括測定し、
+  limitは受理、+1は0 bytes出力・固定`CSV-NEXT-LIMIT-003`・manifest-onlyとする。adapter
+  captureとのcounter混同を許さない。
+- bounded decoderは実response bytesをobject化せず、duplicate key、nesting/string、個別
+  array、aggregate counterをincrementalに数え、aggregate 100001をpre-materializationで
+  拒否する。response envelope validationの前段で成功経路にも適用する。
+
+Pass Aの実行条件:
+
+- request/modelのprojectはID/root対応を比較し、各surfaceのroot-path orderまたはrecord-ID
+  orderをsubmitted順のまま別々に検証する。root manifestのproject listとfingerprintへ
+  逆順二project fixtureを通す。
+- response proofからpre-budget outcomeを一意に導出し、`EntityBudgetGate`は暗黙の
+  `complete`を持たない。under budgetのcomplete/partial_safeは保持し、overrunだけを
+  `payload_unavailable`へ変換し、requested formatのartifactだけを選ぶ。
+- `next-path-v1`の非root値はNFC UTF-8 bytesで1--4096、root sentinel `.`はroot文脈だけ
+  とする。empty/`.`/`..` segment、trailing slash、control、backslash、NFC collisionを
+  全Next surfaceで拒否する。
+- modelとtarget resolverは、選択されたprogram Fileすべてに同一project/pathのModuleが
+  exactly oneあることを要求する。missing/duplicate/component-onlyは全domain unavailable
+  の投影へ進める。
 
 この表の全行がdata-only validator/fixtures/docs/schemaへ反映されるまで、Next
 adapter/CLIの`src/**`実装を開始しない。

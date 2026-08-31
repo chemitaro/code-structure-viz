@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-08-31"
+最終更新: "2026-09-01"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -85,6 +85,37 @@ Round 9 は `review_status: fail`、P0=0、P1=7、P2=1。fresh exact-SHA Strict�
    NFC UTF-8 root-path order、semantic recordsはrecord-ID orderとする。
 7. public targetは`path:`だけであり、pathから解決したinternal Component seedは
    traversal/taint witness内部に限定する。public component selectorを再導入しない。
+
+### Round 10 review state and Pass A remediation
+
+ChatGPT Use Strict Round 10 は `review_status: fail`、P0=0、P1=8、P2=0 だった
+（詳細は `20260901t000000z-disc-strict-spec-review-round-10.md`）。fresh exact-SHA
+Strictは未実行・未通過で、readinessは未確定、production Next adapter/CLIは未実装である。
+Pass Aの設計固定は次のとおりとする。
+
+1. Project対応はimmutable ID/rootをキーに比較する。input/config/source-plan/root
+   manifestはNFC UTF-8 root-path order、semantic collectionsとrun fingerprintの
+   project recordはID orderとして、それぞれのsurfaceで独立に検証する。
+2. `EntityBudgetGate`のpre-budget outcomeはvalidated proof/modelから導出し、既定値を
+   持たない。under budgetは`complete`または`partial_safe`を保持し、overrunだけを
+   `payload_unavailable`へ変換する。artifactはrequested formatだけを選ぶ。
+3. `next-path-v1`をcanonical non-root POSIX path値として共有し、root sentinel `.`は
+   rootを表すフィールドだけで許可する。empty segment、embedded dot、trailing slash、
+   control、backslash、非NFCを拒否し、4096はUTF-8 path value bytes（`path:` prefixを
+   除く）として数える。
+4. program roleかつ`.ts/.tsx/.js/.jsx`の各Fileは、同一project/pathのsemantic Module
+   exactly oneを要求する。欠落・重複・Componentだけの置換はfile/directory targetを
+   fail closedにする。
+
+Round 10 Pass Bで、closed export grammar、独立re-export graph、public stderr、bounded
+JSON decoderのdata-only closureを実装前契約へ反映した。export scannerはmodule-level
+深さ・JSX/property/regex/template/string/commentの除外、async/generic/type span、
+semicolon/ASI方針とexact UTF-8 bytesを固定する。re-exportはraw declaration/edgeから
+alias、star 0..N（default除外）、cycle/conflictを再計算し、main proofへ統合する。
+public stderrはcanonical JSONLを先にUTF-8 encodeし、inclusive limit/+1、partial write 0、
+`CSV-NEXT-LIMIT-003`、manifest-onlyを固定する。responseはduplicate key、depth、string、
+per-array/aggregateをbounded decoderでmaterialize前に数える。fresh exact-SHA Strictは
+未実行・未通過、readiness未確定、production実装未着手である。
 
 ## 責務・Interface
 

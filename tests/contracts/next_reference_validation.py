@@ -73,7 +73,15 @@ ROOT_EDGE_TARGET_KINDS = {
     },
 }
 ID_RE = re.compile(r"^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$")
-PATH_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))(?!.*\\)(?!.*[\x00-\x1f\x7f]).+$")
+# A path value is a repository-relative POSIX path.  ``.`` is reserved for a
+# project/source root; ordinary file and symbol references use the non-root
+# form.  Keep the lexical contract in one helper so every surface rejects the
+# same aliases (``a//b``, ``a/./b``, ``a/`` and control characters).
+PATH_RE = re.compile(
+    r"^(?!/)(?!.*//)(?!.*(?:^|/)\.{1,2}(?:/|$))(?!.*\/$)(?!.*\\)(?!.*[\x00-\x1f\x7f]).+$"
+)
+PATH_VALUE_MAX_BYTES = 4096
+TARGET_SELECTOR_PREFIX = "path:"
 PACKAGE_RE = re.compile(r"^(@[a-z0-9._-]+/)?[a-z0-9._-]+(?:/[a-z0-9._-]+)*$")
 TRUSTED_MODULES = ("react", "react/jsx-runtime", "react/jsx-dev-runtime", "next/dynamic")
 TRUSTED_REFERENCE_MODULES = (*TRUSTED_MODULES, "typescript/lib")
@@ -512,11 +520,14 @@ EXPORT_CENSUS_PATH = REPO_ROOT / "tests/fixtures/next_export_census.json"
 EXPORT_CENSUS_SCHEMA = "code-structure-viz.next-export-census/v1"
 EXPORT_GRAPH_PATH = REPO_ROOT / "tests/fixtures/next_export_graph.json"
 EXPORT_GRAPH_SCHEMA = "code-structure-viz.next-export-graph/v1"
+EXPORT_GRAPH_RAW_PATH = REPO_ROOT / "tests/fixtures/next_export_graph_raw.json"
+EXPORT_GRAPH_RAW_SCHEMA = "code-structure-viz.next-export-graph-raw/v1"
 EXPORT_GRAPH_CASES_PATH = REPO_ROOT / "tests/fixtures/next_export_graph_cases.json"
 EXPORT_GRAPH_CASES_SCHEMA = "code-structure-viz.next-export-graph-cases/v1"
 _IDENTIFIER_RE = r"[A-Za-z_$][A-Za-z0-9_$]*"
 _EXPORT_KEYWORDS = {
     "as",
+    "async",
     "class",
     "const",
     "default",
@@ -528,6 +539,74 @@ _EXPORT_KEYWORDS = {
     "type",
     "var",
 }
+
+
+def _jsx_element_end(text: str, start: int) -> int | None:
+    """Return the end of a conservative JSX element, if one starts here.
+
+    The export contract is lexical rather than a JSX parser.  We only skip a
+    tag-shaped region when a matching closing tag is present, which keeps
+    TypeScript generic/comparison syntax visible to the scanner while making
+    words such as ``export`` in JSX text inert.
+    """
+
+    if text.startswith("<>", start):
+        closing = text.find("</>", start + 3)
+        return closing + 3 if closing >= 0 else None
+    match = re.match(r"<([A-Za-z_$][A-Za-z0-9_$.-]*)(?:\s[^<>]*?)?(/?)>", text[start:])
+    if match is None or match.group(2) == "/":
+        return None
+    closing = text.find(f"</{match.group(1)}>", start + match.end())
+    return closing + len(match.group(1)) + 3 if closing >= 0 else None
+
+
+def _regex_literal_end(text: str, start: int) -> int | None:
+    """Return the end of a regex literal, preserving words inside its body."""
+
+    index = start + 1
+    in_class = False
+    escaped = False
+    while index < len(text):
+        character = text[index]
+        if escaped:
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == "[":
+            in_class = True
+        elif character == "]" and in_class:
+            in_class = False
+        elif character == "/" and not in_class:
+            index += 1
+            while index < len(text) and (text[index].isidentifier() or text[index] == "$"):
+                index += 1
+            return index
+        elif character in "\r\n":
+            return None
+        index += 1
+    return None
+
+
+def _regex_can_start(previous: dict[str, Any] | None) -> bool:
+    if previous is None:
+        return True
+    if previous["kind"] == "identifier":
+        return previous["value"] in {
+            "await",
+            "case",
+            "delete",
+            "do",
+            "else",
+            "in",
+            "instanceof",
+            "of",
+            "return",
+            "throw",
+            "typeof",
+            "void",
+            "yield",
+        }
+    return previous["value"] in "([{=,:;!?&|+-*%^~<>"
 
 
 def _is_program_file(file_record: dict[str, Any]) -> bool:
@@ -555,7 +634,7 @@ def load_export_census_fixture() -> tuple[dict[str, Any], ...]:
     result: list[dict[str, Any]] = []
     for item in files:
         assert set(item) == {"path", "content_base64"}
-        _assert_path(item["path"])
+        _assert_file_path(item["path"])
         encoded = item["content_base64"]
         content = base64.b64decode(encoded, validate=True)
         assert base64.b64encode(content).decode("ascii") == encoded
@@ -581,11 +660,11 @@ def load_export_graph_fixture() -> tuple[dict[str, Any], ...]:
             "target_declaration_key",
             "resolution",
         }
-        _assert_path(edge["owner_file_path"])
+        _assert_file_path(edge["owner_file_path"])
         assert edge["source_specifier"]
         assert edge["source_specifier"].startswith(".")
         if edge["resolved_source_file_path"] is not None:
-            _assert_path(edge["resolved_source_file_path"])
+            _assert_file_path(edge["resolved_source_file_path"])
         assert (
             _is_export_identifier(edge["imported_name"], allow_default=True)
             or edge["imported_name"] == "*"
@@ -601,6 +680,63 @@ def load_export_graph_fixture() -> tuple[dict[str, Any], ...]:
     assert edge_keys == sorted(edge_keys)
     assert len(edge_keys) == len(set(edge_keys))
     return tuple(edges)
+
+
+def load_export_graph_raw_fixture() -> dict[str, Any]:
+    """Load raw declarations and re-export edges for independent recomputation."""
+
+    payload = json.loads(EXPORT_GRAPH_RAW_PATH.read_text(encoding="utf-8"))
+    assert set(payload) == {"schema", "modules", "edges"}
+    assert payload["schema"] == EXPORT_GRAPH_RAW_SCHEMA
+    modules = cast(list[dict[str, Any]], payload["modules"])
+    assert modules
+    module_paths = [module["path"] for module in modules]
+    assert module_paths == sorted(module_paths)
+    assert len(module_paths) == len(set(module_paths))
+    for module in modules:
+        assert set(module) == {"path", "exports"}
+        _assert_file_path(module["path"])
+        exports = cast(list[dict[str, Any]], module["exports"])
+        export_names = [item["name"] for item in exports]
+        assert export_names == sorted(export_names)
+        assert len(export_names) == len(set(export_names))
+        for item in exports:
+            assert set(item) == {"name", "resolution", "target_declaration_key"}
+            assert _is_export_identifier(item["name"], allow_default=True)
+            assert item["resolution"] in {"component", "value", "type", "unknown"}
+            if item["resolution"] == "component":
+                assert _is_export_identifier(item["target_declaration_key"])
+            else:
+                assert item["target_declaration_key"] is None
+    edges = cast(list[dict[str, Any]], payload["edges"])
+    edge_keys: list[tuple[str, str, str, str]] = []
+    for edge in edges:
+        assert set(edge) == {
+            "owner_file_path",
+            "source_specifier",
+            "imported_name",
+            "exported_name",
+        }
+        assert edge["owner_file_path"] in set(module_paths)
+        assert edge["source_specifier"].startswith(".")
+        assert edge["imported_name"] == "*" or _is_export_identifier(
+            edge["imported_name"], allow_default=True
+        )
+        assert edge["exported_name"] == "*" or _is_export_identifier(
+            edge["exported_name"], allow_default=True
+        )
+        assert (edge["imported_name"] == "*") is (edge["exported_name"] == "*")
+        edge_keys.append(
+            (
+                edge["owner_file_path"],
+                edge["source_specifier"],
+                edge["imported_name"],
+                edge["exported_name"],
+            )
+        )
+    assert edge_keys == sorted(edge_keys)
+    assert len(edge_keys) == len(set(edge_keys))
+    return {"modules": modules, "edges": edges}
 
 
 def load_export_graph_cases() -> tuple[dict[str, Any], ...]:
@@ -624,7 +760,7 @@ def load_export_graph_cases() -> tuple[dict[str, Any], ...]:
         module_path_set = set(module_paths)
         for module in modules:
             assert set(module) == {"path", "exports"}
-            _assert_path(module["path"])
+            _assert_file_path(module["path"])
             exports = cast(list[dict[str, Any]], module["exports"])
             export_names = [item["name"] for item in exports]
             assert export_names == sorted(export_names)
@@ -690,6 +826,23 @@ def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]
     for character in text:
         offsets.append(offsets[-1] + len(character.encode("utf-8")))
     tokens: list[dict[str, Any]] = []
+    previous: dict[str, Any] | None = None
+    brace_depth = 0
+    paren_depth = 0
+    bracket_depth = 0
+
+    def append_token(token: dict[str, Any]) -> None:
+        nonlocal previous
+        token.update(
+            {
+                "brace_depth": brace_depth,
+                "paren_depth": paren_depth,
+                "bracket_depth": bracket_depth,
+            }
+        )
+        tokens.append(token)
+        previous = token
+
     index = 1 if text.startswith("\ufeff") else 0
     length = len(text)
     while index < length:
@@ -722,6 +875,16 @@ def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]
             else:
                 raise AssertionError("unterminated template literal")
             continue
+        if character == "<":
+            jsx_end = _jsx_element_end(text, index)
+            if jsx_end is not None:
+                index = jsx_end
+                continue
+        if character == "/" and _regex_can_start(previous):
+            regex_end = _regex_literal_end(text, index)
+            if regex_end is not None:
+                index = regex_end
+                continue
         start = index
         if character in "'\"":
             quote = character
@@ -744,7 +907,7 @@ def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]
                 index += 1
             else:
                 raise AssertionError("unterminated export string")
-            tokens.append(
+            append_token(
                 {
                     "kind": "string",
                     "value": "".join(value_chars),
@@ -767,7 +930,7 @@ def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]
                 allow_default=value == "default",
                 allow_keyword=True,
             ), value
-            tokens.append(
+            append_token(
                 {
                     "kind": "identifier",
                     "value": value,
@@ -782,7 +945,17 @@ def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]
         else:
             index += 1
             value = character
-        tokens.append(
+        if value in "})]":
+            if value == "}":
+                assert brace_depth > 0
+                brace_depth -= 1
+            elif value == ")":
+                assert paren_depth > 0
+                paren_depth -= 1
+            else:
+                assert bracket_depth > 0
+                bracket_depth -= 1
+        append_token(
             {
                 "kind": "punctuation",
                 "value": value,
@@ -790,6 +963,13 @@ def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]
                 "char_end": index,
             }
         )
+        if value in "({[":
+            if value == "(":
+                paren_depth += 1
+            elif value == "[":
+                bracket_depth += 1
+            else:
+                brace_depth += 1
     return tokens, text, offsets
 
 
@@ -804,6 +984,14 @@ def _find_statement_end(tokens: list[dict[str, Any]], index: int) -> int:
     depth = 0
     for position in range(index, len(tokens)):
         value = tokens[position]["value"]
+        if (
+            position > index
+            and value == "export"
+            and tokens[position]["brace_depth"] == 0
+            and tokens[position]["paren_depth"] == 0
+            and tokens[position]["bracket_depth"] == 0
+        ):
+            raise AssertionError("export statement must end before the next module declaration")
         if value in "{[(":
             depth += 1
         elif value in "}])":
@@ -819,10 +1007,22 @@ def _find_statement_end(tokens: list[dict[str, Any]], index: int) -> int:
 def _find_decl_end(tokens: list[dict[str, Any]], index: int) -> int:
     """Find a declaration's balanced body, or its required semicolon."""
 
-    brace_start = next(
-        (position for position in range(index, len(tokens)) if tokens[position]["value"] == "{"),
-        None,
-    )
+    brace_start: int | None = None
+    for position in range(index, len(tokens)):
+        value = tokens[position]["value"]
+        if (
+            position > index
+            and value == "export"
+            and tokens[position]["brace_depth"] == 0
+            and tokens[position]["paren_depth"] == 0
+            and tokens[position]["bracket_depth"] == 0
+        ):
+            break
+        if value == ";":
+            break
+        if value == "{":
+            brace_start = position
+            break
     if brace_start is None:
         return _find_statement_end(tokens, index)
     depth = 0
@@ -897,7 +1097,13 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     position = 0
     while position < len(tokens):
-        if tokens[position]["value"] != "export":
+        if (
+            tokens[position]["value"] != "export"
+            or tokens[position]["brace_depth"] != 0
+            or tokens[position]["paren_depth"] != 0
+            or tokens[position]["bracket_depth"] != 0
+            or (position > 0 and tokens[position - 1]["value"] in {".", "?."})
+        ):
             position += 1
             continue
         export_token = tokens[position]
@@ -915,6 +1121,8 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
             end = cursor + 2
             if end + 1 < len(tokens) and tokens[end + 1]["value"] == ";":
                 end += 1
+            else:
+                raise AssertionError("export-all statement must end with semicolon")
             rows.append(
                 _export_observation_row(
                     path=path,
@@ -953,6 +1161,10 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
                 end = close_brace
             if end + 1 < len(tokens) and tokens[end + 1]["value"] == ";":
                 end += 1
+            elif source_specifier is not None:
+                raise AssertionError("re-export list must end with semicolon")
+            else:
+                raise AssertionError("export list must end with semicolon")
             item = open_brace + 1
             while item < close_brace:
                 if tokens[item]["value"] == ",":
@@ -1002,7 +1214,18 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
             assert cursor < len(tokens)
             next_value = tokens[cursor]["value"]
             imported_name: str | None = None
-            if next_value in {"function", "class"}:
+            if next_value == "async":
+                assert cursor + 1 < len(tokens) and tokens[cursor + 1]["value"] == "function"
+                declaration_cursor = cursor + 2
+                if declaration_cursor < len(tokens) and tokens[declaration_cursor]["value"] == "*":
+                    declaration_cursor += 1
+                if (
+                    declaration_cursor < len(tokens)
+                    and tokens[declaration_cursor]["kind"] == "identifier"
+                ):
+                    imported_name = cast(str, tokens[declaration_cursor]["value"])
+                end = _find_decl_end(tokens, cursor)
+            elif next_value in {"function", "class"}:
                 declaration_cursor = cursor + 1
                 if declaration_cursor < len(tokens) and tokens[declaration_cursor]["value"] == "*":
                     declaration_cursor += 1
@@ -1037,11 +1260,19 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
             position = end + 1
             continue
         declaration = cast(str, tokens[cursor]["value"])
+        if declaration == "async":
+            assert cursor + 1 < len(tokens) and tokens[cursor + 1]["value"] == "function"
+            declaration = "function"
         type_name_direct = role == "type" and tokens[cursor]["kind"] == "identifier"
         if type_name_direct:
             declaration = "type"
         if declaration in {"const", "let", "var", "function", "class", "type", "interface"}:
-            declaration_cursor = cursor if type_name_direct else cursor + 1
+            if type_name_direct:
+                declaration_cursor = cursor
+            elif declaration == "function" and tokens[cursor]["value"] == "async":
+                declaration_cursor = cursor + 2
+            else:
+                declaration_cursor = cursor + 1
             if (
                 declaration in {"function", "class"}
                 and declaration_cursor < len(tokens)
@@ -1272,7 +1503,7 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
             _assert_path(source_root)
             assert _under(source_root, project["root"])
         if project["config_path"] is not None:
-            _assert_path(project["config_path"])
+            _assert_file_path(project["config_path"])
             assert _under(project["config_path"], project["root"])
     assert descriptor["resolved_control_paths"] == sorted(
         descriptor["resolved_control_paths"], key=canonical_json_bytes
@@ -1281,7 +1512,7 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
         assert set(control_path) == {"project_root", "path"}
         assert control_path["project_root"] in project_roots
         _assert_path(control_path["project_root"])
-        _assert_path(control_path["path"])
+        _assert_file_path(control_path["path"])
         assert _under(control_path["path"], control_path["project_root"])
     assert descriptor["local_extends"] == sorted(
         descriptor["local_extends"], key=canonical_json_bytes
@@ -1290,11 +1521,11 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
         assert set(local_extend) == {"project_root", "config_path", "extends"}
         assert local_extend["project_root"] in project_roots
         _assert_path(local_extend["project_root"])
-        _assert_path(local_extend["config_path"])
+        _assert_file_path(local_extend["config_path"])
         assert _under(local_extend["config_path"], local_extend["project_root"])
         assert local_extend["extends"] == sorted(set(local_extend["extends"]))
         for extend in local_extend["extends"]:
-            _assert_path(extend)
+            _assert_file_path(extend)
             assert _under(extend, local_extend["project_root"])
     assert descriptor["file_role_map"] == sorted(
         descriptor["file_role_map"], key=canonical_json_bytes
@@ -1304,7 +1535,7 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
         assert set(file_role) == {"project_root", "path", "roles", "effective_role"}
         assert file_role["project_root"] in project_roots
         _assert_path(file_role["project_root"])
-        _assert_path(file_role["path"])
+        _assert_file_path(file_role["path"])
         assert _under(file_role["path"], file_role["project_root"])
         assert file_role["roles"]
         assert file_role["roles"] == sorted(set(file_role["roles"]), key=ROLE_ORDER.__getitem__)
@@ -1444,12 +1675,47 @@ def validate_request_envelope(request: dict[str, Any]) -> None:
     validate_encoded_stdin_size(request)
 
 
+def _validate_project_correspondence(
+    request_projects: list[dict[str, Any]], model_projects: list[dict[str, Any]]
+) -> None:
+    """Compare projects by immutable ID/root, then validate each wire order."""
+
+    request_by_id = {project["id"]: project for project in request_projects}
+    model_by_id = {project["id"]: project for project in model_projects}
+    assert len(request_by_id) == len(request_projects)
+    assert len(model_by_id) == len(model_projects)
+    assert set(request_by_id) == set(model_by_id)
+    for project_id, request_project in request_by_id.items():
+        model_project = model_by_id[project_id]
+        assert model_project == request_project
+        assert model_project["root"] == request_project["root"]
+    request_roots = [project["root"] for project in request_projects]
+    assert request_roots == sorted(request_roots, key=canonical_json_bytes)
+    model_ids = [project["id"] for project in model_projects]
+    assert model_ids == sorted(model_ids)
+
+
+def derive_pre_budget_outcome(proof: dict[str, Any], model: dict[str, Any]) -> str:
+    """Derive publication quality from validated proof/model facts only."""
+
+    if proof["failure_roots"] or proof["excluded"] or proof["failed"]:
+        return "partial_safe"
+    if any(diagnostic["outcome"] == "partial_safe" for diagnostic in model["diagnostics"]):
+        return "partial_safe"
+    return "complete"
+
+
 def validate_response_envelope(
     response: dict[str, Any],
     request: dict[str, Any],
     *,
-    original_outcome: str = "complete",
+    response_bytes: bytes | None = None,
 ) -> dict[str, Any]:
+    bounded = bounded_decode_json(
+        response if response_bytes is None else response_bytes,
+        limits=request["limits"],
+    )
+    assert bounded["allowed"]
     assert response["protocol"] == request["protocol"] == "code-structure-viz.next-adapter/v1"
     assert response["request_id"] == request["request_id"]
     assert response["adapter_version"] == request["adapter_version"]
@@ -1467,9 +1733,7 @@ def validate_response_envelope(
     )
     validate_limits_consistency(request["limits"], response["limits"])
     model = response["model"]
-    assert sorted(model["projects"], key=lambda project: project["id"]) == sorted(
-        request["projects"], key=lambda project: canonical_json_bytes(project["root"])
-    )
+    _validate_project_correspondence(request["projects"], model["projects"])
     request_files = [
         {key: item for key, item in file_record.items() if key != "content_base64"}
         for file_record in request["files"]
@@ -1480,10 +1744,12 @@ def validate_response_envelope(
         max_model_records=request["limits"]["max_model_records"],
     )
     validate_proof(response["proof"], model, request_targets=request["targets"])
+    pre_budget_outcome = derive_pre_budget_outcome(response["proof"], model)
     return entity_budget_gate(
         actual_entities,
         request["limits"]["max_entities"],
-        original_outcome=original_outcome,
+        original_outcome=pre_budget_outcome,
+        requested_formats=request.get("formats", FORMAT_ORDER),
     )
 
 
@@ -1585,7 +1851,7 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             _assert_path(source_root)
             assert _under(source_root, project["root"])
         if project["config_path"] is not None:
-            _assert_path(project["config_path"])
+            _assert_file_path(project["config_path"])
             assert _under(project["config_path"], project["root"])
         assert project["file_ids"] == sorted(set(project["file_ids"]))
         assert all(_id_kind(file_id) == "file" for file_id in project["file_ids"])
@@ -1603,6 +1869,9 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             for project in value["projects"]
         ],
         key=lambda project: canonical_json_bytes(project["root"]),
+    )
+    assert [project["root"] for project in expected_config_projects] == sorted(
+        project["root"] for project in value["projects"]
     )
     assert value["config"]["projects"] == expected_config_projects
     assert value["request"]["projects"] == expected_config_projects
@@ -1753,7 +2022,8 @@ def entity_budget_gate(
     measured: int,
     resolved: int,
     *,
-    original_outcome: str = "complete",
+    original_outcome: str,
+    requested_formats: list[str] | tuple[str, ...] = FORMAT_ORDER,
 ) -> dict[str, Any]:
     """Compose the entity gate without upgrading a pre-budget outcome.
 
@@ -1764,6 +2034,12 @@ def entity_budget_gate(
     """
 
     assert original_outcome in {"complete", "partial_safe"}
+    formats = list(requested_formats)
+    _assert_formats(formats)
+    expected_artifacts = {
+        "semantic-json": "next.snapshot.semantic.json",
+        "plantuml": "next.snapshot.puml",
+    }
     allowed = entity_budget_allowed(measured, resolved)
     outcome = original_outcome if allowed else "payload_unavailable"
     return {
@@ -1774,9 +2050,10 @@ def entity_budget_gate(
         "original_outcome": original_outcome,
         "outcome": outcome,
         "diagnostic_code": None if allowed else "CSV-NEXT-LIMIT-005",
-        "artifact_paths": (
-            ["next.snapshot.semantic.json", "next.snapshot.puml"] if allowed else []
-        ),
+        "requested_formats": formats,
+        "artifact_paths": [expected_artifacts[format_name] for format_name in formats]
+        if allowed
+        else [],
     }
 
 
@@ -1784,11 +2061,17 @@ def compose_entity_budget_outcome(
     measured: int,
     resolved: int,
     *,
-    original_outcome: str = "complete",
+    original_outcome: str,
+    requested_formats: list[str] | tuple[str, ...] = FORMAT_ORDER,
 ) -> dict[str, Any]:
     """Return the manifest-facing status fields produced by EntityBudgetGate."""
 
-    return entity_budget_gate(measured, resolved, original_outcome=original_outcome)
+    return entity_budget_gate(
+        measured,
+        resolved,
+        original_outcome=original_outcome,
+        requested_formats=requested_formats,
+    )
 
 
 def total_array_items_allowed(measured: int, resolved: int) -> bool:
@@ -1824,6 +2107,208 @@ def count_array_items_before_materialization(
                 "reason": "max_total_array_items",
             }
     return {"allowed": True, "total": total, "failed_at": None, "reason": None}
+
+
+class _BoundedJsonDecodeFailure(Exception):
+    """Internal early-exit marker for the streaming JSON contract."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class _BoundedJsonDecoder:
+    """Count a response's JSON structure without constructing the response."""
+
+    def __init__(self, payload: bytes, limits: dict[str, int]) -> None:
+        self.payload = payload
+        self.limits = limits
+        self.index = 0
+        self.total_array_items = 0
+        self.array_count = 0
+        self.max_array_items = 0
+        self.max_nesting = 0
+        self.max_string_bytes = 0
+
+    def _fail(self, reason: str) -> None:
+        raise _BoundedJsonDecodeFailure(reason)
+
+    def _skip_whitespace(self) -> None:
+        while self.index < len(self.payload) and self.payload[self.index] in b" \t\r\n":
+            self.index += 1
+
+    def _parse_string(self) -> str:
+        start = self.index
+        assert self.payload[self.index] == ord('"')
+        self.index += 1
+        while self.index < len(self.payload):
+            byte = self.payload[self.index]
+            if byte == ord('"'):
+                self.index += 1
+                try:
+                    value = json.loads(self.payload[start : self.index].decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    self._fail("invalid_json")
+                assert isinstance(value, str)
+                encoded_bytes = len(value.encode("utf-8"))
+                self.max_string_bytes = max(self.max_string_bytes, encoded_bytes)
+                if encoded_bytes > self.limits["max_json_string_bytes"]:
+                    self._fail("max_json_string_bytes")
+                return value
+            if byte < 0x20:
+                self._fail("invalid_json")
+            if byte == ord("\\"):
+                self.index += 2
+            else:
+                self.index += 1
+        self._fail("invalid_json")
+        raise AssertionError("unreachable")
+
+    def _parse_number_or_literal(self) -> None:
+        start = self.index
+        while self.index < len(self.payload) and self.payload[self.index] not in b" \t\r\n,]}:":
+            self.index += 1
+        if start == self.index:
+            self._fail("invalid_json")
+        token = self.payload[start : self.index]
+        try:
+            value = json.loads(
+                token.decode("ascii"),
+                parse_constant=lambda _constant: (_ for _ in ()).throw(ValueError),
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            self._fail("invalid_json")
+        assert value is None or isinstance(value, (bool, int, float))
+
+    def _parse_value(self, depth: int) -> None:
+        self.max_nesting = max(self.max_nesting, depth)
+        if depth > self.limits["max_json_nesting"]:
+            self._fail("max_json_nesting")
+        self._skip_whitespace()
+        if self.index >= len(self.payload):
+            self._fail("invalid_json")
+        byte = self.payload[self.index]
+        if byte == ord('"'):
+            self._parse_string()
+            return
+        if byte == ord("{"):
+            self._parse_object(depth)
+            return
+        if byte == ord("["):
+            self._parse_array(depth)
+            return
+        self._parse_number_or_literal()
+
+    def _parse_object(self, depth: int) -> None:
+        self.index += 1
+        keys: set[str] = set()
+        self._skip_whitespace()
+        if self.index < len(self.payload) and self.payload[self.index] == ord("}"):
+            self.index += 1
+            return
+        while True:
+            self._skip_whitespace()
+            if self.index >= len(self.payload) or self.payload[self.index] != ord('"'):
+                self._fail("invalid_json")
+            key = self._parse_string()
+            if key in keys:
+                self._fail("duplicate_object_key")
+            keys.add(key)
+            self._skip_whitespace()
+            if self.index >= len(self.payload) or self.payload[self.index] != ord(":"):
+                self._fail("invalid_json")
+            self.index += 1
+            self._parse_value(depth + 1)
+            self._skip_whitespace()
+            if self.index >= len(self.payload):
+                self._fail("invalid_json")
+            delimiter = self.payload[self.index]
+            if delimiter == ord("}"):
+                self.index += 1
+                return
+            if delimiter != ord(","):
+                self._fail("invalid_json")
+            self.index += 1
+
+    def _parse_array(self, depth: int) -> None:
+        self.index += 1
+        self.array_count += 1
+        length = 0
+        self._skip_whitespace()
+        if self.index < len(self.payload) and self.payload[self.index] == ord("]"):
+            self.index += 1
+            return
+        while True:
+            length += 1
+            self.max_array_items = max(self.max_array_items, length)
+            if length > self.limits["max_array_items"]:
+                self._fail("max_array_items")
+            self.total_array_items += 1
+            if self.total_array_items > self.limits["max_total_array_items"]:
+                self._fail("max_total_array_items")
+            self._parse_value(depth + 1)
+            self._skip_whitespace()
+            if self.index >= len(self.payload):
+                self._fail("invalid_json")
+            delimiter = self.payload[self.index]
+            if delimiter == ord("]"):
+                self.index += 1
+                return
+            if delimiter != ord(","):
+                self._fail("invalid_json")
+            self.index += 1
+
+    def decode(self) -> dict[str, Any]:
+        try:
+            self._parse_value(0)
+            self._skip_whitespace()
+            if self.index != len(self.payload):
+                self._fail("invalid_json")
+        except _BoundedJsonDecodeFailure as failure:
+            return {
+                "allowed": False,
+                "bytes": len(self.payload),
+                "total_array_items": self.total_array_items,
+                "array_count": self.array_count,
+                "max_array_items": self.max_array_items,
+                "max_nesting": self.max_nesting,
+                "max_string_bytes": self.max_string_bytes,
+                "failed_at_byte": self.index,
+                "reason": failure.reason,
+                "materialized": False,
+            }
+        return {
+            "allowed": True,
+            "bytes": len(self.payload),
+            "total_array_items": self.total_array_items,
+            "array_count": self.array_count,
+            "max_array_items": self.max_array_items,
+            "max_nesting": self.max_nesting,
+            "max_string_bytes": self.max_string_bytes,
+            "failed_at_byte": None,
+            "reason": None,
+            "materialized": False,
+        }
+
+
+def bounded_decode_json(
+    response: bytes | bytearray | dict[str, Any],
+    *,
+    limits: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Run the bounded response decoder over bytes before object materialization."""
+
+    payload = canonical_json_bytes(response) if isinstance(response, dict) else bytes(response)
+    resolved_limits = {**LIMIT_DEFAULTS, **(limits or {})}
+    for name in (
+        "max_json_nesting",
+        "max_json_string_bytes",
+        "max_array_items",
+        "max_total_array_items",
+    ):
+        assert isinstance(resolved_limits[name], int)
+        assert resolved_limits[name] >= 1
+    return _BoundedJsonDecoder(payload, resolved_limits).decode()
 
 
 def capture_adapter_stderr(
@@ -1866,6 +2351,82 @@ def capture_adapter_stderr(
         "diagnostic_code": None,
         "outcome": "complete",
         "manifest_stderr_bytes": 0,
+    }
+
+
+def _public_limit_diagnostic() -> dict[str, Any]:
+    """Build the catalog-owned replacement emitted after a public byte breach."""
+
+    entry = _diagnostic_catalog()["CSV-NEXT-LIMIT-003"]
+    return {
+        "type": "diagnostic",
+        "schema": "code-structure-viz.diagnostic/v1",
+        "code": "CSV-NEXT-LIMIT-003",
+        "severity": entry["severity"],
+        "domain": "next",
+        "path": None,
+        "symbol": None,
+        "line": None,
+        "recoverable": entry["recoverable"],
+        "message": entry["message"],
+        "outcome": entry["outcome"],
+        "ref_permission": entry["ref_permission"],
+    }
+
+
+def _public_diagnostic_jsonl(diagnostics: list[dict[str, Any]]) -> bytes:
+    """Encode the complete public diagnostic stream before any write occurs."""
+
+    return b"".join(canonical_json_bytes(diagnostic) + b"\n" for diagnostic in diagnostics)
+
+
+def render_public_diagnostic_stderr(
+    diagnostics: list[dict[str, Any]],
+    *,
+    limit: int = LIMIT_DEFAULTS["max_stderr_bytes"],
+) -> dict[str, Any]:
+    """Apply the public diagnostic UTF-8 byte gate with an all-or-none write.
+
+    The complete JSONL payload is encoded and measured before writing.  An
+    exact-boundary payload is emitted; a payload one byte over the boundary
+    emits zero partial bytes and projects only the stable catalog diagnostic
+    into the manifest.
+    """
+
+    assert limit >= 1
+    _validate_public_diagnostics(diagnostics)
+    payload = _public_diagnostic_jsonl(diagnostics)
+    if len(payload) <= limit:
+        return {
+            "allowed": True,
+            "encoded_bytes": len(payload),
+            "emitted_bytes": len(payload),
+            "partial_write_bytes": 0,
+            "process_group_terminated": False,
+            "raw_disposed": False,
+            "partial_disposed": False,
+            "diagnostic_code": None,
+            "outcome": "complete",
+            "manifest_only": False,
+            "manifest_diagnostics": copy.deepcopy(diagnostics),
+            "stderr_diagnostics": copy.deepcopy(diagnostics),
+            "payload": payload,
+        }
+    replacement = _public_limit_diagnostic()
+    return {
+        "allowed": False,
+        "encoded_bytes": len(payload),
+        "emitted_bytes": 0,
+        "partial_write_bytes": 0,
+        "process_group_terminated": False,
+        "raw_disposed": True,
+        "partial_disposed": True,
+        "diagnostic_code": "CSV-NEXT-LIMIT-003",
+        "outcome": "payload_unavailable",
+        "manifest_only": True,
+        "manifest_diagnostics": [replacement],
+        "stderr_diagnostics": [],
+        "payload": b"",
     }
 
 
@@ -1926,9 +2487,20 @@ def _id_kind(record_id: str) -> str:
     return match.group(1)
 
 
-def _assert_path(path: str) -> None:
+def _assert_path(path: str, *, allow_root: bool = True) -> None:
+    assert isinstance(path, str)
     assert unicodedata.normalize("NFC", path) == path
+    encoded_length = len(path.encode("utf-8"))
+    assert 1 <= encoded_length <= PATH_VALUE_MAX_BYTES
+    if allow_root and path == ".":
+        return
     assert PATH_RE.fullmatch(path), path
+
+
+def _assert_file_path(path: str) -> None:
+    """Validate a path value that cannot be the root sentinel."""
+
+    _assert_path(path, allow_root=False)
 
 
 def _under(path: str, root: str) -> bool:
@@ -1959,7 +2531,13 @@ def _assert_canonical(values: list[Any]) -> None:
 
 
 def _assert_target_keys(targets: list[str]) -> None:
-    assert all(1 <= len(target) <= 4096 for target in targets)
+    assert all(target.startswith(TARGET_SELECTOR_PREFIX) for target in targets)
+    assert all(
+        1
+        <= len(target.removeprefix(TARGET_SELECTOR_PREFIX).encode("utf-8"))
+        <= PATH_VALUE_MAX_BYTES
+        for target in targets
+    )
     normalized = [canonical_target_key(target) for target in targets]
     assert normalized == targets
     _assert_canonical(targets)
@@ -1973,11 +2551,12 @@ def canonical_target_key(target: str) -> str:
     request syntax.
     """
 
-    normalized = unicodedata.normalize("NFC", target)
+    assert unicodedata.normalize("NFC", target) == target
+    normalized = target
     match = PUBLIC_TARGET_RE.fullmatch(normalized)
     assert match is not None
     path = match.group(1)
-    _assert_path(path)
+    _assert_path(path, allow_root=True)
     assert "#" not in path
     return f"path:{path}"
 
@@ -2014,6 +2593,11 @@ def resolve_target_resolutions(
         if not matching_files or len(project_ids) != 1:
             matching: list[str] = []
             status = "failed"
+        elif len(exact_files) > 1:
+            # Two frozen Files with one public path are an ambiguous source
+            # view, even if their record IDs differ after a mutation.
+            matching = []
+            status = "failed"
         elif exact_files and not _is_program_file(exact_files[0]):
             # A direct context/control file is provenance only.  It cannot be
             # addressed as a semantic Next target even when it is frozen.
@@ -2027,14 +2611,37 @@ def resolve_target_resolutions(
                 if (record["project_id"], record["path"]) in file_keys
                 and _is_program_file(
                     next(
-                        file
-                        for file in collections["files"].values()
-                        if file["project_id"] == record["project_id"]
-                        and file["path"] == record["path"]
+                        (
+                            file
+                            for file in collections["files"].values()
+                            if file["project_id"] == record["project_id"]
+                            and file["path"] == record["path"]
+                        ),
+                        {"roles": [], "path": record["path"]},
                     )
                 )
             ]
             module_ids = {record["id"] for record in matching_modules}
+            program_files = [record for record in matching_files if _is_program_file(record)]
+            module_counts = {
+                (record["project_id"], record["path"]): sum(
+                    candidate["project_id"] == record["project_id"]
+                    and candidate["path"] == record["path"]
+                    for candidate in matching_modules
+                )
+                for record in program_files
+            }
+            if any(count != 1 for count in module_counts.values()):
+                matching = []
+                status = "failed"
+                resolutions.append(
+                    {
+                        "target_key": target_key,
+                        "status": status,
+                        "record_ids": matching,
+                    }
+                )
+                continue
             matching_components = [
                 record
                 for record in collections["components"].values()
@@ -2391,7 +2998,7 @@ def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
             assert path_ref is None and symbol_ref is None
         elif permission == "path":
             assert path_ref is not None and symbol_ref is None
-            _assert_path(path_ref)
+            _assert_file_path(path_ref)
         elif permission == "symbol":
             assert path_ref is None and symbol_ref is not None
             _id_kind(symbol_ref)
@@ -2399,7 +3006,7 @@ def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
             assert permission == "path_or_symbol"
             assert (path_ref is None) != (symbol_ref is None)
             if path_ref is not None:
-                _assert_path(path_ref)
+                _assert_file_path(path_ref)
             if symbol_ref is not None:
                 _id_kind(symbol_ref)
         aggregate_keys.append(
@@ -2434,7 +3041,7 @@ def _validate_public_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
             assert path is None and symbol is None
         elif permission == "path":
             assert path is not None and symbol is None
-            _assert_path(path)
+            _assert_file_path(path)
         elif permission == "symbol":
             assert path is None and symbol is not None
             _id_kind(symbol)
@@ -2442,7 +3049,7 @@ def _validate_public_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
             assert permission == "path_or_symbol"
             assert (path is None) != (symbol is None)
             if path is not None:
-                _assert_path(path)
+                _assert_file_path(path)
             if symbol is not None:
                 _id_kind(symbol)
         aggregate_keys.append(
@@ -3101,14 +3708,14 @@ def validate_model(
             _assert_path(source_root)
             assert _under(source_root, project["root"])
         if project["config_path"] is not None:
-            _assert_path(project["config_path"])
+            _assert_file_path(project["config_path"])
             assert _under(project["config_path"], project["root"])
 
     files_by_project: dict[str, list[str]] = {project_id: [] for project_id in project_records}
     for file_record in file_records.values():
         assert file_record["kind"] == "file"
         assert file_record["project_id"] in project_records
-        _assert_path(file_record["path"])
+        _assert_file_path(file_record["path"])
         matching_roots = [
             project_id for root, project_id in roots if _under(file_record["path"], root)
         ]
@@ -3124,16 +3731,25 @@ def validate_model(
 
     files_by_key = {(file["project_id"], file["path"]): file for file in file_records.values()}
     assert len(files_by_key) == len(file_records)
+    modules_by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for module in module_records.values():
+        modules_by_key.setdefault((module["project_id"], module["path"]), []).append(module)
     for module in module_records.values():
         assert module["kind"] == "module"
         assert module["project_id"] in project_records
-        _assert_path(module["path"])
+        _assert_file_path(module["path"])
         assert module["derived_roles"] == sorted(module["derived_roles"])
         assert len(module["derived_roles"]) == len(set(module["derived_roles"]))
         owner_file = files_by_key.get((module["project_id"], module["path"]))
         assert owner_file is not None
         assert _is_program_file(owner_file)
+        assert len(modules_by_key[(module["project_id"], module["path"])]) == 1
     _assert_unique([(module["project_id"], module["path"]) for module in module_records.values()])
+    for file_record in file_records.values():
+        if _is_program_file(file_record):
+            assert (
+                len(modules_by_key.get((file_record["project_id"], file_record["path"]), [])) == 1
+            )
     for component in component_records.values():
         assert component["kind"] == "component"
         assert component["module_id"] in module_records
@@ -3333,7 +3949,7 @@ def validate_request_files(request: dict[str, Any]) -> None:
             assert _under(source_root, root)
         config_path = request["projects"][index]["config_path"]
         if config_path is not None:
-            _assert_path(config_path)
+            _assert_file_path(config_path)
             assert _under(config_path, root)
         for other_root, other_id in roots[:index]:
             assert project_id != other_id
@@ -3484,6 +4100,14 @@ def recompute_export_graph_case(case: dict[str, Any]) -> dict[str, Any]:
                 )
                 resolved_candidate = source_exports.get(edge["imported_name"])
                 if resolved_candidate is None:
+                    declaration_matches = [
+                        candidate
+                        for candidate in source_exports.values()
+                        if candidate["target_declaration_key"] == edge["imported_name"]
+                    ]
+                    if len(declaration_matches) == 1:
+                        resolved_candidate = declaration_matches[0]
+                if resolved_candidate is None:
                     resolved_candidate = unknown(source_path, "missing_export")
                 candidate = resolved_candidate
             candidates.setdefault(edge["exported_name"], []).append(candidate)
@@ -3559,11 +4183,22 @@ def recompute_export_graph_case(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _reexport_graph_index() -> dict[tuple[str, str, str], dict[str, Any]]:
-    return {
-        (edge["owner_file_path"], edge["source_specifier"], edge["imported_name"]): edge
-        for edge in load_export_graph_fixture()
-    }
+def _reexport_graph_index() -> dict[tuple[str, str, str], list[dict[str, Any]]]:
+    """Derive the main fixture graph from raw declarations and edges."""
+
+    raw = load_export_graph_raw_fixture()
+    result = recompute_export_graph_case(raw)
+    index: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for witness in result["witnesses"]:
+        key = (
+            witness["owner_file_path"],
+            witness["source_specifier"],
+            witness["imported_name"],
+        )
+        index.setdefault(key, []).append(witness)
+    for witnesses in index.values():
+        witnesses.sort(key=canonical_json_bytes)
+    return index
 
 
 def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3598,7 +4233,7 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
             # acquire semantic Module ownership.
             continue
         candidates = components_by_module.get(module["id"], [])
-        graph_edge = (
+        graph_witnesses = (
             graph.get(
                 (
                     syntax["owner_file_path"],
@@ -3609,9 +4244,13 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
             if syntax["reexport"]
             else None
         )
+        if graph_witnesses is not None:
+            assert graph_witnesses
+            if not syntax["star"]:
+                assert len(graph_witnesses) == 1
         source_path = (
-            graph_edge["resolved_source_file_path"]
-            if graph_edge is not None
+            graph_witnesses[0]["resolved_source_file_path"]
+            if graph_witnesses is not None
             else _resolve_export_source_path(syntax["owner_file_path"], syntax["source_specifier"])
             if syntax["source_specifier"] is not None
             else None
@@ -3621,8 +4260,8 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
             components_by_module.get(source_module["id"], []) if source_module else []
         )
         declaration_key = (
-            graph_edge["target_declaration_key"]
-            if graph_edge is not None
+            graph_witnesses[0]["target_declaration_key"]
+            if graph_witnesses is not None and not syntax["star"]
             else syntax["imported_name"]
             if syntax["imported_name"] not in {None, "*", "default"}
             else syntax["exported_name"]
@@ -3644,9 +4283,9 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
                 and len(candidates) == 1
             ):
                 component = candidates[0]
-        if graph_edge is not None:
-            resolution = graph_edge["resolution"]
-            expanded_name = graph_edge["expanded_exported_name"]
+        if graph_witnesses is not None and not syntax["star"]:
+            resolution = graph_witnesses[0]["resolution"]
+            expanded_name = graph_witnesses[0]["expanded_exported_name"]
         else:
             resolution = (
                 "component"
@@ -3703,25 +4342,66 @@ def expected_export_resolution_witness(model: dict[str, Any]) -> list[dict[str, 
 
 
 def expected_export_reexport_witness(model: dict[str, Any]) -> list[dict[str, Any]]:
-    """Derive remote re-export identity from the frozen source/module graph."""
+    """Derive re-export identity from raw declarations and edges only.
 
-    observations = _export_census_for_model(model)
-    return sorted(
-        [
+    This deliberately does not consume the submitted observation stream.  A
+    star edge may produce zero, one, or many witnesses, while an explicit edge
+    produces exactly one witness; all cases retain the one source syntax
+    identity that introduced the edge.
+    """
+
+    module_by_path = {module["path"]: module for module in model["modules"]}
+    components_by_module_decl = {
+        (component["module_id"], component["declaration_key"]): component["id"]
+        for component in model["components"]
+    }
+    syntax_by_edge: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
+    for syntax_row in scan_export_syntax_census():
+        if syntax_row["reexport"]:
+            syntax_by_edge.setdefault(
+                (
+                    syntax_row["owner_file_path"],
+                    syntax_row["source_specifier"],
+                    syntax_row["imported_name"],
+                ),
+                syntax_row,
+            )
+    raw_result = recompute_export_graph_case(load_export_graph_raw_fixture())
+    witnesses: list[dict[str, Any]] = []
+    for graph_witness in raw_result["witnesses"]:
+        owner_module = module_by_path.get(graph_witness["owner_file_path"])
+        if owner_module is None:
+            continue
+        matched_syntax = syntax_by_edge.get(
+            (
+                graph_witness["owner_file_path"],
+                graph_witness["source_specifier"],
+                graph_witness["imported_name"],
+            )
+        )
+        assert matched_syntax is not None
+        source_module = module_by_path.get(graph_witness["resolved_source_file_path"])
+        target_component_id = (
+            components_by_module_decl.get(
+                (source_module["id"], graph_witness["target_declaration_key"])
+            )
+            if source_module is not None
+            and graph_witness["resolution"] == "component"
+            and graph_witness["target_declaration_key"] is not None
+            else None
+        )
+        witnesses.append(
             {
-                "syntax_identity": observation["syntax_identity"],
-                "source_specifier": observation["source_specifier"],
-                "imported_name": observation["imported_name"],
-                "resolved_source_module_id": observation["resolved_source_module_id"],
-                "expanded_exported_name": observation["expanded_exported_name"],
-                "target_declaration_id": observation["target_declaration_id"],
-                "resolution": observation["resolution"],
+                "syntax_identity": matched_syntax["syntax_identity"],
+                "source_specifier": graph_witness["source_specifier"],
+                "imported_name": graph_witness["imported_name"],
+                "resolved_source_module_id": source_module["id"] if source_module else None,
+                "expanded_exported_name": graph_witness["expanded_exported_name"],
+                "target_declaration_id": target_component_id,
+                "resolution": graph_witness["resolution"],
             }
-            for observation in observations
-            if observation["reexport"]
-        ],
-        key=canonical_json_bytes,
-    )
+        )
+    return sorted(witnesses, key=canonical_json_bytes)
 
 
 def expected_export_observations(model: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3941,7 +4621,7 @@ def validate_proof(
         if root["collection"] == "files":
             assert root["path_ref"] is not None
         if root["path_ref"] is not None:
-            _assert_path(root["path_ref"])
+            _assert_file_path(root["path_ref"])
     taint_closure = _derived_taint_fixed_point(proof, discovered)
     assert taint_closure == tainted_ids
     assert not any(
@@ -4196,7 +4876,7 @@ def validate_trusted_environment(
         assert "//" not in virtual_path
         assert ".." not in virtual_path.split("/")
     for target_path in target_paths or []:
-        _assert_path(target_path)
+        _assert_file_path(target_path)
         normalized = unicodedata.normalize("NFC", target_path)
         assert not any(normalized == item["virtual_path"] for item in files)
     symbols = environment["certified_symbols"]
@@ -4275,7 +4955,7 @@ def validate_runtime_manifest(manifest: dict[str, Any]) -> None:
         physical_path = item["physical_path"]
         assert physical_path in {path for path, _virtual in RUNTIME_PHYSICAL_TO_VIRTUAL}
         assert (REPO_ROOT / physical_path).is_file()
-        _assert_path(item["path"])
+        _assert_file_path(item["path"])
         assert item["path"].startswith("src/code_structure_viz/_next_runtime/")
         assert "//" not in item["path"]
         assert ".." not in item["path"].split("/")
@@ -4402,11 +5082,14 @@ def validate_run_manifest(
     assert manifest["schema"] == "code-structure-viz.run-manifest/v1"
     assert manifest["contracts"]["plantuml"] == "code-structure-viz.plantuml/next/v1"
     assert manifest["adapters"] == [{"domain": "next", "name": "next-typescript", "version": "1"}]
+    root_projects = sorted(
+        (project["root"] for project in domain["projects"]), key=canonical_json_bytes
+    )
     assert manifest["command"] == {
         "name": "snapshot",
         "domain": "next",
         "formats": domain["formats"],
-        "stdout_selector": "next:semantic-json",
+        "stdout_selector": f"next:{domain['formats'][0]}",
     }
     assert manifest["source"] == domain["source"]
     assert manifest["next_request"] == domain["request"]
@@ -4414,7 +5097,7 @@ def validate_run_manifest(
     assert manifest["domains"] == [domain]
     assert manifest["diagnostics"] == domain["diagnostics"]
     assert manifest["request"] == {
-        "projects": [project["root"] for project in domain["projects"]],
+        "projects": root_projects,
         "targets": domain["targets"],
         "formats": domain["formats"],
         "upstream_depth": domain["request"]["upstream_depth"],
@@ -4422,7 +5105,7 @@ def validate_run_manifest(
     }
     resolved_next = manifest["config"]["resolved"]["next"]
     assert resolved_next == {
-        "projects": [project["root"] for project in domain["projects"]],
+        "projects": root_projects,
         "targets": domain["targets"],
         "formats": domain["formats"],
         "trusted_environment_digest": domain["trusted_environment"]["sha256"],

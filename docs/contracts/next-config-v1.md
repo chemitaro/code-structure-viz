@@ -1,10 +1,11 @@
 # Next configuration and request projection v1
 
-Round 9 review state: `review_status: fail` (P0=0, P1=7, P2=1). The
+Round 10 review state: `review_status: fail` (P0=0, P1=8, P2=0). Pass A/B path,
+project correspondence, and requested-format remediation is locally reflected. The
 domain-discriminated target projection, closed SourceAcquisitionPlan, and
 surface-specific ordering below are local data-only remediations; fresh
 exact-SHA Strict is pending, readiness is unconfirmed, and production
-implementation has not started.
+implementation has not started. Fresh Strict remains pending.
 
 Issue #8 uses one canonical configuration value object and one canonical
 snapshot request projection.  The same values are copied into the domain
@@ -53,6 +54,11 @@ and `domains[0].targets`. The common run-manifest schema still accepts the
 legacy object target grammar for Python and SQLAlchemy; it is not a Next target
 grammar. Python reference validation performs the exact projection and
 ordering comparison because JSON Schema cannot express that join.
+
+Round 10 Pass A fixes the path value boundary: all ordinary Next path values
+use the shared `next-path-v1` schema and helper, while `.` is accepted only by
+fields that explicitly denote a project/root. The 4096 limit counts UTF-8 path
+value bytes and excludes the `path:` selector prefix.
 
 ## Digest preimages
 

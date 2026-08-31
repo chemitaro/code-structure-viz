@@ -18,7 +18,8 @@
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
+    "path": {"$ref": "urn:code-structure-viz:schema:next-path-v1"},
+    "root_path": {"anyOf": [{"const": "."}, {"$ref": "urn:code-structure-viz:schema:next-path-v1"}]},
     "trusted": {
       "type": "object", "additionalProperties": false,
       "required": ["schema", "environment_version", "semantic_profile_id", "sha256"],
@@ -46,7 +47,7 @@
       "properties": {
         "kind": {"const": "project"},
         "id": {"type": "string", "pattern": "^next:project:[0-9a-f]{64}$"},
-        "root": {"$ref": "#/$defs/path"},
+        "root": {"$ref": "#/$defs/root_path"},
         "source_roots": {"type": "array", "items": {"$ref": "#/$defs/path"}},
         "config_path": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
         "config_digest": {"$ref": "#/$defs/digest"},

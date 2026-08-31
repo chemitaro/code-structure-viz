@@ -49,9 +49,11 @@ def _validator(name: str) -> Draft202012Validator:
         "next-adapter-response-v1",
         "next-config-v1",
         "next-domain-manifest-v1",
+        "next-export-graph-raw-v1",
         "next-limits-v1",
         "next-semantic-v1",
         "next-source-plan-v1",
+        "next-path-v1",
         "next-trusted-type-environment-v1",
     }
     registry = Registry()
@@ -73,9 +75,11 @@ def _validator(name: str) -> Draft202012Validator:
         "next-adapter-response-v1.schema.json",
         "next-config-v1.schema.json",
         "next-domain-manifest-v1.schema.json",
+        "next-export-graph-raw-v1.schema.json",
         "next-limits-v1.schema.json",
         "next-runtime-manifest-v1.schema.json",
         "next-source-plan-v1.schema.json",
+        "next-path-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
         "run-manifest-v1.schema.json",
@@ -113,9 +117,9 @@ def test_next_diagnostic_catalog_is_unique_and_closed() -> None:
     )
 
 
-def _next_limits() -> dict[str, int]:
+def _next_limits(*, max_entities: int = 500) -> dict[str, int]:
     return {
-        "max_entities": 500,
+        "max_entities": max_entities,
         "max_files": 20000,
         "max_file_bytes": 4194304,
         "max_decoded_bytes": 67108864,

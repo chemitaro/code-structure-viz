@@ -358,7 +358,7 @@
         図を読み込んでいます。
       </div>
       <div class="callout warning">
-        <strong>現在の状態:</strong> これは Issue #8 のベストプラクティス提案と実装前契約を説明する資料です。プロダクトの Next 実装はまだ開始していません。ChatGPT Use Strict Round 6 は <code>review_status: fail</code>、P0=0、P1=9、P2=2 でした。Round 7 も <code>review_status: fail</code>、P0=0、P1=6、P2=0、Round 8 も <code>review_status: fail</code>、P0=0、P1=4、P2=0、Round 9 も <code>review_status: fail</code>、P0=0、P1=7、P2=1 でした。Round 9までの指摘された契約 gaps は現在、schema・reference validator・fixture・test と canonical R/D/P の data-only 修復として反映済みですが、修復後の fresh exact-SHA Strict review はまだ通過していません。そのため readiness は未確定です。実装開始を判定するには、修復済みの固定SHAをGitHubへpushし、fresh Strictで P0=0 かつ P1=0 を確認する必要があります。
+        <strong>現在の状態:</strong> これは Issue #8 のベストプラクティス提案と実装前契約を説明する資料です。プロダクトの Next 実装はまだ開始していません。ChatGPT Use Strict Round 6 は <code>review_status: fail</code>、P0=0、P1=9、P2=2、Round 7 は P0=0、P1=6、P2=0、Round 8 は P0=0、P1=4、P2=0、Round 9 は P0=0、P1=7、P2=1でした。最新の Round 10 も <code>review_status: fail</code>、P0=0、P1=8、P2=0です。Pass Aとしてproject順序、EntityBudgetGate、canonical path、FileとModuleの一対一を、Pass Bとしてclosed export grammar、独立re-export witness、公開stderr gate、bounded decoderをschema・reference validator・fixture・testとcanonical R/D/Pへ反映しました。fresh exact-SHA Strictはまだ通過していないため readiness は未確定です。実装開始を判定するには、全修復を反映した固定SHAをGitHubへpushし、fresh Strictで P0=0かつP1=0を確認する必要があります。
       </div>
     </header>
 
@@ -860,11 +860,11 @@ stop
 
     <section>
       <h2>実装開始前の readiness gate</h2>
-      <p>この提案を「実装可能」と呼ぶ条件は、文章が揃うことではありません。machine-checkable な request/response、public semantic、run manifest、stdout、diagnostic、PlantUML の closed contractを実体化し、exact bytes と reference validator で相互投影を検証し、既存 Python/SQLAlchemy の全テストと Next の data-only contract vectors を clean checkout で通すことです。Round 6 のP1=9/P2=2、Round 7 のP1=6/P2=0、Round 8 のP1=4/P2=0、Round 9 のP1=7/P2=1は、各指摘を契約・schema・fixture・testの data-only 修復として反映した状態です。そのうえで修復後の GitHub 同一SHAを対象に fresh ChatGPT Use Strict を実行し、P0=0かつP1=0を確認する必要があります。</p>
+      <p>この提案を「実装可能」と呼ぶ条件は、文章が揃うことではありません。machine-checkable な request/response、public semantic、run manifest、stdout、diagnostic、PlantUML の closed contractを実体化し、exact bytes と reference validator で相互投影を検証し、既存 Python/SQLAlchemy の全テストと Next の data-only contract vectors を clean checkout で通すことです。Round 6〜9の指摘とRound 10の8件はローカル契約へ反映済みです。Round 10はP0=0、P1=8、P2=0のfail記録であり、ローカル修復はその事実をpassへ書き換えません。そのうえで修復後の GitHub 同一SHAを対象に fresh ChatGPT Use Strict を実行し、P0=0かつP1=0を確認する必要があります。</p>
       <div class="callout warning">
-        <strong>Strictの判定:</strong> Round 6 は <code>review_status: fail</code>（P0=0、P1=9、P2=2）、Round 7 は <code>review_status: fail</code>（P0=0、P1=6、P2=0）、Round 8 は <code>review_status: fail</code>（P0=0、P1=4、P2=0）、Round 9 は <code>review_status: fail</code>（P0=0、P1=7、P2=1）でした。Round 9までのremedyを含む修復は現在の data-only contracts と R/D/P に反映済みですが、fresh Strict は未通過です。したがって readiness は未確定であり、プロダクトの Next 実装も未着手です。このHTMLは実装着手やreadiness passを宣言するものではありません。
+        <strong>Strictの判定:</strong> Round 6 は <code>review_status: fail</code>（P0=0、P1=9、P2=2）、Round 7 は P0=0、P1=6、P2=0、Round 8 は P0=0、P1=4、P2=0、Round 9 は P0=0、P1=7、P2=1、Round 10 は <code>review_status: fail</code>（P0=0、P1=8、P2=0）でした。Round 10の8件はPass A/Bとして現在の data-only contracts と R/D/P に反映済みですが、fresh Strictは未通過です。したがって readiness は未確定であり、プロダクトの Next 実装も未着手です。このHTMLは実装着手やreadiness passを宣言するものではありません。
       </div>
-      <h3>Round 6 / Round 7 / Round 8 / Round 9 remediation：ローカル契約へ反映した項目</h3>
+      <h3>Round 6 / Round 7 / Round 8 / Round 9 / Round 10 Pass A/B remediation：ローカル契約へ反映した項目</h3>
       <ul>
         <li><strong>✓ taint の必須 edge:</strong> records・roots・closed rule/ownership tableからPythonが必須 causal edgeとtaint closureを独立導出し、submitted edgeと完全一致させます。frontier重複、edge omission、boundary role under-taintを拒否します。</li>
         <li><strong>✓ public target:</strong> 公開文法は <code>path:&lt;repository-relative-path&gt;</code> だけです。program roleかつ suffix が <code>.ts</code>・<code>.tsx</code>・<code>.js</code>・<code>.jsx</code> の file は frozen file・Module・Component 集合へ、directory は全 canonical descendant 集合へ解決し、複数 descendant は正常です。<code>.d.ts</code>・<code>package.json</code>・<code>tsconfig.json</code>・<code>jsconfig.json</code> の direct targetは semantic targetにしません。missing・project-scope ambiguity・out-of-scope・選択集合の tainted/excluded/failed はすべて <code>CSV-NEXT-TARGET-001</code>、<code>payload_unavailable</code>、no-artifact とし、manifest/stdout の unavailable vector まで一致させます。内部 Module/Component IDや旧 <code>component:</code>・<code>module:</code>・<code>file:</code> 形式は受理しません。</li>
@@ -875,9 +875,11 @@ stop
         <li><strong>✓ stdout/status matrix:</strong> <code>None</code>、<code>manifest</code>、<code>next:semantic-json</code>、<code>next:plantuml</code>を、complete・not_applicable・partial_safe・payload_unavailable・fatal・interrupt・usageの全statusで exact bytes、publication、stderr、exitと検証します。</li>
         <li><strong>✓ external PlantUML relation:</strong> 外部 JSX render targetを redacted cloud の <code>X_&lt;64hex&gt;</code> で表し、external JSX goldenとmutationを追加します。</li>
         <li><strong>✓ compatibility identity:</strong> semantic compatibility preimageへ <code>project</code> と <code>file</code> の identity versionを含め、known-answer IDで固定します。併せて <code>head_commit</code> は40桁または64桁だけ、非空 role subsetは7通りだけを受理します。</li>
+        <li><strong>✓ Round 10 Pass A:</strong> projectはID/root対応を比較し、input/config/source-plan/root manifestはNFC UTF-8 root-path順、semantic recordsはrecord-ID順として別々に検証します。EntityBudgetGateはvalidated proofからpre-budget outcomeを導出し、暗黙の <code>complete</code> を持たず、requested formatだけを公開します。共有 <code>next-path-v1</code> はpath本体のUTF-8 4096 bytes、rootだけの <code>.</code>、empty/`.`/`..` segment・trailing slash・control・backslash・非NFC拒否を固定します。program FileごとにModule exactly oneを要求し、欠落したfile/directory targetをfail closedにします。</li>
       </ul>
       <h3>まだ完了していない gate</h3>
       <ul>
+        <li><strong>✓ Round 10 Pass B（ローカル契約）:</strong> module-level closed export grammar（async/generic/type、ASI、JSX/property/regex等のfalse positive除外）、raw declarations/edgesからの独立re-export graph witness（star 0..N/default exclusion/cycle/conflict）、canonical UTF-8 JSONL public diagnostic stderr gate（inclusive limit/+1、partial write 0、<code>CSV-NEXT-LIMIT-003</code>、manifest-only）、bounded nested-response decoder（duplicate key、depth/string、per-array/aggregate、100001 pre-materialization）をdata-only contractへ接続しました。</li>
         <li><strong>□ fresh exact-SHA Strict:</strong> data-only 修復後の同一GitHub SHAを ChatGPT Use Strict で再レビューし、<code>review_status: pass</code>、P0=0、P1=0を確認する。</li>
         <li><strong>□ production implementation:</strong> Strict pass後に初めて、hardened Node adapter、Python integration、publicationを実装し、production acceptanceを別途証明する。</li>
       </ul>

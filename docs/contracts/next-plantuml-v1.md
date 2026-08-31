@@ -1,9 +1,10 @@
 # Next PlantUML contract v1
 
-Round 9 review state: `review_status: fail` (P0=0, P1=7, P2=1). The
+Round 10 review state: `review_status: fail` (P0=0, P1=8, P2=0). Pass A/B contract
+remediation is locally reflected. The
 PlantUML grammar remains a pre-implementation data-only contract; fresh
 exact-SHA Strict is pending, readiness is unconfirmed, and production
-implementation has not started.
+implementation has not started. Fresh Strict remains pending.
 
 Status: pre-implementation normative contract for Issue #8. The renderer in
 `tests/contracts/next_reference_validation.py`, this document, the independent

@@ -1,0 +1,100 @@
+{
+  "schema": "code-structure-viz.next-export-graph-raw/v1",
+  "modules": [
+    {
+      "path": "src/Button.tsx",
+      "exports": [
+        {
+          "name": "Props",
+          "resolution": "type",
+          "target_declaration_key": null
+        },
+        {
+          "name": "default",
+          "resolution": "component",
+          "target_declaration_key": "Button"
+        },
+        {
+          "name": "renderValue",
+          "resolution": "value",
+          "target_declaration_key": null
+        }
+      ]
+    },
+    {
+      "path": "src/ExportExpression.ts",
+      "exports": [
+        {
+          "name": "default",
+          "resolution": "value",
+          "target_declaration_key": null
+        }
+      ]
+    },
+    {
+      "path": "src/ExportGrammar.tsx",
+      "exports": [
+        {
+          "name": "LocalValue",
+          "resolution": "value",
+          "target_declaration_key": null
+        },
+        {
+          "name": "Props",
+          "resolution": "type",
+          "target_declaration_key": null
+        },
+        {
+          "name": "Unicode表示",
+          "resolution": "value",
+          "target_declaration_key": null
+        },
+        {
+          "name": "default",
+          "resolution": "component",
+          "target_declaration_key": "表示"
+        }
+      ]
+    },
+    {
+      "path": "src/ExportReexport.ts",
+      "exports": []
+    },
+    {
+      "path": "src/ExportTypes.ts",
+      "exports": []
+    }
+  ],
+  "edges": [
+    {
+      "owner_file_path": "src/Button.tsx",
+      "source_specifier": "./Other",
+      "imported_name": "*",
+      "exported_name": "*"
+    },
+    {
+      "owner_file_path": "src/ExportReexport.ts",
+      "source_specifier": "./ExportGrammar",
+      "imported_name": "*",
+      "exported_name": "*"
+    },
+    {
+      "owner_file_path": "src/ExportReexport.ts",
+      "source_specifier": "./ExportGrammar",
+      "imported_name": "Props",
+      "exported_name": "PublicProps"
+    },
+    {
+      "owner_file_path": "src/ExportReexport.ts",
+      "source_specifier": "./ExportGrammar",
+      "imported_name": "表示",
+      "exported_name": "default"
+    },
+    {
+      "owner_file_path": "src/ExportTypes.ts",
+      "source_specifier": "./ExportGrammar",
+      "imported_name": "Props",
+      "exported_name": "PublicProps"
+    }
+  ]
+}

@@ -2,11 +2,13 @@
 
 Status: pre-implementation normative contract for Issue #8.
 
-Round 9 review state: ChatGPT Use Strict returned `review_status: fail` with
-P0=0, P1=7, P2=1. The seven P1 and one P2 findings are reflected below and in
-the data-only schemas/reference vectors; a fresh exact-SHA Strict review is
-pending, so readiness is unconfirmed and the production adapter/CLI remains
-unimplemented.
+Round 10 review state: ChatGPT Use Strict returned `review_status: fail` with
+P0=0, P1=8, P2=0. Pass A project/order, EntityBudgetGate, canonical path, and
+File-to-Module completeness remediation is locally reflected below and in the
+data-only schemas/reference vectors. Pass B's closed export grammar, independent
+raw re-export witness, public stderr gate, and bounded decoder are locally
+reflected; fresh exact-SHA Strict is pending, so readiness is unconfirmed and
+the production adapter/CLI remains unimplemented.
 
 The machine-readable authority is:
 
@@ -54,25 +56,29 @@ are required; the value is not a self-reported opaque token.
 - An `export_binding` is public only when one value export resolves uniquely to
   a Component; it carries that Component ID and never represents a value-only
   or type-only export. Before that projection, the adapter emits a complete
-  independent `export_observations` stream. Python owns a frozen UTF-8 source
-  byte fixture and a closed syntax census over repository-relative owner file,
-  exact byte start/end span, token identity, syntax kind, canonical exported
-  name, value/type role, re-export bit, and star bit. The closed tokenizer
-  accepts local lists, default alias/declaration/expression, multiline
-  specifiers, comments, Unicode IdentifierName (NFC), CRLF, and BOM. Node
-  observations must exact-equal this census on syntax identity. Each
-  observation also carries source specifier, imported/original name, resolved
-  source Module, expanded exported name, and target declaration. Python
-  recomputes alias, star, cycle, and conflict behavior from the independent
-  frozen module graph, then exact-compares public bindings, resolution
-  witnesses, and
-  `non_component_value_export_count`/`type_only_export_count`; omitted,
-  duplicated, coordinated observation/binding/count omissions, star/type
-  conflicts, or component substitutions are rejected. The data-only graph
-  fixture `tests/fixtures/next_export_graph_cases.json` exercises the same
-  independent resolver for explicit aliases, star expansion (excluding
-  `default`), cycles, and duplicate-star conflicts; these outcomes are
-  canonical `component`/`value` or fail-closed `unknown` witnesses.
+  independent `export_observations` stream. Python owns frozen UTF-8 source
+  bytes and a closed module-level syntax census over repository-relative owner
+  file, exact byte start/end span, token identity, syntax kind, canonical
+  exported name, value/type role, re-export bit, and star bit. The scanner
+  ignores function/class bodies, JSX, properties, regex/template/string
+  literals, and comments; it accepts local lists, default alias/declaration/
+  expression, `async function`, generic/type spans, multiline specifiers,
+  Unicode IdentifierName (NFC), CRLF, and BOM. Body declarations terminate at
+  their balanced closing brace; expression/list/star forms require a
+  semicolon under the closed ASI policy. Node observations must exact-equal
+  this census on syntax identity. Each observation also carries source
+  specifier, imported/original name, resolved source Module, expanded exported
+  name, and target declaration. Python recomputes alias, star (0..N excluding
+  `default`), cycle, and conflict behavior from raw declarations and raw edges
+  in `tests/fixtures/next_export_graph_raw.json`, then exact-compares public
+  bindings, resolution witnesses, and `non_component_value_export_count`/
+  `type_only_export_count`; omitted, duplicated, coordinated observation/
+  binding/count omissions, star/type conflicts, or component substitutions are
+  rejected. The data-only graph fixture
+  `tests/fixtures/next_export_graph_cases.json` exercises the same independent
+  resolver for explicit aliases, star expansion, cycles, and duplicate-star
+  conflicts; these outcomes are canonical `component`/`value` or fail-closed
+  `unknown` witnesses.
 - Module relations are `static_import` and `literal_dynamic_import`.
 - Component relations are `jsx_render` and internal-only `component_wrap`.
 - Direct `client_entry` and `router_context` are Facts. Derived boundary roles remain Module facets.
@@ -273,7 +279,10 @@ only `partial_safe` diagnostics. Unknown codes, severity/ref/status mutations,
 and the historical FLOW fixture's wrong path reference are rejected.
 
 Explicit targets use only the public canonical key
-`path:<repository-relative-file-or-directory>` (NFC, 1--4096 characters).
+`path:<repository-relative-file-or-directory>` (NFC, non-root POSIX path value is
+1--4096 UTF-8 bytes; the root directory sentinel is exactly `.`). Empty
+segments, embedded `.`/`..`, trailing slash, control characters, backslash, and
+non-NFC spellings are rejected before target resolution.
 Internal Module/Component IDs are not public target syntax. A file resolves
 its frozen file/Module/Component set only when the direct file is a program
 file; a directory resolves its complete canonical descendant frozen set, and

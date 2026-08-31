@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-08-31"
+最終更新: "2026-09-01"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -144,6 +144,41 @@ ChatGPT Use Strict Round 9 は `review_status: fail`、P0=0、P1=7、P2=1 だっ
   semantic record collectionはrecord-ID orderとする。
 - staleなpublic component selector表現は削除し、path targetから解決したinternal
   Component seedだけをtaint/traversal witnessで扱う。
+
+### Round 10 review state and Pass A remediation
+
+ChatGPT Use Strict Round 10 は `review_status: fail`、P0=0、P1=8、P2=0 だった。
+証拠は `20260901t000000z-disc-strict-spec-review-round-10.md` に固定し、fresh
+exact-SHA Strictは未実行・未通過、readinessは未確定、production adapter/CLIは未着手
+のままとする。Pass Aでは、project対応をID/rootで比較して各surfaceの順序を独立検証し、
+EntityBudgetGateの暗黙のcompleteを廃止し、canonical POSIX path値（root `.` は文脈限定、
+path本体UTF-8 4096 bytes）とprogram File→exactly one Moduleをdata-only契約へ反映した。
+Pass Bでは、closed module-level export grammar、raw declaration/edgeから独立再計算する
+re-export witness、公開diagnostic stderrのUTF-8 JSONL gate、実response bytesを
+materializeせず検査するbounded decoderをdata-only契約へ反映した。fresh Strictはまだ
+実行・通過しておらず、実装開始可能性は未確定である。
+
+### Round 10 Pass B remediation (実装前契約)
+
+- export scannerは、深さ0かつ`.`のpropertyではないmodule-level `export`だけを認識する。
+  local list、default alias/declaration/expression、`async function`、generic/type span、
+  複数・改行specifier、CRLF/BOM、NFC Unicodeを閉じた字句規則で処理し、function/class
+  body、JSX、property、regex、template、string、comment中の単語はfalse positiveにしない。
+  body declarationは閉じ波括弧を終端とし、expression/list/re-export/starはsemicolonを
+  要求するというASI方針を固定し、source bytesのexact span/token digestを比較する。
+- re-exportはpublic bindingから逆算せず、Python所有のraw declarationsとraw edgesから
+  alias、star（0..N、default除外）、cycle、conflictを再計算する。各結果はsyntax identity、
+  source specifier、imported/original name、resolved source Module、expanded name、target
+  declaration、resolutionを持ち、main response proofのobservation/binding/countと
+  exact-equalにする。valueで一意にComponentへ解決したものだけpublic bindingとする。
+- public diagnostic stderrは全diagnosticをcanonical JSON + LFのUTF-8 bytesへ先にencode
+  してから判定する。limitはinclusive、limit+1はpartial write 0、安定した
+  `CSV-NEXT-LIMIT-003`だけをmanifestへ投影し、adapter raw textを漏らさない。child capture
+  の`max_adapter_stderr_capture_bytes`とは別のcounterである。
+- responseはbounded streaming decoderでduplicate object key、nesting、string UTF-8 bytes、
+  各array、全array aggregateをmaterialize前に数える。各array 100,000内でもaggregate
+  100,001を拒否し、reason/counter/materialized=falseを証人として残す。成功時も同じ
+  decoderをresponse envelope validation前段で通す。
 
 ### semantic contract
 
