@@ -133,6 +133,30 @@
       ]
     },
     {
+      "name": "hidden-key",
+      "modules": [
+        {
+          "path": "src/hidden.ts",
+          "exports": [
+            {
+              "name": "Public",
+              "resolution": "component",
+              "target_declaration_key": "Hidden"
+            }
+          ]
+        },
+        {"path": "src/index.ts", "exports": []}
+      ],
+      "edges": [
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./hidden",
+          "imported_name": "Hidden",
+          "exported_name": "Alias"
+        }
+      ]
+    },
+    {
       "name": "star",
       "modules": [
         {"path": "src/index.ts", "exports": []},

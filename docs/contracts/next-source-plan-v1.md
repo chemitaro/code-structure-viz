@@ -1,12 +1,12 @@
 # Next SourceAcquisitionPlan v1
 
-Round 11 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
-`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. The closed descriptor and digest vectors below are
-local data-only remediation; a fresh
-exact-SHA Strict review is pending, readiness is unconfirmed, and the
-production adapter/CLI has not been started; Pass A/B path/order, export, stderr, and
-bounded-decoder remediations and Pass C surface-order/path/target remediations plus Pass D
-export/stderr/raw-response remediations are locally reflected. Fresh Strict remains pending.
+Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
+`48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
+The closed descriptor and digest vectors below are local data-only remediation;
+the inverse-order model chain, request-owned run context, bounded raw-response
+path, shared path helper, and typed target outcomes are also reflected. Fresh
+exact-SHA Strict review is pending, readiness is unconfirmed, and the production
+adapter/CLI has not been started. The Round 12 fail result is not a pass.
 
 `schemas/next-source-plan-v1.schema.json` defines the complete
 `code-structure-viz.source-acquisition-plan/next/v1` descriptor. It is carried

@@ -87,7 +87,7 @@
     {
       "owner_file_path": "src/ExportReexport.ts",
       "source_specifier": "./ExportGrammar",
-      "imported_name": "表示",
+      "imported_name": "default",
       "exported_name": "default"
     },
     {

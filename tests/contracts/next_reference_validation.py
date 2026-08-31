@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
 
+from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
+from referencing import Registry, Resource
+
 VALIDATOR_SCHEMA = "code-structure-viz.next-reference-validation/v1"
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "schemas" / "next-diagnostic-catalog-v1.json"
 COLLECTIONS = ("projects", "files", "modules", "components", "members", "relations", "facts")
@@ -32,7 +35,7 @@ ROLE_PRECEDENCE = {"control": 3, "context": 2, "program": 1}
 FORMAT_ORDER = ("semantic-json", "plantuml")
 FORMAT_ORDER_INDEX = {format_name: index for index, format_name in enumerate(FORMAT_ORDER)}
 RUN_CONTEXT_BUDGET_SOURCES = ("builtin", "repository", "explicit", "cli")
-RUN_CONTEXT_SELECTORS = tuple(f"next:{format_name}" for format_name in FORMAT_ORDER)
+RUN_CONTEXT_SELECTORS = (None, "manifest", *(f"next:{format_name}" for format_name in FORMAT_ORDER))
 TAINTS = {
     "parse_file",
     "read_file",
@@ -80,7 +83,7 @@ ID_RE = re.compile(r"^next:(project|file|module|component|member|relation|fact):
 # form.  Keep the lexical contract in one helper so every surface rejects the
 # same aliases (``a//b``, ``a/./b``, ``a/`` and control characters).
 PATH_RE = re.compile(
-    r"^(?!/)(?!.*//)(?!.*(?:^|/)\.{1,2}(?:/|$))(?!.*\/$)(?!.*\\)(?!.*[\x00-\x1f\x7f]).+$"
+    r"^(?!/)(?!.*#)(?!.*//)(?!.*(?:^|/)\.{1,2}(?:/|$))(?!.*\/$)(?!.*\\)(?!.*[\x00-\x1f\x7f]).+$"
 )
 PATH_VALUE_MAX_BYTES = 4096
 TARGET_SELECTOR_PREFIX = "path:"
@@ -123,7 +126,7 @@ class NextRunContext(TypedDict):
     budget_requested: int | None
     budget_resolved: int
     budget_source: str
-    stdout_selector: str
+    stdout_selector: str | None
 
 
 # Every limit has an explicit measurement contract.  The production adapter
@@ -573,11 +576,10 @@ def _jsx_tag_end(text: str, start: int) -> tuple[int, str | None, bool, bool] | 
 
     closing = text.startswith("</", start)
     cursor = start + (2 if closing else 1)
-    name_match = re.match(r"[A-Za-z_$][A-Za-z0-9_$.:\-]*", text[cursor:])
-    if name_match is None:
+    name_result = _jsx_tag_name(text, cursor)
+    if name_result is None:
         return None
-    name = name_match.group(0)
-    cursor += name_match.end()
+    name, cursor = name_result
     last_significant = ""
     while cursor < len(text):
         character = text[cursor]
@@ -597,6 +599,68 @@ def _jsx_tag_end(text: str, start: int) -> tuple[int, str | None, bool, bool] | 
             last_significant = character
         cursor += 1
     return None
+
+
+def _jsx_tag_name(text: str, start: int) -> tuple[str, int] | None:
+    """Read a JSX IdentifierName with member/namespace segments.
+
+    JSX permits Unicode IdentifierName characters and the punctuation ``.``
+    and ``:`` for member/namespace names.  Hyphens are retained for intrinsic
+    HTML names.  Keeping this lexer independent from the export identifier
+    regex prevents Unicode tag text from being mistaken for module-level
+    ``export`` declarations.
+    """
+
+    cursor = start
+    segments: list[str] = []
+    while True:
+        if cursor >= len(text):
+            return None
+        first = text[cursor]
+        if not _is_jsx_identifier_start(first):
+            return None
+        segment_start = cursor
+        cursor += 1
+        while cursor < len(text):
+            character = text[cursor]
+            if _is_jsx_identifier_part(character) or character == "-":
+                cursor += 1
+                continue
+            break
+        segments.append(text[segment_start:cursor])
+        if cursor >= len(text) or text[cursor] not in ".:":
+            break
+        cursor += 1
+    name = ".".join(segments)
+    # The helper above preserves separators as segment boundaries.  Rebuild
+    # them from the source span so ``Foo.Bar`` and ``ns:Tag`` remain distinct.
+    name = text[start:cursor]
+    if unicodedata.normalize("NFC", name) != name:
+        return None
+    return name, cursor
+
+
+def _is_jsx_identifier_start(character: str) -> bool:
+    """Recognize an ECMAScript IdentifierStart character."""
+
+    return character in "$_" or character.isidentifier()
+
+
+def _is_jsx_identifier_part(character: str) -> bool:
+    """Recognize IdentifierPart, including Unicode combining marks.
+
+    Python's ``str.isidentifier`` intentionally describes a complete
+    identifier, so a combining mark is false when tested by itself even
+    though it is a valid continuation.  ECMAScript's IdentifierPart includes
+    Unicode ``Mn``/``Mc`` marks, decimal digits, connector punctuation, and
+    the join controls.
+    """
+
+    return (
+        _is_jsx_identifier_start(character)
+        or character in "\u200c\u200d"
+        or unicodedata.category(character) in {"Mc", "Mn", "Nd", "Pc"}
+    )
 
 
 def _jsx_quoted_end(text: str, start: int) -> int:
@@ -1976,10 +2040,99 @@ def validate_request_envelope(request: dict[str, Any]) -> None:
     assert trusted["semantic_profile_id"] == "next-trusted-profile-v1"
     assert re.fullmatch(r"[0-9a-f]{64}", trusted["sha256"])
     assert request["request_id"] == recompute_request_id(request)
+    context = canonical_run_context(**request["run_context"])
+    assert context["budget_resolved"] == request["limits"]["max_entities"]
     validate_limits(request["limits"])
     validate_request_files(request)
     assert canonical_json_bytes(request) == canonical_json_bytes(_canonicalize(request))
     validate_encoded_stdin_size(request)
+
+
+def _validate_closed_response_schema(response: dict[str, Any]) -> None:
+    """Apply the checked-in closed response schema after bounded decoding.
+
+    This is deliberately kept at the raw-response trust boundary.  The
+    adapter response is not allowed to choose a looser object shape merely
+    because a later typed target failure will be returned.
+    """
+
+    registry = Registry()
+    schema_dir = REPO_ROOT / "schemas"
+    for schema_path in schema_dir.glob("*.schema.json"):
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema_id = schema.get("$id")
+        if isinstance(schema_id, str):
+            registry = registry.with_resource(
+                schema_id,
+                Resource.from_contents(cast(dict[str, Any], schema)),
+            )
+    validator = Draft202012Validator(
+        json.loads(
+            (schema_dir / "next-adapter-response-v1.schema.json").read_text(encoding="utf-8")
+        ),
+        registry=registry,
+    )
+    try:
+        validator.validate(response)
+    except ValidationError as exc:
+        raise AssertionError("adapter response violates its closed schema") from exc
+
+
+def _validate_response_base(
+    response: dict[str, Any],
+    *,
+    allowed_missing_module_keys: set[tuple[str, str]] | None = None,
+    allowed_missing_module_ids: set[str] | None = None,
+    allowed_duplicate_module_keys: set[tuple[str, str]] | None = None,
+) -> None:
+    """Validate path, order, and counter invariants before typed target routing.
+
+    File-to-Module cardinality is intentionally *not* checked here: that one
+    relation is the typed target-failure branch below.  All other inexpensive
+    response invariants must be checked first so an unsafe compound response
+    cannot be relabelled as ``CSV-NEXT-TARGET-001``.
+    """
+
+    model = response["model"]
+    for project in model["projects"]:
+        _assert_path(project["root"])
+        for source_root in project["source_roots"]:
+            _assert_path(source_root)
+        if project["config_path"] is not None:
+            _assert_file_path(project["config_path"])
+    for file_record in model["files"]:
+        _assert_file_path(file_record["path"])
+    for module in model["modules"]:
+        _assert_file_path(module["path"])
+    _validate_model_diagnostics(model["diagnostics"])
+
+    counts = model["coverage"]["counts"]
+    for collection in COLLECTIONS:
+        assert counts[collection] == len(model[collection])
+    assert counts["published"] == sum(len(model[collection]) for collection in COLLECTIONS)
+    assert counts["discovered"] >= counts["published"]
+    assert counts["internal_entities"] == len(model["modules"]) + len(model["components"])
+
+    proof = response["proof"]
+    for root in proof["failure_roots"]:
+        if root["path_ref"] is not None:
+            _assert_file_path(root["path_ref"])
+    for observation in proof["export_observations"]:
+        _assert_file_path(observation["owner_file_path"])
+    for witness in proof["export_reexport_witness"]:
+        _assert_file_path(witness["owner_file_path"])
+    for resolution in proof["target_resolutions"]:
+        canonical_target_key(resolution["target_key"])
+    base_model = _deduplicated_model_for_base_validation(
+        model,
+        allowed_duplicate_module_keys or set(),
+    )
+    validate_model(
+        base_model,
+        max_model_records=response["limits"]["max_model_records"],
+        allowed_missing_module_keys=allowed_missing_module_keys,
+        allowed_missing_module_ids=allowed_missing_module_ids,
+    )
 
 
 def _validate_project_correspondence(
@@ -2045,8 +2198,10 @@ def target_completeness_failure(
         project_ids = {file.get("project_id") for file in matching_files}
         selected_program_files = [file for file in matching_files if _is_program_file(file)]
         reason = None
-        if not matching_files or len(project_ids) != 1 or len(exact_files) > 1:
-            reason = "missing_or_ambiguous_path"
+        if not matching_files:
+            reason = "missing"
+        elif len(project_ids) != 1 or len(exact_files) > 1:
+            reason = "ambiguous"
         elif exact_files and not _is_program_file(exact_files[0]):
             reason = "non_program_file"
         elif not selected_program_files:
@@ -2063,19 +2218,161 @@ def target_completeness_failure(
                             "path": key[1],
                         }
                     )
-                    reason = (
-                        "component_only"
-                        if not matching_modules and expected_module_id in component_module_ids
-                        else "module_missing_or_duplicate"
-                    )
+                    if not matching_modules and expected_module_id in component_module_ids:
+                        reason = "component_only"
+                    elif not matching_modules:
+                        reason = "missing"
+                    else:
+                        reason = "duplicate"
                     break
                 module_id = matching_modules[0].get("id")
                 if module_id not in {module.get("id") for module in modules}:
-                    reason = "module_missing_or_duplicate"
+                    reason = "missing"
                     break
         if reason is not None:
             failures.append({"target_key": target_key, "reason": reason})
     return NextTargetCompletenessFailure(failures) if failures else None
+
+
+def _target_missing_module_exceptions(
+    model: dict[str, Any],
+    targets: list[str],
+    failure: NextTargetCompletenessFailure | None,
+) -> tuple[set[tuple[str, str]], set[str]]:
+    """Return only selected File→Module gaps permitted by typed target routing.
+
+    A target failure does not make the rest of the response structurally
+    untrusted.  The sole exception is the selected program File→Module
+    cardinality gap: an absent Module is the typed ``missing`` case, and its
+    one orphan Component is the typed ``component_only`` case.  Every other
+    missing or duplicate relation remains a base-validation failure.
+    """
+
+    if failure is None:
+        return set(), set()
+    failure_reasons = {item["target_key"]: item["reason"] for item in failure.failures}
+    selected_targets = list(targets)
+    if not selected_targets:
+        selected_targets = [
+            f"path:{file_record.get('path')}"
+            for file_record in model.get("files", [])
+            if _is_program_file(file_record)
+        ]
+    modules_by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for module in model["modules"]:
+        modules_by_key.setdefault((module["project_id"], module["path"]), []).append(module)
+    allowed_keys: set[tuple[str, str]] = set()
+    allowed_ids: set[str] = set()
+    files = list(model["files"])
+    for target in selected_targets:
+        target_key = canonical_target_key(target)
+        if failure_reasons.get(target_key) not in {"missing", "component_only"}:
+            continue
+        requested_path = target_key.removeprefix(TARGET_SELECTOR_PREFIX)
+        exact_files = [file for file in files if file["path"] == requested_path]
+        matching_files = exact_files or [
+            file for file in files if _under(file["path"], requested_path)
+        ]
+        for file_record in matching_files:
+            if not _is_program_file(file_record):
+                continue
+            module_key = (file_record["project_id"], file_record["path"])
+            if modules_by_key.get(module_key):
+                continue
+            allowed_keys.add(module_key)
+            if failure_reasons[target_key] == "component_only":
+                allowed_ids.add(
+                    recompute_record_id(
+                        {
+                            "kind": "module",
+                            "project_id": file_record["project_id"],
+                            "path": file_record["path"],
+                        }
+                    )
+                )
+    return allowed_keys, allowed_ids
+
+
+def _target_duplicate_module_exceptions(
+    model: dict[str, Any],
+    targets: list[str],
+    failure: NextTargetCompletenessFailure | None,
+) -> set[tuple[str, str]]:
+    """Return only byte-identical duplicate Modules for failed targets.
+
+    The duplicate is a typed File→Module cardinality failure, but the rest of
+    the response must still pass ordinary collection/reference validation.
+    Therefore this helper grants no general duplicate exemption: it identifies
+    the selected program-file keys whose duplicate rows are exactly identical,
+    and the caller removes only the extra copies in a validation copy.  Any
+    non-selected, inconsistent, or otherwise unrelated duplicate remains a
+    base-validation failure.
+    """
+
+    if failure is None:
+        return set()
+    failure_reasons = {item["target_key"]: item["reason"] for item in failure.failures}
+    selected_targets = list(targets)
+    if not selected_targets:
+        selected_targets = [
+            f"path:{file_record.get('path')}"
+            for file_record in model.get("files", [])
+            if _is_program_file(file_record)
+        ]
+    modules_by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for module in model["modules"]:
+        modules_by_key.setdefault((module["project_id"], module["path"]), []).append(module)
+    files = list(model["files"])
+    allowed: set[tuple[str, str]] = set()
+    for target in selected_targets:
+        target_key = canonical_target_key(target)
+        if failure_reasons.get(target_key) != "duplicate":
+            continue
+        requested_path = target_key.removeprefix(TARGET_SELECTOR_PREFIX)
+        exact_files = [file for file in files if file["path"] == requested_path]
+        matching_files = exact_files or [
+            file for file in files if _under(file["path"], requested_path)
+        ]
+        for file_record in matching_files:
+            if not _is_program_file(file_record):
+                continue
+            module_key = (file_record["project_id"], file_record["path"])
+            candidates = modules_by_key.get(module_key, [])
+            if len(candidates) <= 1:
+                continue
+            encoded = canonical_json_bytes(candidates[0])
+            if all(canonical_json_bytes(candidate) == encoded for candidate in candidates[1:]):
+                allowed.add(module_key)
+    return allowed
+
+
+def _deduplicated_model_for_base_validation(
+    model: dict[str, Any], duplicate_keys: set[tuple[str, str]]
+) -> dict[str, Any]:
+    """Copy a model while removing only validated extra duplicate Module rows."""
+
+    if not duplicate_keys:
+        return model
+    candidate = copy.deepcopy(model)
+    modules: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    removed = 0
+    for module in candidate["modules"]:
+        module_key = (module["project_id"], module["path"])
+        if module_key not in duplicate_keys or module_key not in seen:
+            modules.append(module)
+            seen.add(module_key)
+            continue
+        removed += 1
+    assert removed >= 1
+    candidate["modules"] = modules
+    counts = candidate["coverage"]["counts"]
+    for collection in COLLECTIONS:
+        counts[collection] = len(candidate[collection])
+    counts["published"] = sum(len(candidate[collection]) for collection in COLLECTIONS)
+    counts["discovered"] = max(counts["published"], counts["discovered"] - removed)
+    counts["internal_entities"] = len(candidate["modules"]) + len(candidate["components"])
+    return candidate
 
 
 def target_failure_decision(
@@ -2165,6 +2462,25 @@ def validate_response_envelope(
     bounded = bounded_decode_json(response_bytes, limits=request["limits"])
     assert bounded["allowed"]
     response = cast(dict[str, Any], bounded["value"])
+    _validate_closed_response_schema(response)
+    model = response["model"]
+    target_failure = target_completeness_failure(model, request["targets"])
+    allowed_missing_module_keys, allowed_missing_module_ids = _target_missing_module_exceptions(
+        model,
+        request["targets"],
+        target_failure,
+    )
+    allowed_duplicate_module_keys = _target_duplicate_module_exceptions(
+        model,
+        request["targets"],
+        target_failure,
+    )
+    _validate_response_base(
+        response,
+        allowed_missing_module_keys=allowed_missing_module_keys,
+        allowed_missing_module_ids=allowed_missing_module_ids,
+        allowed_duplicate_module_keys=allowed_duplicate_module_keys,
+    )
     assert response["protocol"] == request["protocol"] == "code-structure-viz.next-adapter/v1"
     assert response["request_id"] == request["request_id"]
     assert response["adapter_version"] == request["adapter_version"]
@@ -2181,18 +2497,19 @@ def validate_response_envelope(
         response["trusted_type_environment_digest"] == request["trusted_type_environment"]["sha256"]
     )
     validate_limits_consistency(request["limits"], response["limits"])
+    request_context = canonical_run_context(**request["run_context"])
     run_context = canonical_run_context(**response["run_context"])
-    assert run_context["budget_resolved"] == request["limits"]["max_entities"]
-    model = response["model"]
+    assert run_context == request_context
     _validate_project_correspondence(request["projects"], model["projects"])
     request_files = [
         {key: item for key, item in file_record.items() if key != "content_base64"}
         for file_record in request["files"]
     ]
     assert model["files"] == request_files
-    target_failure = target_completeness_failure(model, request["targets"])
     if target_failure is not None:
-        return target_failure_decision(target_failure, run_context)
+        decision = target_failure_decision(target_failure, run_context)
+        decision["validated_model"] = copy.deepcopy(model)
+        return decision
     actual_entities = validate_model(
         model,
         max_model_records=request["limits"]["max_model_records"],
@@ -2200,14 +2517,18 @@ def validate_response_envelope(
     validate_proof(response["proof"], model, request_targets=request["targets"])
     export_failure = export_failure_decision(response["proof"], run_context)
     if export_failure is not None:
+        export_failure["validated_model"] = copy.deepcopy(model)
+        export_failure["validated_proof"] = copy.deepcopy(response["proof"])
         return export_failure
     pre_budget_outcome = derive_pre_budget_outcome(response["proof"], model)
-    return entity_budget_gate(
+    decision = entity_budget_gate(
         actual_entities,
-        run_context["budget_resolved"],
         original_outcome=pre_budget_outcome,
         run_context=run_context,
     )
+    decision["validated_model"] = copy.deepcopy(model)
+    decision["validated_proof"] = copy.deepcopy(response["proof"])
+    return decision
 
 
 def recompute_run_fingerprint(
@@ -2218,7 +2539,7 @@ def recompute_run_fingerprint(
     projects: list[dict[str, Any]],
     targets: list[str],
     formats: list[str] | tuple[str, ...],
-    stdout_selector: str,
+    stdout_selector: str | None,
     limits: dict[str, Any],
     node_version: str | None,
     typescript_version: str,
@@ -2243,6 +2564,40 @@ def recompute_run_fingerprint(
             "trusted_environment_digest": trusted_environment_digest,
         }
     )
+
+
+def recompute_publication_projection_digest(domain: dict[str, Any]) -> str:
+    """Bind published bytes to the validated domain projection inputs."""
+
+    return digest(
+        {
+            "projects": domain["projects"],
+            "targets": domain["targets"],
+            "formats": domain["formats"],
+            "coverage": domain["coverage"],
+            "run_fingerprint": domain["run_fingerprint"],
+        }
+    )
+
+
+def validate_published_projection(
+    domain: dict[str, Any], published_bytes: dict[str, bytes]
+) -> None:
+    """Require each placeholder golden to carry the same projection digest."""
+
+    projection_digest = recompute_publication_projection_digest(domain)
+    for path, payload in published_bytes.items():
+        if path.endswith(".json"):
+            value = json.loads(payload.decode("utf-8"))
+            assert value == {
+                "domain": "next",
+                "projection_digest": projection_digest,
+                "schema": "code-structure-viz.semantic/v1",
+            }
+        else:
+            assert payload == (
+                f"@startuml\nnote top: projection={projection_digest}\n@enduml\n".encode()
+            )
 
 
 def validate_domain_manifest(value: dict[str, Any]) -> None:
@@ -2487,7 +2842,6 @@ def entity_budget_allowed(measured: int, resolved: int) -> bool:
 
 def entity_budget_gate(
     measured: int,
-    resolved: int,
     *,
     original_outcome: str,
     run_context: NextRunContext,
@@ -2507,6 +2861,7 @@ def entity_budget_gate(
         "semantic-json": "next.snapshot.semantic.json",
         "plantuml": "next.snapshot.puml",
     }
+    resolved = context["budget_resolved"]
     allowed = entity_budget_allowed(measured, resolved)
     outcome = original_outcome if allowed else "payload_unavailable"
     return {
@@ -2530,7 +2885,6 @@ def entity_budget_gate(
 
 def compose_entity_budget_outcome(
     measured: int,
-    resolved: int,
     *,
     original_outcome: str,
     run_context: NextRunContext,
@@ -2539,7 +2893,6 @@ def compose_entity_budget_outcome(
 
     return entity_budget_gate(
         measured,
-        resolved,
         original_outcome=original_outcome,
         run_context=run_context,
     )
@@ -3270,7 +3623,7 @@ def canonical_run_context(
     budget_requested: int | None,
     budget_resolved: int,
     budget_source: str,
-    stdout_selector: str,
+    stdout_selector: str | None,
 ) -> NextRunContext:
     """Construct and validate the explicit context shared by all run surfaces."""
 
@@ -3280,7 +3633,8 @@ def canonical_run_context(
     assert 1 <= budget_resolved <= 100000
     assert budget_source in RUN_CONTEXT_BUDGET_SOURCES
     assert stdout_selector in RUN_CONTEXT_SELECTORS
-    assert stdout_selector.removeprefix("next:") in formats
+    if stdout_selector is not None and stdout_selector != "manifest":
+        assert stdout_selector.removeprefix("next:") in formats
     if budget_source == "builtin":
         assert budget_requested is None
     else:
@@ -4298,7 +4652,11 @@ def validate_model(
     model: dict[str, Any],
     *,
     max_model_records: int = LIMIT_DEFAULTS["max_model_records"],
+    allowed_missing_module_keys: set[tuple[str, str]] | None = None,
+    allowed_missing_module_ids: set[str] | None = None,
 ) -> int:
+    allowed_missing_module_keys = allowed_missing_module_keys or set()
+    allowed_missing_module_ids = allowed_missing_module_ids or set()
     collections = _validate_model_collections(model)
     project_records = collections["projects"]
     file_records = collections["files"]
@@ -4361,35 +4719,59 @@ def validate_model(
         owner_file = files_by_key.get((module["project_id"], module["path"]))
         assert owner_file is not None
         assert _is_program_file(owner_file)
-    duplicate_module_keys = [
-        key for key, candidates in modules_by_key.items() if len(candidates) != 1
+    invalid_module_keys = [
+        key
+        for key, candidates in modules_by_key.items()
+        if len(candidates) > 1 or (len(candidates) == 0 and key not in allowed_missing_module_keys)
     ]
-    if duplicate_module_keys:
+    if invalid_module_keys:
+        module_target_reasons = {
+            key: "duplicate" if len(candidates) > 1 else "missing"
+            for key, candidates in modules_by_key.items()
+        }
         raise NextTargetCompletenessFailure(
             [
                 {
                     "target_key": f"path:{path}",
-                    "reason": "module_missing_or_duplicate",
+                    "reason": module_target_reasons[(project_id, path)],
                 }
-                for _project_id, path in duplicate_module_keys
+                for project_id, path in invalid_module_keys
             ]
         )
     for file_record in file_records.values():
-        if (
-            _is_program_file(file_record)
-            and len(modules_by_key.get((file_record["project_id"], file_record["path"]), [])) != 1
+        module_key = (file_record["project_id"], file_record["path"])
+        if _is_program_file(file_record) and (
+            len(modules_by_key.get(module_key, [])) != 1
+            and module_key not in allowed_missing_module_keys
         ):
             raise NextTargetCompletenessFailure(
                 [
                     {
                         "target_key": f"path:{file_record['path']}",
-                        "reason": "module_missing_or_duplicate",
+                        "reason": (
+                            "component_only"
+                            if any(
+                                component["module_id"]
+                                == recompute_record_id(
+                                    {
+                                        "kind": "module",
+                                        "project_id": file_record["project_id"],
+                                        "path": file_record["path"],
+                                    }
+                                )
+                                for component in component_records.values()
+                            )
+                            else "missing"
+                        ),
                     }
                 ]
             )
     for component in component_records.values():
         assert component["kind"] == "component"
-        assert component["module_id"] in module_records
+        assert (
+            component["module_id"] in module_records
+            or component["module_id"] in allowed_missing_module_ids
+        )
         _assert_canonical(component["recognition_evidence"])
     _assert_unique(
         [
@@ -4757,14 +5139,6 @@ def recompute_export_graph_case(case: dict[str, Any]) -> dict[str, Any]:
                 )
                 resolved_candidate = source_exports.get(edge["imported_name"])
                 if resolved_candidate is None:
-                    declaration_matches = [
-                        candidate
-                        for candidate in source_exports.values()
-                        if candidate["target_declaration_key"] == edge["imported_name"]
-                    ]
-                    if len(declaration_matches) == 1:
-                        resolved_candidate = declaration_matches[0]
-                if resolved_candidate is None:
                     resolved_candidate = unknown(source_path, "missing_export")
                 candidate = resolved_candidate
             candidates.setdefault(edge["exported_name"], []).append(candidate)
@@ -5093,6 +5467,8 @@ def expected_export_reexport_witness(model: dict[str, Any]) -> list[dict[str, An
         )
         witnesses.append(
             {
+                "owner_module_id": owner_module["id"],
+                "owner_file_path": graph_witness["owner_file_path"],
                 "syntax_identity": matched_syntax["syntax_identity"],
                 "source_specifier": graph_witness["source_specifier"],
                 "imported_name": graph_witness["imported_name"],
@@ -5161,16 +5537,13 @@ def _export_binding_projection_for_model(model: dict[str, Any]) -> list[dict[str
     projected = _export_binding_projection_from_observations(
         [observation for observation in observations if not observation["reexport"]]
     )
-    module_by_path = {module["path"]: module for module in model["modules"]}
     for witness in expected_export_reexport_witness(model):
         if witness["resolution"] != "component":
             continue
-        owner_module = module_by_path.get(witness["owner_file_path"])
-        assert owner_module is not None
         component_id = witness["target_declaration_id"]
         assert component_id is not None
         identity = {
-            "owner_id": owner_module["id"],
+            "owner_id": witness["owner_module_id"],
             "exported_name": witness["exported_name"],
             "role": "value",
         }
@@ -5181,7 +5554,7 @@ def _export_binding_projection_for_model(model: dict[str, Any]) -> list[dict[str
                     "next:member:"
                     f"{digest({'kind': 'export_binding', 'version': 1, 'identity': identity})}"
                 ),
-                "owner_id": owner_module["id"],
+                "owner_id": witness["owner_module_id"],
                 "exported_name": witness["exported_name"],
                 "role": "value",
                 "target_component_id": component_id,
@@ -5919,6 +6292,7 @@ def validate_run_manifest(
             }
         )
     assert manifest["artifacts"] == expected_artifacts
+    validate_published_projection(domain, published_bytes)
 
 
 def escape_plantuml_label(value: str) -> str:

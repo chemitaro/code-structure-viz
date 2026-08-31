@@ -97,6 +97,12 @@ def test_checked_in_schema_is_valid_and_closed(name: str) -> None:
     assert schema["additionalProperties"] is False
 
 
+def test_next_path_schema_rejects_fragment_marker() -> None:
+    validator = _validator("next-path-v1.schema.json")
+    with pytest.raises(ValidationError):
+        validator.validate("src/Button#shadow.tsx")
+
+
 def test_next_diagnostic_catalog_is_unique_and_closed() -> None:
     catalog = _schema("next-diagnostic-catalog-v1.json")
     assert catalog["schema"] == "code-structure-viz.next-diagnostic-catalog/v1"

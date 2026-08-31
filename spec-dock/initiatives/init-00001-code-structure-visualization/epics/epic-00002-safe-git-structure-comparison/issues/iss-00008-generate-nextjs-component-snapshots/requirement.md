@@ -203,8 +203,8 @@ Pass Cの固定事項:
   mutationは拒否し、formatsとstdout selectorもrun fingerprint preimageに含める。
 - run contextの`requested_formats`、`budget_requested`、`budget_resolved`、`budget_source`、
   `stdout_selector`をresponse、EntityBudgetGate、domain、root runへ同じ値で投影する。
-  requested formatを暗黙のFORMAT_ORDERから補わず、selectorはrequested setの一員でなければ
-  ならない。
+  requested formatを暗黙のFORMAT_ORDERから補わない。selectorは`null`（省略）、`manifest`、または
+  requested set内の`next:semantic-json`/`next:plantuml`のいずれかである。
 - `next-path-v1`の`maxLength`は補助的な文字数検査に留め、NFC・UTF-8 bytes・root `.`の文脈
   規則を共有helperで再検証する。4095/4096 bytesは受理し、4097 bytes、NFC collision、
   ordinary file surfaceのroot `.`は拒否する。
@@ -225,6 +225,35 @@ Pass Dの固定事項:
   limit+1はpartial write 0、`CSV-NEXT-LIMIT-003`だけをmanifestへ投影する。adapter captureとは別の
   counterであり、raw responseはbytesを入口とするbounded decoderでduplicate key、depth、decoded string、
   per-array、aggregateをmaterialize前に拒否する。
+
+### Round 12 review state and remediation contract
+
+ChatGPT Use Strict Round 12 は exact SHA `48266f813353a7fd78e4e15d72ff6d33c4142827`、CI run
+`33435802167`（7/7 success）に対して `review_status: fail`、P0=0、P1=8、P2=0を返した。詳細な
+原文は `artifacts/20260901t020000z-disc-strict-spec-review-round-12.md` に保存する。これは受理済みの
+data-only修復範囲であり、fresh exact-SHA Strictは未実行・未通過、readinessは未確定、Next
+production adapter/CLI実装は未着手のままとする。
+
+1. 逆順二projectは同じvalidated response modelをdomain、budget/coverage、published bytes、root
+   manifest、run fingerprintまで通し、各surfaceのroot-path orderとrecord-ID orderを別々に検証する。
+2. `NextRunContext/v1` は `null | manifest | next:semantic-json | next:plantuml` を表し、requested
+   formats、budget requested/resolved/source、実selectorをprivate requestからresponseへexact echoする。
+   EntityBudgetGateはcontextだけをauthorityにし、fallbackやprovenance推測をしない。
+3. raw response bytesはbounded decode後にclosed response schema、安全なNFC/UTF-8 path/ref/count基礎検証、
+   typed target precedenceの順で一つの入口から検証する。wrong schema、extra field、unsafe compound
+   mutationはtarget failureへ再分類しない。
+4. JSX censusはNFC Unicode IdentifierNameのpaired/nested/member/namespace tagをmodule-level lexerで
+   認識し、属性式とtext内の偽exportを除外する。re-exportはexported-nameだけでlookupし、declaration key
+   をfallbackにしない。owner Moduleとphysical targetをwitnessへ保持し、component targetを必須にする。
+5. double alias/star（default除外、0..N、value/type/unknown coverage）とcycle/conflictをschema-valid
+   proofから`CSV-NEXT-EXPORT-001`、domain/root manifest、stdout unavailable、exit 3まで投影する。
+6. 全path surfaceはshared `next-path-v1` helperで`#`、非NFC、UTF-8 byte boundaryを拒否する。File→Module
+   のtyped target failureはfile/directoryそれぞれで三分類する。`missing`は選択されたprogram Fileが
+   存在するがModuleがなく、期待されるModule identityを参照するComponentもない純粋な欠落、
+   `component_only`はModuleがない一方で期待されるModule identityを参照するComponentが残る状態、
+   `duplicate`は同じ選択Fileにbyte-identicalなModule行が複数ある状態である。`duplicate`だけは
+   typed failureへ進む前に選択対象の同一行に限って許可する狭い例外とし、三分類すべてをresponse→diagnostic→
+   domain→root manifest→stdout unavailable→exit 3へ完全に投影する。
 
 ### semantic contract
 

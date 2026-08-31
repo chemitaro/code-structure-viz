@@ -115,6 +115,31 @@ Pass Dの実行項目:
 Pass D実装後もRound 11の `review_status: fail`（P0=0、P1=8、P2=0）は履歴として保持する。
 fresh exact-SHA Strictは未実施・未通過で、readinessは未確定、production adapter/CLIは未着手である。
 
+### Round 12 remediation gate
+
+ChatGPT Use Strict Round 12 は exact SHA `48266f813353a7fd78e4e15d72ff6d33c4142827`、CI run
+`33435802167`（7/7 success）で `review_status: fail`、P0=0、P1=8、P2=0だった。証拠は
+`artifacts/20260901t020000z-disc-strict-spec-review-round-12.md` に固定し、failをpassへ書き換えない。
+受理済みのdata-only修復は次の実装前gateを満たす必要があるが、fresh exact-SHA Strictは未実行・
+未通過、readinessは未確定、production adapter/CLIは未着手である。
+
+1. inverse-order二projectを同じvalidated modelでresponseからdomain、publication、root manifest、
+   fingerprintまで通し、project ID/root correspondence、surface-specific order、counts/budget/coverageと
+   publication digestのmutationを拒否する。
+2. request-owned `NextRunContext`（selector `null|manifest|next:semantic-json|next:plantuml`）をprivate
+   request ID preimageへ含め、response/gate/domain/root/stdoutへexact echoする。resolved budgetやselectorの
+   fallback・provenance inference・gate duplicate argumentを残さない。
+3. raw-byte bounded decoder、closed response schema、shared path helper、安全な基礎検証、typed target
+   precedenceを一つの実行順序へ固定する。wrong schema/extra/unsafe compound mutationはtyped target
+   failureへ落とさない。
+4. Unicode JSX lexical states、exported-name-only re-export lookup、owner/physical target witness、
+   component non-null target、double-alias/star binding+coverage、cycle/conflict unavailable vector、
+   shared `#` path rejection、file/directoryのFile→Module typed failure三分類をschema・reference testへ
+   反映する。`missing`は選択program FileがあるがModuleも期待identityを参照するComponentもない状態、
+   `component_only`はModuleがなくComponentだけが期待identityを参照する状態、`duplicate`は同じ選択Fileに
+   byte-identicalなModule行が複数ある状態である。`duplicate`の許可は選択対象の同一行だけに限定し、三分類を
+   response→diagnostic→domain→root manifest→stdout unavailable→exit 3まで通す。
+
 Pass Bの実行条件:
 
 - scannerはmodule-level深さ0だけを対象に、async declaration、generic/type span、semicolon

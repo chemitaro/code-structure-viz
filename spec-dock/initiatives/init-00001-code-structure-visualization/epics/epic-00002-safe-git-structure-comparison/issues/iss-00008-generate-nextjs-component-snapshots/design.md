@@ -137,7 +137,7 @@ Pass Cの設計不変条件は次のとおりとする。
    submitted順を独立に検証する。formatsと実際のstdout selectorはfingerprint preimageへ含める。
 2. `NextRunContext`は`requested_formats`、budgetのrequested/resolved/source、
    `stdout_selector`を持つ唯一のprojection contextであり、response、gate、domain、root
-   runで値を複製する。selectorはrequested formatに含まれ、FORMAT_ORDERを暗黙補完しない。
+   runで値を複製する。selectorは`null`、`manifest`、またはrequested formatに対応するNext selectorに閉じ、FORMAT_ORDERを暗黙補完しない。
 3. `next-path-v1`の`maxLength`は補助ガードであり、NFC、UTF-8 byte（4095/4096受理、4097拒否）、
    root `.`の文脈規則は共通helperが再検証する。ordinary file pathにroot sentinelを許さない。
 4. target resolution前にprogram File→Module写像を型付きfailureとして判定し、missing/
@@ -166,6 +166,34 @@ Pass Dのdata-only契約は次を固定する。
 Pass DはRound 11のP1をローカル契約へ反映した状態を示すだけであり、Round 11 Strictの
 `review_status: fail`（P0=0、P1=8、P2=0）を書き換えない。fresh exact-SHA Strictは未実施・未通過で、
 readinessは未確定、production adapter/CLIも未着手である。
+
+### Round 12 review state and remediation contract
+
+ChatGPT Use Strict Round 12 は exact SHA `48266f813353a7fd78e4e15d72ff6d33c4142827`、CI run
+`33435802167`（7/7 success）に対して `review_status: fail`、P0=0、P1=8、P2=0を返した。原文と
+transcript digestは `artifacts/20260901t020000z-disc-strict-spec-review-round-12.md` に固定する。
+Round 12の修復は実装前の契約だけを更新し、fresh exact-SHA Strictは未実行・未通過、readinessは
+未確定、production adapter/CLIは未着手である。
+
+- 二projectのinverse-order fixtureは、request→validated response→domain→publication/root manifest→
+  fingerprintを同一modelで接続し、projectをID/rootで対応させ、各surfaceの順序を独立検証する。
+- `NextRunContext/v1` は `null`、`manifest`、`next:semantic-json`、`next:plantuml` を閉じた値として
+  requestが所有する。responseは全contextをexact echoし、gateはcontextからresolved budgetだけを得る。
+  omitted selectorや500のsourceをformat順や値から推測しない。
+- responseはraw bytes→bounded decoder→closed schema→shared path/ref/count基礎検証→typed target判定
+  の順で検証する。targetのmissing/duplicate/component_onlyがあっても、wrong schema、extra field、
+  unsafe compound mutationはprotocol/schema failureを迂回できない。
+- JSX lexerはNFC Unicode IdentifierName segmentのpaired/nested/member/namespace tag、attribute/text
+  state、偽export除外を閉じる。re-exportはexported-name tableのみでlookupし、owner Module、resolved
+  physical target、original/exported name、cycle/conflict reasonを独立witnessへ保持する。
+- component resolutionはnon-null target declarationを要求し、double alias/star（default除外、0..N）を
+  binding/coverageへ投影する。schema-valid cycle/conflict responseは`CSV-NEXT-EXPORT-001`のdomain/root/
+  stdout unavailable、exit 3 vectorへ進む。全path surfaceは`#`を含む値をshared helperで拒否し、File→Module
+  target failureはfile/directory targetそれぞれで三分類する。`missing`は選択されたprogram Fileが存在するが
+  Moduleがなく期待されるModule identityを参照するComponentもない純粋な欠落、`component_only`はModuleが
+  ない一方でそのComponentが残る状態、`duplicate`は同じ選択Fileにbyte-identicalなModule行が複数ある状態
+  である。`duplicate`は選択対象の同一行だけに限る狭い例外としてtyped failureへ進め、三分類すべてを
+  response→diagnostic→domain→root manifest→stdout unavailable→exit 3へ投影する。
 
 ## 責務・Interface
 

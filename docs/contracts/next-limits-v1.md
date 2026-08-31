@@ -1,13 +1,12 @@
 # Next resolved limits v1
 
-Round 11 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
-`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Pass A/B entity, stderr, and bounded decoder
-remediations plus Pass C explicit run-context propagation and Pass D raw-response/public
-stderr boundary checks are locally reflected.
-The independent entity publication gate, separate stderr/array counters, and
-response-to-outcome vectors below are local data-only remediations; fresh
-exact-SHA Strict is pending, readiness is unconfirmed, and production
-implementation has not started. Fresh Strict remains pending.
+Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
+`48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
+The data-only limits and outcome vectors below remain pre-implementation
+contracts. Round 12 additionally requires the same validated model to supply
+computed counts, budget, coverage, publication, and fingerprint across every
+surface. Fresh exact-SHA Strict is pending, readiness is unconfirmed, and
+production implementation has not started; the fail result is not a pass.
 
 `schemas/next-limits-v1.schema.json` is the single resolved limits record for
 the Next snapshot boundary. The same record is copied byte-for-byte into the

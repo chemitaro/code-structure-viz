@@ -2,14 +2,22 @@
 
 Status: pre-implementation normative contract for Issue #8.
 
-Round 11 review state: ChatGPT Use Strict returned `review_status: fail` with
-P0=0, P1=8, P2=0 at exact SHA `75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Pass A/B
-remediations and Pass C project/order, explicit run-context, canonical path, and
-File-to-Module completeness work are locally reflected below and in the data-only
-schemas/reference vectors. Pass D additionally reflects the closed JSX export scanner,
-independent re-export witness, bounded public stderr, and raw-response decoder. Fresh
-exact-SHA Strict is pending, so readiness is unconfirmed and the production adapter/CLI
-remains unimplemented.
+Round 12 review state: ChatGPT Use Strict returned `review_status: fail` with
+P0=0, P1=8, P2=0 at exact SHA `48266f813353a7fd78e4e15d72ff6d33c4142827`
+(CI `33435802167`, 7/7 success). Round 12 adds the same-model inverse-order
+chain, one request-owned run context for null/manifest/semantic/PlantUML,
+bounded raw-byte validation, NFC Unicode JSX tag segments, exported-name-only
+re-export lookup, owner-module witness joins, shared `#` path rejection, and
+separate missing/component-only/duplicate target vectors below. For a selected
+program File, `missing` means the File exists but its Module and any Component referring
+to the expected Module identity are absent; `component_only` means the Module is absent
+while that Component remains; `duplicate` means more than one byte-identical Module row
+exists for the same selected File, with only that selected identical duplicate narrowly
+allowed before typed failure. All three reasons apply to file and directory targets and
+project through response, diagnostic, domain, root manifest, unavailable stdout, and exit 3.
+Fresh exact-SHA Strict is
+pending, so readiness is unconfirmed and the production adapter/CLI remains
+unimplemented. This local remediation does not change the recorded fail result.
 
 The machine-readable authority is:
 
@@ -116,10 +124,12 @@ canonical source-plan and config digests.
 `NextRunContext/v1` is the single run-level context copied through the response,
 entity gate, domain manifest, root `run`, and stdout projection. It carries
 `requested_formats`, `budget_requested`, `budget_resolved`, `budget_source`, and
-the actual `stdout_selector`; the selector must name one requested format. No
-surface fills in a missing format from `FORMAT_ORDER`. The context's formats and
-selector are fields of the run-fingerprint preimage, so changing either changes
-the fingerprint.
+the actual `stdout_selector`. The selector is `null` for the canonical run
+summary, `manifest` for the exact committed manifest bytes, or a requested
+`next:<format>` renderer. No surface fills in a missing format from
+`FORMAT_ORDER` or infers provenance. The context's formats and selector are
+fields of the run-fingerprint preimage, so changing either changes the
+fingerprint.
 
 Only a frozen file with `program` role and exact suffix `.ts`, `.tsx`, `.js`, or
 `.jsx` (explicitly excluding `.d.ts`) may own a public Module. Components,
@@ -296,9 +306,17 @@ Internal Module/Component IDs are not public target syntax. A file resolves
 its frozen file/Module/Component set only when the direct file is a program
 file; a directory resolves its complete canonical descendant frozen set, and
 multiple descendants are normal. A direct context/control file is not a
-semantic target and fails even when frozen. Missing,
-project-scope ambiguity, out-of-scope, or any selected tainted/excluded/failed
-record is `CSV-NEXT-TARGET-001`, `payload_unavailable`, and no artifact.
+semantic target and fails even when frozen. File→Module `missing`/`component_only`/
+`duplicate`, project-scope ambiguity, out-of-scope, or any selected
+tainted/excluded/failed record is `CSV-NEXT-TARGET-001`, `payload_unavailable`,
+and no artifact. For a selected program File, `missing` means the File exists
+but its Module and any Component referring to the expected Module identity are
+absent; `component_only` means the Module is absent while that Component remains;
+`duplicate` means more than one byte-identical Module row exists for the same
+selected File, with only that selected identical duplicate narrowly allowed
+before typed failure. All three reasons apply to file and directory targets and
+project through response, diagnostic, domain, root manifest, unavailable stdout,
+and exit 3.
 The adapter must return exactly one canonical resolution row per requested key,
 duplicate-free; Python resolves keys against the frozen published model and
 rejects missing, extra, substituted, permuted, or `failed`-as-resolved rows.

@@ -1,11 +1,11 @@
 # Next PlantUML contract v1
 
-Round 11 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
-`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Pass A/B, Pass C, and Pass D contract
-remediation is locally reflected. The
-PlantUML grammar remains a pre-implementation data-only contract; fresh
-exact-SHA Strict is pending, readiness is unconfirmed, and production
-implementation has not started. Fresh Strict remains pending.
+Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
+`48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
+The PlantUML grammar remains a pre-implementation data-only contract. Its
+external relation target grammar and the same model/publication projection are
+covered locally, but fresh exact-SHA Strict is pending, readiness is
+unconfirmed, and production implementation has not started.
 
 Status: pre-implementation normative contract for Issue #8. The renderer in
 `tests/contracts/next_reference_validation.py`, this document, the independent

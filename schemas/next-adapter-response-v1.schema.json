@@ -117,13 +117,19 @@
         "member_id": {"type": "string", "pattern": "^next:member:[0-9a-f]{64}$"},
         "resolution": {"enum": ["component", "value", "type"]},
         "component_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"resolution": {"const": "component"}}}, "then": {"properties": {"component_id": {"type": "string"}}}},
+        {"if": {"properties": {"resolution": {"enum": ["value", "type"]}}}, "then": {"properties": {"component_id": {"type": "null"}}}}
+      ]
     },
     "export_reexport_witness": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["syntax_identity", "source_specifier", "imported_name", "original_exported_name", "exported_name", "resolved_source_module_id", "expanded_exported_name", "target_declaration_id", "resolution", "diagnostic"],
+      "required": ["owner_module_id", "owner_file_path", "syntax_identity", "source_specifier", "imported_name", "original_exported_name", "exported_name", "resolved_source_module_id", "expanded_exported_name", "target_declaration_id", "resolution", "diagnostic"],
       "properties": {
+        "owner_module_id": {"type": "string", "pattern": "^next:module:[0-9a-f]{64}$"},
+        "owner_file_path": {"$ref": "urn:code-structure-viz:schema:next-path-v1"},
         "syntax_identity": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
         "source_specifier": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
         "imported_name": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"const": "*"}]},
@@ -134,7 +140,11 @@
         "target_declaration_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]},
         "resolution": {"enum": ["component", "value", "type", "unknown"]},
         "diagnostic": {"enum": [null, "cycle", "conflict", "missing_source", "missing_export"]}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"resolution": {"const": "component"}}}, "then": {"properties": {"target_declaration_id": {"type": "string"}}}},
+        {"if": {"properties": {"resolution": {"enum": ["value", "type", "unknown"]}}}, "then": {"properties": {"target_declaration_id": {"type": "null"}}}}
+      ]
     },
     "export_observation": {
       "type": "object",

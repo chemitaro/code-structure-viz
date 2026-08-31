@@ -1,11 +1,12 @@
 # Next semantic compatibility descriptor v1
 
-Round 11 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
-`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Pass C project correspondence, explicit run context,
-canonical path, and File-to-Module target-failure remediation is locally reflected as data-only
-contract work. Pass D's export identity/witness and bounded transport checks are also reflected;
-a fresh exact-SHA Strict review is pending, readiness is unconfirmed, and production implementation
-has not started.
+Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
+`48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
+Round 12's data-only remediation keeps project and file identity versions in the
+compatibility preimage and preserves the same exact-SHA Strict gate. A fresh
+exact-SHA Strict review is pending, readiness is unconfirmed, and production
+implementation has not started. The historical Round 11 result remains evidence,
+not a pass.
 
 `code-structure-viz.next-semantic-compatibility/v1` is a closed descriptor,
 not a caller-supplied label. It contains the public semantic schema ID, the

@@ -1,13 +1,20 @@
 # Next configuration and request projection v1
 
-Round 11 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
-`75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b`. Pass A/B path, project correspondence, and
-requested-format remediation plus Pass C explicit run context, shared path helper, and
-typed File-to-Module target failure are locally reflected. Pass D's raw-response trust
-boundary, export witness, and public stderr gate are also reflected. The domain-discriminated target
-projection, closed SourceAcquisitionPlan, and surface-specific ordering below are local
-data-only remediations; fresh exact-SHA Strict is pending, readiness is unconfirmed, and
-production implementation has not started. Fresh Strict remains pending.
+Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
+`48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
+The Round 12 data-only contract adds one exact request-owned run context,
+bounded raw-response validation, shared `#`-rejecting path validation, and
+distinct `missing`/`component_only`/`duplicate` target evidence while preserving the
+domain-discriminated target projection and surface-specific ordering below. For a selected
+program File, `missing` means that the File exists but its Module and any Component referring
+to the expected Module identity are absent; `component_only` means that the Module is absent
+while such a Component remains; `duplicate` means more than one byte-identical Module row
+exists for the same selected File. Only that selected, identical duplicate is narrowly allowed
+before typed failure. All three reasons apply to file and directory targets and project through
+response, diagnostic, domain, root manifest, unavailable stdout, and exit 3.
+Fresh exact-SHA Strict is pending, readiness is unconfirmed, and production
+implementation has not started. The Round 12 fail result is not rewritten as a
+pass.
 
 Issue #8 uses one canonical configuration value object and one canonical
 snapshot request projection.  The same values are copied into the domain
@@ -120,7 +127,8 @@ backslashes, control characters, trailing slash, and `#`. JSON Schema
 helper. The root sentinel `.` is accepted only by fields that explicitly
 declare a project/source root, and is rejected for ordinary file paths.
 
-Missing path, project-scope ambiguity, out-of-scope path, or any selected
+Missing path, a File→Module `missing`/`component_only`/`duplicate` cardinality failure,
+project-scope ambiguity, out-of-scope path, or any selected
 tainted/excluded/failed record makes the whole domain
 `CSV-NEXT-TARGET-001`/`payload_unavailable`, publishes no domain artifacts,
 and uses the exact manifest/stdout unavailable vector. The response proof has
@@ -140,7 +148,8 @@ encoded-byte limits until the production adapter is implemented.
 `NextRunContext/v1` is the one explicit context used after request resolution:
 `requested_formats`, `budget_requested`, `budget_resolved`, `budget_source`, and
 the actual `stdout_selector` are copied unchanged through the adapter response,
-EntityBudgetGate, domain manifest, root run, and stdout result. A selector must
-be one of the requested formats; no projection uses an implicit format-order
-fallback. Formats and selector are also included in the run-fingerprint
-preimage.
+EntityBudgetGate, domain manifest, root run, and stdout result. The selector is
+`null` for the canonical run summary, `manifest` for the exact committed
+manifest bytes, or a requested `next:<format>` renderer; no projection uses an
+implicit format-order fallback or infers provenance. Formats and selector are
+also included in the run-fingerprint preimage.
