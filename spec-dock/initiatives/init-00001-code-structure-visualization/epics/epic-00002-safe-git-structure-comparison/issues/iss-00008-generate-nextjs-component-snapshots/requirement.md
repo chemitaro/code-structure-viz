@@ -117,6 +117,34 @@ ChatGPT Use Strict Round 8 は `review_status: fail`、P0=0、P1=4、P2=0 だっ
 exact-SHA Strictはまだ実行・通過しておらず、readinessは未確定である。製品の
 Next adapter/CLI実装は開始していない。
 
+### Round 9 review state
+
+ChatGPT Use Strict Round 9 は `review_status: fail`、P0=0、P1=7、P2=1 だった。
+追加7 P1/1 P2は実装前data-only contractへ反映し、fresh exact-SHA Strictは未実行・
+未通過、readinessは未確定、production adapter/CLIは未着手のままとする。
+
+- export syntax censusはlocal export list、default alias/declaration/expression、
+  multiple/multiline specifier、comment、Unicode IdentifierName NFC、CRLF、BOMを
+  含む閉じたtoken grammarとexact UTF-8 byte spanで固定し、positive/omission/mutation
+  vectorを持つ。
+- re-exportはsyntax identity、source specifier、imported/original name、resolved
+  source Module、expanded exported name、target declarationを独立witnessへ記録する。
+  Pythonはfrozen module graphからalias/star/cycle/conflictを再計算し、Node observation、
+  public binding、coverage countをexact比較する。
+- EntityBudgetGateはpre-budget outcomeを保持する。complete/partial_safeはunder
+  budgetでそのまま、overrunだけpayload_unavailableとし、override通過でもpartial_safe
+  をcompleteへ昇格させない。
+- `max_adapter_stderr_capture_bytes`とpublic diagnostic emission bound、
+  `max_total_array_items`と`max_collection_items`を分離する。captureはincremental
+  UTF-8 byte count、limit/+1、process-group termination、raw/partial disposal、stable
+  diagnostic、manifest projectionを固定し、array aggregateはpre-materializationで数える。
+- closed SourceAcquisitionPlan/v1 descriptorはresolved control paths、local extends、
+  file-role map、projects、suffixes、exclusions、limits、trusted digestの全fieldをhashし、
+  known-answer mutationを持つ。input/config/source-planはNFC UTF-8 root-path order、
+  semantic record collectionはrecord-ID orderとする。
+- staleなpublic component selector表現は削除し、path targetから解決したinternal
+  Component seedだけをtaint/traversal witnessで扱う。
+
 ### semantic contract
 
 - entityはphysical-path `ModuleEntity`とdeclaration-anchored `ComponentEntity`。named declarationまたは`@anonymous-default`でComponentを識別し、range/export/route/wrapper/propsをidentityに含めない。

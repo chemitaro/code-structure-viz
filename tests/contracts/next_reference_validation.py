@@ -86,10 +86,12 @@ LIMIT_DEFAULTS = {
     "max_json_nesting": 64,
     "max_json_string_bytes": 8388608,
     "max_array_items": 100000,
+    "max_total_array_items": 100000,
     "max_collection_items": 20000,
     "max_model_records": 100000,
     "max_stdout_bytes": 16777216,
     "max_stderr_bytes": 65536,
+    "max_adapter_stderr_capture_bytes": 65536,
     "timeout_seconds": 60,
     "v8_old_space_mib": 512,
     "max_type_depth": 16,
@@ -163,6 +165,13 @@ LIMIT_CONTRACTS: dict[str, dict[str, Any]] = {
         "inclusive": True,
         "outcome": "payload_unavailable",
     },
+    "max_total_array_items": {
+        "unit": "items_across_json_arrays_per_response",
+        "measurement": "streaming_counter_before_array_item_materialization",
+        "encoding": "not_applicable",
+        "inclusive": True,
+        "outcome": "payload_unavailable",
+    },
     "max_collection_items": {
         "unit": "records_per_model_collection",
         "measurement": "adapter_record_emission_before_append",
@@ -187,6 +196,13 @@ LIMIT_CONTRACTS: dict[str, dict[str, Any]] = {
     "max_stderr_bytes": {
         "unit": "utf8_bytes_per_stderr_payload",
         "measurement": "diagnostic_encode_before_write",
+        "encoding": "utf8",
+        "inclusive": True,
+        "outcome": "payload_unavailable",
+    },
+    "max_adapter_stderr_capture_bytes": {
+        "unit": "utf8_bytes_per_adapter_stderr_capture",
+        "measurement": "incremental_process_group_capture_before_append",
         "encoding": "utf8",
         "inclusive": True,
         "outcome": "payload_unavailable",
@@ -453,10 +469,65 @@ SOURCE_PLAN_CONTEXT_SUFFIXES = (".d.ts",)
 SOURCE_PLAN_HARD_EXCLUSIONS = (".git", "node_modules", ".next", "out", "dist", "build", "coverage")
 SOURCE_PLAN_CONTROL_PATHS = ("package.json", "tsconfig.json", "jsconfig.json")
 SOURCE_PLAN_VERSION = "1"
+SOURCE_PLAN_FILE_ROLE_MAP: tuple[dict[str, Any], ...] = (
+    {
+        "project_root": ".",
+        "path": "jsconfig.json",
+        "roles": ["control"],
+        "effective_role": "control",
+    },
+    {
+        "project_root": ".",
+        "path": "package.json",
+        "roles": ["control"],
+        "effective_role": "control",
+    },
+    {
+        "project_root": ".",
+        "path": "src/Button.tsx",
+        "roles": ["program"],
+        "effective_role": "program",
+    },
+    {
+        "project_root": ".",
+        "path": "src/Card.tsx",
+        "roles": ["program"],
+        "effective_role": "program",
+    },
+    {
+        "project_root": ".",
+        "path": "src/types.d.ts",
+        "roles": ["context"],
+        "effective_role": "context",
+    },
+    {
+        "project_root": ".",
+        "path": "tsconfig.json",
+        "roles": ["control"],
+        "effective_role": "control",
+    },
+)
 PUBLIC_TARGET_RE = re.compile(r"^path:([^#]+)$")
 EXPORT_CENSUS_PATH = REPO_ROOT / "tests/fixtures/next_export_census.json"
 EXPORT_CENSUS_SCHEMA = "code-structure-viz.next-export-census/v1"
+EXPORT_GRAPH_PATH = REPO_ROOT / "tests/fixtures/next_export_graph.json"
+EXPORT_GRAPH_SCHEMA = "code-structure-viz.next-export-graph/v1"
+EXPORT_GRAPH_CASES_PATH = REPO_ROOT / "tests/fixtures/next_export_graph_cases.json"
+EXPORT_GRAPH_CASES_SCHEMA = "code-structure-viz.next-export-graph-cases/v1"
 _IDENTIFIER_RE = r"[A-Za-z_$][A-Za-z0-9_$]*"
+_EXPORT_KEYWORDS = {
+    "as",
+    "class",
+    "const",
+    "default",
+    "export",
+    "from",
+    "function",
+    "interface",
+    "let",
+    "type",
+    "var",
+}
 
 
 def _is_program_file(file_record: dict[str, Any]) -> bool:
@@ -493,95 +564,532 @@ def load_export_census_fixture() -> tuple[dict[str, Any], ...]:
     return tuple(result)
 
 
+def load_export_graph_fixture() -> tuple[dict[str, Any], ...]:
+    """Load the independent frozen module graph used for re-export closure."""
+
+    payload = json.loads(EXPORT_GRAPH_PATH.read_text(encoding="utf-8"))
+    assert set(payload) == {"schema", "edges"}
+    assert payload["schema"] == EXPORT_GRAPH_SCHEMA
+    edges = cast(list[dict[str, Any]], payload["edges"])
+    for edge in edges:
+        assert set(edge) == {
+            "owner_file_path",
+            "source_specifier",
+            "imported_name",
+            "resolved_source_file_path",
+            "expanded_exported_name",
+            "target_declaration_key",
+            "resolution",
+        }
+        _assert_path(edge["owner_file_path"])
+        assert edge["source_specifier"]
+        assert edge["source_specifier"].startswith(".")
+        if edge["resolved_source_file_path"] is not None:
+            _assert_path(edge["resolved_source_file_path"])
+        assert (
+            _is_export_identifier(edge["imported_name"], allow_default=True)
+            or edge["imported_name"] == "*"
+        )
+        expanded = edge["expanded_exported_name"]
+        assert expanded is None or _is_export_identifier(expanded, allow_default=True)
+        declaration = edge["target_declaration_key"]
+        assert declaration is None or _is_export_identifier(declaration)
+        assert edge["resolution"] in {"component", "value", "type", "unknown"}
+    edge_keys = [
+        (edge["owner_file_path"], edge["source_specifier"], edge["imported_name"]) for edge in edges
+    ]
+    assert edge_keys == sorted(edge_keys)
+    assert len(edge_keys) == len(set(edge_keys))
+    return tuple(edges)
+
+
+def load_export_graph_cases() -> tuple[dict[str, Any], ...]:
+    """Load closed alias/star/cycle/conflict graph witnesses."""
+
+    payload = json.loads(EXPORT_GRAPH_CASES_PATH.read_text(encoding="utf-8"))
+    assert set(payload) == {"schema", "cases"}
+    assert payload["schema"] == EXPORT_GRAPH_CASES_SCHEMA
+    cases = cast(list[dict[str, Any]], payload["cases"])
+    names = [case["name"] for case in cases]
+    assert names == sorted(names)
+    assert len(names) == len(set(names))
+    for case in cases:
+        assert set(case) == {"name", "modules", "edges"}
+        assert isinstance(case["name"], str) and case["name"]
+        modules = cast(list[dict[str, Any]], case["modules"])
+        assert modules
+        module_paths = [module["path"] for module in modules]
+        assert module_paths == sorted(module_paths)
+        assert len(module_paths) == len(set(module_paths))
+        module_path_set = set(module_paths)
+        for module in modules:
+            assert set(module) == {"path", "exports"}
+            _assert_path(module["path"])
+            exports = cast(list[dict[str, Any]], module["exports"])
+            export_names = [item["name"] for item in exports]
+            assert export_names == sorted(export_names)
+            assert len(export_names) == len(set(export_names))
+            for item in exports:
+                assert set(item) == {"name", "resolution", "target_declaration_key"}
+                assert _is_export_identifier(item["name"], allow_default=True)
+                assert item["resolution"] in {"component", "value", "type", "unknown"}
+                if item["resolution"] == "component":
+                    assert _is_export_identifier(item["target_declaration_key"])
+                else:
+                    assert item["target_declaration_key"] is None
+        edges = cast(list[dict[str, Any]], case["edges"])
+        edge_keys = []
+        for edge in edges:
+            assert set(edge) == {
+                "owner_file_path",
+                "source_specifier",
+                "imported_name",
+                "exported_name",
+            }
+            assert edge["owner_file_path"] in module_path_set
+            assert edge["source_specifier"].startswith(".")
+            imported_name = edge["imported_name"]
+            assert imported_name == "*" or _is_export_identifier(imported_name, allow_default=True)
+            exported_name = edge["exported_name"]
+            assert exported_name == "*" or _is_export_identifier(exported_name, allow_default=True)
+            assert (imported_name == "*") is (exported_name == "*")
+            edge_keys.append(
+                (edge["owner_file_path"], edge["source_specifier"], imported_name, exported_name)
+            )
+        assert edge_keys == sorted(edge_keys)
+        assert len(edge_keys) == len(set(edge_keys))
+    return tuple(cases)
+
+
+def _is_export_identifier(
+    value: str, *, allow_default: bool = False, allow_keyword: bool = False
+) -> bool:
+    if allow_default and value == "default":
+        return True
+    if value in _EXPORT_KEYWORDS and not allow_keyword:
+        return False
+    if not value or unicodedata.normalize("NFC", value) != value:
+        return False
+    first = value[0]
+    return (first in "$_" or first.isidentifier()) and all(
+        char in "$_\u200c\u200d" or char.isidentifier() or char.isdecimal() for char in value[1:]
+    )
+
+
+def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]]:
+    """Tokenize the closed fixture grammar while retaining UTF-8 byte spans.
+
+    This is intentionally a small lexical scanner, not a TypeScript parser.
+    Comments and whitespace are discarded only for recognition; every token
+    retains its source range so the resulting census remains tied to immutable
+    bytes.  The accepted grammar is closed by ``scan_export_syntax_census``.
+    """
+
+    text = content.decode("utf-8")
+    offsets = [0]
+    for character in text:
+        offsets.append(offsets[-1] + len(character.encode("utf-8")))
+    tokens: list[dict[str, Any]] = []
+    index = 1 if text.startswith("\ufeff") else 0
+    length = len(text)
+    while index < length:
+        character = text[index]
+        if character.isspace():
+            index += 1
+            continue
+        if text.startswith("//", index):
+            newline = text.find("\n", index + 2)
+            index = length if newline < 0 else newline + 1
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            assert end >= 0, "unterminated block comment"
+            index = end + 2
+            continue
+        if character == "`":
+            # Template literals are outside the closed export grammar.  Skip
+            # the complete literal so an ``export`` word in its text (or in a
+            # template interpolation) cannot become a false census row.
+            index += 1
+            while index < length:
+                if text[index] == "\\":
+                    index += 2
+                    continue
+                if text[index] == "`":
+                    index += 1
+                    break
+                index += 1
+            else:
+                raise AssertionError("unterminated template literal")
+            continue
+        start = index
+        if character in "'\"":
+            quote = character
+            index += 1
+            value_chars: list[str] = []
+            while index < length:
+                current = text[index]
+                if current in "\r\n":
+                    raise AssertionError("newline in export string")
+                if current == quote:
+                    index += 1
+                    break
+                if current == "\\":
+                    index += 1
+                    assert index < length
+                    value_chars.append(text[index])
+                    index += 1
+                    continue
+                value_chars.append(current)
+                index += 1
+            else:
+                raise AssertionError("unterminated export string")
+            tokens.append(
+                {
+                    "kind": "string",
+                    "value": "".join(value_chars),
+                    "char_start": start,
+                    "char_end": index,
+                }
+            )
+            continue
+        if character in "$_" or character.isidentifier():
+            index += 1
+            while index < length:
+                current = text[index]
+                if current in "$_\u200c\u200d" or current.isidentifier() or current.isdecimal():
+                    index += 1
+                else:
+                    break
+            value = text[start:index]
+            assert _is_export_identifier(
+                value,
+                allow_default=value == "default",
+                allow_keyword=True,
+            ), value
+            tokens.append(
+                {
+                    "kind": "identifier",
+                    "value": value,
+                    "char_start": start,
+                    "char_end": index,
+                }
+            )
+            continue
+        if text.startswith("...", index):
+            index += 3
+            value = "..."
+        else:
+            index += 1
+            value = character
+        tokens.append(
+            {
+                "kind": "punctuation",
+                "value": value,
+                "char_start": start,
+                "char_end": index,
+            }
+        )
+    return tokens, text, offsets
+
+
+def _token_end(tokens: list[dict[str, Any]], index: int) -> int:
+    assert 0 <= index < len(tokens)
+    return cast(int, tokens[index]["char_end"])
+
+
+def _find_statement_end(tokens: list[dict[str, Any]], index: int) -> int:
+    """Return the inclusive token index for a semicolon-terminated statement."""
+
+    depth = 0
+    for position in range(index, len(tokens)):
+        value = tokens[position]["value"]
+        if value in "{[(":
+            depth += 1
+        elif value in "}])":
+            depth -= 1
+            assert depth >= 0
+        elif value == ";" and depth == 0:
+            return position
+    # The closed grammar requires a semicolon for expressions and export
+    # lists.  Declaration bodies are handled separately by _find_decl_end.
+    raise AssertionError("export statement must end with semicolon")
+
+
+def _find_decl_end(tokens: list[dict[str, Any]], index: int) -> int:
+    """Find a declaration's balanced body, or its required semicolon."""
+
+    brace_start = next(
+        (position for position in range(index, len(tokens)) if tokens[position]["value"] == "{"),
+        None,
+    )
+    if brace_start is None:
+        return _find_statement_end(tokens, index)
+    depth = 0
+    for position in range(brace_start, len(tokens)):
+        value = tokens[position]["value"]
+        if value == "{":
+            depth += 1
+        elif value == "}":
+            depth -= 1
+            if depth == 0:
+                return position
+    raise AssertionError("unbalanced export declaration")
+
+
+def _export_string(tokens: list[dict[str, Any]], index: int) -> str:
+    assert tokens[index]["kind"] == "string"
+    value = cast(str, tokens[index]["value"])
+    assert value and "\n" not in value and "\r" not in value
+    return value
+
+
+def _export_observation_row(
+    *,
+    path: str,
+    content: bytes,
+    offsets: list[int],
+    start_token: dict[str, Any],
+    end_token: dict[str, Any],
+    syntax_kind: str,
+    exported_name: str,
+    role: str,
+    reexport: bool,
+    star: bool = False,
+    source_specifier: str | None = None,
+    imported_name: str | None = None,
+    target_declaration_id: str | None = None,
+) -> dict[str, Any]:
+    char_start = cast(int, start_token["char_start"])
+    char_end = cast(int, end_token["char_end"])
+    byte_start = offsets[char_start]
+    byte_end = offsets[char_end]
+    token_bytes = content[byte_start:byte_end]
+    token_identity = digest(
+        {
+            "owner_file_path": path,
+            "byte_start": byte_start,
+            "byte_end": byte_end,
+            "token_bytes_sha256": hashlib.sha256(token_bytes).hexdigest(),
+            "imported_name": imported_name,
+            "exported_name": exported_name,
+        }
+    )
+    return {
+        "owner_file_path": path,
+        "byte_start": byte_start,
+        "byte_end": byte_end,
+        "token_identity": token_identity,
+        "syntax_identity": (f"export:{path}:{byte_start}:{byte_end}:{syntax_kind}:{exported_name}"),
+        "syntax_kind": syntax_kind,
+        "exported_name": exported_name,
+        "role": role,
+        "reexport": reexport,
+        "star": star,
+        "source_specifier": source_specifier,
+        "imported_name": imported_name,
+        "target_declaration_id": target_declaration_id,
+    }
+
+
+def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
+    tokens, _text, offsets = _export_tokens(content)
+    rows: list[dict[str, Any]] = []
+    position = 0
+    while position < len(tokens):
+        if tokens[position]["value"] != "export":
+            position += 1
+            continue
+        export_token = tokens[position]
+        cursor = position + 1
+        role = "value"
+        if cursor < len(tokens) and tokens[cursor]["value"] == "type":
+            role = "type"
+            cursor += 1
+        assert cursor < len(tokens)
+        source_specifier: str | None = None
+        if tokens[cursor]["value"] == "*":
+            assert cursor + 2 < len(tokens)
+            assert tokens[cursor + 1]["value"] == "from"
+            source_specifier = _export_string(tokens, cursor + 2)
+            end = cursor + 2
+            if end + 1 < len(tokens) and tokens[end + 1]["value"] == ";":
+                end += 1
+            rows.append(
+                _export_observation_row(
+                    path=path,
+                    content=content,
+                    offsets=offsets,
+                    start_token=export_token,
+                    end_token=tokens[end],
+                    syntax_kind="export_all",
+                    exported_name="*",
+                    role=role,
+                    reexport=True,
+                    star=True,
+                    source_specifier=source_specifier,
+                    imported_name="*",
+                )
+            )
+            position = end + 1
+            continue
+        if tokens[cursor]["value"] == "{":
+            open_brace = cursor
+            close_brace = next(
+                (
+                    candidate
+                    for candidate in range(open_brace + 1, len(tokens))
+                    if tokens[candidate]["value"] == "}"
+                ),
+                None,
+            )
+            assert close_brace is not None
+            after = close_brace + 1
+            if after < len(tokens) and tokens[after]["value"] == "from":
+                assert after + 1 < len(tokens)
+                source_specifier = _export_string(tokens, after + 1)
+                end = after + 1
+            else:
+                end = close_brace
+            if end + 1 < len(tokens) and tokens[end + 1]["value"] == ";":
+                end += 1
+            item = open_brace + 1
+            while item < close_brace:
+                if tokens[item]["value"] == ",":
+                    item += 1
+                    continue
+                item_start = item
+                item_role = role
+                if tokens[item]["value"] == "type":
+                    item_role = "type"
+                    item += 1
+                assert item < close_brace
+                item_imported_name = cast(str, tokens[item]["value"])
+                assert tokens[item]["kind"] == "identifier"
+                assert _is_export_identifier(item_imported_name, allow_default=True)
+                item += 1
+                exported_name = item_imported_name
+                if item < close_brace and tokens[item]["value"] == "as":
+                    assert item + 1 < close_brace
+                    exported_name = cast(str, tokens[item + 1]["value"])
+                    assert _is_export_identifier(exported_name, allow_default=True)
+                    item += 2
+                item_end = item - 1
+                rows.append(
+                    _export_observation_row(
+                        path=path,
+                        content=content,
+                        offsets=offsets,
+                        start_token=tokens[item_start],
+                        end_token=tokens[item_end],
+                        syntax_kind="reexport" if source_specifier is not None else "named_export",
+                        exported_name=exported_name,
+                        role=item_role,
+                        reexport=source_specifier is not None,
+                        source_specifier=source_specifier,
+                        imported_name=item_imported_name,
+                    )
+                )
+                assert item < len(tokens)
+                if tokens[item]["value"] == ",":
+                    item += 1
+                elif item != close_brace:
+                    raise AssertionError("invalid export list separator")
+            position = end + 1
+            continue
+        if tokens[cursor]["value"] == "default":
+            cursor += 1
+            assert cursor < len(tokens)
+            next_value = tokens[cursor]["value"]
+            imported_name: str | None = None
+            if next_value in {"function", "class"}:
+                declaration_cursor = cursor + 1
+                if declaration_cursor < len(tokens) and tokens[declaration_cursor]["value"] == "*":
+                    declaration_cursor += 1
+                if (
+                    declaration_cursor < len(tokens)
+                    and tokens[declaration_cursor]["kind"] == "identifier"
+                ):
+                    imported_name = cast(str, tokens[declaration_cursor]["value"])
+                end = _find_decl_end(tokens, cursor)
+            else:
+                if (
+                    tokens[cursor]["kind"] == "identifier"
+                    and cursor + 1 < len(tokens)
+                    and tokens[cursor + 1]["value"] == ";"
+                ):
+                    imported_name = cast(str, tokens[cursor]["value"])
+                end = _find_statement_end(tokens, cursor)
+            rows.append(
+                _export_observation_row(
+                    path=path,
+                    content=content,
+                    offsets=offsets,
+                    start_token=export_token,
+                    end_token=tokens[end],
+                    syntax_kind="default_export",
+                    exported_name="default",
+                    role="value",
+                    reexport=False,
+                    imported_name=imported_name,
+                )
+            )
+            position = end + 1
+            continue
+        declaration = cast(str, tokens[cursor]["value"])
+        type_name_direct = role == "type" and tokens[cursor]["kind"] == "identifier"
+        if type_name_direct:
+            declaration = "type"
+        if declaration in {"const", "let", "var", "function", "class", "type", "interface"}:
+            declaration_cursor = cursor if type_name_direct else cursor + 1
+            if (
+                declaration in {"function", "class"}
+                and declaration_cursor < len(tokens)
+                and tokens[declaration_cursor]["value"] == "*"
+            ):
+                declaration_cursor += 1
+            assert declaration_cursor < len(tokens)
+            declared_name = cast(str, tokens[declaration_cursor]["value"])
+            assert tokens[declaration_cursor]["kind"] == "identifier"
+            assert _is_export_identifier(declared_name)
+            end = (
+                _find_decl_end(tokens, cursor)
+                if declaration in {"function", "class", "type", "interface"}
+                else _find_statement_end(tokens, cursor)
+            )
+            rows.append(
+                _export_observation_row(
+                    path=path,
+                    content=content,
+                    offsets=offsets,
+                    start_token=export_token,
+                    end_token=tokens[end],
+                    syntax_kind="type_export"
+                    if role == "type" or declaration in {"type", "interface"}
+                    else "named_export",
+                    exported_name=declared_name,
+                    role="type"
+                    if role == "type" or declaration in {"type", "interface"}
+                    else "value",
+                    reexport=False,
+                    imported_name=declared_name,
+                )
+            )
+            position = end + 1
+            continue
+        raise AssertionError(f"unsupported export syntax: {declaration}")
+    return rows
+
+
 def scan_export_syntax_census() -> list[dict[str, Any]]:
-    """Derive a closed export syntax census from fixture bytes, never from model rows."""
+    """Derive the closed export grammar census from immutable UTF-8 bytes."""
 
     rows: list[dict[str, Any]] = []
     for fixture in load_export_census_fixture():
-        path = cast(str, fixture["path"])
-        content = cast(bytes, fixture["content"])
-        offset = 0
-        for line in content.splitlines(keepends=True):
-            statement_bytes = line.rstrip(b"\r\n")
-            statement = statement_bytes.decode("utf-8")
-            match = re.fullmatch(rf"export[ \t]+default[ \t]+({_IDENTIFIER_RE})[ \t]*;?", statement)
-            syntax_kind = "default_export"
-            exported_name = "default"
-            role = "value"
-            reexport = False
-            star = False
-            if match is None:
-                match = re.fullmatch(
-                    rf"export[ \t]+(?:const|let|var|function|class)[ \t]+({_IDENTIFIER_RE})(?:.*)?",
-                    statement,
-                )
-                syntax_kind = "named_export"
-                exported_name = match.group(1) if match is not None else ""
-            if match is None:
-                match = re.fullmatch(
-                    rf"export[ \t]+(?:type|interface)[ \t]+({_IDENTIFIER_RE})(?:.*)?",
-                    statement,
-                )
-                syntax_kind = "type_export"
-                exported_name = match.group(1) if match is not None else ""
-                role = "type"
-            if match is None:
-                match = re.fullmatch(
-                    r"export[ \t]+\*[ \t]+from[ \t]+(?:\"[^\"\n]+\"|'[^'\n]+')[ \t]*;?",
-                    statement,
-                )
-                syntax_kind = "export_all"
-                exported_name = "*"
-                role = "value"
-                reexport = True
-                star = True
-            if match is None:
-                match = re.fullmatch(
-                    rf"export[ \t]+\{{[ \t]*({_IDENTIFIER_RE})"
-                    rf"(?:[ \t]+as[ \t]+({_IDENTIFIER_RE}|default))?"
-                    r"[ \t]*\}[ \t]+from[ \t]+(?:\"[^\"\n]+\"|'[^'\n]+')[ \t]*;?",
-                    statement,
-                )
-                syntax_kind = "reexport"
-                exported_name = (
-                    match.group(2)
-                    if match is not None and match.group(2)
-                    else match.group(1)
-                    if match is not None
-                    else ""
-                )
-                role = "value"
-                reexport = True
-            if match is not None and exported_name:
-                byte_start = offset
-                byte_end = offset + len(statement_bytes)
-                token_identity = digest(
-                    {
-                        "owner_file_path": path,
-                        "byte_start": byte_start,
-                        "byte_end": byte_end,
-                        "token_bytes_sha256": hashlib.sha256(statement_bytes).hexdigest(),
-                    }
-                )
-                rows.append(
-                    {
-                        "owner_file_path": path,
-                        "byte_start": byte_start,
-                        "byte_end": byte_end,
-                        "token_identity": token_identity,
-                        "syntax_identity": (
-                            f"export:{path}:{byte_start}:{byte_end}:{syntax_kind}:{exported_name}"
-                        ),
-                        "syntax_kind": syntax_kind,
-                        "exported_name": exported_name,
-                        "role": role,
-                        "reexport": reexport,
-                        "star": star,
-                    }
-                )
-            offset += len(line)
+        rows.extend(_scan_export_file(cast(str, fixture["path"]), cast(bytes, fixture["content"])))
     rows.sort(key=canonical_json_bytes)
     assert len({row["token_identity"] for row in rows}) == len(rows)
+    assert len({row["syntax_identity"] for row in rows}) == len(rows)
     return rows
 
 
@@ -660,23 +1168,175 @@ def project_config_digest(project: dict[str, Any]) -> str:
     )
 
 
-def source_plan_digest(config_or_request: dict[str, Any]) -> str:
-    """Recompute the source-plan digest from the closed config projection."""
+def _source_plan_projects(config_or_request: dict[str, Any]) -> list[dict[str, Any]]:
+    """Canonicalize project roots for the input/config/source-plan surface."""
 
-    projects = config_or_request["projects"]
-    return digest(
-        {
-            "schema": "code-structure-viz.source-acquisition-plan/next/v1",
-            "version": SOURCE_PLAN_VERSION,
-            "projects": projects,
-            "program_suffixes": SOURCE_PLAN_PROGRAM_SUFFIXES,
-            "context_suffixes": SOURCE_PLAN_CONTEXT_SUFFIXES,
-            "control_paths": SOURCE_PLAN_CONTROL_PATHS,
-            "hard_exclusions": SOURCE_PLAN_HARD_EXCLUSIONS,
-            "limits": config_or_request["limits"],
-            "trusted_type_environment_digest": config_or_request["trusted_environment_digest"],
-        }
+    return sorted(
+        copy.deepcopy(config_or_request["projects"]),
+        key=lambda project: canonical_json_bytes(unicodedata.normalize("NFC", project["root"])),
     )
+
+
+def source_plan_descriptor(
+    config_or_request: dict[str, Any],
+    *,
+    resolved_control_paths: list[dict[str, Any]] | None = None,
+    local_extends: list[dict[str, Any]] | None = None,
+    file_role_map: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build the closed, reproducible SourceAcquisitionPlan/v1 descriptor."""
+
+    if (
+        "source_plan" in config_or_request
+        and resolved_control_paths is None
+        and local_extends is None
+        and file_role_map is None
+    ):
+        existing = cast(dict[str, Any], copy.deepcopy(config_or_request["source_plan"]))
+        _validate_source_plan_descriptor(existing)
+        return existing
+
+    projects = _source_plan_projects(config_or_request)
+    default_control_paths = [
+        {
+            "project_root": project["root"],
+            "path": (path if project["root"] == "." else f"{project['root'].rstrip('/')}/{path}"),
+        }
+        for project in projects
+        for path in SOURCE_PLAN_CONTROL_PATHS
+    ]
+    default_file_role_map = [
+        {
+            **file_role,
+            "project_root": project["root"],
+            "path": (
+                file_role["path"]
+                if project["root"] == "."
+                else f"{project['root'].rstrip('/')}/{file_role['path']}"
+            ),
+        }
+        for project in projects
+        for file_role in SOURCE_PLAN_FILE_ROLE_MAP
+    ]
+    descriptor = {
+        "schema": "code-structure-viz.source-acquisition-plan/next/v1",
+        "version": SOURCE_PLAN_VERSION,
+        "projects": projects,
+        "resolved_control_paths": sorted(
+            copy.deepcopy(
+                resolved_control_paths
+                if resolved_control_paths is not None
+                else [
+                    *default_control_paths,
+                ]
+            ),
+            key=canonical_json_bytes,
+        ),
+        "local_extends": sorted(copy.deepcopy(local_extends or []), key=canonical_json_bytes),
+        "file_role_map": sorted(
+            copy.deepcopy(file_role_map if file_role_map is not None else default_file_role_map),
+            key=canonical_json_bytes,
+        ),
+        "program_suffixes": list(SOURCE_PLAN_PROGRAM_SUFFIXES),
+        "context_suffixes": list(SOURCE_PLAN_CONTEXT_SUFFIXES),
+        "hard_exclusions": sorted(SOURCE_PLAN_HARD_EXCLUSIONS),
+        "limits": copy.deepcopy(config_or_request["limits"]),
+        "trusted_environment_digest": config_or_request["trusted_environment_digest"],
+    }
+    _validate_source_plan_descriptor(descriptor)
+    return descriptor
+
+
+def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
+    assert set(descriptor) == {
+        "schema",
+        "version",
+        "projects",
+        "resolved_control_paths",
+        "local_extends",
+        "file_role_map",
+        "program_suffixes",
+        "context_suffixes",
+        "hard_exclusions",
+        "limits",
+        "trusted_environment_digest",
+    }
+    assert descriptor["schema"] == "code-structure-viz.source-acquisition-plan/next/v1"
+    assert descriptor["version"] == SOURCE_PLAN_VERSION
+    assert descriptor["projects"] == _source_plan_projects({"projects": descriptor["projects"]})
+    project_roots = {project["root"] for project in descriptor["projects"]}
+    for project in descriptor["projects"]:
+        _assert_path(project["root"])
+        assert project["source_roots"] == sorted(set(project["source_roots"]))
+        for source_root in project["source_roots"]:
+            _assert_path(source_root)
+            assert _under(source_root, project["root"])
+        if project["config_path"] is not None:
+            _assert_path(project["config_path"])
+            assert _under(project["config_path"], project["root"])
+    assert descriptor["resolved_control_paths"] == sorted(
+        descriptor["resolved_control_paths"], key=canonical_json_bytes
+    )
+    for control_path in descriptor["resolved_control_paths"]:
+        assert set(control_path) == {"project_root", "path"}
+        assert control_path["project_root"] in project_roots
+        _assert_path(control_path["project_root"])
+        _assert_path(control_path["path"])
+        assert _under(control_path["path"], control_path["project_root"])
+    assert descriptor["local_extends"] == sorted(
+        descriptor["local_extends"], key=canonical_json_bytes
+    )
+    for local_extend in descriptor["local_extends"]:
+        assert set(local_extend) == {"project_root", "config_path", "extends"}
+        assert local_extend["project_root"] in project_roots
+        _assert_path(local_extend["project_root"])
+        _assert_path(local_extend["config_path"])
+        assert _under(local_extend["config_path"], local_extend["project_root"])
+        assert local_extend["extends"] == sorted(set(local_extend["extends"]))
+        for extend in local_extend["extends"]:
+            _assert_path(extend)
+            assert _under(extend, local_extend["project_root"])
+    assert descriptor["file_role_map"] == sorted(
+        descriptor["file_role_map"], key=canonical_json_bytes
+    )
+    role_keys: list[tuple[str, str]] = []
+    for file_role in descriptor["file_role_map"]:
+        assert set(file_role) == {"project_root", "path", "roles", "effective_role"}
+        assert file_role["project_root"] in project_roots
+        _assert_path(file_role["project_root"])
+        _assert_path(file_role["path"])
+        assert _under(file_role["path"], file_role["project_root"])
+        assert file_role["roles"]
+        assert file_role["roles"] == sorted(set(file_role["roles"]), key=ROLE_ORDER.__getitem__)
+        assert set(file_role["roles"]) <= set(ROLES)
+        assert file_role["effective_role"] == max(
+            file_role["roles"], key=ROLE_PRECEDENCE.__getitem__
+        )
+        role_keys.append((file_role["project_root"], file_role["path"]))
+    assert len(role_keys) == len(set(role_keys))
+    assert descriptor["program_suffixes"] == list(SOURCE_PLAN_PROGRAM_SUFFIXES)
+    assert descriptor["context_suffixes"] == list(SOURCE_PLAN_CONTEXT_SUFFIXES)
+    assert descriptor["hard_exclusions"] == sorted(SOURCE_PLAN_HARD_EXCLUSIONS)
+    validate_limits(descriptor["limits"])
+    assert re.fullmatch(r"[0-9a-f]{64}", descriptor["trusted_environment_digest"])
+
+
+def source_plan_digest(config_or_request: dict[str, Any]) -> str:
+    """Hash every resolved SourceAcquisitionPlan field, never a partial proxy."""
+
+    descriptor = config_or_request.get("source_plan")
+    if descriptor is None:
+        descriptor = source_plan_descriptor(config_or_request)
+    else:
+        descriptor = copy.deepcopy(descriptor)
+        _validate_source_plan_descriptor(descriptor)
+        assert descriptor["projects"] == _source_plan_projects(config_or_request)
+        assert descriptor["limits"] == config_or_request["limits"]
+        assert (
+            descriptor["trusted_environment_digest"]
+            == config_or_request["trusted_environment_digest"]
+        )
+    return digest(descriptor)
 
 
 def _without(value: dict[str, Any], key: str) -> dict[str, Any]:
@@ -784,7 +1444,12 @@ def validate_request_envelope(request: dict[str, Any]) -> None:
     validate_encoded_stdin_size(request)
 
 
-def validate_response_envelope(response: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+def validate_response_envelope(
+    response: dict[str, Any],
+    request: dict[str, Any],
+    *,
+    original_outcome: str = "complete",
+) -> dict[str, Any]:
     assert response["protocol"] == request["protocol"] == "code-structure-viz.next-adapter/v1"
     assert response["request_id"] == request["request_id"]
     assert response["adapter_version"] == request["adapter_version"]
@@ -802,7 +1467,9 @@ def validate_response_envelope(response: dict[str, Any], request: dict[str, Any]
     )
     validate_limits_consistency(request["limits"], response["limits"])
     model = response["model"]
-    assert model["projects"] == request["projects"]
+    assert sorted(model["projects"], key=lambda project: project["id"]) == sorted(
+        request["projects"], key=lambda project: canonical_json_bytes(project["root"])
+    )
     request_files = [
         {key: item for key, item in file_record.items() if key != "content_base64"}
         for file_record in request["files"]
@@ -813,7 +1480,11 @@ def validate_response_envelope(response: dict[str, Any], request: dict[str, Any]
         max_model_records=request["limits"]["max_model_records"],
     )
     validate_proof(response["proof"], model, request_targets=request["targets"])
-    return entity_budget_gate(actual_entities, request["limits"]["max_entities"])
+    return entity_budget_gate(
+        actual_entities,
+        request["limits"]["max_entities"],
+        original_outcome=original_outcome,
+    )
 
 
 def recompute_run_fingerprint(
@@ -882,15 +1553,20 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
         assert value["toolchain"]["node_version"] is not None
     if value["status"] == "complete":
         allowed_outcomes = {"complete"}
+        assert value["budget"]["outcome"] == "complete"
     elif value["status"] == "not_applicable":
         allowed_outcomes = {"not_applicable"}
+        assert value["budget"]["outcome"] == "not_applicable"
     else:
         allowed_outcomes = {value["incomplete_kind"]}
+        assert value["budget"]["outcome"] == value["incomplete_kind"]
     assert {diagnostic["outcome"] for diagnostic in value["diagnostics"]} <= allowed_outcomes
     assert value["config"]["trusted_environment_digest"] == value["trusted_environment"]["sha256"]
     assert value["config"]["domain_config_digest"] == resolved_config_digest(value["config"])
     assert value["config"]["domain_config_digest"] == value["domain_config_digest"]
     assert value["config"]["source_plan_digest"] == value["source_plan_digest"]
+    assert value["config"]["source_plan"] == source_plan_descriptor(value["config"])
+    assert value["request"]["source_plan"] == value["config"]["source_plan"]
     assert value["config"]["source_plan_digest"] == source_plan_digest(value["config"])
     project_records = _assert_sorted_unique(value["projects"], "projects")
     roots: list[tuple[str, str]] = []
@@ -916,15 +1592,18 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
     assert value["source"]["file_count"] == sum(
         len(project["file_ids"]) for project in value["projects"]
     )
-    expected_config_projects = [
-        {
-            "root": project["root"],
-            "source_roots": project["source_roots"],
-            "config_path": project["config_path"],
-            "compiler_options": project["compiler_options"],
-        }
-        for project in value["projects"]
-    ]
+    expected_config_projects = sorted(
+        [
+            {
+                "root": project["root"],
+                "source_roots": project["source_roots"],
+                "config_path": project["config_path"],
+                "compiler_options": project["compiler_options"],
+            }
+            for project in value["projects"]
+        ],
+        key=lambda project: canonical_json_bytes(project["root"]),
+    )
     assert value["config"]["projects"] == expected_config_projects
     assert value["request"]["projects"] == expected_config_projects
     assert value["request"]["targets"] == value["targets"]
@@ -1070,25 +1749,124 @@ def entity_budget_allowed(measured: int, resolved: int) -> bool:
     return measured >= 0 and resolved >= 1 and measured <= resolved
 
 
-def entity_budget_gate(measured: int, resolved: int) -> dict[str, Any]:
-    """Compose a valid model's publication decision at the entity boundary."""
+def entity_budget_gate(
+    measured: int,
+    resolved: int,
+    *,
+    original_outcome: str = "complete",
+) -> dict[str, Any]:
+    """Compose the entity gate without upgrading a pre-budget outcome.
 
+    ``original_outcome`` is derived before the publication gate (for example
+    ``partial_safe`` when a bounded type traversal lost detail).  The gate is
+    allowed to make a payload unavailable, but it must never turn a safe
+    partial result into a complete result merely because the entity count fits.
+    """
+
+    assert original_outcome in {"complete", "partial_safe"}
     allowed = entity_budget_allowed(measured, resolved)
+    outcome = original_outcome if allowed else "payload_unavailable"
     return {
         "actual": measured,
         "resolved": resolved,
         "allowed": allowed,
         "payload_available": allowed,
-        "outcome": "complete" if allowed else "payload_unavailable",
+        "original_outcome": original_outcome,
+        "outcome": outcome,
         "diagnostic_code": None if allowed else "CSV-NEXT-LIMIT-005",
-        "artifact_paths": ["next.snapshot.semantic.json", "next.snapshot.puml"] if allowed else [],
+        "artifact_paths": (
+            ["next.snapshot.semantic.json", "next.snapshot.puml"] if allowed else []
+        ),
     }
 
 
-def compose_entity_budget_outcome(measured: int, resolved: int) -> dict[str, Any]:
+def compose_entity_budget_outcome(
+    measured: int,
+    resolved: int,
+    *,
+    original_outcome: str = "complete",
+) -> dict[str, Any]:
     """Return the manifest-facing status fields produced by EntityBudgetGate."""
 
-    return entity_budget_gate(measured, resolved)
+    return entity_budget_gate(measured, resolved, original_outcome=original_outcome)
+
+
+def total_array_items_allowed(measured: int, resolved: int) -> bool:
+    """Apply the aggregate JSON-array item boundary without materialization."""
+
+    return 0 <= measured <= resolved
+
+
+def count_array_items_before_materialization(
+    array_lengths: list[int],
+    *,
+    max_array_items: int = LIMIT_DEFAULTS["max_array_items"],
+    max_total_array_items: int = LIMIT_DEFAULTS["max_total_array_items"],
+) -> dict[str, Any]:
+    """Count nested arrays incrementally and stop before an over-limit append."""
+
+    total = 0
+    for index, length in enumerate(array_lengths):
+        assert length >= 0
+        if length > max_array_items:
+            return {
+                "allowed": False,
+                "total": total + length,
+                "failed_at": index,
+                "reason": "max_array_items",
+            }
+        total += length
+        if not total_array_items_allowed(total, max_total_array_items):
+            return {
+                "allowed": False,
+                "total": total,
+                "failed_at": index,
+                "reason": "max_total_array_items",
+            }
+    return {"allowed": True, "total": total, "failed_at": None, "reason": None}
+
+
+def capture_adapter_stderr(
+    chunks: list[bytes],
+    *,
+    limit: int = LIMIT_DEFAULTS["max_adapter_stderr_capture_bytes"],
+) -> dict[str, Any]:
+    """Model bounded adapter stderr capture and disposal semantics.
+
+    The caller supplies already-read chunks; the counter is byte-based and
+    increments before retaining a chunk.  A breach terminates the process
+    group and disposes both raw and partial stderr, so no adapter text can
+    reach public diagnostics.
+    """
+
+    assert limit >= 1
+    captured = 0
+    for chunk_index, chunk in enumerate(chunks):
+        assert isinstance(chunk, bytes)
+        captured += len(chunk)
+        if captured > limit:
+            return {
+                "allowed": False,
+                "captured_bytes": captured,
+                "failed_at": chunk_index,
+                "process_group_terminated": True,
+                "raw_disposed": True,
+                "partial_disposed": True,
+                "diagnostic_code": "CSV-NEXT-LIMIT-003",
+                "outcome": "payload_unavailable",
+                "manifest_stderr_bytes": 0,
+            }
+    return {
+        "allowed": True,
+        "captured_bytes": captured,
+        "failed_at": None,
+        "process_group_terminated": False,
+        "raw_disposed": False,
+        "partial_disposed": False,
+        "diagnostic_code": None,
+        "outcome": "complete",
+        "manifest_stderr_bytes": 0,
+    }
 
 
 def model_record_budget_allowed(measured: int, limit: int) -> bool:
@@ -2539,10 +3317,10 @@ def validate_request_files(request: dict[str, Any]) -> None:
     _assert_target_keys(request["targets"])
     assert len(request["files"]) <= LIMIT_DEFAULTS["max_files"]
     project_ids = [project["id"] for project in request["projects"]]
-    assert project_ids == sorted(project_ids)
     assert len(project_ids) == len(set(project_ids))
     assert all(_id_kind(project_id) == "project" for project_id in project_ids)
     roots = [(project["root"], project["id"]) for project in request["projects"]]
+    assert roots == sorted(roots, key=lambda item: canonical_json_bytes(item[0]))
     for index, (root, project_id) in enumerate(roots):
         assert request["projects"][index]["kind"] == "project"
         assert request["projects"][index]["config_digest"] == project_config_digest(
@@ -2598,8 +3376,198 @@ def validate_request_files(request: dict[str, Any]) -> None:
         assert project["file_ids"] == sorted(files_by_project[project["id"]])
 
 
+def _resolve_export_source_path(owner_path: str, source_specifier: str) -> str | None:
+    """Resolve only the closed relative source specifier grammar."""
+
+    if not source_specifier.startswith("."):
+        return None
+    owner_directory = owner_path.rsplit("/", 1)[0] if "/" in owner_path else ""
+    candidate = f"{owner_directory}/{source_specifier}" if owner_directory else source_specifier
+    parts: list[str] = []
+    for part in candidate.split("/"):
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not parts:
+                return None
+            parts.pop()
+        else:
+            parts.append(part)
+    return "/".join(parts)
+
+
+def recompute_export_graph_case(case: dict[str, Any]) -> dict[str, Any]:
+    """Recompute re-export closure from frozen module declarations and edges.
+
+    This resolver is deliberately independent of ``ExportBinding``.  It
+    resolves explicit aliases, expands stars (excluding ``default``), and
+    converts cycles or duplicate star names into an ``unknown`` result.  The
+    returned witness is deterministic and is suitable for exact comparison
+    with an adapter's graph observation.
+    """
+
+    modules = {module["path"]: module for module in case["modules"]}
+    edges_by_owner: dict[str, list[dict[str, Any]]] = {path: [] for path in modules}
+    for edge in case["edges"]:
+        edges_by_owner[edge["owner_file_path"]].append(edge)
+    for edges in edges_by_owner.values():
+        edges.sort(key=canonical_json_bytes)
+
+    def resolve_source(owner_path: str, source_specifier: str) -> str | None:
+        candidate = _resolve_export_source_path(owner_path, source_specifier)
+        if candidate is None:
+            return None
+        for suffix in ("", ".ts", ".tsx", ".js", ".jsx"):
+            path = candidate if suffix == "" else candidate + suffix
+            if path in modules:
+                return path
+        return None
+
+    cycles: set[tuple[str, str]] = set()
+    conflicts: set[tuple[str, str]] = set()
+
+    def unknown(source_path: str | None, reason: str) -> dict[str, Any]:
+        return {
+            "source_file_path": source_path,
+            "expanded_exported_name": None,
+            "target_declaration_key": None,
+            "resolution": "unknown",
+            "reason": reason,
+        }
+
+    def module_exports(
+        module_path: str,
+        active_symbols: set[tuple[str, str]],
+        active_modules: set[str],
+    ) -> dict[str, dict[str, Any]]:
+        if module_path in active_modules:
+            cycles.add((module_path, "*"))
+            return {}
+        module = modules[module_path]
+        candidates: dict[str, list[dict[str, Any]]] = {}
+        for direct in module["exports"]:
+            candidates.setdefault(direct["name"], []).append(
+                {
+                    "source_file_path": module_path,
+                    "expanded_exported_name": direct["name"],
+                    "target_declaration_key": direct["target_declaration_key"],
+                    "resolution": direct["resolution"],
+                    "reason": None,
+                }
+            )
+        next_modules = active_modules | {module_path}
+        for edge in edges_by_owner[module_path]:
+            source_path = resolve_source(module_path, edge["source_specifier"])
+            if source_path is None:
+                if edge["imported_name"] == "*":
+                    candidates.setdefault("*", []).append(unknown(None, "missing_source"))
+                else:
+                    candidates.setdefault(edge["exported_name"], []).append(
+                        unknown(None, "missing_source")
+                    )
+                continue
+            if edge["imported_name"] == "*":
+                source_exports = module_exports(source_path, active_symbols, next_modules)
+                for name, candidate in source_exports.items():
+                    if name != "default":
+                        candidates.setdefault(name, []).append(candidate)
+                continue
+            symbol = (source_path, edge["imported_name"])
+            if symbol in active_symbols:
+                cycles.add(symbol)
+                candidate = unknown(source_path, "cycle")
+            else:
+                source_exports = module_exports(
+                    source_path,
+                    active_symbols | {(module_path, edge["exported_name"])},
+                    next_modules,
+                )
+                resolved_candidate = source_exports.get(edge["imported_name"])
+                if resolved_candidate is None:
+                    resolved_candidate = unknown(source_path, "missing_export")
+                candidate = resolved_candidate
+            candidates.setdefault(edge["exported_name"], []).append(candidate)
+
+        resolved: dict[str, dict[str, Any]] = {}
+        for name, candidate_list in candidates.items():
+            if name == "*":
+                continue
+            if len(candidate_list) != 1:
+                conflicts.add((module_path, name))
+                resolved[name] = unknown(module_path, "conflict")
+            else:
+                resolved[name] = candidate_list[0]
+        return resolved
+
+    tables = {path: module_exports(path, set(), set()) for path in sorted(modules)}
+    witnesses: list[dict[str, Any]] = []
+    for edge in case["edges"]:
+        owner = edge["owner_file_path"]
+        source_path = resolve_source(owner, edge["source_specifier"])
+        owner_exports = tables[owner]
+        expanded_names: list[str | None]
+        if edge["imported_name"] == "*":
+            expanded_names = cast(
+                list[str | None],
+                sorted(
+                    name
+                    for name in (tables[source_path] if source_path is not None else {})
+                    if name != "default"
+                ),
+            )
+            if not expanded_names:
+                expanded_names = [None]
+        else:
+            expanded_names = [edge["exported_name"]]
+        for expanded_name in expanded_names:
+            result = (
+                owner_exports.get(expanded_name)
+                if expanded_name is not None
+                else unknown(source_path, "missing_source")
+            )
+            if result is None:
+                result = unknown(source_path, "missing_export")
+            witness = {
+                "owner_file_path": owner,
+                "source_specifier": edge["source_specifier"],
+                "imported_name": edge["imported_name"],
+                "exported_name": expanded_name,
+                "resolved_source_file_path": source_path,
+                "expanded_exported_name": result["expanded_exported_name"],
+                "target_declaration_key": result["target_declaration_key"],
+                "resolution": result["resolution"],
+                "diagnostic": result["reason"],
+            }
+            witnesses.append(witness)
+    return {
+        "exports": [
+            {
+                "module_file_path": path,
+                "exported_name": name,
+                **table[name],
+            }
+            for path, table in tables.items()
+            for name in sorted(table)
+        ],
+        "witnesses": sorted(witnesses, key=canonical_json_bytes),
+        "cycles": [
+            {"module_file_path": path, "exported_name": name} for path, name in sorted(cycles)
+        ],
+        "conflicts": [
+            {"module_file_path": path, "exported_name": name} for path, name in sorted(conflicts)
+        ],
+    }
+
+
+def _reexport_graph_index() -> dict[tuple[str, str, str], dict[str, Any]]:
+    return {
+        (edge["owner_file_path"], edge["source_specifier"], edge["imported_name"]): edge
+        for edge in load_export_graph_fixture()
+    }
+
+
 def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
-    """Bind frozen source syntax rows to model modules without reading bindings."""
+    """Bind frozen source syntax rows to modules and a separate graph witness."""
 
     files_by_path = {(file["project_id"], file["path"]): file for file in model["files"]}
     modules_by_path = {module["path"]: module for module in model["modules"]}
@@ -2620,39 +3588,86 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
         components_by_module.setdefault(component_record["module_id"], []).append(component_record)
     for components in components_by_module.values():
         components.sort(key=canonical_json_bytes)
+    graph = _reexport_graph_index()
 
     observations: list[dict[str, Any]] = []
     for syntax in scan_export_syntax_census():
         module = modules_by_path.get(syntax["owner_file_path"])
         if module is None:
-            # Context/control fixture bytes are intentionally scanned but have
-            # no semantic Module owner and therefore no export observation.
+            # Context/control and grammar-only fixtures are scanned but do not
+            # acquire semantic Module ownership.
             continue
         candidates = components_by_module.get(module["id"], [])
+        graph_edge = (
+            graph.get(
+                (
+                    syntax["owner_file_path"],
+                    syntax["source_specifier"],
+                    syntax["imported_name"],
+                )
+            )
+            if syntax["reexport"]
+            else None
+        )
+        source_path = (
+            graph_edge["resolved_source_file_path"]
+            if graph_edge is not None
+            else _resolve_export_source_path(syntax["owner_file_path"], syntax["source_specifier"])
+            if syntax["source_specifier"] is not None
+            else None
+        )
+        source_module = modules_by_path.get(source_path) if source_path is not None else module
+        source_components = (
+            components_by_module.get(source_module["id"], []) if source_module else []
+        )
+        declaration_key = (
+            graph_edge["target_declaration_key"]
+            if graph_edge is not None
+            else syntax["imported_name"]
+            if syntax["imported_name"] not in {None, "*", "default"}
+            else syntax["exported_name"]
+        )
         component: dict[str, Any] | None = None
         if syntax["role"] == "value" and not syntax["star"]:
-            if syntax["exported_name"] == "default" and len(candidates) == 1:
+            component = next(
+                (
+                    candidate
+                    for candidate in source_components
+                    if candidate["declaration_key"] == declaration_key
+                ),
+                None,
+            )
+            if (
+                component is None
+                and syntax["exported_name"] == "default"
+                and source_module is module
+                and len(candidates) == 1
+            ):
                 component = candidates[0]
-            else:
-                component = next(
-                    (
-                        candidate
-                        for candidate in candidates
-                        if candidate["declaration_key"] == syntax["exported_name"]
-                    ),
-                    None,
-                )
-        resolution = (
-            "component"
-            if component is not None
-            else ("type" if syntax["role"] == "type" else "unknown" if syntax["star"] else "value")
-        )
+        if graph_edge is not None:
+            resolution = graph_edge["resolution"]
+            expanded_name = graph_edge["expanded_exported_name"]
+        else:
+            resolution = (
+                "component"
+                if component is not None
+                else "type"
+                if syntax["role"] == "type"
+                else "unknown"
+                if syntax["star"]
+                else "value"
+            )
+            expanded_name = None if syntax["star"] else syntax["exported_name"]
+        target_component_id = component["id"] if resolution == "component" and component else None
         observations.append(
             {
                 "owner_module_id": module["id"],
                 **syntax,
                 "resolution": resolution,
-                "component_id": component["id"] if component is not None else None,
+                "component_id": target_component_id,
+                "target_declaration_id": target_component_id,
+                "resolved_source_module_id": source_module["id"] if source_module else None,
+                "expanded_exported_name": expanded_name,
             }
         )
     observations.sort(key=canonical_json_bytes)
@@ -2685,6 +3700,28 @@ def expected_export_resolution_witness(model: dict[str, Any]) -> list[dict[str, 
         )
     witnesses.sort(key=canonical_json_bytes)
     return witnesses
+
+
+def expected_export_reexport_witness(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Derive remote re-export identity from the frozen source/module graph."""
+
+    observations = _export_census_for_model(model)
+    return sorted(
+        [
+            {
+                "syntax_identity": observation["syntax_identity"],
+                "source_specifier": observation["source_specifier"],
+                "imported_name": observation["imported_name"],
+                "resolved_source_module_id": observation["resolved_source_module_id"],
+                "expanded_exported_name": observation["expanded_exported_name"],
+                "target_declaration_id": observation["target_declaration_id"],
+                "resolution": observation["resolution"],
+            }
+            for observation in observations
+            if observation["reexport"]
+        ],
+        key=canonical_json_bytes,
+    )
 
 
 def expected_export_observations(model: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2747,8 +3784,13 @@ def validate_export_observations(observations: list[dict[str, Any]], model: dict
         "role",
         "reexport",
         "star",
+        "source_specifier",
+        "imported_name",
         "resolution",
         "component_id",
+        "target_declaration_id",
+        "resolved_source_module_id",
+        "expanded_exported_name",
     )
     assert [
         tuple(observation[field] for field in syntax_fields) for observation in observations
@@ -2774,8 +3816,8 @@ def validate_export_observations(observations: list[dict[str, Any]], model: dict
             assert observation["resolution"] == "unknown"
             assert observation["component_id"] is None
         else:
-            assert observation["exported_name"] == "default" or re.fullmatch(
-                r"[A-Za-z_$][A-Za-z0-9_$]*", observation["exported_name"]
+            assert observation["exported_name"] == "default" or _is_export_identifier(
+                observation["exported_name"], allow_default=True
             )
         assert (
             unicodedata.normalize("NFC", observation["exported_name"])
@@ -2783,6 +3825,25 @@ def validate_export_observations(observations: list[dict[str, Any]], model: dict
         )
         assert observation["role"] in {"value", "type"}
         assert isinstance(observation["reexport"], bool)
+        if observation["reexport"]:
+            assert observation["source_specifier"]
+            assert observation["imported_name"] is not None
+            assert (
+                observation["resolved_source_module_id"] is None
+                or observation["resolved_source_module_id"] in modules
+            )
+            assert (
+                observation["expanded_exported_name"] is None
+                or unicodedata.normalize("NFC", observation["expanded_exported_name"])
+                == observation["expanded_exported_name"]
+            )
+        else:
+            assert observation["source_specifier"] is None
+        assert observation["target_declaration_id"] == observation["component_id"]
+        assert (
+            observation["resolved_source_module_id"] is None
+            or observation["resolved_source_module_id"] in modules
+        )
         assert observation["syntax_identity"]
         assert (
             unicodedata.normalize("NFC", observation["syntax_identity"])
@@ -2960,6 +4021,7 @@ def validate_proof(
         observation["resolution"] == "type" for observation in proof["export_observations"]
     )
     assert proof["export_resolution_witness"] == expected_export_resolution_witness(model)
+    assert proof["export_reexport_witness"] == expected_export_reexport_witness(model)
 
     target_keys = [item["target_key"] for item in proof["target_resolutions"]]
     assert proof["target_resolutions"] == sorted(

@@ -1,5 +1,10 @@
 # Next semantic compatibility descriptor v1
 
+Round 9 review state: `review_status: fail` (P0=0, P1=7, P2=1). The
+identity/version contract is synchronized as data-only remediation; a fresh
+exact-SHA Strict review is pending, readiness is unconfirmed, and production
+implementation has not started.
+
 `code-structure-viz.next-semantic-compatibility/v1` is a closed descriptor,
 not a caller-supplied label. It contains the public semantic schema ID, the
 eight identity versions (project, file, module, component, member, relation,

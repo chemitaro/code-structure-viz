@@ -68,7 +68,7 @@
       "maxLength": 4096,
       "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
     },
-    "identifier": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"},
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
     "identity_versions": {
       "type": "object",
       "additionalProperties": false,

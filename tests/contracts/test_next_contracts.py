@@ -32,22 +32,31 @@ from tests.contracts.next_reference_validation import (
     assert_limit_boundary,
     canonical_json_bytes,
     canonical_target_key,
+    capture_adapter_stderr,
+    count_array_items_before_materialization,
     derive_required_causal_edges,
     digest,
     encoded_request_bytes,
     entity_budget_allowed,
     entity_budget_gate,
     expected_export_observations,
+    expected_export_reexport_witness,
     expected_export_resolution_witness,
     internal_entity_count,
+    load_export_census_fixture,
+    load_export_graph_cases,
+    load_export_graph_fixture,
     model_record_budget_allowed,
     project_config_digest,
     recompute_compatibility_id,
+    recompute_export_graph_case,
     recompute_record_id,
     recompute_request_id,
     recompute_run_fingerprint,
     render_plantuml,
     resolve_target_resolutions,
+    scan_export_syntax_census,
+    source_plan_descriptor,
     validate_compatibility_descriptor,
     validate_domain_manifest,
     validate_encoded_stdin_size,
@@ -306,8 +315,14 @@ def _config_projection(
     targets: list[str] | None = None,
     formats: list[str] | None = None,
     source_plan_digest_value: str | None = None,
+    source_plan_file_role_map: list[dict[str, Any]] | None = None,
+    source_plan_local_extends: list[dict[str, Any]] | None = None,
+    source_plan_control_paths: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    config_projects = [_config_project(project) for project in (projects or [_project()])]
+    config_projects = sorted(
+        [_config_project(project) for project in (projects or [_project()])],
+        key=lambda project: canonical_json_bytes(project["root"]),
+    )
     projection: dict[str, Any] = {
         "schema": "code-structure-viz.domain-config/next/v1",
         "projects": config_projects,
@@ -320,6 +335,12 @@ def _config_projection(
         "source_plan_digest": "0" * 64,
         "domain_config_digest": "0" * 64,
     }
+    projection["source_plan"] = source_plan_descriptor(
+        projection,
+        resolved_control_paths=source_plan_control_paths,
+        local_extends=source_plan_local_extends,
+        file_role_map=source_plan_file_role_map,
+    )
     projection["source_plan_digest"] = source_plan_digest_value or recompute_source_plan_digest(
         projection
     )
@@ -352,6 +373,7 @@ def _snapshot_request(
         "formats": projection["formats"],
         "limits": projection["limits"],
         "trusted_environment_digest": projection["trusted_environment_digest"],
+        "source_plan": copy.deepcopy(projection["source_plan"]),
         "source_plan_digest": projection["source_plan_digest"],
         "domain_config_digest": projection["domain_config_digest"],
         "run_fingerprint": run_fingerprint,
@@ -706,6 +728,7 @@ def _complete_proof(model: dict[str, Any]) -> dict[str, Any]:
         "target_resolutions": [],
         "export_observations": expected_export_observations(model),
         "export_resolution_witness": expected_export_resolution_witness(model),
+        "export_reexport_witness": expected_export_reexport_witness(model),
         "excluded": [],
         "failed": [],
     }
@@ -878,6 +901,15 @@ def _domain(
             "resolved": 500,
             "actual": actual,
             "source": "builtin",
+            "outcome": (
+                "not_applicable"
+                if status == "not_applicable"
+                else "payload_unavailable"
+                if incomplete_kind == "payload_unavailable"
+                else "partial_safe"
+                if incomplete_kind == "partial_safe"
+                else "complete"
+            ),
         },
         "semantic_compatibility_id": descriptor["compatibility_id"],
         "compatibility_descriptor": descriptor,
@@ -1615,6 +1647,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         "resolved": 500,
         "allowed": True,
         "payload_available": True,
+        "original_outcome": "complete",
         "outcome": "complete",
         "diagnostic_code": None,
         "artifact_paths": ["next.snapshot.semantic.json", "next.snapshot.puml"],
@@ -1986,6 +2019,159 @@ def test_export_resolution_witness_uses_complete_source_census_and_coverage_only
     ]
     with pytest.raises(AssertionError):
         validate_proof(coordinated_proof, coordinated_model)
+
+
+def test_export_scanner_closes_unicode_bom_crlf_comments_and_reexport_forms() -> None:
+    fixtures = load_export_census_fixture()
+    assert any(item["content"].startswith(b"\xef\xbb\xbf") for item in fixtures)
+    rows = scan_export_syntax_census()
+    assert {row["syntax_kind"] for row in rows} == {
+        "default_export",
+        "named_export",
+        "type_export",
+        "reexport",
+        "export_all",
+    }
+    assert any(row["role"] == "type" and row["reexport"] for row in rows)
+    assert any(row["imported_name"] == "*" and row["star"] for row in rows)
+    assert len(load_export_graph_fixture()) == 4
+    unicode_row = next(row for row in rows if row["exported_name"] == "Unicode公開")
+    assert unicode_row["owner_file_path"] == "src/ExportGrammar.tsx"
+    assert unicode_row["byte_end"] > unicode_row["byte_start"]
+    assert (
+        unicode_row["byte_end"]
+        <= next(
+            item["content"] for item in fixtures if item["path"] == unicode_row["owner_file_path"]
+        ).__len__()
+    )
+    assert len({row["token_identity"] for row in rows}) == len(rows)
+    assert len({row["syntax_identity"] for row in rows}) == len(rows)
+
+
+def test_reexport_graph_recomputes_alias_star_cycle_and_conflict_witnesses() -> None:
+    cases = {case["name"]: case for case in load_export_graph_cases()}
+    assert set(cases) == {"alias", "conflict", "cycle", "star"}
+
+    alias = recompute_export_graph_case(cases["alias"])
+    alias_row = next(row for row in alias["exports"] if row["module_file_path"] == "src/index.ts")
+    assert alias_row == {
+        "module_file_path": "src/index.ts",
+        "exported_name": "Alias",
+        "source_file_path": "src/Button.tsx",
+        "expanded_exported_name": "Button",
+        "target_declaration_key": "Button",
+        "resolution": "component",
+        "reason": None,
+    }
+    assert alias["cycles"] == []
+    assert alias["conflicts"] == []
+
+    star = recompute_export_graph_case(cases["star"])
+    star_rows = [row for row in star["witnesses"] if row["owner_file_path"] == "src/index.ts"]
+    assert [row["exported_name"] for row in star_rows] == ["Card", "answer"]
+    assert {row["resolution"] for row in star_rows} == {"component", "value"}
+    assert all(row["exported_name"] != "default" for row in star_rows)
+
+    cycle = recompute_export_graph_case(cases["cycle"])
+    assert cycle["cycles"] == [
+        {"module_file_path": "src/a.ts", "exported_name": "Loop"},
+        {"module_file_path": "src/b.ts", "exported_name": "Loop"},
+    ]
+    assert all(row["resolution"] == "unknown" for row in cycle["witnesses"])
+    assert all(row["diagnostic"] == "cycle" for row in cycle["witnesses"])
+
+    conflict = recompute_export_graph_case(cases["conflict"])
+    assert conflict["conflicts"] == [
+        {"module_file_path": "src/index.ts", "exported_name": "Shared"}
+    ]
+    assert len(conflict["witnesses"]) == 2
+    assert all(row["resolution"] == "unknown" for row in conflict["witnesses"])
+    assert all(row["diagnostic"] == "conflict" for row in conflict["witnesses"])
+
+    # A submitted witness cannot replace the independent result with a
+    # component resolution, nor can it drop one of the two star edges.
+    mutated = copy.deepcopy(conflict["witnesses"])
+    mutated[0]["resolution"] = "component"
+    assert mutated != conflict["witnesses"]
+    assert len(conflict["witnesses"]) != 1
+
+
+def test_source_plan_descriptor_hashes_every_resolved_field_and_known_mutations() -> None:
+    config = _config_projection()
+    descriptor = config["source_plan"]
+    _validator("next-source-plan-v1.schema.json").validate(descriptor)
+    assert config["source_plan_digest"] == recompute_source_plan_digest(config)
+    for field in ("local_extends", "resolved_control_paths", "file_role_map"):
+        mutation = copy.deepcopy(config)
+        if field == "local_extends":
+            mutation["source_plan"][field] = [
+                {"project_root": ".", "config_path": "tsconfig.json", "extends": ["base.json"]}
+            ]
+        elif field == "resolved_control_paths":
+            mutation["source_plan"][field].append({"project_root": ".", "path": "vite.config.ts"})
+            mutation["source_plan"][field].sort(key=canonical_json_bytes)
+        else:
+            mutation["source_plan"][field][0]["roles"] = ["program"]
+            mutation["source_plan"][field][0]["effective_role"] = "program"
+            mutation["source_plan"][field].sort(key=canonical_json_bytes)
+        mutation["source_plan_digest"] = recompute_source_plan_digest(mutation)
+        assert mutation["source_plan_digest"] != config["source_plan_digest"]
+
+    # The remaining descriptor fields are closed v1 values, but they still
+    # belong to the digest preimage.  Hashing a valid descriptor-shaped
+    # mutation directly proves that no field is silently omitted from that
+    # preimage without relaxing the v1 fixed-value validator.
+    for field, replacement in (
+        (
+            "projects",
+            [
+                {
+                    **descriptor["projects"][0],
+                    "root": "workspace",
+                    "source_roots": ["workspace/src"],
+                    "config_path": "workspace/tsconfig.json",
+                }
+            ],
+        ),
+        ("program_suffixes", [".js", ".jsx", ".mjs", ".ts", ".tsx"]),
+        ("context_suffixes", [".d.ts", ".d.mts"]),
+        ("hard_exclusions", [*descriptor["hard_exclusions"], "vendor"]),
+        ("limits", {**descriptor["limits"], "max_flow_visits": 10001}),
+        ("trusted_environment_digest", "8" * 64),
+    ):
+        mutated_descriptor = copy.deepcopy(descriptor)
+        mutated_descriptor[field] = replacement
+        assert digest(mutated_descriptor) != digest(descriptor)
+
+
+def test_project_surface_order_is_root_path_while_semantic_records_remain_id_order() -> None:
+    first = _project()
+    first["root"] = "zeta"
+    first["source_roots"] = ["zeta/src"]
+    first["config_path"] = "zeta/tsconfig.json"
+    first["id"] = recompute_record_id(first)
+    first["config_digest"] = project_config_digest(first)
+    second = _project()
+    second["root"] = "alpha"
+    second["source_roots"] = ["alpha/src"]
+    second["config_path"] = "alpha/tsconfig.json"
+    second["id"] = recompute_record_id(second)
+    second["config_digest"] = project_config_digest(second)
+    assert [
+        project["root"] for project in sorted((first, second), key=lambda item: item["root"])
+    ] != [
+        project["root"] for project in sorted((first, second), key=lambda item: item["id"])
+    ]  # path order and ID order intentionally differ
+    config_a = _config_projection(projects=[first, second])
+    config_b = _config_projection(projects=[second, first])
+    assert [project["root"] for project in config_a["projects"]] == ["alpha", "zeta"]
+    assert config_a["projects"] == config_b["projects"]
+    assert config_a["source_plan_digest"] == config_b["source_plan_digest"]
+    assert config_a["domain_config_digest"] == config_b["domain_config_digest"]
+    assert [project["root"] for project in config_a["source_plan"]["projects"]] == [
+        "alpha",
+        "zeta",
+    ]
 
 
 def test_public_targets_are_path_only_and_resolve_frozen_file_or_directory_sets() -> None:
@@ -2654,6 +2840,7 @@ def test_direct_context_target_is_manifest_and_stdout_payload_unavailable() -> N
     domain["incomplete_kind"] = "payload_unavailable"
     domain["artifact_paths"] = []
     domain["budget"]["actual"] = None
+    domain["budget"]["outcome"] = "payload_unavailable"
     domain["diagnostics"] = [_public_diagnostic("CSV-NEXT-TARGET-001", path="src/types.d.ts")]
     validate_domain_manifest(domain)
     manifest = _run_manifest(domain)
@@ -2681,6 +2868,7 @@ def test_entity_budget_gate_composes_entity_and_model_record_boundaries() -> Non
         assert outcome["resolved"] == resolved
         assert outcome["allowed"] is allowed
         assert outcome["payload_available"] is allowed
+        assert outcome["original_outcome"] == "complete"
         assert outcome["outcome"] == ("complete" if allowed else "payload_unavailable")
         assert outcome["diagnostic_code"] == (None if allowed else "CSV-NEXT-LIMIT-005")
         assert outcome["artifact_paths"] == (
@@ -2688,6 +2876,51 @@ def test_entity_budget_gate_composes_entity_and_model_record_boundaries() -> Non
         )
     assert model_record_budget_allowed(100000, 100000)
     assert not model_record_budget_allowed(100001, 100000)
+
+
+def test_entity_budget_gate_preserves_partial_safe_and_overrun_is_unavailable() -> None:
+    partial = entity_budget_gate(500, 500, original_outcome="partial_safe")
+    assert partial["allowed"] is True
+    assert partial["payload_available"] is True
+    assert partial["original_outcome"] == "partial_safe"
+    assert partial["outcome"] == "partial_safe"
+    overridden = entity_budget_gate(501, 600, original_outcome="partial_safe")
+    assert overridden["allowed"] is True
+    assert overridden["outcome"] == "partial_safe"
+    overrun = entity_budget_gate(501, 500, original_outcome="partial_safe")
+    assert overrun["allowed"] is False
+    assert overrun["payload_available"] is False
+    assert overrun["outcome"] == "payload_unavailable"
+    assert overrun["original_outcome"] == "partial_safe"
+
+
+def test_array_and_adapter_stderr_limits_have_independent_incremental_boundaries() -> None:
+    aggregate_limit = 100000
+    assert count_array_items_before_materialization(
+        [50000, 50000], max_total_array_items=aggregate_limit
+    )["allowed"]
+    aggregate_overrun = count_array_items_before_materialization(
+        [50000, 50000, 1], max_total_array_items=aggregate_limit
+    )
+    assert aggregate_overrun == {
+        "allowed": False,
+        "total": 100001,
+        "failed_at": 2,
+        "reason": "max_total_array_items",
+    }
+    assert count_array_items_before_materialization(
+        [20000, 20000], max_array_items=20000, max_total_array_items=100000
+    )["allowed"]
+    capture_limit = 65536
+    assert capture_adapter_stderr([b"a" * capture_limit])["allowed"]
+    exceeded = capture_adapter_stderr([b"a" * capture_limit, b"b"])
+    assert exceeded["allowed"] is False
+    assert exceeded["captured_bytes"] == capture_limit + 1
+    assert exceeded["process_group_terminated"] is True
+    assert exceeded["raw_disposed"] is True
+    assert exceeded["partial_disposed"] is True
+    assert exceeded["manifest_stderr_bytes"] == 0
+    assert exceeded["diagnostic_code"] == "CSV-NEXT-LIMIT-003"
 
 
 def test_whole_run_validator_rejects_projection_and_artifact_mutations() -> None:
@@ -3091,6 +3324,13 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "stdout-all-selectors",
         "head-commit-known-lengths",
         "taint-boundary-closure",
+        "export-closed-tokenizer",
+        "export-reexport-graph-closure",
+        "entity-budget-outcome-preserving",
+        "adapter-stderr-capture-bound",
+        "array-aggregate-bound",
+        "source-acquisition-plan-v1",
+        "surface-order-by-domain",
     } <= set(fixture["positive"])
     assert {
         "cross-domain",
@@ -3123,4 +3363,13 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "runtime-member-byte-mutation",
         "runtime-attestation-mutation",
         "head-commit-invalid-length",
+        "export-syntax-omission",
+        "export-syntax-mutation",
+        "reexport-cycle",
+        "reexport-conflict",
+        "entity-budget-outcome-upgrade",
+        "adapter-stderr-limit-plus-one",
+        "array-aggregate-pre-materialization",
+        "source-plan-field-mutation",
+        "surface-order-mutation",
     } <= set(fixture["negative"])

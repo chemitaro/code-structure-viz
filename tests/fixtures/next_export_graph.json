@@ -1,0 +1,41 @@
+{
+  "schema": "code-structure-viz.next-export-graph/v1",
+  "edges": [
+    {
+      "owner_file_path": "src/Button.tsx",
+      "source_specifier": "./Other",
+      "imported_name": "*",
+      "resolved_source_file_path": null,
+      "expanded_exported_name": null,
+      "target_declaration_key": null,
+      "resolution": "unknown"
+    },
+    {
+      "owner_file_path": "src/ExportReexport.ts",
+      "source_specifier": "./ExportGrammar",
+      "imported_name": "*",
+      "resolved_source_file_path": "src/ExportGrammar.tsx",
+      "expanded_exported_name": null,
+      "target_declaration_key": null,
+      "resolution": "unknown"
+    },
+    {
+      "owner_file_path": "src/ExportReexport.ts",
+      "source_specifier": "./ExportGrammar",
+      "imported_name": "Props",
+      "resolved_source_file_path": "src/ExportGrammar.tsx",
+      "expanded_exported_name": "Props",
+      "target_declaration_key": null,
+      "resolution": "type"
+    },
+    {
+      "owner_file_path": "src/ExportReexport.ts",
+      "source_specifier": "./ExportGrammar",
+      "imported_name": "表示",
+      "resolved_source_file_path": "src/ExportGrammar.tsx",
+      "expanded_exported_name": "default",
+      "target_declaration_key": "表示",
+      "resolution": "component"
+    }
+  ]
+}

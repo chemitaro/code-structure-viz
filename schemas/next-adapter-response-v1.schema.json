@@ -21,6 +21,7 @@
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "identifier_name": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
     "collection": {"enum": ["projects", "files", "modules", "components", "members", "relations", "facts"]},
     "model": {
       "type": "object",
@@ -66,7 +67,7 @@
     "proof": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["discovered_records", "failure_roots", "causal_edges", "target_resolutions", "export_observations", "export_resolution_witness", "excluded", "failed"],
+      "required": ["discovered_records", "failure_roots", "causal_edges", "target_resolutions", "export_observations", "export_resolution_witness", "export_reexport_witness", "excluded", "failed"],
       "properties": {
         "discovered_records": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/proof_record"}},
         "failure_roots": {"type": "array", "items": {"$ref": "#/$defs/failure_root"}},
@@ -74,6 +75,7 @@
         "target_resolutions": {"type": "array", "items": {"$ref": "#/$defs/target_resolution"}},
         "export_observations": {"type": "array", "items": {"$ref": "#/$defs/export_observation"}},
         "export_resolution_witness": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/export_resolution_witness"}},
+        "export_reexport_witness": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/export_reexport_witness"}},
         "excluded": {"type": "array", "items": {"$ref": "#/$defs/excluded_record"}},
         "failed": {"type": "array", "items": {"$ref": "#/$defs/failed_record"}}
       }
@@ -116,10 +118,24 @@
         "component_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]}
       }
     },
+    "export_reexport_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["syntax_identity", "source_specifier", "imported_name", "resolved_source_module_id", "expanded_exported_name", "target_declaration_id", "resolution"],
+      "properties": {
+        "syntax_identity": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
+        "source_specifier": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
+        "imported_name": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"const": "*"}]},
+        "resolved_source_module_id": {"anyOf": [{"type": "string", "pattern": "^next:module:[0-9a-f]{64}$"}, {"type": "null"}]},
+        "expanded_exported_name": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"type": "null"}]},
+        "target_declaration_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]},
+        "resolution": {"enum": ["component", "value", "type", "unknown"]}
+      }
+    },
     "export_observation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["owner_module_id", "owner_file_path", "byte_start", "byte_end", "token_identity", "syntax_identity", "syntax_kind", "exported_name", "role", "reexport", "star", "resolution", "component_id"],
+      "required": ["owner_module_id", "owner_file_path", "byte_start", "byte_end", "token_identity", "syntax_identity", "syntax_kind", "exported_name", "role", "reexport", "star", "source_specifier", "imported_name", "resolved_source_module_id", "expanded_exported_name", "resolution", "component_id", "target_declaration_id"],
       "properties": {
         "owner_module_id": {"type": "string", "pattern": "^next:module:[0-9a-f]{64}$"},
         "owner_file_path": {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/path"},
@@ -128,16 +144,23 @@
         "token_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "syntax_identity": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
         "syntax_kind": {"enum": ["default_export", "named_export", "type_export", "reexport", "export_all"]},
-        "exported_name": {"anyOf": [{"type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"}, {"const": "default"}, {"const": "*"}]},
+        "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"const": "*"}]},
         "role": {"enum": ["value", "type"]},
         "reexport": {"type": "boolean"},
         "star": {"type": "boolean"},
+        "source_specifier": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"}, {"type": "null"}]},
+        "imported_name": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"const": "*"}, {"type": "null"}]},
+        "resolved_source_module_id": {"anyOf": [{"type": "string", "pattern": "^next:module:[0-9a-f]{64}$"}, {"type": "null"}]},
+        "expanded_exported_name": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"type": "null"}]},
+        "target_declaration_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]},
         "resolution": {"enum": ["component", "value", "type", "unknown"]},
         "component_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]}
       },
       "allOf": [
         {"if": {"properties": {"star": {"const": true}}}, "then": {"properties": {"syntax_kind": {"const": "export_all"}, "exported_name": {"const": "*"}, "reexport": {"const": true}, "resolution": {"const": "unknown"}, "component_id": {"type": "null"}}}},
         {"if": {"properties": {"star": {"const": false}}}, "then": {"not": {"properties": {"exported_name": {"const": "*"}}}}},
+        {"if": {"properties": {"reexport": {"const": true}}}, "then": {"properties": {"source_specifier": {"type": "string"}, "imported_name": {"not": {"type": "null"}}}}},
+        {"if": {"properties": {"reexport": {"const": false}}}, "then": {"properties": {"source_specifier": {"type": "null"}}}},
         {"if": {"properties": {"resolution": {"const": "component"}}}, "then": {"properties": {"role": {"const": "value"}, "component_id": {"type": "string"}}}},
         {"if": {"properties": {"resolution": {"enum": ["value", "type", "unknown"]}}}, "then": {"properties": {"component_id": {"type": "null"}}}},
         {"if": {"properties": {"resolution": {"const": "value"}}}, "then": {"properties": {"role": {"const": "value"}}}},

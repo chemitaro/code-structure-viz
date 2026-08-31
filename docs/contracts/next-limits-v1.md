@@ -1,9 +1,10 @@
 # Next resolved limits v1
 
-Round 8 review state: `review_status: fail` (P0=0, P1=4, P2=0). The
-independent entity publication gate and response-to-outcome vectors below are
-local data-only remediations; fresh exact-SHA Strict is pending and readiness
-is unconfirmed.
+Round 9 review state: `review_status: fail` (P0=0, P1=7, P2=1). The
+independent entity publication gate, separate stderr/array counters, and
+response-to-outcome vectors below are local data-only remediations; fresh
+exact-SHA Strict is pending, readiness is unconfirmed, and production
+implementation has not started.
 
 `schemas/next-limits-v1.schema.json` is the single resolved limits record for
 the Next snapshot boundary. The same record is copied byte-for-byte into the
@@ -30,10 +31,12 @@ total-RSS promise.
 | `max_json_nesting` | 64 | JSON nesting levels | parser depth before child descent | UTF-8 input | `payload_unavailable` |
 | `max_json_string_bytes` | 8,388,608 | UTF-8 bytes per JSON string | parser decode, before materialization | UTF-8 | `payload_unavailable` |
 | `max_array_items` | 100,000 | items per JSON array | parser item count before append | N/A | `payload_unavailable` |
+| `max_total_array_items` | 100,000 | items across all JSON arrays in one response | streaming aggregate counter before item materialization | N/A | `payload_unavailable` |
 | `max_collection_items` | 20,000 | records per model collection | record emission, before append | N/A | `payload_unavailable` |
 | `max_model_records` | 100,000 | all discovered model records | model assembly, before publication | N/A | `payload_unavailable` |
 | `max_stdout_bytes` | 16,777,216 | UTF-8 bytes per stdout payload | canonical output encode, before write | UTF-8 | `payload_unavailable` |
 | `max_stderr_bytes` | 65,536 | UTF-8 bytes per stderr payload | diagnostic encode, before write | UTF-8 | `payload_unavailable` |
+| `max_adapter_stderr_capture_bytes` | 65,536 | UTF-8 bytes captured from adapter stderr | incremental process-group capture before append | UTF-8 | `payload_unavailable` |
 | `timeout_seconds` | 60 | wall-clock seconds per adapter run | monotonic deadline at process wait | N/A | `payload_unavailable` |
 | `v8_old_space_mib` | 512 | binary MiB heap limit | adapter process start flag | N/A | `payload_unavailable` |
 | `max_type_depth` | 16 | TypeIR levels per prop | validator before child descent | N/A | `partial_safe` |
@@ -54,6 +57,20 @@ overrun records `CSV-NEXT-LIMIT-005`, keeps the actual count in the domain
 manifest, returns `payload_unavailable`, and publishes neither semantic JSON
 nor PlantUML. `max_model_records` remains the structural all-record boundary;
 its first over-limit value is independently composable with the entity gate.
+
+`max_array_items` limits each individual JSON array, while
+`max_total_array_items` counts all nested response-array items in a streaming
+counter. `max_collection_items` applies only to each semantic model
+collection; it is not an aggregate JSON-array limit. The reference vector
+`[50000, 50000, 1]` therefore fails at aggregate 100,001 even though every
+individual array is below 100,000 and no large response is allocated.
+
+`max_stderr_bytes` is the public diagnostic encode/write bound.
+`max_adapter_stderr_capture_bytes` is a separate child-process trust boundary:
+the counter is incremental in UTF-8 bytes, equality is accepted, and the first
+byte over the limit terminates the process group, disposes raw and partial
+adapter stderr, emits only stable `CSV-NEXT-LIMIT-003`, and projects zero raw
+stderr bytes into the manifest. Neither bound exposes adapter text.
 
 The executable boundary vectors in `tests/contracts/test_next_contracts.py`
 exercise `limit-1`, `limit`, and `limit+1` arithmetically for every row, so

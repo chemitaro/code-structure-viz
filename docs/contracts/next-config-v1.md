@@ -1,9 +1,10 @@
 # Next configuration and request projection v1
 
-Round 8 review state: `review_status: fail` (P0=0, P1=4, P2=0). The
-domain-discriminated manifest target projection and program-only target rules
-below are local data-only remediations; fresh exact-SHA Strict is pending and
-production implementation has not started.
+Round 9 review state: `review_status: fail` (P0=0, P1=7, P2=1). The
+domain-discriminated target projection, closed SourceAcquisitionPlan, and
+surface-specific ordering below are local data-only remediations; fresh
+exact-SHA Strict is pending, readiness is unconfirmed, and production
+implementation has not started.
 
 Issue #8 uses one canonical configuration value object and one canonical
 snapshot request projection.  The same values are copied into the domain
@@ -24,6 +25,7 @@ settings from the legacy root `request`/`config` fields.
   "downstream_depth": 1,
   "formats": ["semantic-json", "plantuml"],
   "limits": "<object conforming to next-limits-v1>",
+  "source_plan": "<object conforming to next-source-plan-v1>",
   "trusted_environment_digest": "<sha256>",
   "source_plan_digest": "<sha256>",
   "domain_config_digest": "<sha256>"
@@ -63,28 +65,25 @@ project.config_digest = SHA-256(canonical-json({
   root, source_roots, config_path, compiler_options
 }))
 
-source_plan_digest = SHA-256(canonical-json({
-  schema: "code-structure-viz.source-acquisition-plan/next/v1",
-  version: "1",
-  projects,
-  program_suffixes: [".js", ".jsx", ".ts", ".tsx"],
-  context_suffixes: [".d.ts"],
-  control_paths: ["package.json", "tsconfig.json", "jsconfig.json"],
-  hard_exclusions: [".git", "node_modules", ".next", "out", "dist", "build", "coverage"],
-  limits,
-  trusted_type_environment_digest
-}))
+source_plan_digest = SHA-256(canonical-json(SourceAcquisitionPlan/v1))
 
 domain_config_digest = SHA-256(canonical-json(ResolvedNextConfig
   without domain_config_digest))
 ```
 
 Project descriptors are sorted by their kind-prefixed IDs in semantic records;
-the configuration projection is sorted by the same canonical project order.
+input/config/source-plan projections are sorted by NFC UTF-8 root-path bytes.
 Targets use NFC UTF-8 order and formats use the fixed order
 `semantic-json`, `plantuml`.  Changing project/compiler/source-plan/limits or
 trusted-environment inputs changes the corresponding digest and the run
 fingerprint.
+
+The closed SourceAcquisitionPlan includes resolved control paths, local
+`extends` closure, file-role assignments, projects, suffixes, exclusions,
+limits, and trusted digest. Every one of those fields is part of the digest;
+the reference vectors mutate each independently. Semantic model arrays still
+use record-ID order, so path order and ID order are intentionally distinct
+surfaces for multi-project requests.
 
 ## Roles and transport boundary
 

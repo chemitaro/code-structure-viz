@@ -1,5 +1,10 @@
 # Next runtime manifest v1
 
+Round 9 review state: `review_status: fail` (P0=0, P1=7, P2=1). Runtime and
+trusted fixture attestation is synchronized as data-only remediation; fresh
+exact-SHA Strict is pending, readiness is unconfirmed, and production
+implementation has not started.
+
 `schemas/next-runtime-manifest-v1.schema.json` is the checked-in compatibility
 unit inventory. `members` are sorted by safe wheel-relative path and unique;
 `licenses` are sorted by `(ecosystem,name,version,license_id)` and unique.

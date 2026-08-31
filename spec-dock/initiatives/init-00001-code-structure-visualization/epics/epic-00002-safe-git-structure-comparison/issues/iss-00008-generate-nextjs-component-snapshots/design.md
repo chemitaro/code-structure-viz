@@ -53,6 +53,39 @@ census、response検証後のEntityBudgetGate、program-only semantic ownership�
 このDesignとdata-only contractへ反映する。fresh exact-SHA Strictは未実行・未通過で、
 readinessは未確定である。production Next adapter/CLIは未実装のまま維持する。
 
+### Round 9 contract remediation (design-fixed)
+
+Round 9 は `review_status: fail`、P0=0、P1=7、P2=1。fresh exact-SHA Strictは
+未実行・未通過で、readinessは未確定、production実装は未着手である。次の閉じた
+設計を実装前契約として固定する。
+
+1. Python-owned frozen UTF-8 tokenizerは、local export list、default alias/
+   declaration/expression、複数・改行入りspecifier、comments、NFC Unicode
+   IdentifierName、CRLF、BOMを認識し、token identityとexact byte spanを返す。
+   Nodeのsyntax identityはこのcensusとexact-equalでなければならない。
+2. re-export observationとは別に、`syntax_identity`、`source_specifier`、
+   `imported_name`、resolved source Module、expanded exported name、target
+   declarationを持つsource-edge witnessを返す。Pythonはfrozen module graphから
+   alias/star/cycle/conflictを再計算し、observation・public ExportBinding・coverage
+   countを比較する。value/type/unknownはcoverage-onlyである。
+3. response validation後のEntityBudgetGateはpre-budget outcomeを入力にし、
+   under-budgetのcomplete/partial_safeを同じoutcomeでmanifest/stdoutへ投影する。
+   overrunだけを`payload_unavailable`へ落とし、valid overrideもpartial_safeを
+   completeへ昇格させない。
+4. `max_adapter_stderr_capture_bytes`（adapter childのincremental UTF-8 capture）
+   と`max_stderr_bytes`（public diagnostic encode/write）を別カウンタにする。limitは
+   inclusive、limit+1はprocess-group termination、raw/partial disposal、固定
+   `CSV-NEXT-LIMIT-003`、manifest上のraw bytes非公開とする。
+5. `max_total_array_items`（response全array aggregate）、`max_array_items`（各array）、
+   `max_collection_items`（semantic collection）を分離し、materialize前のcounterで
+   100001を拒否する。
+6. `SourceAcquisitionPlan/v1` descriptor/schemaはresolved control paths、local
+   extends closure、file-role map、projects、suffixes、exclusions、limits、trusted
+   digestの全fieldをcanonical JSON SHA-256へ含める。input/config/source-planは
+   NFC UTF-8 root-path order、semantic recordsはrecord-ID orderとする。
+7. public targetは`path:`だけであり、pathから解決したinternal Component seedは
+   traversal/taint witness内部に限定する。public component selectorを再導入しない。
+
 ## 責務・Interface
 
 ### planned component responsibilities
@@ -60,7 +93,7 @@ readinessは未確定である。production Next adapter/CLIは未実装のま�
 | planned path / symbol | 状態 | 責務 |
 | --- | --- | --- |
 | `src/code_structure_viz/source/source_view.py`（existing） | existing extension | domain-owned acquisition planを受け、既存Git/source safetyでbytesを凍結する。 |
-| `src/code_structure_viz/source/targets.py`（existing） | existing extension | Python grammarを維持し、Next project/path/component selectorへdomain-aware routingする。 |
+| `src/code_structure_viz/source/targets.py`（existing） | existing extension | Python grammarを維持し、Next project/path targetへdomain-aware routingする。内部Component seedは解決後のselection stateでのみ扱う。 |
 | `src/code_structure_viz/core/config.py`（existing） | existing extension | closed `[next]` config、value source、digestを追加する。 |
 | `src/code_structure_viz/core/domains.py`、`application/snapshot_domain.py`（existing） | existing extension | Nextをsnapshot registryへだけ追加する。 |
 | `src/code_structure_viz/artifacts/`、`core/outcomes.py`（existing） | existing extension | Next coverage/path/schema/stream/writer/publication invariantを追加する。 |
@@ -163,7 +196,7 @@ serializer と manifest builder は `incomplete_kind` と `payload_available` �
 - compiled first-party adapter、exact TypeScript runtime、lockfile、license inventoryを一つのcompatibility unitとしてbundleする。
 - Node 22 LTS以上はapplicable Next runだけで必要とし、Python/SQLAlchemy core install/run/testへ持ち込まない。
 
-v1 finite limitsは4 MiB/file、64 MiB decoded total、20,000 files、96 MiB encoded stdin、16 MiB stdout、64 KiB stderr capture、60秒、512 MiB old-spaceとRound 2 decoder/model limitsに固定する。unbounded/silent truncationは不可。
+v1 finite limitsは4 MiB/file、64 MiB decoded total、20,000 files、96 MiB encoded stdin、各array/aggregate array 100,000、collection 20,000、16 MiB stdout、public diagnostic stderr 64 KiB、adapter stderr capture 64 KiB、60秒、512 MiB old-spaceとRound 2 decoder/model limitsに固定する。adapter captureとpublic diagnostic emissionは別のincremental counterとし、unbounded/silent truncationは不可。
 
 ### Identity and members
 
@@ -437,7 +470,8 @@ JSON decoderはUTF-8、duplicate key拒否、integer-only safe counts、maximum 
 | spawn failure | payload unavailable `CSV-NEXT-NODE-002` |
 | timeout / process group termination | payload unavailable `CSV-NEXT-NODE-003` |
 | `v8_old_space_mib` process failure | payload unavailable `CSV-NEXT-LIMIT-004` |
-| stdout cap / stderr cap超過 | process terminate、payload unavailable `CSV-NEXT-LIMIT-003`。raw/partial bytes非公開 |
+| stdout cap / public diagnostic cap超過 | process terminateまたはpayload unavailable `CSV-NEXT-LIMIT-003`。raw/partial bytes非公開 |
+| adapter stderr capture cap超過 | process group terminate、raw/partial capture disposal、payload unavailable `CSV-NEXT-LIMIT-003`。adapter text非公開 |
 | non-zero exit（valid JSON有無を問わない） | responseを捨てpayload unavailable `CSV-NEXT-NODE-004` |
 | zero exit + stdout noise/malformed/duplicate key | payload unavailable `CSV-NEXT-PROTOCOL-001` |
 | valid response + stderr | responseを検証し、stderrはraw非公開。safe fixed diagnostic countのみmanifestへ記録 |
@@ -501,7 +535,7 @@ local type complexity/recursion/unsupported/any/external unresolvedはaffected P
 
 1. targetなしはapplicable project内の全internal Module/Componentをselectし、depth optionは禁止。
 2. path file/directory targetはsubtreeのprogram Moduleをmodule-plane seed、そのcontained Componentをcomponent-plane seedにする。
-3. component targetはresolved Componentをcomponent-plane seed、そのowner Moduleをmodule-plane seedにする。
+3. path targetから解決したinternal Componentをcomponent-plane seed、そのowner Moduleをmodule-plane seedにする。Component IDをpublic target文法として受理しない。
 4. containmentはzero-hopでcounterpartをresultへ含めるが、relation depthを消費しない。
 5. upstream/downstreamは各planeで独立BFS。depth 0はseed+zero-hop containment、Nは最大N relation edges。
 6. module relationからComponentへ、component relationからModule relationへimplicit fan-outしない。
@@ -656,10 +690,10 @@ Next PlantUML v1はaliasを`N_M_<64hex>`/`N_C_<64hex>`に閉じ、label escaping
 | named default function/class | named declaration | named declaration |
 | anonymous function/classでpositive evidence成立 | `@anonymous-default` | 同Component |
 | allowlisted wrapper result | `@anonymous-default` | 同Component |
-| raw JSX element value | none | non-component value export coverage。explicit Component targetならpayload unavailable |
-| arbitrary call/object/literal/conditional | none | unknown coverage。explicit targetならpayload unavailable |
+| raw JSX element value | none | non-component value export coverage。Component seedが必要なpath選択ならpayload unavailable |
+| arbitrary call/object/literal/conditional | none | unknown coverage。Component seedが必要なpath選択ならpayload unavailable |
 
-- alias chainはmodule-scope `const`、single initializer/write、identifier/parenthesized identifierだけ。cycle/ambiguityはunknown、explicit targetならpayload unavailable。
+- alias chainはmodule-scope `const`、single initializer/write、identifier/parenthesized identifierだけ。cycle/ambiguityはunknown、path targetから解決したinternal Component seedが必要な場合はpayload unavailable。
 - `export *`は一意にComponentへ解決するvalue exportだけをExportBindingへ展開する。non-component valueはbindingを作らず`non_component_value_export_count`へ、type-onlyは別countへ記録する。
 - fixed-point、alias、star expansionはNFC UTF-8 byte order。collision/ambiguous starはpayload unavailable。
 
@@ -746,16 +780,17 @@ closed payload variants:
 | encoded stdin | 96 MiB | spawn前payload unavailable |
 | JSON nesting | 64 | request/response reject |
 | JSON string bytes | 8 MiB | request/response reject |
-| array items | overall 100,000 / collection 20,000 | request/response reject |
+| array items | each array 100,000 / aggregate 100,000 / collection 20,000 | request/response reject |
 | model records | 100,000 | payload unavailable |
 | stdout | 16 MiB | terminate/payload unavailable |
-| stderr capture | 64 KiB | terminate/payload unavailable |
+| public diagnostic stderr | 64 KiB UTF-8 | payload unavailable |
+| adapter stderr capture | 64 KiB UTF-8, incremental | process-group terminate/payload unavailable |
 | timeout | 60 s | terminate/payload unavailable |
 | V8 old space | 512 MiB | process failure/payload unavailable |
 
 v1は総RSS上限を約束しない。finite memoryはencoded/decoded bytes、decoder、collections/model、V8 old-spaceを上記で制限する意味である。OS-level RSS isolationは将来の別contract。
 
-diagnostic mappingはfile bytes/encoded stdin=`LIMIT-001`、file count/decoded total=`LIMIT-002`、JSON/string/array/stdout/stderr=`LIMIT-003`、V8 old-space=`LIMIT-004`、model records/entity budget=`LIMIT-005`。timeoutは`NODE-003`。
+diagnostic mappingはfile bytes/encoded stdin=`LIMIT-001`、file count/decoded total=`LIMIT-002`、JSON/string/array/stdout/public diagnostic stderr/adapter stderr capture=`LIMIT-003`、V8 old-space=`LIMIT-004`、model records/entity budget=`LIMIT-005`。timeoutは`NODE-003`。adapter stderr captureはpublic diagnostic emissionとは別のincremental process-group trust boundaryであり、超過時はraw/partial bytesを破棄する。
 
 ### Complete PropsTypeIR and JavaScript extraction
 
@@ -835,7 +870,7 @@ production adapter実装前のcontract-authoring commitで次を実ファイル�
 - `semantic-v1.schema.json`: domain enumに`next`、上記Project/Module/Component/Member/Relation/Fact/Coverage discriminated branchを追加。既存Python/SQLAlchemy branchは変更しない。
 - `run-manifest-v1.schema.json`: Next domain descriptor内だけにsource plan/config/run fingerprint、projects、targets、toolchain、trusted environment、limits、coverageを追加。
 - Next snapshotのroot `request.targets`はdomain-discriminatedなunique path-string arrayとして`next_request.targets`、`next_config.targets`、resolved config、domain targetsと同じcanonical bytesへ投影する。共通Python/SQLAlchemyのobject target grammarは変更しない。
-- `tests/fixtures/next_export_census.json`は凍結source bytesを入力とするPython-owned census fixtureとし、source syntax identityの完全性をNode observationと照合する。
+- `tests/fixtures/next_export_census.json`は凍結source bytesを入力とするPython-owned census fixtureとし、source syntax identityの完全性をNode observationと照合する。`tests/fixtures/next_export_graph_cases.json`は独立module graphのalias/star/cycle/conflictを再計算するdata-only witness fixtureである。
 - diagnostic catalog: `CSV-NEXT-*`ごとにexact code、severity、recoverable、path/symbol permission、fixed message templateをregistry/docs/schemaへ一件ずつ定義する。
 - PlantUML grammar: one statement/line、UTF-8 LF、start/title/legend/packages/entities/members/relations/end固定順。identifierはdigest alias、displayはNFC escape済み。backslash、LF/CR/tab、quote、PlantUML control characterをescapeし、raw source/literalを入力にしない。
 - Next projection canonical JSONは`schema,projects,targets,depth,limits,trusted_environment_digest`だけをclosed orderで持つ。
@@ -903,7 +938,7 @@ same SourceView fingerprint、source plan、project/target/limits、domain confi
 | planned file | planned change | 存在確認 |
 | --- | --- | --- |
 | `src/code_structure_viz/source/source_view.py` | existing extension | domain-owned acquisition planを追加し、Python/SQLAlchemy bytesを維持する。 |
-| `src/code_structure_viz/source/targets.py` | existing extension | domain-aware Next path/component targetを追加し、Python grammarを維持する。 |
+| `src/code_structure_viz/source/targets.py` | existing extension | domain-aware Next path targetを追加し、Python grammarを維持する。内部Component seedは公開構文にしない。 |
 | `src/code_structure_viz/core/config.py` | existing extension | closed `[next]` project/source/config/limit fieldsとprovenanceを追加する。 |
 | `src/code_structure_viz/core/domains.py` / `application/snapshot_domain.py` | existing extension | Nextをsnapshotへだけ登録する。 |
 | `src/code_structure_viz/application/snapshot.py` / `core/outcomes.py` | existing extension | applicability、runner、Next outcome/path invariantを接続する。 |

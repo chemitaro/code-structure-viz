@@ -1,0 +1,120 @@
+{
+  "schema": "code-structure-viz.next-export-graph-cases/v1",
+  "cases": [
+    {
+      "name": "alias",
+      "modules": [
+        {
+          "path": "src/Button.tsx",
+          "exports": [
+            {
+              "name": "Button",
+              "resolution": "component",
+              "target_declaration_key": "Button"
+            }
+          ]
+        },
+        {"path": "src/index.ts", "exports": []}
+      ],
+      "edges": [
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./Button",
+          "imported_name": "Button",
+          "exported_name": "Alias"
+        }
+      ]
+    },
+    {
+      "name": "conflict",
+      "modules": [
+        {"path": "src/index.ts", "exports": []},
+        {
+          "path": "src/one.ts",
+          "exports": [
+            {
+              "name": "Shared",
+              "resolution": "component",
+              "target_declaration_key": "One"
+            }
+          ]
+        },
+        {
+          "path": "src/two.ts",
+          "exports": [
+            {
+              "name": "Shared",
+              "resolution": "component",
+              "target_declaration_key": "Two"
+            }
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./one",
+          "imported_name": "*",
+          "exported_name": "*"
+        },
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./two",
+          "imported_name": "*",
+          "exported_name": "*"
+        }
+      ]
+    },
+    {
+      "name": "cycle",
+      "modules": [
+        {"path": "src/a.ts", "exports": []},
+        {"path": "src/b.ts", "exports": []}
+      ],
+      "edges": [
+        {
+          "owner_file_path": "src/a.ts",
+          "source_specifier": "./b",
+          "imported_name": "Loop",
+          "exported_name": "Loop"
+        },
+        {
+          "owner_file_path": "src/b.ts",
+          "source_specifier": "./a",
+          "imported_name": "Loop",
+          "exported_name": "Loop"
+        }
+      ]
+    },
+    {
+      "name": "star",
+      "modules": [
+        {"path": "src/index.ts", "exports": []},
+        {
+          "path": "src/values.ts",
+          "exports": [
+            {
+              "name": "Card",
+              "resolution": "component",
+              "target_declaration_key": "Card"
+            },
+            {"name": "answer", "resolution": "value", "target_declaration_key": null},
+            {
+              "name": "default",
+              "resolution": "component",
+              "target_declaration_key": "DefaultCard"
+            }
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./values",
+          "imported_name": "*",
+          "exported_name": "*"
+        }
+      ]
+    }
+  ]
+}

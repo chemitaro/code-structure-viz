@@ -2,10 +2,11 @@
 
 Status: pre-implementation normative contract for Issue #8.
 
-Round 8 review state: ChatGPT Use Strict returned `review_status: fail` with
-P0=0, P1=4, P2=0. The four findings are reflected below and in the data-only
-schemas/reference vectors; a fresh exact-SHA Strict review is pending, so
-readiness is unconfirmed and the production adapter/CLI remains unimplemented.
+Round 9 review state: ChatGPT Use Strict returned `review_status: fail` with
+P0=0, P1=7, P2=1. The seven P1 and one P2 findings are reflected below and in
+the data-only schemas/reference vectors; a fresh exact-SHA Strict review is
+pending, so readiness is unconfirmed and the production adapter/CLI remains
+unimplemented.
 
 The machine-readable authority is:
 
@@ -16,6 +17,7 @@ The machine-readable authority is:
 - `schemas/next-config-v1.schema.json`
 - `schemas/next-domain-manifest-v1.schema.json`
 - `schemas/next-limits-v1.schema.json`
+- `schemas/next-source-plan-v1.schema.json`
 - `schemas/next-compatibility-v1.schema.json`
 
 These schemas materialize the field-level branch that will be integrated into the existing public registries during Issue #8 production implementation. They do not make the current CLI accept `--domain next` before that implementation.
@@ -55,14 +57,22 @@ are required; the value is not a self-reported opaque token.
   independent `export_observations` stream. Python owns a frozen UTF-8 source
   byte fixture and a closed syntax census over repository-relative owner file,
   exact byte start/end span, token identity, syntax kind, canonical exported
-  name, value/type role, re-export bit, and star bit. Node observations must
-  exact-equal this census on syntax identity. Their
-  `component|value|type|unknown` resolution and optional Component ID are then
-  cross-checked against the model/TypeChecker witness. Python derives and
-  exact-compares public bindings, resolution witnesses, and
+  name, value/type role, re-export bit, and star bit. The closed tokenizer
+  accepts local lists, default alias/declaration/expression, multiline
+  specifiers, comments, Unicode IdentifierName (NFC), CRLF, and BOM. Node
+  observations must exact-equal this census on syntax identity. Each
+  observation also carries source specifier, imported/original name, resolved
+  source Module, expanded exported name, and target declaration. Python
+  recomputes alias, star, cycle, and conflict behavior from the independent
+  frozen module graph, then exact-compares public bindings, resolution
+  witnesses, and
   `non_component_value_export_count`/`type_only_export_count`; omitted,
   duplicated, coordinated observation/binding/count omissions, star/type
-  conflicts, or component substitutions are rejected.
+  conflicts, or component substitutions are rejected. The data-only graph
+  fixture `tests/fixtures/next_export_graph_cases.json` exercises the same
+  independent resolver for explicit aliases, star expansion (excluding
+  `default`), cycles, and duplicate-star conflicts; these outcomes are
+  canonical `component`/`value` or fail-closed `unknown` witnesses.
 - Module relations are `static_import` and `literal_dynamic_import`.
 - Component relations are `jsx_render` and internal-only `component_wrap`.
 - Direct `client_entry` and `router_context` are Facts. Derived boundary roles remain Module facets.
@@ -88,6 +98,14 @@ The request envelope ID is `SHA-256(canonical-json(request without
 request_id))`; the response must echo that exact ID and its `model_digest` is
 `SHA-256(canonical-json(model))`.
 
+Input/config/source-plan project projections are sorted by NFC UTF-8 root-path
+bytes; semantic records and their discovered proof collections remain sorted
+by record ID. Diagnostics, recognition evidence, target completeness, failed
+files, and other derived arrays are canonical JSON UTF-8 order and are checked
+against the submitted order without first sorting it. A two-project fixture
+whose path and ID orders differ, plus a permuted CLI input, must produce equal
+canonical source-plan and config digests.
+
 Only a frozen file with `program` role and exact suffix `.ts`, `.tsx`, `.js`, or
 `.jsx` (explicitly excluding `.d.ts`) may own a public Module. Components,
 members, relations, and facts descend only from those program Modules. A direct
@@ -102,7 +120,7 @@ failure roots, causal edges, target-resolution witnesses, the independent
 export-observation stream, export-resolution witnesses, and exclusions.
 `collection`, taint kind, exclusion reason, and propagation rule are closed
 vocabularies. Python derives the complete mandatory root seeds (including
-export target Component, incoming explicit re-export/barrel Module, and
+the internal Component seed resolved from a path target, incoming explicit re-export/barrel Module, and
 dependent bindings), causal edges, and taint fixed point from records, roots,
 and the closed rule/ownership table; adapter-provided edges, taints, and counts
 are not trusted. It checks that every discovered record is exactly

@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, cast
@@ -50,6 +51,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-domain-manifest-v1",
         "next-limits-v1",
         "next-semantic-v1",
+        "next-source-plan-v1",
         "next-trusted-type-environment-v1",
     }
     registry = Registry()
@@ -73,6 +75,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-domain-manifest-v1.schema.json",
         "next-limits-v1.schema.json",
         "next-runtime-manifest-v1.schema.json",
+        "next-source-plan-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
         "run-manifest-v1.schema.json",
@@ -120,10 +123,12 @@ def _next_limits() -> dict[str, int]:
         "max_json_nesting": 64,
         "max_json_string_bytes": 8388608,
         "max_array_items": 100000,
+        "max_total_array_items": 100000,
         "max_collection_items": 20000,
         "max_model_records": 100000,
         "max_stdout_bytes": 16777216,
         "max_stderr_bytes": 65536,
+        "max_adapter_stderr_capture_bytes": 65536,
         "timeout_seconds": 60,
         "v8_old_space_mib": 512,
         "max_type_depth": 16,
@@ -134,6 +139,26 @@ def _next_limits() -> dict[str, int]:
         "max_signatures_per_component": 16,
         "max_flow_visits": 10000,
         "max_alias_edges": 64,
+    }
+
+
+def _next_source_plan(config_project: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "schema": "code-structure-viz.source-acquisition-plan/next/v1",
+        "version": "1",
+        "projects": [config_project],
+        "resolved_control_paths": [
+            {"project_root": ".", "path": "package.json"},
+            {"project_root": ".", "path": "tsconfig.json"},
+            {"project_root": ".", "path": "jsconfig.json"},
+        ],
+        "local_extends": [],
+        "file_role_map": [],
+        "program_suffixes": [".js", ".jsx", ".ts", ".tsx"],
+        "context_suffixes": [".d.ts"],
+        "hard_exclusions": [".git", "node_modules", ".next", "out", "dist", "build", "coverage"],
+        "limits": _next_limits(),
+        "trusted_environment_digest": "7" * 64,
     }
 
 
@@ -440,6 +465,7 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
             "formats": ["semantic-json"],
             "limits": _next_limits(),
             "trusted_environment_digest": "7" * 64,
+            "source_plan": _next_source_plan(config_project),
             "source_plan_digest": "c" * 64,
             "domain_config_digest": "d" * 64,
             "run_fingerprint": "e" * 64,
@@ -472,6 +498,7 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
             "resolved": 500,
             "actual": 0,
             "source": "builtin",
+            "outcome": "complete",
         },
         "source_plan_digest": "c" * 64,
         "domain_config_digest": "d" * 64,
@@ -492,6 +519,7 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
             "formats": ["semantic-json"],
             "limits": _next_limits(),
             "trusted_environment_digest": "7" * 64,
+            "source_plan": _next_source_plan(config_project),
             "source_plan_digest": "c" * 64,
             "domain_config_digest": "d" * 64,
         },
@@ -504,6 +532,7 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
             "formats": ["semantic-json"],
             "limits": _next_limits(),
             "trusted_environment_digest": "7" * 64,
+            "source_plan": _next_source_plan(config_project),
             "source_plan_digest": "c" * 64,
             "domain_config_digest": "d" * 64,
         },

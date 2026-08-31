@@ -31,7 +31,14 @@
     "taint-boundary-closure",
     "run-manifest-next-non-empty-path-targets",
     "export-source-census",
+    "export-closed-tokenizer",
+    "export-reexport-graph-closure",
     "entity-budget-composition",
+    "entity-budget-outcome-preserving",
+    "adapter-stderr-capture-bound",
+    "array-aggregate-bound",
+    "source-acquisition-plan-v1",
+    "surface-order-by-domain",
     "program-file-semantic-ownership"
   ],
   "negative": [
@@ -75,6 +82,15 @@
     "export-census-type-value-conflict",
     "export-census-unknown-star-conflict",
     "export-census-component-substitution",
+    "export-syntax-omission",
+    "export-syntax-mutation",
+    "reexport-cycle",
+    "reexport-conflict",
+    "entity-budget-outcome-upgrade",
+    "adapter-stderr-limit-plus-one",
+    "array-aggregate-pre-materialization",
+    "source-plan-field-mutation",
+    "surface-order-mutation",
     "program-context-direct-target"
   ]
 }

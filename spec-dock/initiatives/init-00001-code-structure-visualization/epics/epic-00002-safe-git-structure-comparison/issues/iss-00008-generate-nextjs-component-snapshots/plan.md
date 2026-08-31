@@ -49,6 +49,26 @@ census、response検証後の独立EntityBudgetGate、program-only semantic owne
 data-only contractへ反映する。修復後のfresh exact-SHA Strictは未実行・未通過で、
 readinessは未確定、production adapter/CLIは未着手のままとする。
 
+### Round 9 review state and remediation gate
+
+ChatGPT Use Strict Round 9 は `review_status: fail`、P0=0、P1=7、P2=1 だった。
+fresh exact-SHA Strictは未実行・未通過で、readinessは未確定、production adapter/CLIは
+未着手である。以下のdata-only契約修復を実装前に完了し、focused/full test、schema/
+SpecDock/HTML検証、clean exact-SHA Strict passを経て初めてproduction実装へ進む。
+
+| Round 9 finding | 固定する実装前証拠 |
+| --- | --- |
+| P1-1 export grammar | Python frozen tokenizer/censusがlocal list、default alias/declaration/expression、multiline/comments、NFC Unicode、CRLF/BOM、exact byte spanをpositive/omission/mutationで閉包する。 |
+| P1-2 re-export witness | source specifier/imported name/source Module/expanded name/target declarationを独立graph witnessへ記録し、alias/star/cycle/conflictをPython再計算してNode/public/countと比較する。 |
+| P1-3 budget composition | complete/partial_safe under budgetを保持し、overrunのみpayload_unavailable。override passでも元outcomeを保持し、response→domain→manifest/stdoutをvector化する。 |
+| P1-4 stderr boundary | capture boundとpublic diagnostic boundを別名・別計数にし、limit/+1、process-group termination、raw/partial disposal、stable code、manifest projectionをvector化する。 |
+| P1-5 array boundary | total array aggregate、individual array、semantic collectionを分離し、individual内でもaggregate 100001をpre-materializationで拒否する。 |
+| P1-6 source plan | closed SourceAcquisitionPlan/v1 schema/descriptorを追加し、control/extends/file roles/projects/suffixes/exclusions/limits/trusted digestを全hash、known-answer mutationを持つ。 |
+| P1-7 ordering / P2-1 target prose | input/config/source-planはNFC UTF-8 root-path、semantic recordsはrecord-ID order。public component selectorは削除し、pathから解決したinternal Component seedだけを扱う。 |
+
+この表の全行がdata-only validator/fixtures/docs/schemaへ反映されるまで、Next
+adapter/CLIの`src/**`実装を開始しない。
+
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
 | I05-PLAN-000 | implementation判断を残さないfield-level identity/source/protocol/type/taint/public schema/config/package contractをcanonical Designへ固定する。 | I05-DES-001〜007 |
