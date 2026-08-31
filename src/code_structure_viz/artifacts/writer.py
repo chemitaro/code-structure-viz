@@ -689,6 +689,47 @@ def _valid_sqlalchemy_plantuml(content: bytes) -> bool:
     return not in_entity
 
 
+def _valid_sqlalchemy_diff_row(line: str) -> bool:
+    marker_colors = (
+        ("  + ", "DarkGreen"),
+        ("  - ", "DarkRed"),
+        ("  ~ before ", "DarkGoldenRod"),
+        ("  ~ after ", "DarkGoldenRod"),
+    )
+    for marker, color in marker_colors:
+        opening = f"{marker}<color:{color}>"
+        if not line.startswith(opening):
+            continue
+        content = line.removeprefix(opening).removesuffix("</color>")
+        return (
+            line.endswith("</color>")
+            and bool(content)
+            and "<color:" not in content
+            and "</color>" not in content
+        )
+    return False
+
+
+def _sqlalchemy_diff_entity_alias(line: str) -> str | None:
+    entity = re.fullmatch(
+        rf'entity "(.+)" as ({_SQLALCHEMY_ALIAS}) (#[A-Za-z0-9]+) \{{',
+        line,
+    )
+    if entity is None:
+        return None
+    label, alias, color = entity.groups()
+    marker, separator, display = label.partition(" ")
+    expected_color = {
+        "+": "#E8F5E9",
+        "-": "#MistyRose",
+        "~": "#LightYellow",
+        "context": "#LightGray",
+    }.get(marker)
+    if separator != " " or not _valid_sqlalchemy_display(display) or color != expected_color:
+        return None
+    return alias
+
+
 def _valid_sqlalchemy_diff_plantuml(content: bytes) -> bool:
     try:
         text = content.decode("utf-8", errors="strict")
@@ -723,14 +764,14 @@ def _valid_sqlalchemy_diff_plantuml(content: bytes) -> bool:
             if not in_entity:
                 return False
             in_entity = False
-        elif line.startswith('entity "') and (
-            entity := re.fullmatch(rf'entity ".+" as ({_SQLALCHEMY_ALIAS}) #[A-Za-z]+ \{{', line)
-        ):
+        elif line.startswith('entity "') and (entity_alias := _sqlalchemy_diff_entity_alias(line)):
             if in_entity:
                 return False
-            aliases.add(entity.group(1))
+            if entity_alias in aliases:
+                return False
+            aliases.add(entity_alias)
             in_entity = True
-        elif (in_entity and line.startswith(("  + ", "  - ", "  ~ "))) or (
+        elif (in_entity and _valid_sqlalchemy_diff_row(line)) or (
             not in_entity
             and (
                 line.startswith('note "status: ')

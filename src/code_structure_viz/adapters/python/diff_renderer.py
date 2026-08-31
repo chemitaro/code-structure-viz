@@ -92,7 +92,8 @@ def render_plantuml_diff(result: SemanticDiffResult) -> bytes:
             if identity in member_owners or identity in relation_sources or identity in result.seeds
             else "unknown"
         )
-        marker, color = _status_style(status)
+        marker = _status_style(status)[0]
+        color = _status_background(status)
         alias = _class_alias(identity)
         lines.append(f'  class "{_escape(marker + " " + label)}" as {alias} {color} {{')
         for member in sorted(members_by_owner.get(identity, ()), key=lambda item: item.identity):
@@ -107,13 +108,15 @@ def render_plantuml_diff(result: SemanticDiffResult) -> bytes:
     for delta in result.members:
         if _owner_id(delta) in rendered_entity_ids:
             continue
-        marker, color = _status_style(delta.status.value)
+        marker = _status_style(delta.status.value)[0]
+        color = _status_background(delta.status.value)
         lines.append(
             f'  note "{_escape(marker + " member " + delta.identity)}" '
             f"as {_note_alias(delta.identity)} {color}"
         )
     for delta in result.relations:
-        marker, color = _status_style(delta.status.value)
+        marker = _status_style(delta.status.value)[0]
+        color = _status_background(delta.status.value)
         lines.append(
             f'  note "{_escape(marker + " relation " + delta.identity)}" '
             f"as {_note_alias('relation:' + delta.identity)} {color}"
@@ -207,6 +210,12 @@ def _status_style(status: str) -> tuple[str, str]:
         "moved": ("→", "#LightBlue"),
         "unknown": ("?", "#LightGray"),
     }.get(status, ("?", "#LightGray"))
+
+
+def _status_background(status: str) -> str:
+    if status == "added":
+        return "#E8F5E9"
+    return _status_style(status)[1]
 
 
 def _sha(value: str) -> str:

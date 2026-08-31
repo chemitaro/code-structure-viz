@@ -93,8 +93,8 @@ def test_complete_sqlalchemy_diff_publishes_closed_payloads_and_manifest(
     assert semantic["semantic_change_set"]["members"][0]["status"] == "modified"
     assert b"skinparam classAttributeIconSize 0\n" in plantuml
     assert b"\nhide methods\n" not in plantuml
-    assert b"~ before name : string (str) <<NULL>>" in plantuml
-    assert b"~ after * name : string (str) <<NN>>" in plantuml
+    assert b"~ before <color:DarkGoldenRod>name : string (str) <<NULL>></color>" in plantuml
+    assert b"~ after <color:DarkGoldenRod>* name : string (str) <<NN>></color>" in plantuml
     assert manifest["adapters"] == [
         {"domain": "sqlalchemy", "name": "sqlalchemy-ast", "version": "1"}
     ]

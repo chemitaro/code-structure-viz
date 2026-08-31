@@ -61,12 +61,17 @@ _LEGEND_TAIL = (
 
 def escape_plantuml_label(value: str) -> str:
     escaped: list[str] = []
-    for character in unicodedata.normalize("NFC", value):
+    normalized = unicodedata.normalize("NFC", value)
+    for index, character in enumerate(normalized):
+        if character == "_" and re.match(r"_U[0-9A-Fa-f]{4,6}_", normalized[index:]):
+            escaped.append("_U005F_")
+            continue
         if unicodedata.category(character)[0] in {"L", "N"} or character in {
             " ",
             "-",
             "/",
             "$",
+            "_",
         }:
             escaped.append(character)
         else:
@@ -165,7 +170,7 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
             else "context"
         )
         color = {
-            "+": "#PaleGreen",
+            "+": "#E8F5E9",
             "-": "#MistyRose",
             "~": "#LightYellow",
             "context": "#LightGray",
@@ -183,7 +188,7 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
                     before_row, after_row
                 )
                 lines.append(
-                    "  ~ before "
+                    "  ~ before <color:DarkGoldenRod>"
                     + _row_line(
                         before_row,
                         foreign_key_columns=_foreign_key_columns(
@@ -191,9 +196,10 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
                         ),
                     ).removeprefix("  ")
                     + before_supplement
+                    + "</color>"
                 )
                 lines.append(
-                    "  ~ after "
+                    "  ~ after <color:DarkGoldenRod>"
                     + _row_line(
                         after_row,
                         foreign_key_columns=_foreign_key_columns(
@@ -201,9 +207,11 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
                         ),
                     ).removeprefix("  ")
                     + after_supplement
+                    + "</color>"
                 )
             else:
                 row_marker = "+" if member.status.value == "added" else "-"
+                row_color = "DarkGreen" if row_marker == "+" else "DarkRed"
                 row = (
                     after_members[member.identity]
                     if member.status.value == "added"
@@ -215,11 +223,12 @@ def render_sqlalchemy_diff(result: SqlAlchemyDiffResult) -> bytes:
                     else result.before.snapshot
                 )
                 lines.append(
-                    f"  {row_marker} "
+                    f"  {row_marker} <color:{row_color}>"
                     + _row_line(
                         row,
                         foreign_key_columns=_foreign_key_columns(snapshot, row.owner_id),
                     ).removeprefix("  ")
+                    + "</color>"
                 )
         lines.append("}")
 

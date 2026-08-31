@@ -5,7 +5,7 @@ ID: "iss-00007"
 関連GitHub: ["#7"]
 package_sequence_key: "ISSUE-04"
 状態: "ready"
-最終更新: "2026-08-30"
+最終更新: "2026-08-31"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -24,7 +24,8 @@ coding agent が、Issue #5 の安全な Git comparison と Issue #6 の SQLAlch
 - `iss-00005` で `DiffApplication`、named endpoint、working-tree freeze、metadata-only `FileChangeSet`、changed-path budget、atomic publication、stdout/stderr/exit contract が実装済みである。
 - `iss-00006` で SQLAlchemy の table・row・relation identity、coverage、redaction、semantic JSON、ER semantics、PlantUML v2 が実装済みである。
 - 現在の `diff` CLI と semantic differ は Python-only であり、本 Issue は `--domain sqlalchemy` を追加する。
-- Issue #5/#6 の public output bytes を、本 Issue の都合だけで変更しない。
+- Issue #5/#6 の semantic JSON、ID、schemaを、本 Issue の都合だけで変更しない。PlantUML v2の
+  表示上の不具合は、既存の意味を変えないrenderer-owned projectionとして修正できる。
 
 ## 観測可能な要件
 
@@ -82,6 +83,10 @@ SQLAlchemy diff に `--target` や SQLAlchemy 専用 config は追加しない�
 - removed table/row は before value を ghost として残す。
 - modified row は safe before/after の差が読める。
 - impact context の table を変更対象と区別して表示する。
+- 通常のschema/table識別子に含まれる`_`をそのまま表示し、renderer-owned escape tokenや
+  schema/table区切りとの衝突は防止する。
+- added tableは淡い緑`#E8F5E9`、removedは`#MistyRose`、modifiedは`#LightYellow`、contextは
+  `#LightGray`の背景とし、changed rowのmarkerと文字色も保持する。
 - relation の方向・種別・cardinality は Issue #6 の `build_er_view` / SQLAlchemy PlantUML v2 semantics を再利用し、新たに推測しない。
 - color だけに依存して差分状態を表現しない。
 
@@ -93,7 +98,8 @@ SQLAlchemy diff に `--target` や SQLAlchemy 専用 config は追加しない�
 - SQLAlchemy package、DB driver、target application の import/execute。
 - Next.js、`domain: all`、cross-domain relation、HTML report。
 - 新しい runtime dependency、public plugin ABI、汎用 cross-domain diff framework。
-- completed Python diff または SQLAlchemy snapshot の既存 public bytes の変更。
+- completed Python diffまたはSQLAlchemy snapshotのsemantic JSON、ID、schemaの変更。
+- PlantUML v1の履歴変更、または追加背景色以外のPython diff配色・member行表現の変更。
 
 ## 受け入れ条件
 
@@ -101,8 +107,8 @@ SQLAlchemy diff に `--target` や SQLAlchemy 専用 config は追加しない�
 | --- | --- |
 | I04-AC-001 | complete before/after で table・relation の added/removed、Issue #6 row の added/removed/modified と impact context が正しく出力され、table mapping と relation source の provenance-only change は no-delta、ID変更はremoved+addedになる。 |
 | I04-AC-002 | both-absent、before-only、after-only、side-incomplete が parent truth tableどおりの status、publication、exit になり、failure sideからadded/removedを捏造しない。 |
-| I04-AC-003 | PlantUML が added/removed ghost/modified/impact context を判別でき、Issue #6 のER relation semanticsとredactionを維持する。 |
+| I04-AC-003 | PlantUML が added/removed ghost/modified/impact context を判別でき、通常のschema/table識別子の`_`を可読表示し、added背景を`#E8F5E9`で統一しつつIssue #6のER relation semanticsとredactionを維持する。 |
 | I04-AC-004 | changed-path/entity budget、stdout selector、atomic/no-overwrite publication が SQLAlchemy diff でも既存 contractどおり動作し、source/literal/secret/absolute pathを漏らさない。 |
-| I04-AC-005 | existing Python diff と SQLAlchemy snapshot の regression が通り、runtime dependency・source execution・DB access・Git mutationを追加しない。 |
+| I04-AC-005 | existing Python diff と SQLAlchemy snapshot の regression が通り、Pythonの追加class/note背景だけを`#E8F5E9`へ統一し、runtime dependency・source execution・DB access・Git mutationを追加しない。 |
 
 I04-AC-001〜I04-AC-005 がすべて成立した時点を本 Issue の実装完了条件とする。本書の `ready` は実装着手可能な仕様状態を示し、実装完了を意味しない。

@@ -5,7 +5,7 @@ ID: "iss-00007"
 関連GitHub: ["#7"]
 package_sequence_key: "ISSUE-04"
 状態: "ready"
-最終更新: "2026-08-30"
+最終更新: "2026-08-31"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -43,6 +43,11 @@ baseline failureやDesign記載のplanned-new pathが既に存在する場合は
 | I04-PLAN-002 | SQLAlchemy exact-ID diff、impact、JSON/PlantUML renderingを実装する。 | I04-DES-002,003 |
 | I04-PLAN-003 | `DiffApplication`、CLI、artifact/manifest/stream/schemaへSQLAlchemy branchを接続する。 | I04-DES-001,004 |
 | I04-PLAN-004 | safety、Python diff/SQLAlchemy snapshot regression、repository-wide quality gateを完了する。 | I04-DES-005 |
+| I04-PLAN-005 | 通常のSQLAlchemy table/schema名のunderscore可読化と、SQLAlchemy/Pythonのadded背景`#E8F5E9`統一をtest-firstで追加する。 | I04-DES-004,005 |
+
+I04-PLAN-005は、通常の`_`、literal escape token、component内`.`をunit testで固定してからrendererを
+変更する。続いてSQLAlchemy table背景、writerのmarker/背景対応、Python class/note背景をpublic
+Artifact testで固定する。Python member行、他statusの配色、semantic JSON、ID、aliasは変更しない。
 
 ## I04-PLAN-001 — tests first
 
@@ -115,7 +120,8 @@ uv run pytest tests/unit/sqlalchemy/test_semantic_json.py tests/unit/sqlalchemy/
 stop:
 
 - heuristic rename/move、raw source/literal、runtime SQLAlchemy/DBが必要になる。
-- Issue #6 IDまたはsnapshot public bytesを変更しなければ実装できない。
+- Issue #6 IDまたはsnapshot semantic bytesを変更しなければ実装できない。PlantUML v2の通常の
+  underscore表示だけはI04-PLAN-005で承認された表示修正として扱う。
 
 ## I04-PLAN-003 — existing diff machineryへ接続
 
@@ -186,11 +192,11 @@ python3 ./spec-dock/scripts/spec-dock validate
 
 | Requirement | Design | Plan | Acceptance |
 | --- | --- | --- | --- |
-| I04-REQ-001 | I04-DES-001,004 | I04-PLAN-001,003 | I04-AC-001,004 |
+| I04-REQ-001 | I04-DES-001,004 | I04-PLAN-001,003,005 | I04-AC-001,004 |
 | I04-REQ-002 | I04-DES-002 | I04-PLAN-001,002 | I04-AC-001 |
 | I04-REQ-003 | I04-DES-003 | I04-PLAN-001,002 | I04-AC-001,003 |
 | I04-REQ-004 | I04-DES-001,004 | I04-PLAN-001,003 | I04-AC-002,004 |
-| I04-REQ-005 | I04-DES-005 | I04-PLAN-004 | I04-AC-003,004,005 |
+| I04-REQ-005 | I04-DES-005 | I04-PLAN-004,005 | I04-AC-003,004,005 |
 
 ## rollback / handoff
 
@@ -206,4 +212,5 @@ handoff条件:
 - focused testとrepository-wide gateが成功する。
 - Python diffとSQLAlchemy snapshotのpublic regressionがない。
 - runtime dependency、Next/all/HTML/target-query、heuristic moveを追加していない。
-- `report.md`、`.meta.json`、parent scopeは本Issue implementationで変更していない。
+- `.meta.json`とparent scopeは本Issue implementationで変更していない。`report.md`は実装・検証結果を
+  完了時に記録する。

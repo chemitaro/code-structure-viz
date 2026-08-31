@@ -8,7 +8,10 @@ from typing import cast
 from code_structure_viz.adapters.sqlalchemy.analyzer import SqlAlchemySnapshotAnalyzer
 from code_structure_viz.adapters.sqlalchemy.diff import SqlAlchemyDiffer
 from code_structure_viz.adapters.sqlalchemy.model import SqlAlchemySnapshot
-from code_structure_viz.adapters.sqlalchemy.plantuml import render_sqlalchemy_diff
+from code_structure_viz.adapters.sqlalchemy.plantuml import (
+    render_plantuml,
+    render_sqlalchemy_diff,
+)
 from code_structure_viz.adapters.sqlalchemy.semantic_json import (
     render_sqlalchemy_diff as render_json_diff,
 )
@@ -242,9 +245,84 @@ class Team(Base): __tablename__ = "teams"
     assert b"skinparam classAttributeIconSize 0\n" in plantuml
     assert b"\nhide methods\n" not in plantuml
     assert b"+ teams" in plantuml
-    assert b"~ before name : string (str) <<NULL>>" in plantuml
-    assert b"~ after * name : string (str) <<NN>>" in plantuml
+    assert b"~ before <color:DarkGoldenRod>name : string (str) <<NULL>></color>" in plantuml
+    assert b"~ after <color:DarkGoldenRod>* name : string (str) <<NN>></color>" in plantuml
     assert b"src/models.py" not in plantuml
+
+
+def test_snapshot_and_diff_keep_common_table_underscores_readable() -> None:
+    snapshot = _snapshot(
+        b"""
+from sqlalchemy.orm import DeclarativeBase
+class Base(DeclarativeBase): pass
+class EventOutbox(Base):
+    __tablename__ = "sa_event_outbox"
+    __table_args__ = {"schema": "shared_schema"}
+"""
+    )
+
+    snapshot_plantuml = render_plantuml(snapshot)
+    diff_plantuml = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(None, snapshot))
+
+    assert b'entity "shared_schema.sa_event_outbox" as ' in snapshot_plantuml
+    assert b'entity "+ shared_schema.sa_event_outbox" as ' in diff_plantuml
+    assert b"_U005F_" not in snapshot_plantuml
+    assert b"_U005F_" not in diff_plantuml
+
+
+def test_diff_plantuml_colors_changed_member_text_and_preserves_table_palette() -> None:
+    before = _snapshot(
+        b"""
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class Account(Base): __tablename__ = "accounts"
+class Legacy(Base): __tablename__ = "legacies"
+class User(Base):
+    __tablename__ = "users"
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
+    name: Mapped[int] = mapped_column()
+    legacy: Mapped[str] = mapped_column()
+"""
+    )
+    after = _snapshot(
+        b"""
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+class Base(DeclarativeBase): pass
+class Account(Base): __tablename__ = "accounts"
+class Team(Base): __tablename__ = "teams"
+class User(Base):
+    __tablename__ = "users"
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
+    name: Mapped[str] = mapped_column()
+    current: Mapped[str] = mapped_column()
+"""
+    )
+
+    result = SqlAlchemyDiffer().compare(before, after, downstream_depth=1)
+    plantuml = render_sqlalchemy_diff(result)
+    lines = plantuml.splitlines()
+
+    assert any(
+        line.startswith(b'entity "+ teams" as ') and line.endswith(b" #E8F5E9 {") for line in lines
+    )
+    assert any(
+        line.startswith(b'entity "- legacies" as ') and line.endswith(b" #MistyRose {")
+        for line in lines
+    )
+    assert any(
+        line.startswith(b'entity "~ users" as ') and line.endswith(b" #LightYellow {")
+        for line in lines
+    )
+    assert any(
+        line.startswith(b'entity "context accounts" as ') and line.endswith(b" #LightGray {")
+        for line in lines
+    )
+    assert b"  + <color:DarkGreen>current : string (str) <<?NULL>></color>" in plantuml
+    assert b"  - <color:DarkRed>legacy : string (str) <<?NULL>></color>" in plantuml
+    assert b"  ~ before <color:DarkGoldenRod>name : integer (int) <<?NULL>></color>" in plantuml
+    assert b"  ~ after <color:DarkGoldenRod>name : string (str) <<?NULL>></color>" in plantuml
 
 
 def test_modified_row_plantuml_uses_typed_safe_before_and_after_lines() -> None:
@@ -269,8 +347,8 @@ class User(Base):
 
     plantuml = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
 
-    assert b"~ before name : integer" in plantuml
-    assert b"~ after name : string" in plantuml
+    assert b"~ before <color:DarkGoldenRod>name : integer" in plantuml
+    assert b"~ after <color:DarkGoldenRod>name : string" in plantuml
     assert b"[changed]" not in plantuml
 
 
@@ -572,9 +650,9 @@ class User(Base): __tablename__ = "users"
     removed = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(before, after))
     added = render_sqlalchemy_diff(SqlAlchemyDiffer().compare(after, before))
 
-    assert b"- * legacy : string" in removed
+    assert b"- <color:DarkRed>* legacy : string" in removed
     assert b"- column legacy" not in removed
-    assert b"+ * legacy : string" in added
+    assert b"+ <color:DarkGreen>* legacy : string" in added
     assert b"+ column legacy" not in added
 
 

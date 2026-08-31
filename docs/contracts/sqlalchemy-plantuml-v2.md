@@ -94,7 +94,10 @@ snapshot member orderを維持し、columnとconstraintの境界に`  --`を一�
 ## display escaping
 
 PlantUML entity/table components use `escape_plantuml_label` so schema/table components and
-their owned separator remain injective. Human-facing row values use the separate
+their owned separator remain injective. Ordinary `_` is preserved for readability, while `.`
+and syntax-sensitive characters remain encoded. A literal escape-token prefix such as
+`_U0022_` has its leading `_` encoded so it cannot collide with renderer-owned escapes.
+Human-facing row values use the separate
 `escape_plantuml_display_label` projection. It preserves common identifier punctuation,
 including `_` and `.`, while still encoding quotes, braces, control characters, and other
 syntax-sensitive code points. This keeps names such as `authentication_identity_id` readable
@@ -111,7 +114,14 @@ removed relationのbefore evidenceも保持する。色だけをdelta識別の�
 
 diff skeletonはrow markerを可視文字として保持するため、snapshot skeletonの`hide methods`を
 含めず、`skinparam linetype ortho`の直後に`skinparam classAttributeIconSize 0`を置く。
-snapshot skeletonとsnapshot bytesは変更しない。
+snapshot skeletonは変更しない。table/schema表示の通常の`_`を可読化する修正だけはsnapshotと
+diffの双方へ適用し、semantic JSON、table ID、aliasは変更しない。
+
+diff tableの背景色はaddedを`#E8F5E9`、removedを`#MistyRose`、member-only modifiedを
+`#LightYellow`、impact-only contextを`#LightGray`とする。member行はmarkerを残したまま、
+addedを`<color:DarkGreen>...</color>`、removedを`<color:DarkRed>...</color>`、modifiedの
+before/afterを`<color:DarkGoldenRod>...</color>`で囲む。このinline文字色はrendererが所有する
+閉じた語彙であり、未着色行、markerとの色の取り違え、未知の色はdiff成果物として受理しない。
 
 external/unknown targetのsynthetic entity/edgeは生成しない。table aliasはhashed table idだけから
 作り、path、source range、row id、URL、token、raw expressionを出力しない。`redacted_values`は

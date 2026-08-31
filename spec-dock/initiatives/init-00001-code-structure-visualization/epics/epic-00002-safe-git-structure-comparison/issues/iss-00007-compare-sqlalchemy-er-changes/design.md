@@ -5,7 +5,7 @@ ID: "iss-00007"
 関連GitHub: ["#7"]
 package_sequence_key: "ISSUE-04"
 状態: "ready"
-最終更新: "2026-08-30"
+最終更新: "2026-08-31"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -50,8 +50,9 @@ Python diff の `src/code_structure_viz/semantic/diff.py` は `PythonSnapshot` �
 | `src/code_structure_viz/core/outcomes.py` | SQLAlchemy domain の Artifact allowlist に `sqlalchemy.diff.semantic.json` と `sqlalchemy.diff.puml` の2 pathだけを追加する。`DomainOutcome` の構造は変更しない。 |
 | `src/code_structure_viz/cli/parser.py` | `DiffCliRequest.domain` と diff domain/stdout compatibilityを `python|sqlalchemy` にする。option setは変更しない。 |
 | `src/code_structure_viz/application/diff.py` | shared source/publication lifecycleはそのままに、Python existing path と SQLAlchemy path を domain で分岐する。 |
-| `src/code_structure_viz/adapters/sqlalchemy/semantic_json.py` | Issue #6 の safe table/row/relation projectionをdiffから再利用できる小さな内部 helper と SQLAlchemy diff JSON renderingを追加する。snapshot bytesは不変とする。 |
-| `src/code_structure_viz/adapters/sqlalchemy/plantuml.py` | existing escaping/row formatting/ER projectionを使う diff rendering entry pointを追加する。snapshot PlantUML v2 bytesは不変とする。 |
+| `src/code_structure_viz/adapters/sqlalchemy/semantic_json.py` | Issue #6 の safe table/row/relation projectionをdiffから再利用できる小さな内部 helper と SQLAlchemy diff JSON renderingを追加する。snapshot semantic bytesは不変とする。 |
+| `src/code_structure_viz/adapters/sqlalchemy/plantuml.py` | existing row formatting/ER projectionを使う diff rendering entry pointを追加する。通常のtable/schema名の`_`はsnapshot/diffで可読表示し、added背景は`#E8F5E9`とする。 |
+| `src/code_structure_viz/adapters/python/diff_renderer.py` | added class/note背景だけをSQLAlchemyと同じ`#E8F5E9`へ合わせ、member行bytesは変更しない。 |
 | `src/code_structure_viz/artifacts/manifest.py` | diff Artifact contract、domain、adapter metadata、PlantUML contractをrequest domainで選ぶ。 |
 | `src/code_structure_viz/artifacts/writer.py` | `sqlalchemy.diff.semantic.json` / `sqlalchemy.diff.puml` をclosed final pathとして追加し、diff stagingをdomain-awareにする。 |
 | `src/code_structure_viz/artifacts/streams.py` | SQLAlchemy diff selectorをSQLAlchemy diff pathへ解決する。 |
@@ -74,7 +75,6 @@ Python diff の `src/code_structure_viz/semantic/diff.py` は `PythonSnapshot` �
 
 - `src/code_structure_viz/semantic/diff.py`
 - `src/code_structure_viz/adapters/python/matcher.py`
-- `src/code_structure_viz/adapters/python/diff_renderer.py`
 - `src/code_structure_viz/adapters/sqlalchemy/model.py`
 - `src/code_structure_viz/adapters/sqlalchemy/analyzer.py`
 - `src/code_structure_viz/adapters/sqlalchemy/selection.py`
@@ -192,8 +192,14 @@ diagnostics
 - impact-only tableはcontextとしてmarkerなしまたは固定context markerで表示する。
 - before/after relation unionを描き、removed relationはbefore evidence、current relationはafter evidenceを使う。
 - relation/cardinalityをdiff layerで再推論しない。
+- table/schema componentでは通常の`_`を保持し、`.`とsyntax-sensitive文字をescapeする。
+  literal `_Uxxxx_`はtoken先頭を保護し、renderer-owned escapeとのinjectivityを維持する。
+- table背景はadded=`#E8F5E9`、removed=`#MistyRose`、modified=`#LightYellow`、
+  context=`#LightGray`とし、member行はmarkerと既定の濃色文字色を併用する。
+- writerはtable markerと背景色の閉じた対応を検証し、旧`#PaleGreen`、誤配色、未知色を拒否する。
 
-snapshot rendererの既存header/legend/outputは変更しない。diff pathだけ別skeletonをwriterでvalidateする。
+snapshot rendererのheader/legendは変更しない。table/schema表示のunderscore可読化だけをsnapshotにも
+適用し、semantic JSON、ID、aliasは変更しない。diff pathは別skeletonをwriterでvalidateする。
 
 ## Artifact / manifest / streams
 
@@ -227,6 +233,7 @@ endpoint/source/FileChangeSet/budget/run fingerprint/publication structureはexi
 - changed-path overrun、endpoint/source/output/drift/internal failureはexisting run-fatal behaviorを使う。
 - usage/stdout compatibilityはsource acquisition前に確定する。
 - Python diff pathは既存 implementationを使い、shared registry/API変更によるpublic output差分を認めない。
-- SQLAlchemy snapshot semantic JSON/PlantUML v2 output差分を認めない。
+- SQLAlchemy snapshot semantic JSON、ID、aliasの差分を認めない。PlantUML v2は通常のtable/schema名の
+  underscore可読化による表示bytes差分だけを認める。
 - migrationはN/A。persistent dataを持たず、既存Artifactを書き換えない。
 - false positiveを避けるため、将来move matchingを追加したくなっても本Issue内では行わない。
