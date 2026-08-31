@@ -37,7 +37,7 @@ def test_snapshot_requires_python_domain_and_resolves_default_formats() -> None:
 
 def test_closed_domain_vocabulary_dispatches_both_snapshot_adapters() -> None:
     assert SNAPSHOT_DOMAINS == ("python", "sqlalchemy")
-    assert DIFF_DOMAINS == ("python",)
+    assert DIFF_DOMAINS == ("python", "sqlalchemy")
     assert snapshot_adapter_for("python").contract.domain == "python"
     assert snapshot_adapter_for("sqlalchemy").contract.domain == "sqlalchemy"
 
@@ -92,21 +92,25 @@ def test_snapshot_rejects_cross_domain_stdout_selector(domain: str, selector: st
     assert caught.value.diagnostic.code.value == "CSV-USAGE-005"
 
 
-def test_diff_remains_python_only() -> None:
-    with pytest.raises(CliUsageError) as caught:
-        parse_diff_cli(
-            [
-                "diff",
-                "--repo",
-                ".",
-                "--output-dir",
-                "../output",
-                "--domain",
-                "sqlalchemy",
-            ]
-        )
+def test_diff_accepts_sqlalchemy_with_matching_stdout_selector() -> None:
+    request = parse_diff_cli(
+        [
+            "diff",
+            "--repo",
+            ".",
+            "--output-dir",
+            "../output",
+            "--domain",
+            "sqlalchemy",
+            "--stdout",
+            "sqlalchemy:semantic-json",
+        ]
+    )
 
-    assert caught.value.diagnostic.code.value == "CSV-USAGE-001"
+    assert request.domain == "sqlalchemy"
+    assert request.stdout_selector == DomainFormatSelector(
+        domain="sqlalchemy", format="semantic-json"
+    )
 
 
 def test_diff_resolves_closed_endpoint_and_output_format_grammar() -> None:

@@ -15,7 +15,14 @@ _DOMAIN_ARTIFACT_PATHS = {
             "python.diff.puml",
         }
     ),
-    "sqlalchemy": frozenset({"sqlalchemy.snapshot.semantic.json", "sqlalchemy.snapshot.puml"}),
+    "sqlalchemy": frozenset(
+        {
+            "sqlalchemy.snapshot.semantic.json",
+            "sqlalchemy.snapshot.puml",
+            "sqlalchemy.diff.semantic.json",
+            "sqlalchemy.diff.puml",
+        }
+    ),
 }
 
 

@@ -30,6 +30,8 @@ _FINAL_PATHS = frozenset(
         "sqlalchemy.snapshot.puml",
         "python.diff.semantic.json",
         "python.diff.puml",
+        "sqlalchemy.diff.semantic.json",
+        "sqlalchemy.diff.puml",
         "file-changes.json",
         "run-manifest.json",
     }
@@ -364,6 +366,7 @@ def _contains_private_paths(
         "python.snapshot.puml",
         "python.diff.puml",
         "sqlalchemy.snapshot.puml",
+        "sqlalchemy.diff.puml",
     }:
         return any(_contains_private_path_token(text, path) for path in private_paths)
     try:
@@ -686,6 +689,102 @@ def _valid_sqlalchemy_plantuml(content: bytes) -> bool:
     return not in_entity
 
 
+def _valid_sqlalchemy_diff_row(line: str) -> bool:
+    marker_colors = (
+        ("  + ", "DarkGreen"),
+        ("  - ", "DarkRed"),
+        ("  ~ before ", "DarkGoldenRod"),
+        ("  ~ after ", "DarkGoldenRod"),
+    )
+    for marker, color in marker_colors:
+        opening = f"{marker}<color:{color}>"
+        if not line.startswith(opening):
+            continue
+        content = line.removeprefix(opening).removesuffix("</color>")
+        return (
+            line.endswith("</color>")
+            and bool(content)
+            and "<color:" not in content
+            and "</color>" not in content
+        )
+    return False
+
+
+def _sqlalchemy_diff_entity_alias(line: str) -> str | None:
+    entity = re.fullmatch(
+        rf'entity "(.+)" as ({_SQLALCHEMY_ALIAS}) (#[A-Za-z0-9]+) \{{',
+        line,
+    )
+    if entity is None:
+        return None
+    label, alias, color = entity.groups()
+    marker, separator, display = label.partition(" ")
+    expected_color = {
+        "+": "#E8F5E9",
+        "-": "#MistyRose",
+        "~": "#LightYellow",
+        "context": "#LightGray",
+    }.get(marker)
+    if separator != " " or not _valid_sqlalchemy_display(display) or color != expected_color:
+        return None
+    return alias
+
+
+def _valid_sqlalchemy_diff_plantuml(content: bytes) -> bool:
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return False
+    if not text.endswith("\n") or text.endswith("\n\n"):
+        return False
+    lines = text[:-1].split("\n")
+    header = [
+        "@startuml",
+        "title SQLAlchemy ER diff",
+        "top to bottom direction",
+        "hide circle",
+        "skinparam linetype ortho",
+        "skinparam classAttributeIconSize 0",
+    ]
+    tail = [
+        "legend right",
+        "  + added",
+        "  - removed (ghost)",
+        "  ~ modified (before/after)",
+        "  context impact context",
+        "endlegend",
+        "@enduml",
+    ]
+    if lines[: len(header)] != header or lines[-len(tail) :] != tail:
+        return False
+    in_entity = False
+    aliases: set[str] = set()
+    for line in lines[len(header) : -len(tail)]:
+        if line == "}":
+            if not in_entity:
+                return False
+            in_entity = False
+        elif line.startswith('entity "') and (entity_alias := _sqlalchemy_diff_entity_alias(line)):
+            if in_entity:
+                return False
+            if entity_alias in aliases:
+                return False
+            aliases.add(entity_alias)
+            in_entity = True
+        elif (in_entity and _valid_sqlalchemy_diff_row(line)) or (
+            not in_entity
+            and (
+                line.startswith('note "status: ')
+                or re.fullmatch(r'note ".+" as N_[0-9a-f]{64}', line)
+                or _valid_sqlalchemy_relation(line, aliases)
+            )
+        ):
+            continue
+        else:
+            return False
+    return not in_entity
+
+
 class OutputTransaction:
     def __init__(
         self,
@@ -823,12 +922,13 @@ class OutputTransaction:
 
     def stage_diff_payload(
         self,
+        domain: DomainName,
         format_value: ArtifactFormat,
         content: bytes,
     ) -> ArtifactDescriptor:
         if format_value not in {"semantic-json", "plantuml", "file-change-set"}:
             raise _error(DiagnosticCode.INTERNAL_INVARIANT)
-        descriptor = ArtifactDescriptor.create_diff(format_value, content)
+        descriptor = ArtifactDescriptor.create_diff(domain, format_value, content)
         if descriptor.path in self._descriptors:
             raise _error(DiagnosticCode.INTERNAL_INVARIANT)
         self._validate_content(descriptor.path, content)
@@ -971,6 +1071,8 @@ class OutputTransaction:
             if relative_path in {"python.snapshot.puml", "python.diff.puml"}
             else _valid_sqlalchemy_plantuml(content)
             if relative_path == "sqlalchemy.snapshot.puml"
+            else _valid_sqlalchemy_diff_plantuml(content)
+            if relative_path == "sqlalchemy.diff.puml"
             else _canonical_json_bytes(content)
         )
         if not valid:

@@ -137,10 +137,11 @@ def _alias(table: SqlAlchemyTable) -> str:
 
 def test_escape_plantuml_label_is_injective_and_component_safe() -> None:
     assert escape_plantuml_label("e\N{COMBINING ACUTE ACCENT} A9-/$") == "é A9-/$"
+    assert escape_plantuml_label("sa_event_outbox") == "sa_event_outbox"
     assert escape_plantuml_label('"') == "_U0022_"
-    assert escape_plantuml_label("_U0022_") == "_U005F_U0022_U005F_"
+    assert escape_plantuml_label("_U0022_") == "_U005F_U0022_"
     assert escape_plantuml_label(".") == "_U002E_"
-    assert escape_plantuml_label("_U002E_") == "_U005F_U002E_U005F_"
+    assert escape_plantuml_label("_U002E_") == "_U005F_U002E_"
     assert escape_plantuml_label("\\\n{\N{ZERO WIDTH SPACE}") == ("_U005C__U000A__U007B__U200B_")
 
 
@@ -402,5 +403,5 @@ def test_renderer_keeps_quote_and_literal_escape_token_labels_distinct() -> None
     rendered = render_plantuml(_snapshot((quote, token))).decode()
 
     assert f'entity "_U0022_" as {_alias(quote)} {{' in rendered
-    assert f'entity "_U005F_U0022_U005F_" as {_alias(token)} {{' in rendered
+    assert f'entity "_U005F_U0022_" as {_alias(token)} {{' in rendered
     assert rendered.count('entity "') == 2

@@ -93,7 +93,12 @@ authorityであり、rendererで再集計しない。
 
 ## Schema boundary
 
-`schemas/semantic-v1.schema.json` はexisting Python snapshot/diff branchとSQLAlchemy snapshot
-branchのclosed unionである。SQLAlchemy diff、cross-domain entity/row/relation、unknown row
+`schemas/semantic-v1.schema.json` はexisting Python snapshot/diff branch、SQLAlchemy snapshot、
+SQLAlchemy diff branchのclosed unionである。SQLAlchemy diffはsnapshotのsafe table/row/relation
+projectionをbefore/afterへ再利用し、table/relationはadded/removed、rowは
+added/removed/modified、`matching`は空配列に閉じる。table mappingとrow/relation sourceだけの
+provenance変更はdeltaにせず、ID変更をrename/moveへ再対応付けしない。
+
+cross-domain entity/row/relation、unknown row
 kind、kind外field、raw expression field、internal byte-column fieldを拒否する。SQLAlchemy
 diagnosticは `CSV-SA-001`〜`CSV-SA-013` とそのclosed message/severity/contextだけを受理する。

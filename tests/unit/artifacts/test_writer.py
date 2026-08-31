@@ -30,6 +30,33 @@ endlegend
 @enduml
 """
 
+_SQLALCHEMY_VISIBLE_DIFF_PUML = (
+    b"""@startuml
+title SQLAlchemy ER diff
+top to bottom direction
+hide circle
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+entity "+ shared_schema.sa_event_outbox" as """
+    b"T_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb #E8F5E9 {\n"
+    b"""}
+entity "~ users" as """
+    b"T_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa #LightYellow {\n"
+    b"""  + <color:DarkGreen>* id : integer (int) <<PK, NN>></color>
+  - <color:DarkRed>legacy : string (str) <<NULL>></color>
+  ~ before <color:DarkGoldenRod>name : string (str) <<NULL>></color>
+  ~ after <color:DarkGoldenRod>* name : string (str) <<NN>></color>
+}
+legend right
+  + added
+  - removed (ghost)
+  ~ modified (before/after)
+  context impact context
+endlegend
+@enduml
+"""
+)
+
 
 def test_output_transaction_publishes_the_closed_file_set_by_directory_rename(
     tmp_path: Path,
@@ -75,6 +102,90 @@ def test_output_transaction_publishes_closed_sqlalchemy_snapshot_paths(
         "sqlalchemy.snapshot.puml",
         "sqlalchemy.snapshot.semantic.json",
     ]
+
+
+def test_output_transaction_stages_closed_sqlalchemy_diff_path(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+
+    descriptor = transaction.stage_diff_payload("sqlalchemy", "semantic-json", b"{}\n")
+
+    assert descriptor.path == "sqlalchemy.diff.semantic.json"
+    transaction.abort()
+
+
+def test_output_transaction_accepts_visible_sqlalchemy_diff_fields(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+
+    descriptor = transaction.stage_diff_payload(
+        "sqlalchemy", "plantuml", _SQLALCHEMY_VISIBLE_DIFF_PUML
+    )
+
+    assert descriptor.path == "sqlalchemy.diff.puml"
+    transaction.abort()
+
+
+def test_output_transaction_rejects_hidden_sqlalchemy_diff_fields(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+    hidden = _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(
+        b"skinparam classAttributeIconSize 0\n", b"hide methods\n"
+    )
+
+    with pytest.raises(OutputTransactionError) as caught:
+        transaction.stage_diff_payload("sqlalchemy", "plantuml", hidden)
+
+    assert caught.value.diagnostic.code is DiagnosticCode.INTERNAL_INVARIANT
+    transaction.abort()
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(
+            b"  + <color:DarkGreen>* id : integer (int) <<PK, NN>></color>\n",
+            b"  + * id : integer (int) <<PK, NN>>\n",
+        ),
+        _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(b"  + <color:DarkGreen>", b"  + <color:DarkRed>"),
+        _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(
+            b"  + <color:DarkGreen>", b"  + <color:MidnightBlue>"
+        ),
+        _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(
+            b"  ~ before <color:DarkGoldenRod>", b"  ~ before <color:DarkRed>"
+        ),
+        _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(b"#E8F5E9", b"#PaleGreen"),
+        _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(b"#E8F5E9", b"#MistyRose"),
+        _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(b"#E8F5E9", b"#E8F5EA"),
+        _SQLALCHEMY_VISIBLE_DIFF_PUML.replace(
+            b'entity "~ users" as '
+            b"T_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
+            b"#LightYellow {",
+            b'entity "~ users" as '
+            b"T_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
+            b"#E8F5E9 {",
+        ),
+    ],
+)
+def test_output_transaction_rejects_invalid_sqlalchemy_diff_colors(
+    tmp_path: Path, invalid: bytes
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    transaction = OutputTransaction(repository, tmp_path / "result")
+    transaction.begin()
+
+    with pytest.raises(OutputTransactionError) as caught:
+        transaction.stage_diff_payload("sqlalchemy", "plantuml", invalid)
+
+    assert caught.value.diagnostic.code is DiagnosticCode.INTERNAL_INVARIANT
+    transaction.abort()
 
 
 @pytest.mark.parametrize(

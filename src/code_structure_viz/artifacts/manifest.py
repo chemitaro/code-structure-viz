@@ -50,15 +50,27 @@ _SNAPSHOT_ARTIFACT_CONTRACT = {
     ),
 }
 _DIFF_ARTIFACT_CONTRACT = {
-    "semantic-json": (
+    ("python", "semantic-json"): (
         "python.diff.semantic.json",
         "application/json",
     ),
-    "plantuml": (
+    ("python", "plantuml"): (
         "python.diff.puml",
         "text/vnd.plantuml; charset=utf-8",
     ),
-    "file-change-set": (
+    ("sqlalchemy", "semantic-json"): (
+        "sqlalchemy.diff.semantic.json",
+        "application/json",
+    ),
+    ("sqlalchemy", "plantuml"): (
+        "sqlalchemy.diff.puml",
+        "text/vnd.plantuml; charset=utf-8",
+    ),
+    ("python", "file-change-set"): (
+        "file-changes.json",
+        "application/json",
+    ),
+    ("sqlalchemy", "file-change-set"): (
         "file-changes.json",
         "application/json",
     ),
@@ -107,11 +119,16 @@ class ArtifactDescriptor:
         )
 
     @classmethod
-    def create_diff(cls, format_value: ArtifactFormat, content: bytes) -> ArtifactDescriptor:
-        path, media_type = _DIFF_ARTIFACT_CONTRACT[format_value]
+    def create_diff(
+        cls,
+        domain: DomainName,
+        format_value: ArtifactFormat,
+        content: bytes,
+    ) -> ArtifactDescriptor:
+        path, media_type = _DIFF_ARTIFACT_CONTRACT[(domain, format_value)]
         return cls(
             path=path,
-            domain="python",
+            domain=domain,
             format=format_value,
             media_type=media_type,
             size_bytes=len(content),
@@ -343,7 +360,7 @@ def artifact_format(value: OutputFormat) -> ArtifactFormat:
 
 
 class DiffManifestBuilder:
-    """Render the Python diff run manifest without changing snapshot schema."""
+    """Render one first-party domain diff run manifest."""
 
     def render(
         self,
@@ -360,8 +377,10 @@ class DiffManifestBuilder:
         semantic_sides: Mapping[str, object] | None = None,
     ) -> bytes:
         if len(outcome.domains) != 1 or outcome.manifest_relative_path != "run-manifest.json":
-            raise ValueError("diff manifest requires one Python domain")
+            raise ValueError("diff manifest requires one domain")
         domain = outcome.domains[0]
+        if domain.domain != request.domain:
+            raise ValueError("diff request and outcome domains do not match")
         if isinstance(domain.coverage, PythonCoverage):
             coverage: object | None = python_coverage_value(domain.coverage)
         elif isinstance(domain.coverage, Mapping):
@@ -386,7 +405,9 @@ class DiffManifestBuilder:
                 ),
             )
         )
-        if any(item.format not in _DIFF_ARTIFACT_CONTRACT for item in ordered_artifacts):
+        if any(
+            (item.domain, item.format) not in _DIFF_ARTIFACT_CONTRACT for item in ordered_artifacts
+        ):
             raise ValueError("artifact descriptor violates the diff contract")
         expected_domain_paths = tuple(
             item.path for item in ordered_artifacts if item.format != "file-change-set"
@@ -396,13 +417,14 @@ class DiffManifestBuilder:
         if not any(item.format == "file-change-set" for item in ordered_artifacts):
             raise ValueError("diff manifest requires a file-change descriptor")
         if any(
-            item.path != _DIFF_ARTIFACT_CONTRACT[item.format][0]
-            or item.media_type != _DIFF_ARTIFACT_CONTRACT[item.format][1]
+            item.path != _DIFF_ARTIFACT_CONTRACT[(request.domain, item.format)][0]
+            or item.media_type != _DIFF_ARTIFACT_CONTRACT[(request.domain, item.format)][1]
+            or item.domain != request.domain
             for item in ordered_artifacts
         ):
             raise ValueError("artifact descriptor violates the diff contract")
         domain_value: dict[str, object] = {
-            "domain": "python",
+            "domain": request.domain,
             "status": domain.status.value,
             "payload_available": domain.payload_available,
             "entity_count": domain.entity_count,
@@ -420,7 +442,9 @@ class DiffManifestBuilder:
         preimage = {
             "schema": "code-structure-viz.run-fingerprint/v1",
             "tool_version": __version__,
-            "adapter_version": "python-ast/1",
+            "adapter_version": (
+                "python-ast/1" if request.domain == "python" else "sqlalchemy-ast/1"
+            ),
             "config_sha256": config.sha256,
             "command": "diff",
             "formats": list(request.formats),
@@ -452,10 +476,20 @@ class DiffManifestBuilder:
                 "manifest": "code-structure-viz.run-manifest/v1",
                 "run_summary": "code-structure-viz.run-summary/v1",
                 "stdout_result": "code-structure-viz.stdout-result/v1",
-                "plantuml": "code-structure-viz.plantuml/python/v1",
+                "plantuml": (
+                    "code-structure-viz.plantuml/python/v1"
+                    if request.domain == "python"
+                    else "code-structure-viz.plantuml/sqlalchemy/v2"
+                ),
                 "file_change_set": "code-structure-viz.file-change-set/v1",
             },
-            "adapters": [{"domain": "python", "name": "python-ast", "version": "1"}],
+            "adapters": [
+                {
+                    "domain": request.domain,
+                    "name": "python-ast" if request.domain == "python" else "sqlalchemy-ast",
+                    "version": "1",
+                }
+            ],
             "command": {
                 "name": "diff",
                 "domain": request.domain,

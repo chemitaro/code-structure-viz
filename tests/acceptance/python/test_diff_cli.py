@@ -65,6 +65,27 @@ def test_explicit_commit_endpoints_publish_python_semantic_diff(tmp_path: Path) 
     assert "~ method total" in plantuml
 
 
+def test_added_python_backgrounds_use_subtle_green_without_changing_member_style(
+    tmp_path: Path,
+) -> None:
+    repository, before, after = create_two_commit_repository(
+        tmp_path,
+        before_text="class Target:\n    pass\n",
+        after_text=("class Target:\n    pass\nclass Source:\n    target: Target\n"),
+    )
+    output = tmp_path / "output"
+
+    result = run_diff_cli(repository, output, "--from", before, "--to", after)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    plantuml = (output / "python.diff.puml").read_text(encoding="utf-8")
+    assert 'class "+ Source" as ' in plantuml
+    assert "#E8F5E9 {" in next(line for line in plantuml.splitlines() if 'class "+ Source"' in line)
+    assert 'note "+ relation ' in plantuml
+    assert "#E8F5E9" in next(line for line in plantuml.splitlines() if 'note "+ relation ' in line)
+    assert "    + field target : Target #PaleGreen" in plantuml
+
+
 def test_from_only_freezes_working_tree_and_records_endpoint_provenance(
     tmp_path: Path,
 ) -> None:
