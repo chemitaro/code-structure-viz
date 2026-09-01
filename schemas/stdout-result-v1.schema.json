@@ -13,25 +13,27 @@
     "domain_status": {"enum": ["complete", "not_applicable", "incomplete"]},
     "incomplete_kind": {"const": "partial_safe"},
     "run_status": {"enum": ["fatal", "interrupted"]},
-    "reason": {"enum": ["missing", "component_only", "duplicate"]},
-    "stable_reason": {"enum": ["published_artifact", "domain_not_applicable", "domain_payload_unavailable", "run_fatal", "final_manifest_unavailable", "run_interrupted"]},
+    "target_failures": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/target_failure"}},
+    "stable_reason": {"enum": ["published_artifact", "domain_not_applicable", "domain_payload_unavailable", "target_payload_unavailable", "run_fatal", "final_manifest_unavailable", "run_interrupted"]},
     "artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifact"}]}
   },
   "oneOf": [
     {
       "required": ["domain_status", "artifact"],
-      "not": {"required": ["run_status", "incomplete_kind"]},
       "properties": {
         "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
         "availability": {"const": true},
         "domain_status": {"const": "complete"},
         "stable_reason": {"const": "published_artifact"},
         "artifact": {"type": "object"}
-      }
+      },
+      "allOf": [
+        {"not": {"required": ["run_status", "incomplete_kind"]}},
+        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+      ]
     },
     {
       "required": ["domain_status", "artifact", "incomplete_kind"],
-      "not": {"required": ["run_status"]},
       "properties": {
         "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
         "availability": {"const": true},
@@ -39,62 +41,95 @@
         "incomplete_kind": {"const": "partial_safe"},
         "stable_reason": {"const": "published_artifact"},
         "artifact": {"type": "object"}
-      }
+      },
+      "allOf": [
+        {"not": {"required": ["run_status"]}},
+        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+      ]
     },
     {
       "required": ["domain_status"],
-      "not": {"required": ["run_status", "incomplete_kind"]},
       "properties": {
         "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
         "availability": {"const": false},
         "domain_status": {"const": "not_applicable"},
         "stable_reason": {"const": "domain_not_applicable"},
         "artifact": {"type": "null"}
-      }
+      },
+      "allOf": [
+        {"not": {"required": ["run_status", "incomplete_kind"]}},
+        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+      ]
+    },
+    {
+      "required": ["domain_status", "target_failures"],
+      "properties": {
+        "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+        "availability": {"const": false},
+        "domain_status": {"const": "incomplete"},
+        "stable_reason": {"const": "target_payload_unavailable"},
+        "artifact": {"type": "null"},
+        "target_failures": {"minItems": 1}
+      },
+      "allOf": [
+        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["incomplete_kind"]}, {"required": ["reason"]}]}}
+      ]
     },
     {
       "required": ["domain_status"],
-      "not": {"required": ["run_status", "incomplete_kind"]},
       "properties": {
         "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
         "availability": {"const": false},
         "domain_status": {"const": "incomplete"},
         "stable_reason": {"const": "domain_payload_unavailable"},
         "artifact": {"type": "null"}
-      }
+      },
+      "allOf": [
+        {"not": {"required": ["run_status", "incomplete_kind"]}},
+        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+      ]
     },
     {
       "required": ["run_status"],
-      "not": {"required": ["domain_status", "incomplete_kind"]},
       "properties": {
         "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
         "availability": {"const": false},
         "run_status": {"const": "fatal"},
         "stable_reason": {"const": "run_fatal"},
         "artifact": {"type": "null"}
-      }
+      },
+      "allOf": [
+        {"not": {"required": ["domain_status", "incomplete_kind"]}},
+        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+      ]
     },
     {
       "required": ["run_status"],
-      "not": {"required": ["domain_status", "incomplete_kind"]},
       "properties": {
         "selector": {"const": "manifest"},
         "availability": {"const": false},
         "run_status": {"const": "fatal"},
         "stable_reason": {"const": "final_manifest_unavailable"},
         "artifact": {"type": "null"}
-      }
+      },
+      "allOf": [
+        {"not": {"required": ["domain_status", "incomplete_kind"]}},
+        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+      ]
     },
     {
       "required": ["run_status"],
-      "not": {"required": ["domain_status", "incomplete_kind"]},
       "properties": {
         "selector": {"enum": ["manifest", "python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
         "availability": {"const": false},
         "run_status": {"const": "interrupted"},
         "stable_reason": {"const": "run_interrupted"},
         "artifact": {"type": "null"}
-      }
+      },
+      "allOf": [
+        {"not": {"required": ["domain_status", "incomplete_kind"]}},
+        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+      ]
     }
   ],
   "$defs": {
@@ -109,6 +144,15 @@
         "media_type": {"type": "string", "minLength": 1},
         "size_bytes": {"type": "integer", "minimum": 0},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "target_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_key", "reason"],
+      "properties": {
+        "target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"},
+        "reason": {"enum": ["missing", "component_only", "duplicate"]}
       }
     }
   }

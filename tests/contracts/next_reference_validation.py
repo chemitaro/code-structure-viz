@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -20,6 +21,33 @@ from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 from referencing import Registry, Resource
+
+from tests.contracts.ecmascript_unicode_15_0 import (
+    ALGORITHM_VERSION as ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
+)
+from tests.contracts.ecmascript_unicode_15_0 import (
+    ID_CONTINUE_INTERVALS as ECMASCRIPT_ID_CONTINUE_INTERVALS,
+)
+from tests.contracts.ecmascript_unicode_15_0 import (
+    ID_START_INTERVALS as ECMASCRIPT_ID_START_INTERVALS,
+)
+from tests.contracts.ecmascript_unicode_15_0 import (
+    JOIN_CONTROL as ECMASCRIPT_JOIN_CONTROL,
+)
+from tests.contracts.ecmascript_unicode_15_0 import (
+    OTHER_ID_CONTINUE as ECMASCRIPT_OTHER_ID_CONTINUE_CODEPOINTS,
+)
+from tests.contracts.ecmascript_unicode_15_0 import (
+    OTHER_ID_START as ECMASCRIPT_OTHER_ID_START_CODEPOINTS,
+)
+from tests.contracts.ecmascript_unicode_15_0 import (
+    TABLE_DIGEST as _ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
+)
+from tests.contracts.ecmascript_unicode_15_0 import (
+    contains as _unicode_table_contains,
+)
+
+ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST: str = _ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST
 
 VALIDATOR_SCHEMA = "code-structure-viz.next-reference-validation/v1"
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "schemas" / "next-diagnostic-catalog-v1.json"
@@ -102,10 +130,11 @@ LIMIT_DEFAULTS = {
     "max_array_items": 100000,
     "max_total_array_items": 100000,
     "max_collection_items": 20000,
-    "max_model_records": 100000,
+    "max_model_records": 10000,
     "max_stdout_bytes": 16777216,
     "max_stderr_bytes": 65536,
     "max_adapter_stderr_capture_bytes": 65536,
+    "max_adapter_stdout_capture_bytes": 16777216,
     "timeout_seconds": 60,
     "v8_old_space_mib": 512,
     "max_type_depth": 16,
@@ -131,7 +160,7 @@ class NextRunContext(TypedDict):
 
 
 @dataclass(frozen=True)
-class NextValidatedDecision:
+class ValidatedResponseDecision:
     """Immutable trust-boundary decision consumed by every publication surface.
 
     The response validator is the only constructor.  Downstream projections
@@ -149,6 +178,7 @@ class NextValidatedDecision:
     targets: tuple[str, ...] = ()
     target_failures: tuple[dict[str, Any], ...] = ()
     export_failures: tuple[dict[str, Any], ...] = ()
+    request: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "validated_model", copy.deepcopy(self.validated_model))
@@ -174,9 +204,138 @@ class NextValidatedDecision:
             "targets",
             "target_failures",
             "export_failures",
+            "request",
         }:
             return copy.deepcopy(value)
         return value
+
+
+# Compatibility alias for the Round 13 name.  New code should type against
+# ``ValidatedResponseDecision`` or the closed ``NextRunDecision`` union.
+NextValidatedDecision = ValidatedResponseDecision
+
+
+DECISION_FAILURE_STAGES = frozenset(
+    {
+        "source_selection",
+        "source_read",
+        "stdin_encode",
+        "adapter_heap",
+        "node_discovery",
+        "node_spawn",
+        "node_timeout",
+        "node_process",
+        "adapter_stderr_capture",
+        "adapter_stdout_capture",
+        "response_raw_bytes",
+        "response_decode",
+        "response_protocol",
+        "response_schema",
+        "response_validation",
+        "model_validation",
+        "public_stderr_capture",
+    }
+)
+DECISION_FAILURE_CODES = frozenset(
+    {
+        "CSV-NEXT-LIMIT-001",
+        "CSV-NEXT-LIMIT-002",
+        "CSV-NEXT-LIMIT-003",
+        "CSV-NEXT-LIMIT-004",
+        "CSV-NEXT-LIMIT-005",
+        "CSV-NEXT-NODE-001",
+        "CSV-NEXT-NODE-002",
+        "CSV-NEXT-NODE-003",
+        "CSV-NEXT-NODE-004",
+        "CSV-NEXT-PROTOCOL-001",
+    }
+)
+KNOWN_COUNT_KEYS = ("files", "source_bytes", "model_records", "stdout_bytes")
+
+
+@dataclass(frozen=True)
+class PreResponseFailureDecision:
+    """The sole authority when no schema-valid adapter response exists."""
+
+    request: dict[str, Any]
+    run_context: NextRunContext
+    stage: str
+    diagnostic_code: str
+    diagnostic: dict[str, Any]
+    known_counts: dict[str, int | None]
+    outcome: str = "payload_unavailable"
+    payload_available: bool = False
+    artifact_paths: tuple[str, ...] = ()
+    exit_code: int = 3
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "request", copy.deepcopy(self.request))
+        object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
+        assert self.stage in DECISION_FAILURE_STAGES
+        assert self.diagnostic_code in DECISION_FAILURE_CODES
+        assert set(self.known_counts) == set(KNOWN_COUNT_KEYS)
+        assert all(
+            value is None or (isinstance(value, int) and value >= 0)
+            for value in self.known_counts.values()
+        )
+        assert self.outcome == "payload_unavailable"
+        assert self.payload_available is False
+        assert self.artifact_paths == ()
+        assert self.exit_code == 3
+        assert self.request["run_context"] == self.run_context
+        assert self.diagnostic["code"] == self.diagnostic_code
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name in {"request", "run_context", "diagnostic", "known_counts", "artifact_paths"}:
+            return copy.deepcopy(value)
+        return value
+
+
+@dataclass(frozen=True)
+class NotApplicableDecision:
+    """Closed no-Next applicability outcome with the same downstream shape."""
+
+    request: dict[str, Any]
+    run_context: NextRunContext
+    diagnostic: dict[str, Any]
+    known_counts: dict[str, int | None]
+    outcome: str = "not_applicable"
+    payload_available: bool = False
+    artifact_paths: tuple[str, ...] = ()
+    exit_code: int = 0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "request", copy.deepcopy(self.request))
+        object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
+        assert self.diagnostic["code"] == "CSV-NEXT-APPLICABILITY-001"
+        assert set(self.known_counts) == set(KNOWN_COUNT_KEYS)
+        assert all(
+            value is None or (isinstance(value, int) and value >= 0)
+            for value in self.known_counts.values()
+        )
+        assert self.outcome == "not_applicable"
+        assert self.payload_available is False
+        assert self.artifact_paths == ()
+        assert self.exit_code == 0
+        assert self.request["run_context"] == self.run_context
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name in {"request", "run_context", "diagnostic", "known_counts", "artifact_paths"}:
+            return copy.deepcopy(value)
+        return value
+
+
+NextRunDecision = ValidatedResponseDecision | PreResponseFailureDecision | NotApplicableDecision
+
+
+def is_next_run_decision(value: object) -> bool:
+    """Return whether a value is one of the three closed run decisions."""
+
+    return isinstance(
+        value, (ValidatedResponseDecision, PreResponseFailureDecision, NotApplicableDecision)
+    )
 
 
 # Every limit has an explicit measurement contract.  The production adapter
@@ -276,6 +435,13 @@ LIMIT_CONTRACTS: dict[str, dict[str, Any]] = {
     },
     "max_adapter_stderr_capture_bytes": {
         "unit": "utf8_bytes_per_adapter_stderr_capture",
+        "measurement": "incremental_process_group_capture_before_append",
+        "encoding": "utf8",
+        "inclusive": True,
+        "outcome": "payload_unavailable",
+    },
+    "max_adapter_stdout_capture_bytes": {
+        "unit": "utf8_bytes_per_adapter_stdout_capture",
         "measurement": "incremental_process_group_capture_before_append",
         "encoding": "utf8",
         "inclusive": True,
@@ -543,25 +709,15 @@ SOURCE_PLAN_CONTEXT_SUFFIXES = (".d.ts",)
 SOURCE_PLAN_HARD_EXCLUSIONS = (".git", "node_modules", ".next", "out", "dist", "build", "coverage")
 SOURCE_PLAN_CONTROL_PATHS = ("package.json", "tsconfig.json", "jsconfig.json")
 SOURCE_PLAN_VERSION = "1"
-# ECMAScript IdentifierName is pinned to the Unicode data set used by the
-# Issue #8 v1 grammar.  Python's Unicode database is used for the broad
-# ID_Start/ID_Continue categories, while the ECMAScript Other_ID additions
-# are checked in explicitly.  Keeping the version in compatibility and run
-# fingerprint preimages prevents a host Python upgrade from silently
-# changing the census.
-# Python 3.12's checked-in Unicode database is 15.0.0.  The reference
-# contract rejects a host with another database instead of silently changing
-# the export census; the ECMAScript-specific Other_ID additions remain
-# explicit below.
-ECMASCRIPT_IDENTIFIER_UNICODE_VERSION = "ecma-unicode-15.0"
-ECMASCRIPT_IDENTIFIER_UNICODE_DATA_VERSION = "15.0.0"
-ECMASCRIPT_OTHER_ID_START = frozenset("\u1885\u1886\u2118\u212e\u309b\u309c")
-ECMASCRIPT_OTHER_ID_CONTINUE = frozenset(
-    "\u00b7\u0387\u1369\u136a\u136b\u136c\u136d\u136e\u136f\u1370\u1371\u19da"
+# ECMAScript IdentifierName uses a checked-in Unicode 15.0.0 table rather
+# than the host Python Unicode database.  The table digest is included in
+# the trusted profile, compatibility descriptor, and run fingerprint so a
+# table replacement is an explicit compatibility change.
+ECMASCRIPT_OTHER_ID_START = frozenset(
+    chr(codepoint) for codepoint in ECMASCRIPT_OTHER_ID_START_CODEPOINTS
 )
-ECMASCRIPT_ID_START_CATEGORIES = frozenset({"Lu", "Ll", "Lt", "Lm", "Lo", "Nl"})
-ECMASCRIPT_ID_CONTINUE_CATEGORIES = frozenset(
-    {*ECMASCRIPT_ID_START_CATEGORIES, "Mn", "Mc", "Nd", "Pc"}
+ECMASCRIPT_OTHER_ID_CONTINUE = frozenset(
+    chr(codepoint) for codepoint in ECMASCRIPT_OTHER_ID_CONTINUE_CODEPOINTS
 )
 SOURCE_PLAN_FILE_ROLE_MAP: tuple[dict[str, Any], ...] = (
     {
@@ -610,6 +766,97 @@ EXPORT_GRAPH_RAW_PATH = REPO_ROOT / "tests/fixtures/next_export_graph_raw.json"
 EXPORT_GRAPH_RAW_SCHEMA = "code-structure-viz.next-export-graph-raw/v1"
 EXPORT_GRAPH_CASES_PATH = REPO_ROOT / "tests/fixtures/next_export_graph_cases.json"
 EXPORT_GRAPH_CASES_SCHEMA = "code-structure-viz.next-export-graph-cases/v1"
+
+
+class InstrumentedSourceReader:
+    """Small reference reader that makes accidental post-seal reads visible."""
+
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self._files = dict(files)
+        self.read_counts: dict[str, int] = {}
+        self.sealed = False
+        self.seal_calls = 0
+
+    def read(self, path: str) -> bytes:
+        assert not self.sealed, "SourceView is sealed; filesystem reads are forbidden"
+        assert path in self._files, path
+        self.read_counts[path] = self.read_counts.get(path, 0) + 1
+        assert self.read_counts[path] == 1, path
+        return self._files[path]
+
+    def seal(self) -> int:
+        assert not self.sealed
+        self.sealed = True
+        self.seal_calls += 1
+        return self.seal_calls
+
+
+@dataclass(frozen=True)
+class SourceAcquisitionSeal:
+    """Atomic final-plan/source-view pair produced by the two-phase reader."""
+
+    final_plan: dict[str, Any]
+    source_view: dict[str, Any]
+    plan_digest: str
+    source_view_fingerprint: str
+    seal_id: str
+    seal_operation: int
+
+
+def freeze_source_acquisition(
+    reader: InstrumentedSourceReader,
+    *,
+    discovery_paths: tuple[str, ...],
+    final_paths: tuple[str, ...],
+    final_plan: dict[str, Any],
+    inventory_revision_before: str = "inventory-v1",
+    inventory_revision_after: str = "inventory-v1",
+) -> SourceAcquisitionSeal:
+    """Reference the required intent/read/read-drift-check/seal sequence."""
+
+    assert discovery_paths == tuple(dict.fromkeys(discovery_paths))
+    assert final_paths == tuple(dict.fromkeys(final_paths))
+    contents: dict[str, bytes] = {}
+    for path in discovery_paths:
+        contents[path] = reader.read(path)
+    for path in final_paths:
+        if path not in contents:
+            contents[path] = reader.read(path)
+    assert inventory_revision_after == inventory_revision_before
+    view_files = [
+        {
+            "path": path,
+            "size_bytes": len(contents[path]),
+            "sha256": hashlib.sha256(contents[path]).hexdigest(),
+        }
+        for path in sorted(contents)
+    ]
+    plan_copy = copy.deepcopy(final_plan)
+    plan_digest = digest(plan_copy)
+    source_view = {
+        "schema": "code-structure-viz.source-view/v1",
+        "files": view_files,
+        "file_count": len(view_files),
+    }
+    source_view_fingerprint = digest(source_view)
+    seal_operation = reader.seal()
+    seal_id = digest(
+        {
+            "plan_digest": plan_digest,
+            "source_view_fingerprint": source_view_fingerprint,
+            "seal_operation": seal_operation,
+        }
+    )
+    return SourceAcquisitionSeal(
+        final_plan=plan_copy,
+        source_view=source_view,
+        plan_digest=plan_digest,
+        source_view_fingerprint=source_view_fingerprint,
+        seal_id=seal_id,
+        seal_operation=seal_operation,
+    )
+
+
 _IDENTIFIER_RE = r"[A-Za-z_$][A-Za-z0-9_$]*"
 _EXPORT_KEYWORDS = {
     "as",
@@ -713,11 +960,10 @@ def _jsx_tag_name(text: str, start: int) -> tuple[str, int] | None:
 def _is_jsx_identifier_start(character: str) -> bool:
     """Recognize an ECMAScript IdentifierStart character."""
 
-    assert unicodedata.unidata_version == ECMASCRIPT_IDENTIFIER_UNICODE_DATA_VERSION
     return len(character) == 1 and (
         character in "$_"
-        or character in ECMASCRIPT_OTHER_ID_START
-        or unicodedata.category(character) in ECMASCRIPT_ID_START_CATEGORIES
+        or ord(character) in ECMASCRIPT_OTHER_ID_START_CODEPOINTS
+        or _unicode_table_contains(ECMASCRIPT_ID_START_INTERVALS, ord(character))
     )
 
 
@@ -731,12 +977,11 @@ def _is_jsx_identifier_part(character: str) -> bool:
     the join controls.
     """
 
-    assert unicodedata.unidata_version == ECMASCRIPT_IDENTIFIER_UNICODE_DATA_VERSION
     return len(character) == 1 and (
         _is_jsx_identifier_start(character)
-        or character in ECMASCRIPT_OTHER_ID_CONTINUE
-        or character in "\u200c\u200d"
-        or unicodedata.category(character) in ECMASCRIPT_ID_CONTINUE_CATEGORIES
+        or ord(character) in ECMASCRIPT_OTHER_ID_CONTINUE_CODEPOINTS
+        or ord(character) in ECMASCRIPT_JOIN_CONTROL
+        or _unicode_table_contains(ECMASCRIPT_ID_CONTINUE_INTERVALS, ord(character))
     )
 
 
@@ -2274,6 +2519,7 @@ def _validate_target_exception_proof_base(
     ``CSV-NEXT-TARGET-001`` outcome.
     """
 
+    _validate_proof_reason_semantics(proof, model)
     duplicate_keys = _target_duplicate_module_exceptions(model, request_targets, failure)
     base_model = _deduplicated_model_for_base_validation(model, duplicate_keys)
     expected_by_collection = {
@@ -2287,18 +2533,26 @@ def _validate_target_exception_proof_base(
     discovered_order: list[tuple[str, str]] = []
     for item in proof["discovered_records"]:
         collection = item["collection"]
-        record = item["record"]
-        record_id = record["id"]
+        record_id = item["record_id"]
         assert collection in COLLECTIONS
         assert record_id not in discovered_ids
         assert record_id not in discovered[collection]
         assert _id_kind(record_id) == collection.removesuffix("s")
+        supplied_record = item.get("record")
+        if supplied_record is None:
+            assert record_id in expected_by_collection[collection]
+            record = expected_by_collection[collection][record_id]
+        else:
+            # Published model records are referenced by ID only.  A payload is
+            # allowed solely for a proof-only discovered record that cannot be
+            # present in the published model.
+            assert record_id not in expected_by_collection[collection]
+            record = supplied_record
+            assert record["id"] == record_id
         assert recompute_record_id(record) == record_id
         assert all(taint in TAINTS for taint in item["taints"])
         assert item["taints"] == sorted(item["taints"], key=TAINT_ORDER_INDEX.__getitem__)
-        assert record_id in expected_by_collection[collection]
-        assert record == expected_by_collection[collection][record_id]
-        discovered[collection][record_id] = item
+        discovered[collection][record_id] = {**item, "record": record}
         discovered_ids.add(record_id)
         discovered_order.append((collection, record_id))
     assert all(
@@ -2724,13 +2978,48 @@ def export_failure_decision(
 
 
 def derive_pre_budget_outcome(proof: dict[str, Any], model: dict[str, Any]) -> str:
-    """Derive publication quality from validated proof/model facts only."""
+    """Derive status from the closed proof-reason semantics.
 
-    if proof["failure_roots"] or proof["excluded"] or proof["failed"]:
+    Selection bookkeeping (``not_selected`` and ``target_excluded``) and an
+    intentionally unknown unsupported frontier do not imply information loss.
+    Only a localized taint/failure or an already partial semantic diagnostic
+    lowers the outcome; entity over-budget is owned by the later Python gate.
+    """
+
+    _validate_proof_reason_semantics(proof, model)
+    if (
+        proof["failure_roots"]
+        or any(item["reason"] in {"tainted", "failed"} for item in proof["excluded"])
+        or proof["failed"]
+    ):
         return "partial_safe"
     if any(diagnostic["outcome"] == "partial_safe" for diagnostic in model["diagnostics"]):
         return "partial_safe"
     return "complete"
+
+
+def _validate_proof_reason_semantics(proof: dict[str, Any], model: dict[str, Any]) -> None:
+    """Keep proof dispositions and outcome ownership mutually reachable."""
+
+    excluded_reasons = {item["reason"] for item in proof["excluded"]}
+    failed_reasons = {item["reason"] for item in proof["failed"]}
+    assert "over_budget" not in excluded_reasons
+    assert "over_budget" not in failed_reasons
+    if "unsupported" in excluded_reasons:
+        assert any(
+            diagnostic["code"] == "CSV-NEXT-UNSUPPORTED-001" and diagnostic["outcome"] == "complete"
+            for diagnostic in model["diagnostics"]
+        )
+        coverage = model.get("coverage")
+        if isinstance(coverage, dict):
+            assert coverage.get("unknown_relation_count", 0) >= 1
+    lowers_outcome = bool(proof["failure_roots"] or failed_reasons or "tainted" in excluded_reasons)
+    if lowers_outcome:
+        # A reason alone is not locality proof.  At least one immutable failure
+        # root must witness the bounded region that is being omitted.
+        roots = proof["failure_roots"]
+        assert roots
+        assert all(isinstance(root, dict) and root.get("id") for root in roots)
 
 
 def _with_validated_decision(
@@ -2740,6 +3029,7 @@ def _with_validated_decision(
     proof: dict[str, Any],
     run_context: NextRunContext,
     pre_budget_outcome: str,
+    request: dict[str, Any],
     targets: list[str] | tuple[str, ...] = (),
     target_failures: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
     export_failures: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
@@ -2774,6 +3064,7 @@ def _with_validated_decision(
         targets=tuple(targets),
         target_failures=tuple(target_failures),
         export_failures=tuple(export_failures),
+        request=request,
     )
     return projection
 
@@ -2843,6 +3134,7 @@ def validate_response_envelope(
             proof=response["proof"],
             run_context=run_context,
             pre_budget_outcome="payload_unavailable",
+            request=request,
             targets=request["targets"],
             target_failures=target_failure.failures,
         )
@@ -2861,6 +3153,7 @@ def validate_response_envelope(
             proof=response["proof"],
             run_context=run_context,
             pre_budget_outcome="payload_unavailable",
+            request=request,
             targets=request["targets"],
             export_failures=export_failure["export_failures"],
         )
@@ -2878,6 +3171,7 @@ def validate_response_envelope(
         proof=response["proof"],
         run_context=run_context,
         pre_budget_outcome=pre_budget_outcome,
+        request=request,
         targets=request["targets"],
     )
 
@@ -2898,6 +3192,7 @@ def recompute_run_fingerprint(
     protocol: str,
     trusted_environment_digest: str,
     identifier_unicode_version: str = ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
+    identifier_unicode_table_digest: str = ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
 ) -> str:
     return digest(
         {
@@ -2915,6 +3210,7 @@ def recompute_run_fingerprint(
             "protocol": protocol,
             "trusted_environment_digest": trusted_environment_digest,
             "identifier_unicode_version": identifier_unicode_version,
+            "identifier_unicode_table_digest": identifier_unicode_table_digest,
         }
     )
 
@@ -2946,6 +3242,10 @@ def validate_published_projection(
     """Validate actual semantic/PlantUML bytes from the accepted model."""
 
     decision = getattr(domain, "validated_decision", None)
+    if isinstance(decision, (PreResponseFailureDecision, NotApplicableDecision)):
+        assert published_bytes == {}
+        assert domain["artifact_paths"] == []
+        return
     assert isinstance(decision, NextValidatedDecision), "publication has no validated decision"
     model = decision.validated_model
     expected_entities = [*model["modules"], *model["components"]]
@@ -3188,6 +3488,7 @@ def validate_compatibility_descriptor(descriptor: dict[str, Any]) -> None:
         "fact": 1,
         "boundary": 1,
         "identifier_unicode": ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
+        "identifier_unicode_table_digest": ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
     }
     assert descriptor["compatibility_id"] == recompute_compatibility_id(descriptor)
 
@@ -3652,6 +3953,75 @@ def bounded_decode_json(
     return _BoundedJsonDecoder(payload, resolved_limits).decode()
 
 
+def response_boundary_decision(response_bytes: bytes, request: dict[str, Any]) -> NextRunDecision:
+    """Return one closed decision for every response-boundary failure.
+
+    A real adapter response is never routed directly to a domain projection:
+    raw-byte/decode failures become a pre-response decision, while a
+    schema/proof/reference failure is classified as protocol failure before
+    the same decision is projected.  A valid response returns the immutable
+    decision created by :func:`validate_response_envelope`.
+    """
+
+    bounded = bounded_decode_json(response_bytes, limits=request["limits"])
+    if not bounded["allowed"]:
+        reason = bounded["reason"]
+        classification = classify_response_limit(
+            raw_bytes=bounded["bytes"],
+            aggregate_array_items=bounded["total_array_items"],
+            model_records=0,
+            limits=request["limits"],
+        )
+        code = classification["diagnostic_code"] or "CSV-NEXT-PROTOCOL-001"
+        stage = classification["stage"] or (
+            "response_raw_bytes" if reason == "max_stdout_bytes" else "response_decode"
+        )
+        return pre_response_failure_decision(
+            request,
+            stage=stage,
+            diagnostic_code=code,
+            stdout_bytes=bounded["bytes"],
+        )
+    decoded = bounded["value"]
+    if isinstance(decoded, dict):
+        model = decoded.get("model")
+        proof = decoded.get("proof")
+        model_records = (
+            sum(len(model.get(collection, [])) for collection in COLLECTIONS)
+            if isinstance(model, dict)
+            else 0
+        )
+        proof_records = len(proof.get("discovered_records", [])) if isinstance(proof, dict) else 0
+        classification = classify_response_limit(
+            raw_bytes=bounded["bytes"],
+            aggregate_array_items=bounded["total_array_items"],
+            model_records=proof_records or model_records,
+            limits=request["limits"],
+        )
+        if not classification["allowed"]:
+            return pre_response_failure_decision(
+                request,
+                stage=classification["stage"],
+                diagnostic_code=classification["diagnostic_code"],
+                model_records=classification["measured"],
+                stdout_bytes=bounded["bytes"],
+            )
+    try:
+        projection = validate_response_envelope(response_bytes, request)
+    except AssertionError:
+        return pre_response_failure_decision(
+            request,
+            stage="response_validation",
+            diagnostic_code="CSV-NEXT-PROTOCOL-001",
+        )
+    decision = projection.get("validated_decision")
+    assert isinstance(
+        decision,
+        (ValidatedResponseDecision, PreResponseFailureDecision, NotApplicableDecision),
+    )
+    return decision
+
+
 def capture_adapter_stderr(
     chunks: list[bytes],
     *,
@@ -3692,6 +4062,65 @@ def capture_adapter_stderr(
         "diagnostic_code": None,
         "outcome": "complete",
         "manifest_stderr_bytes": 0,
+    }
+
+
+def capture_adapter_stdout(
+    chunks: Iterable[bytes],
+    *,
+    limit: int = LIMIT_DEFAULTS["max_adapter_stdout_capture_bytes"],
+    decoder: Any | None = None,
+) -> dict[str, Any]:
+    """Capture child stdout incrementally before any decoder sees bytes.
+
+    The parent counts each chunk before retaining it.  A breach terminates the
+    process group and disposes every retained byte, so a decoder can only be
+    invoked after a bounded, complete capture succeeds.  The iterable models
+    the runner's chunk reads; this reference function does not claim to spawn
+    or terminate an operating-system process.
+    """
+
+    assert limit >= 1
+    captured = 0
+    retained: list[bytes] = []
+    for chunk_index, chunk in enumerate(chunks):
+        assert isinstance(chunk, bytes)
+        captured += len(chunk)
+        if captured > limit:
+            return {
+                "allowed": False,
+                "captured_bytes": captured,
+                "retained_bytes": 0,
+                "retained": b"",
+                "failed_at": chunk_index,
+                "process_group_terminated": True,
+                "raw_disposed": True,
+                "partial_disposed": True,
+                "decoder_called": False,
+                "diagnostic_code": "CSV-NEXT-LIMIT-003",
+                "outcome": "payload_unavailable",
+                "manifest_stdout_bytes": 0,
+            }
+        retained.append(chunk)
+    payload = b"".join(retained)
+    assert len(payload) == captured <= limit
+    decoder_called = False
+    if decoder is not None:
+        decoder(payload)
+        decoder_called = True
+    return {
+        "allowed": True,
+        "captured_bytes": captured,
+        "retained_bytes": len(payload),
+        "retained": payload,
+        "failed_at": None,
+        "process_group_terminated": False,
+        "raw_disposed": False,
+        "partial_disposed": False,
+        "decoder_called": decoder_called,
+        "diagnostic_code": None,
+        "outcome": "complete",
+        "manifest_stdout_bytes": len(payload),
     }
 
 
@@ -3775,6 +4204,52 @@ def model_record_budget_allowed(measured: int, limit: int) -> bool:
     """Apply max_model_records without allocating a model-sized fixture."""
 
     return measured >= 0 and limit >= 1 and measured <= limit
+
+
+def model_wire_record_count(model_records: int, proof_only_records: int = 0) -> int:
+    """Count the wire model once; proof IDs do not duplicate model payloads."""
+
+    assert model_records >= 0
+    assert proof_only_records >= 0
+    return model_records + proof_only_records
+
+
+def classify_response_limit(
+    *,
+    raw_bytes: int,
+    aggregate_array_items: int,
+    model_records: int,
+    proof_only_records: int = 0,
+    limits: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Apply the fixed response limit precedence without materializing records."""
+
+    resolved = {**LIMIT_DEFAULTS, **(limits or {})}
+    assert raw_bytes >= 0
+    assert aggregate_array_items >= 0
+    measured_model_records = model_wire_record_count(model_records, proof_only_records)
+    if raw_bytes > resolved["max_stdout_bytes"]:
+        return {
+            "allowed": False,
+            "diagnostic_code": "CSV-NEXT-LIMIT-003",
+            "stage": "response_raw_bytes",
+            "measured": raw_bytes,
+        }
+    if aggregate_array_items > resolved["max_total_array_items"]:
+        return {
+            "allowed": False,
+            "diagnostic_code": "CSV-NEXT-PROTOCOL-001",
+            "stage": "response_decode",
+            "measured": aggregate_array_items,
+        }
+    if measured_model_records > resolved["max_model_records"]:
+        return {
+            "allowed": False,
+            "diagnostic_code": "CSV-NEXT-LIMIT-005",
+            "stage": "model_validation",
+            "measured": measured_model_records,
+        }
+    return {"allowed": True, "diagnostic_code": None, "stage": None, "measured": None}
 
 
 def assert_limit_boundary(limit: int, *, at_limit: bool, over_limit: bool) -> None:
@@ -4358,6 +4833,96 @@ def _diagnostic_catalog() -> dict[str, dict[str, Any]]:
         entry["code"]: entry
         for entry in json.loads(CATALOG_PATH.read_text(encoding="utf-8"))["entries"]
     }
+
+
+def _decision_known_counts(
+    request: dict[str, Any],
+    *,
+    stdout_bytes: int | None = None,
+    model_records: int | None = None,
+) -> dict[str, int | None]:
+    """Derive bounded counters owned by a pre-response decision."""
+
+    files = request.get("files")
+    return {
+        "files": len(files) if isinstance(files, list) else None,
+        "source_bytes": (
+            sum(item.get("size_bytes", 0) for item in files)
+            if isinstance(files, list) and all(isinstance(item, dict) for item in files)
+            else None
+        ),
+        "model_records": model_records,
+        "stdout_bytes": stdout_bytes,
+    }
+
+
+def pre_response_failure_decision(
+    request: dict[str, Any],
+    *,
+    stage: str,
+    diagnostic_code: str,
+    known_counts: dict[str, int | None] | None = None,
+    stdout_bytes: int | None = None,
+    model_records: int | None = None,
+) -> PreResponseFailureDecision:
+    """Create the closed authority for a failure before response validation."""
+
+    context = canonical_run_context(**request["run_context"])
+    entry = _diagnostic_catalog()[diagnostic_code]
+    assert entry["outcome"] == "payload_unavailable"
+    assert entry["ref_permission"] == "none"
+    diagnostic = {
+        "type": "diagnostic",
+        "schema": "code-structure-viz.diagnostic/v1",
+        "code": diagnostic_code,
+        "severity": entry["severity"],
+        "domain": "next",
+        "path": None,
+        "symbol": None,
+        "line": None,
+        "recoverable": entry["recoverable"],
+        "message": entry["message"],
+        "outcome": entry["outcome"],
+        "ref_permission": entry["ref_permission"],
+    }
+    return PreResponseFailureDecision(
+        request=request,
+        run_context=context,
+        stage=stage,
+        diagnostic_code=diagnostic_code,
+        diagnostic=diagnostic,
+        known_counts=known_counts
+        or _decision_known_counts(
+            request,
+            stdout_bytes=stdout_bytes,
+            model_records=model_records,
+        ),
+    )
+
+
+def not_applicable_decision(request: dict[str, Any]) -> NotApplicableDecision:
+    """Create the closed authority for an intentional non-Next project."""
+
+    entry = _diagnostic_catalog()["CSV-NEXT-APPLICABILITY-001"]
+    return NotApplicableDecision(
+        request=request,
+        run_context=canonical_run_context(**request["run_context"]),
+        diagnostic={
+            "type": "diagnostic",
+            "schema": "code-structure-viz.diagnostic/v1",
+            "code": "CSV-NEXT-APPLICABILITY-001",
+            "severity": entry["severity"],
+            "domain": "next",
+            "path": None,
+            "symbol": None,
+            "line": None,
+            "recoverable": entry["recoverable"],
+            "message": entry["message"],
+            "outcome": entry["outcome"],
+            "ref_permission": entry["ref_permission"],
+        },
+        known_counts=_decision_known_counts(request),
+    )
 
 
 def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
@@ -5059,12 +5624,17 @@ def _derived_taint_fixed_point(
                 continue
             taints.add(taint)
             pending_pairs.append((target_id, taint))
-    for record_id, item in (
-        (record_id, item)
+    for record_id in (
+        record_id
         for records_by_collection in discovered.values()
-        for record_id, item in records_by_collection.items()
+        for record_id in records_by_collection
     ):
-        assert set(item["taints"]) == expected_taints.get(record_id, set())
+        proof_item = next(
+            proof_item
+            for proof_item in proof["discovered_records"]
+            if proof_item["record_id"] == record_id
+        )
+        assert set(proof_item["taints"]) == expected_taints.get(record_id, set())
     return reachable
 
 
@@ -6229,19 +6799,28 @@ def validate_proof(
     request_targets: list[str] | None = None,
 ) -> None:
     model_collections = _validate_model_collections(model)
+    _validate_proof_reason_semantics(proof, model)
     discovered: dict[str, dict[str, dict[str, Any]]] = {
         collection: {} for collection in COLLECTIONS
     }
     for item in proof["discovered_records"]:
-        record = item["record"]
         collection = item["collection"]
-        record_id = record["id"]
+        record_id = item["record_id"]
+        assert collection in COLLECTIONS
+        supplied_record = item.get("record")
+        if supplied_record is None:
+            assert record_id in model_collections[collection]
+            record = model_collections[collection][record_id]
+        else:
+            assert record_id not in model_collections[collection]
+            record = supplied_record
+            assert record["id"] == record_id
         assert record_id not in discovered[collection]
         assert _id_kind(record_id) == collection.removesuffix("s")
         assert recompute_record_id(record) == record_id
         assert all(taint in TAINTS for taint in item["taints"])
         assert item["taints"] == sorted(item["taints"], key=TAINT_ORDER_INDEX.__getitem__)
-        discovered[collection][record_id] = item
+        discovered[collection][record_id] = {**item, "record": record}
 
     published = {collection: set(records) for collection, records in model_collections.items()}
     for collection, record_ids in published.items():
@@ -6261,6 +6840,7 @@ def validate_proof(
     failure_ids = {root["id"] for root in proof["failure_roots"]}
     assert len(failure_ids) == len(proof["failure_roots"])
     all_discovered_ids = set().union(*(set(records) for records in discovered.values()))
+    assert len(all_discovered_ids) == model["coverage"]["counts"]["discovered"]
     for root in proof["failure_roots"]:
         assert root["id"].startswith("next:failure:")
         assert root["collection"] in COLLECTIONS
@@ -6334,7 +6914,7 @@ def validate_proof(
                 assert item["taints"]
             if disposition in failed_reasons:
                 reason = failed_reasons[disposition]
-                assert reason == "over_budget" or reason in item["taints"]
+                assert reason in item["taints"]
 
     assert taint_closure <= {
         record_id
@@ -6499,6 +7079,9 @@ def validate_trusted_environment(
     assert environment["environment_version"] == "1"
     assert environment["semantic_profile_id"] == "next-trusted-profile-v1"
     assert environment["typescript_version"] == "5.9.2"
+    assert (
+        environment["identifier_unicode_table_digest"] == ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST
+    )
     assert environment["license_inventory_digest"] == TRUSTED_PROFILE_LICENSE_DIGEST
     assert environment["reserved_module_specifiers"] == list(TRUSTED_MODULES)
     assert environment["reserved_global_names"] == list(TRUSTED_GLOBALS)
@@ -6724,16 +7307,29 @@ def validate_run_status_vector(
         assert stdout_result["stable_reason"] in {
             "domain_not_applicable",
             "domain_payload_unavailable",
+            "target_payload_unavailable",
         }
         target_diagnostics = [
             diagnostic
             for diagnostic in manifest_diagnostics
             if diagnostic["code"] == "CSV-NEXT-TARGET-001"
         ]
-        if target_diagnostics and "reason" in target_diagnostics[0]:
-            assert stdout_result.get("reason") == target_diagnostics[0]["reason"]
+        target_failures = [
+            {
+                "target_key": f"path:{diagnostic['path']}",
+                "reason": diagnostic["reason"],
+            }
+            for diagnostic in target_diagnostics
+            if "reason" in diagnostic
+        ]
+        if target_failures:
+            assert stdout_result["target_failures"] == sorted(
+                target_failures, key=canonical_json_bytes
+            )
+            assert "reason" not in stdout_result
         else:
             assert "reason" not in stdout_result
+            assert "target_failures" not in stdout_result
         assert stdout_bytes == canonical_json_bytes(stdout_result) + b"\n"
     else:
         assert expected_path in published_bytes

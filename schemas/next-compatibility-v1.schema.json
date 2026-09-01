@@ -23,8 +23,8 @@
     "algorithm_versions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["recognition", "export", "props", "relation", "fact", "boundary", "identifier_unicode"],
-      "properties": {"recognition": {"const": 1}, "export": {"const": 1}, "props": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "boundary": {"const": 1}, "identifier_unicode": {"const": "ecma-unicode-15.0"}}
+      "required": ["recognition", "export", "props", "relation", "fact", "boundary", "identifier_unicode", "identifier_unicode_table_digest"],
+      "properties": {"recognition": {"const": 1}, "export": {"const": 1}, "props": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "boundary": {"const": 1}, "identifier_unicode": {"const": "ecma-unicode-15.0"}, "identifier_unicode_table_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
     }
   }
 }

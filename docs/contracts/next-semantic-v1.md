@@ -29,6 +29,18 @@ shared root-or-path validation, and the pre-decode raw stdout byte cap. The
 historical fail is preserved; fresh exact-SHA Strict is pending, readiness is
 unconfirmed, and the production adapter/CLI is absent.
 
+Round 14 remediation closes the remaining pre-implementation boundary. The
+closed `NextRunDecision` union is the only input accepted by domain, root
+manifest, stdout, and stderr projections:
+`ValidatedResponseDecision` carries the schema-valid model/proof;
+`PreResponseFailureDecision` owns request-derived context, a closed stage and
+diagnostic, known/null counters, `payload_unavailable`, zero artifacts, and
+exit 3; `NotApplicableDecision` owns the corresponding complete no-Next
+outcome and exit 0. Node discovery/spawn/timeout/nonzero, adapter capture,
+raw/decode/schema/reference/ID failures cannot create an independent domain
+status. Fresh exact-SHA Strict is still pending, readiness is unconfirmed, and
+the product implementation remains absent.
+
 The machine-readable authority is:
 
 - `schemas/next-semantic-v1.schema.json`
@@ -152,7 +164,16 @@ retain context/control Files as provenance without creating semantic children.
 
 The Node response includes the complete discovered record set, typed taints,
 failure roots, causal edges, target-resolution witnesses, the independent
-export-observation stream, export-resolution witnesses, and exclusions.
+export-observation stream, export-resolution witnesses, and exclusions. Each
+published model record appears in `proof.discovered_records` as
+`{collection,record_id,taints}`; the record payload is joined by ID from the
+same model. The optional `record` payload is reserved for a proof-only record
+that is absent from the published model. This one-to-one shape prevents model
+payload duplication from making `max_model_records` unreachable while keeping
+proof-only evidence self-contained. It does not remove the separate ID item in
+the proof array: the response schema therefore permits 20,000 structural proof
+items, while the semantic `max_model_records` cap is 10,000 so exact and +1
+model wires remain reachable below the aggregate/raw limits.
 `collection`, taint kind, exclusion reason, and propagation rule are closed
 vocabularies. Python derives the complete mandatory root seeds (including
 the internal Component seed resolved from a path target, incoming explicit re-export/barrel Module, and
@@ -165,6 +186,26 @@ resolved model, and that coverage counts equal the proof decomposition. Counts
 alone are not evidence. The validator contract is versioned as
 `code-structure-viz.next-reference-validation/v1` and lives in
 `tests/contracts/next_reference_validation.py` until production code owns it.
+
+### Proof reason semantics
+
+The adapter proof vocabulary is intentionally narrower than the Python-owned
+limit vocabulary. `not_selected` and selection-only `target_excluded` are
+bookkeeping and preserve `complete`; they do not by themselves imply data
+loss. `unsupported` is complete when the unknown frontier is represented by
+`CSV-NEXT-UNSUPPORTED-001` and `unknown_relation_count`, rather than silently
+dropping a promised fact. A localized `tainted`/`failed` disposition becomes
+`partial_safe` only when a non-empty failure root and its causal locality proof
+cover the omitted region. `over_budget` is invalid in adapter `excluded` or
+`failed` records; `EntityBudgetGate` alone owns the later
+`CSV-NEXT-LIMIT-005` decision. An explicit target identity failure remains
+typed `payload_unavailable`.
+
+The minimum executable matrix is: unrelated `not_selected` → complete/exit 0;
+intentional unsupported → complete plus diagnostic; localized taint with a
+root → partial_safe/exit 3; adapter `over_budget` → protocol rejection. The
+same reason remains distinguishable in proof, coverage, diagnostics, and the
+target-failure stdout result where applicable.
 
 ## PropsTypeIR/v1
 
@@ -285,6 +326,14 @@ closure; `taint_frontier` is the sorted untainted internal reference frontier;
 closed, sorted projections with owner/reference checks. A `partial_safe`
 semantic and PlantUML pair must use the same validated subset.
 
+For stdout target failures, the canonical projection is the sorted,
+duplicate-free `target_failures: [{target_key, reason}]` array. It is present
+only on the target-related `payload_unavailable` branch and preserves one row
+per failed target, including repeated identical reasons on different targets.
+Available, `not_applicable`, generic unavailable, fatal, and interrupted
+results must not carry either `target_failures` or the legacy single `reason`
+field. The branch uses stable reason `target_payload_unavailable`.
+
 `coverage.counts.internal_entities` is recomputed as the number of published
 internal Modules plus Components only. Members, relations, facts, projects,
 external frontiers, and proof-only records do not consume `max_entities`; the
@@ -294,8 +343,10 @@ entity count. An independent `EntityBudgetGate` runs after response
 validation and before publication; an overrun emits `CSV-NEXT-LIMIT-005`,
 records the actual count, produces a manifest-only `payload_unavailable`
 outcome, and publishes no artifacts. Boundary vectors cover 500 success, 501
-unavailable, 501 under a 600 override, and a compositional 100001-record
-model-cap failure.
+unavailable, 501 under a 600 override, and a compositional 10,001-record
+model-cap failure. The resolved `max_model_records` is 10,000 so that this
+cap remains reachable on the wire after the ID-only proof rows and within the
+100,000 aggregate-array and 16 MiB raw-byte limits.
 
 ## Diagnostics, config, and status cross-checks
 

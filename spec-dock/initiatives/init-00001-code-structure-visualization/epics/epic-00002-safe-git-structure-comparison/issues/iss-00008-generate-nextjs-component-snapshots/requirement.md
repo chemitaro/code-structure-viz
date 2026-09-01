@@ -90,7 +90,7 @@ code-structure-viz snapshot --repo . --domain next --format semantic-json --stdo
 - program filesはTS/TSX/JS/JSX、`.d.ts`はcontext-only。`.git`、`node_modules`、`.next`、`out`、`dist`、`build`、`coverage`はhard exclude。test/spec/storyはdefault excludeにしない。
 - config lookupは`tsconfig.json`、`jsconfig.json`、versioned built-in safe configの順。repository-local `extends`、`baseUrl`、`paths`だけをfrozen SourceView内で解決し、package-based extendsやtarget `node_modules`を暗黙に読まない。
 - one-shot Node adapterはrequest virtual files、bundled TypeScript standard library、`code-structure-viz.next-trusted-types/v1`だけを読むin-memory CompilerHostを使う。TrustedTypeEnvironmentはminimal JSX/React/Next wrapper declarations、exact version/digest/licenseを持ち、target type roots/node_modules/networkを参照しない。Node.js 22 LTS以上はapplicable runだけで要求する。
-- transport/processは20,000 files、4 MiB/file、64 MiB decoded source、96 MiB encoded stdin、JSON nesting 64、8 MiB/string、100,000 total/20,000 per collection array items、100,000 model records、16 MiB stdout、64 KiB stderr、60秒、512 MiB V8 old-spaceをv1上限とし、超過はsilent truncationせず`payload_unavailable`とする。総RSS上限はv1で保証しない。
+- transport/processは20,000 files、4 MiB/file、64 MiB decoded source、96 MiB encoded stdin、JSON nesting 64、8 MiB/string、100,000 total/20,000 per collection array items、10,000 model records、16 MiB stdout、64 KiB stderr、60秒、512 MiB V8 old-spaceをv1上限とし、超過はsilent truncationせず`payload_unavailable`とする。総RSS上限はv1で保証しない。
 
 ### public target grammar
 
@@ -287,6 +287,60 @@ Next adapter/CLI実装は未着手のままとする。
    partial writeなしのunavailable/manifest-only/exit 3へ通す。
 10. 人間向けHTMLの重複Round 11 Pass C itemを一つだけ残す。上記のlocal修復・テスト成功はfresh
     Strict passやIssue完了を意味しない。
+
+### Round 14 review state and remediation contract
+
+Round 14 Strict は、初回connector検証失敗（`issue-eight-strict-round-fourteen`、証跡は
+`/Users/iwasawayuuta/.oracle/sessions/issue-eight-strict-round-fourteen/artifacts/transcript.md`、
+SHA-256 `da7a78ea8c298fff4527bac48b3593f6fa8009ee2fe4f774c8dfad1978b7e4cb`）と、再試行で得た
+content review（`issue-eight-strict-round-fourteen-2`、証跡は
+`/Users/iwasawayuuta/.oracle/sessions/issue-eight-strict-round-fourteen-2/artifacts/transcript.md`、
+SHA-256 `05c802ca289681a10fb804e152c7d0ffcd20a30a8223123bede7204eb7803fc4`）を分けて記録する。
+再試行は対象SHA `cf5da416e25e76068ed99caf0d450d0e2d5b28df`、GitHub Actions run `33457932686`
+（7/7 success）を確認し、`review_status: fail`、P0=0、P1=5、P2=2、
+`implementation_ready: no`を返した。fresh current-SHA Strictは未実行・未確認、readinessは未確定、
+production adapter/CLI実装は未着手である。詳細とローカル修復の対応表は
+`artifacts/20260901t031000z-disc-strict-spec-review-round-14.md`を正本の証跡とする。
+
+Round 14で追加する実行可能な受入条件は次のとおりである。
+
+1. `NextRunDecision`を`ValidatedResponseDecision`、`PreResponseFailureDecision`、
+   `NotApplicableDecision`からなるclosed unionとする。pre-response variantはrequest-derived
+   `NextRunContext`、closed stage/diagnostic、knownまたはnull counts、`payload_unavailable`、
+   artifact 0件、exit behaviorを所有する。domain/root/manifest/stdout/stderrはこのunionだけを
+   入力とし、Node discovery/spawn/timeout/nonzero、stderr/raw stdout cap、malformed JSON、duplicate
+   key、schema/ref/ID failureを別の`_domain` authorityから作らない。
+2. proof reasonをclosed semanticsにする。`not_selected`とselection-only `target_excluded`は
+   statusを下げず、intentional `unsupported`はunknown coverageと`CSV-NEXT-UNSUPPORTED-001`を伴う
+   completeとする。localized taint/failedはlocality proofがある場合だけpartial_safeとし、
+   adapterの`over_budget`は拒否してPython-owned `EntityBudgetGate`だけが予算超過を所有する。
+   explicit target identity failureはtyped `payload_unavailable`とする。
+3. ECMAScript IdentifierNameはhost `unicodedata.category()`を使わず、Unicode 15.0.0の
+   ID_Start/ID_ContinueとOther_ID sets、U+00B7、Join_Controlを含むchecked-in tableで判定する。
+   table bytesのdigest、compatibility preimage、run fingerprintを同じprofileへ固定し、Python
+   3.12と最新対応Pythonの全code point digestを一致させる。
+4. model/aggregate/raw limitsは実wire envelopeで相互に到達可能にする。`max_model_records`は
+   10,000へ固定し、proofは公開model recordをpayload重複しないID/reference evidenceで表し、
+   proof-only recordだけpayloadを許す。9,999件のcompact context Fileと1件のProjectからなる
+   schema-valid streamでmodel exact/+1、aggregate+1、raw-byte+1をbounded decode→response
+   validation→decisionへ通し、diagnostic precedenceを固定する。`proof.discovered_records`の
+   schema上限は構造上限として20,000にし、10,001件をschema-validのままmodel-limitへ到達させる。
+   巨大なPython object graphは作らない。
+5. 親processはchild stdoutをincrementalにcaptureし、`max_adapter_stdout_capture_bytes`をretain前に
+   数える。exactは受理し、+1はprocess groupを停止してpartial/raw bytesを破棄し、decoderを呼ばず、
+   `CSV-NEXT-LIMIT-003`、manifest-only、typed unavailable stdout、exit 3へ進める。
+6. stdoutのtarget failureはcanonical sorted `target_failures:[{target_key,reason}]`で一対一に保持し、
+   target-related `domain_payload_unavailable` branchだけで許可する。available、not_applicable、
+   generic unavailable、fatal、interrupt branchはtarget failureを拒否する。single、同一理由複数、
+   異なる理由複数、非target mutationを固定する。
+7. source acquisitionは`SourceDiscoveryIntent`から始め、two-phase single-read acquisitionの最後に
+   `FinalSourceAcquisitionPlan`と`SourceView`を同じseal operationで確定する。final read/drift check後の
+   filesystem readを禁止し、instrumented readerで各path一回、frozen bytesとのplan/view一致、共有sealを
+   検証する。
+
+これらの受入条件は`tests/contracts/test_next_contracts.py`、`tests/contracts/test_json_schemas.py`、
+`tests/contracts/next_reference_validation.py`、関連JSON Schema、Markdown contract、fixture、HTMLへ
+反映し、local passをStrict passやIssue完了と解釈しない。
 
 ### semantic contract
 

@@ -58,9 +58,10 @@
     "proof_record": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["collection", "record", "taints"],
+      "required": ["collection", "record_id", "taints"],
       "properties": {
         "collection": {"$ref": "#/$defs/collection"},
+        "record_id": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"},
         "record": {"$ref": "#/$defs/record"},
         "taints": {"type": "array", "uniqueItems": true, "items": {"enum": ["parse_file", "read_file", "type_symbol", "export_binding", "props_subtree", "component_flow", "module_relation", "boundary_derivation"]}}
       }
@@ -70,7 +71,7 @@
       "additionalProperties": false,
       "required": ["discovered_records", "failure_roots", "causal_edges", "target_resolutions", "export_observations", "export_resolution_witness", "export_reexport_witness", "excluded", "failed"],
       "properties": {
-        "discovered_records": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/proof_record"}},
+        "discovered_records": {"type": "array", "maxItems": 20000, "items": {"$ref": "#/$defs/proof_record"}},
         "failure_roots": {"type": "array", "items": {"$ref": "#/$defs/failure_root"}},
         "causal_edges": {"type": "array", "items": {"$ref": "#/$defs/causal_edge"}},
         "target_resolutions": {"type": "array", "items": {"$ref": "#/$defs/target_resolution"}},
@@ -188,7 +189,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["collection", "record_id", "reason"],
-      "properties": {"collection": {"$ref": "#/$defs/collection"}, "record_id": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"}, "reason": {"enum": ["tainted", "target_excluded", "unsupported", "failed", "not_selected", "over_budget"]}}
+      "properties": {"collection": {"$ref": "#/$defs/collection"}, "record_id": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"}, "reason": {"enum": ["tainted", "target_excluded", "unsupported", "failed", "not_selected"]}}
     },
     "failed_record": {
       "type": "object",
@@ -197,7 +198,7 @@
       "properties": {
         "collection": {"$ref": "#/$defs/collection"},
         "record_id": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"},
-        "reason": {"enum": ["parse_file", "read_file", "type_symbol", "export_binding", "props_subtree", "component_flow", "module_relation", "boundary_derivation", "over_budget"]}
+        "reason": {"enum": ["parse_file", "read_file", "type_symbol", "export_binding", "props_subtree", "component_flow", "module_relation", "boundary_derivation"]}
       }
     }
   }

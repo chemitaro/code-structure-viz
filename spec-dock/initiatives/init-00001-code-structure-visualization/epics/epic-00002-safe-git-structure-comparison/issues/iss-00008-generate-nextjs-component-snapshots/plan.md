@@ -200,6 +200,28 @@ Round 13のproduction実装前チェックリスト:
    unconfirmed/product absentを記録する。これらを満たしfresh StrictがP0/P1=0になるまで I05-PLAN-002以降の
    production implementationへ進まない。
 
+### Round 14 remediation gate
+
+Round 14は、初回connector検証失敗と成功した再試行を別証跡として
+`artifacts/20260901t031000z-disc-strict-spec-review-round-14.md`へ保存する。成功した再試行の固定点は
+SHA `cf5da416e25e76068ed99caf0d450d0e2d5b28df`、CI run `33457932686`（7/7 success）であり、判定は
+`review_status: fail; p0_count: 0; p1_count: 5; p2_count: 2; implementation_ready: no`である。
+fresh current-SHA Strictはpending/readiness unconfirmed、production implementation absentと記録する。
+
+実装開始前に次の順序で契約を閉じる。
+
+1. `NextRunDecision`（validated response / pre-response failure / not applicable）のclosed unionを定義し、
+   全projectionをdecision-onlyにする。P1-1のnode/protocol/pre-response limit parameterized E2Eを追加する。
+2. proof reason semantics、Unicode 15.0 checked-in table、`max_model_records=10,000`を含む
+   model/aggregate/raw reachable limits、bounded child stdout captureをschema・reference validator・
+   negative/positive testへ反映する（P1-2〜P1-5）。`proof.discovered_records`は構造上限20,000とし、
+   9,999 compact context Files + 1 Projectのschema-valid responseをexact boundary、10,001件を
+   schema-valid model-limit boundaryとして実wireで検証する。
+3. canonical `target_failures` cardinality/branch、source intent→single-read→atomic sealを反映する（P2-1〜P2-2）。
+4. focused/full tests、mypy、ruff、SpecDock、HTML PlantUML、TS trusted gateを実行し、Round14 artifactへ
+   command/resultとcriterion→test mapを追記する。fresh exact-current-SHA StrictがP0/P1=0を返すまで
+   I05-PLAN-002以降を開始しない。
+
 | I05-PLAN-000 | implementation判断を残さないfield-level identity/source/protocol/type/taint/public schema/config/package contractをcanonical Designへ固定する。 | I05-DES-001〜007 |
 | I05-PLAN-001 | identity/export、project/target、protocol、type IR、relations/boundary、outcome/publication、TrustedTypeEnvironment、packaging/regressionのI05-AT-001〜011 fixtures/schemaを先に固定する。 | I05-DES-001〜007 |
 | I05-PLAN-008 | actual schema/docs/catalog/golden/mutation fixtureを含むclean pushed exact SHAでChatGPT Use Strictを再実行し、P0/P1=0をproduction implementation gateとする。 | I05-DES-001〜007 |
@@ -272,7 +294,7 @@ explicit project rootのdirect Next dependencyをPythonで判定し、不在を�
 
 - intentional unsupportedをunknownとして完全表現できる場合はcomplete+diagnostic。promised semanticsの局所欠落はsafe subset/exact coverage/same-renderer-subset/redaction/target/budgetをすべて証明した場合だけpartial_safe。
 - explicit target、malformed applicability/config、global Program、Node/protocol/schema/security/identity/limit failureはpayload unavailableとし、not_applicable/fallbackへ変換しない。
-- model structural/reference validationは`max_model_records`を適用してactual internal Module+Component countを返す。publication直前の独立EntityBudgetGateがselected/published Module+Componentだけを数え、default 500は受理、501は`CSV-NEXT-LIMIT-005`付きexit 3/affected payloadなし/actual付きmanifest-only、600 overrideで501は成功とする。100001 total model recordsはentity budgetと別の`max_model_records` failureとして固定し、invalid valueはexit 2。
+- model structural/reference validationは`max_model_records=10,000`を適用してactual internal Module+Component countを返す。publication直前の独立EntityBudgetGateがselected/published Module+Componentだけを数え、default 500は受理、501は`CSV-NEXT-LIMIT-005`付きexit 3/affected payloadなし/actual付きmanifest-only、600 overrideで501は成功とする。10,001 total model recordsはentity budgetと別の`max_model_records` failureとして固定し、invalid valueはexit 2。ID-only proof rowを含む実wireでexact 10,000と10,001をbounded decode→response validation→decisionへ通す。
 
 ### I05-PLAN-004 Artifact publication
 

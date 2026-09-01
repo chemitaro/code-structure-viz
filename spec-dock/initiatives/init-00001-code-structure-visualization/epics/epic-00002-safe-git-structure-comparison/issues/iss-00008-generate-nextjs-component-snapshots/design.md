@@ -78,7 +78,8 @@ Round 9 は `review_status: fail`、P0=0、P1=7、P2=1。fresh exact-SHA Strict�
    `CSV-NEXT-LIMIT-003`、manifest上のraw bytes非公開とする。
 5. `max_total_array_items`（response全array aggregate）、`max_array_items`（各array）、
    `max_collection_items`（semantic collection）を分離し、materialize前のcounterで
-   100001を拒否する。
+   100001を拒否する。`max_model_records`は10,000へ固定し、公開model recordごとの
+   ID-only proof rowを含めてもaggregate/raw capへ到達する値にする。
 6. `SourceAcquisitionPlan/v1` descriptor/schemaはresolved control paths、local
    extends closure、file-role map、projects、suffixes、exclusions、limits、trusted
    digestの全fieldをcanonical JSON SHA-256へ含める。input/config/source-planは
@@ -204,7 +205,10 @@ Round 13 Strict は対象SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`、CI run
 未着手であり、履歴のfailをpassへ変更しない。
 
 - **Authority:** raw responseはbounded decode→closed schema→proof-base→typed targetの順に検証し、
-  一つのimmutable `NextValidatedDecision`（model/proof/request context/pre-budget/gate）だけを後段へ渡す。
+  一つのimmutable `NextRunDecision`だけを後段へ渡す。valid responseは
+  `ValidatedResponseDecision`、response成立前の失敗は`PreResponseFailureDecision`、適用対象外は
+  `NotApplicableDecision`とし、各variantがpayload availability、diagnostic、counts、artifacts、exit
+  behaviorを閉じて所有する。
 - **Publication:** semantic六collectionとPlantUMLは同じvalidated modelからrenderし、canonical bytes、
   artifact hashes、root descriptorを再計算する。schema-validな順序・payload変異をrootで拒否する。
 - **Failure/graph:** `missing`・`component_only`・`duplicate`を全projectionへ保持し、double alias、
@@ -217,6 +221,45 @@ Round 13 Strict は対象SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`、CI run
   raw responseの`max_stdout_bytes`はdecode前に検査し、16 MiB+1はmaterializationもpartial writeも行わない。
 - **Evidence hygiene:** Round 13の対象SHA/CI/fail countsとP1-1..P1-9/P2-1をartifactへ記録し、HTMLの
   重複項目を除く。local gate successをStrict pass、readiness、またはproduct implementationの開始と解釈しない。
+
+### Round 14 review state and remediation design
+
+Round 14の初回connector失敗と成功した再試行の完全なtranscriptは
+`artifacts/20260901t031000z-disc-strict-spec-review-round-14.md`へ保存する。成功した再試行は対象SHA
+`cf5da416e25e76068ed99caf0d450d0e2d5b28df`、CI run `33457932686`（7/7 success）を確認したが、
+`review_status: fail`、P0=0、P1=5、P2=2、`implementation_ready: no`である。fresh current-SHA Strictは
+未実行・未確認、readinessは未確定、production implementationは未着手であり、履歴のfailをpassへ
+変更しない。
+
+Round 14の設計閉包は次のとおりである。
+
+- **Decision union:** `NextRunDecision`をclosed unionとして実装し、pre-response failureはrequest-owned
+  `NextRunContext`、closed stage/diagnostic、known/null counts、`payload_unavailable`、artifact 0件、
+  exit 3を保持する。domain/root/manifest/stdout/stderrはdecision projectionだけを受け、各failureの
+  `_domain`や独立statusをauthorityにしない。
+- **Proof semantics:** `not_selected`とselection-only `target_excluded`はcompleteを維持する。
+  `unsupported`はunknown coverageと`CSV-NEXT-UNSUPPORTED-001`を持つcomplete、locality proof付きの
+  taint/failedだけがpartial_safe、adapter proofの`over_budget`はprotocol rejection、予算超過は
+  Python `EntityBudgetGate`、explicit target identity failureはtyped payload unavailableとする。
+- **Deterministic Unicode:** Unicode 15.0.0のID_Start/ID_Continue/Other_ID sets/U+00B7/Join_Controlを
+  checked-in deterministic tableで判定し、table digestをtrusted profile、compatibility、run fingerprint
+  の全preimageへ含める。host Unicode databaseへの依存を禁止する。
+- **Reachable limits and capture:** proofの公開model recordはID/reference evidenceとし、
+  `max_model_records=10,000`へ固定する。9,999 compact context Files + 1 Projectのschema-valid
+  responseをexact boundary、10,001件をmodel-limit boundaryとして実wireで検証し、aggregate/raw
+  precedenceも同じ入口で固定する。child stdoutは`max_adapter_stdout_capture_bytes`でincremental
+  captureし、exact受理、+1停止・破棄・未decode・`CSV-NEXT-LIMIT-003`/manifest-only/exit 3を固定する。
+- **Target failures:** stdoutの正本はsorted unique `target_failures:[{target_key,reason}]`であり、
+  `missing`/`component_only`/`duplicate`をtarget unavailable branchだけに許す。available、not_applicable、
+  generic unavailable、fatal、interruptでは同fieldを禁止し、top-level単一`reason`は持たない。
+- **Source seal:** `SourceDiscoveryIntent`→two-phase single-read→`FinalSourceAcquisitionPlan`と`SourceView`
+  のatomic sealを採用し、drift check後のreadを禁止する。reader instrumentationで一回読み・同一seal・
+  frozen byte一致を検証する。
+
+最小受入テストは、pre-response node/protocol/limitの全projection、proof reason四ケース、Python version間
+Unicode全code point digest、model/aggregate/rawのexact/+1、stdout capture exact/+1、target failure cardinality、
+source reader sealを`tests/contracts/test_next_contracts.py`とschema mutationで実行する。local gateの成功は
+fresh Strict pass、implementation readiness、production implementation開始を意味しない。
 
 ## 責務・Interface
 
@@ -263,9 +306,14 @@ CLI parser は `--stdout` を optional single-value option として一度だけ
 
 1. selector なしなら `run-summary/v1` を canonical JSON 1行として出す。
 2. selected Artifact が利用可能なら、公開 file を binary read して exact bytes を複製する。
-3. selected Artifact が利用不能なら、`RunOutcome`/`DomainOutcome` から `stdout-result/v1` 1行を構築する。
+3. selected Artifact が利用不能なら、closed `NextRunDecision` の projection から `stdout-result/v1` 1行を構築する。
 
 stdout emitter は diagnostic renderer と分離し、diagnostic は stderr だけへ出す。exact-byte copy に summary、BOM、改行補正を加えない。`stdout-result/v1` は status と stable reason だけを参照し、source content、absolute path、secret を受け取る field を持たない。handled SIGINT は cleanup 完了後に `run_status: interrupted` を返せる場合だけ exit 130 の result line を出す。process を強制終了された場合の出力は契約外である。
+
+Nextのunavailable target projectionは、decisionが保持する全target failureをcanonical sorted
+`target_failures: [{target_key, reason}]`として出す。`missing`、`component_only`、`duplicate`はtarget
+payload unavailable branchだけで許可し、available、not_applicable、generic domain unavailable、fatal、
+interruptではtarget failureも旧top-level単一`reason`も出さない。
 
 ### snapshot path excludes comparison facilities
 
@@ -328,7 +376,7 @@ serializer と manifest builder は `incomplete_kind` と `payload_available` �
 - compiled first-party adapter、exact TypeScript runtime、lockfile、license inventoryを一つのcompatibility unitとしてbundleする。
 - Node 22 LTS以上はapplicable Next runだけで必要とし、Python/SQLAlchemy core install/run/testへ持ち込まない。
 
-v1 finite limitsは4 MiB/file、64 MiB decoded total、20,000 files、96 MiB encoded stdin、各array/aggregate array 100,000、collection 20,000、16 MiB stdout、public diagnostic stderr 64 KiB、adapter stderr capture 64 KiB、60秒、512 MiB old-spaceとRound 2 decoder/model limitsに固定する。adapter captureとpublic diagnostic emissionは別のincremental counterとし、unbounded/silent truncationは不可。
+v1 finite limitsは4 MiB/file、64 MiB decoded total、20,000 files、96 MiB encoded stdin、各array/aggregate array 100,000、collection 20,000、model records 10,000、16 MiB stdout、public diagnostic stderr 64 KiB、adapter stderr capture 64 KiB、60秒、512 MiB old-spaceとRound 2 decoder/model limitsに固定する。adapter captureとpublic diagnostic emissionは別のincremental counterとし、unbounded/silent truncationは不可。
 
 ### Identity and members
 
@@ -510,7 +558,11 @@ overlapping rootsを禁止するため、各source moduleのowning projectは一
 - multiple targetsはcanonical target keyでdeduplicate/sortしたunion。入力順違いはsame bytes。一件でもresolution failureまたは選択集合のtaint/exclusion/failureがあれば全target payload unavailable。
 - targetなしは全applicable project。depthはtargetありのときだけ。
 
-### SourceAcquisitionPlan/v1 and discovery closure
+### SourceDiscoveryIntent → SourceAcquisitionPlan/v1 and discovery closure
+
+`SourceDiscoveryIntent`はrun開始時のrepository root、候補control path、project root、固定された
+suffix/exclusion規則だけを持つ探索意図であり、最終的なbytesやrole mapを権威として持たない。
+`FinalSourceAcquisitionPlan`と`SourceView`がfilesystemから得た唯一の凍結結果である。
 
 plan value object:
 
@@ -528,15 +580,20 @@ trusted_type_environment_digest
 
 plan digest preimageは上の全fieldをcanonical JSONでencodeし、path/tupleはNFC UTF-8 byte order。source content digestは含めず、SourceView fingerprintへ分離する。
 
-discovery procedure:
+discovery procedure（two-phase single-read protocol）:
 
-1. common Git repositoryがrun-start inventory/state fingerprintを取得する。
+1. common Git repositoryがrun-start inventory/state fingerprintを取得し、`SourceDiscoveryIntent`をsealする。
 2. validated project rootsからknown `package.json`と`tsconfig.json`/`jsconfig.json`候補をcontrol pathへ追加する。
 3. descriptor-safe readでcontrol bytesを一度だけ`control_snapshot`へ取得し、その保持bytesでapplicability/configを解析する。
 4. repository-local `extends`をvisited path setで解き、新規controlだけを一度読みsnapshotへ追加する。既読controlを再読しない。
 5. resolved include/exclude/source rootsをrun-start inventoryへ適用し、program/context path closureを確定する。
 6. control以外のprogram/context bytesを一度だけ取得しcontrol snapshotと結合し、最後にinventory/state driftを検証する。
-7. 一つのlogical SourceView、plan digest、file-role mapを確定し、それ以降target filesystemを読まない。
+7. 最終readとdrift checkが成功した時点で、`FinalSourceAcquisitionPlan`、logical `SourceView`、plan digest、
+   file-role mapを同じatomic seal operationで確定する。それ以降target filesystemを読まない。
+
+各pathのreadはinstrumented readerで一回だけであることを検証する。planのcontrol/extends/file-role mapと
+SourceViewのfrozen bytes集合は同じseal入力から導出し、後段がplanを再解決したりfilesystemを再読したり
+してはならない。
 
 control failureはglobal payload unavailable、unsafe path/inventory/state driftはrun fatal。program/context read/UTF-8/parse failureはlocalized coverageを証明できる場合だけpartial safe。
 
@@ -741,7 +798,7 @@ Issue #8/current CLI/run-manifest/run-summaryはsingle-domain (`maxItems: 1`)。
 | explicit target | missing/ambiguous/out-of-scope/cycle | `CSV-NEXT-TARGET-001` | yes/global target | payload_unavailable | payloadなし / manifest / unavailable stdout / 3 |
 | project/control | malformed package/config/extends/conflict | `CSV-NEXT-CONFIG-001/002` | yes/global domain | payload_unavailable | payloadなし / manifest / 3 |
 | trusted types | digest/version mismatch | `CSV-NEXT-TRUST-001` | yes/global domain | payload_unavailable | payloadなし / manifest / 3 |
-| process/protocol | Node/spawn/timeout/nonzero/cap/noise/schema/ref/ID | `CSV-NEXT-NODE-*` / `CSV-NEXT-PROTOCOL-*` | yes/global domain | payload_unavailable | payloadなし / manifest / 3 |
+| process/protocol | Node discovery/spawn/timeout/nonzero、adapter stdout capture、stderr/raw cap、noise/schema/ref/ID | `CSV-NEXT-NODE-*` / `CSV-NEXT-PROTOCOL-*` / `CSV-NEXT-LIMIT-003` | yes/global domain | payload_unavailable | payloadなし / manifest / 3 |
 | source/transport/entity | file 4MiB、total 64MiB、20k files、model/entity 501+ | `CSV-NEXT-LIMIT-001/002/005` | yes/global domain | payload_unavailable | payloadなし / manifest count / 3 |
 | common source integrity | Git root/inventory/path collision/unsafe symlink/read invariant | existing `CSV-REPO-*`/`CSV-SOURCE-*` | run source untrusted | fatal | payloadなし / final manifestなし / run unavailable / 1 |
 | publication | source drift、writer/serializer/transaction invariant | existing `CSV-SOURCE-001`/`CSV-INTERNAL-001` | run result untrusted | fatal | payloadなし / final manifestなし / 1 |
@@ -853,16 +910,24 @@ module resolutionはvirtual inventoryだけを使う。relative/baseUrl/pathsに
 
 ### Two-phase single-read freeze
 
-一つのlogical SourceViewは次のprotocolで作る。各path bytesは一度だけ読む。
+`SourceDiscoveryIntent`はrun開始時のrepository root、候補control path、project root、固定された
+suffix/exclusion規則だけを持つ探索意図である。最終bytesやrole mapは所有せず、
+`FinalSourceAcquisitionPlan`と`SourceView`がfilesystemから得た唯一の凍結結果となる。一つのlogical
+SourceViewは次のprotocolで作り、各path bytesは一度だけ読む。
 
-1. run-start inventory/state fingerprintを固定する。
+1. run-start inventory/state fingerprintを固定し、`SourceDiscoveryIntent`をsealする。
 2. selected projectのknown package/config候補をdescriptor-safeに一度読み、`control_snapshot`へbytes/digestを保持する。
 3. 保持bytesだけでapplicability/config/extends closureを解く。新たなlocal extendsは一度読み追加し、既読controlを再読しない。
 4. config closureからprogram/context path closureをinventory上で確定する。
 5. control以外のprogram/context bytesを一度読み、control snapshotと結合する。
-6. inventory/state driftを再検証し、logical SourceView fingerprintを計算する。それ以降target filesystemを読まない。
+6. inventory/state driftを再検証する。成功した最後のreadとdrift checkの直後に、
+   `FinalSourceAcquisitionPlan`、logical SourceView、plan digest、file-role mapを同じatomic seal operationで確定する。
+7. seal後はtarget filesystemを読まない。planの再解決、role mapの再構築、path bytesの再読は契約違反である。
 
-同一pathが複数roleを持つ場合は`control > context > program`で一recordにし、role setも保持する。phase間drift、descriptor/path mismatch、read-after-freezeはrun fatal。
+同一pathが複数roleを持つ場合は`control > context > program`で一recordにし、role setも保持する。phase間
+drift、descriptor/path mismatch、read-after-freezeはrun fatal。instrumented readerで各pathのread回数が一回、
+plan/viewのcontrol・extends・file-role mapが凍結bytes集合と一致し、両者が同じseal operationを共有することを
+検証する。
 
 ### Protocol family, closed model, and digest preimages
 
@@ -870,7 +935,7 @@ module resolutionはvirtual inventoryだけを使う。relative/baseUrl/pathsに
 - request schemaは`code-structure-viz.next-adapter-request/v1`、response schemaは`code-structure-viz.next-adapter-response/v1`。両方の`protocol` fieldがfamily IDを持つ。
 - `request_id = SHA256(canonical_json(request without request_id))`。
 - `model_digest = SHA256(canonical_json(model))`。
-- `run_fingerprint = SHA256(canonical_json({source_view_fingerprint,source_plan_digest,domain_config_digest,projects,targets,formats,stdout_selector,limits,node_version,typescript_version,adapter_version,protocol,trusted_environment_digest}))`。`formats`と実際の`stdout_selector`はcanonical `NextRunContext`から供給し、欠落時に`FORMAT_ORDER`を補わない。
+- `run_fingerprint = SHA256(canonical_json({source_view_fingerprint,source_plan_digest,domain_config_digest,projects,targets,formats,stdout_selector,limits,node_version,typescript_version,adapter_version,protocol,trusted_environment_digest}))`。`formats`と実際の`stdout_selector`はcanonical `NextRunContext`から供給し、欠落時に`FORMAT_ORDER`を補わない。limits（`max_model_records`を含む）の変更はrun fingerprintを変えるが、operational limitはsemantic compatibility preimageへ入れない。
 - Artifact digestはpublished exact bytes、manifest digestはmanifest自身のdigest fieldを除いたcanonical bytesから計算する。
 
 snapshot/model/manifestは`identity_versions={project:1,file:1,module:1,component:1,member:1,relation:1,fact:1,props_ir:1}`と`semantic_compatibility_id`を持つ。compatibility IDはsemantic schema ID、identity versions、recognition/export/props/relation/fact/boundary algorithm version、TrustedTypeEnvironment `semantic_profile_id`のcanonical JSON SHA-256。content-only environment digest、adapter patch、Node patch、config/source digestはpreimageに入れない。identity/payload semanticsまたはtrusted certified signatureを変えるとalgorithm/profile versionを上げ、compatibility IDを変える。
@@ -913,8 +978,9 @@ closed payload variants:
 | JSON nesting | 64 | request/response reject |
 | JSON string bytes | 8 MiB | request/response reject |
 | array items | each array 100,000 / aggregate 100,000 / collection 20,000 | request/response reject |
-| model records | 100,000 | payload unavailable |
+| model records | 10,000 | payload unavailable |
 | stdout | 16 MiB | terminate/payload unavailable |
+| adapter stdout capture | 16 MiB UTF-8, incremental | process-group terminate/payload unavailable |
 | public diagnostic stderr | 64 KiB UTF-8 | payload unavailable |
 | adapter stderr capture | 64 KiB UTF-8, incremental | process-group terminate/payload unavailable |
 | timeout | 60 s | terminate/payload unavailable |
@@ -922,7 +988,7 @@ closed payload variants:
 
 v1は総RSS上限を約束しない。finite memoryはencoded/decoded bytes、decoder、collections/model、V8 old-spaceを上記で制限する意味である。OS-level RSS isolationは将来の別contract。
 
-diagnostic mappingはfile bytes/encoded stdin=`LIMIT-001`、file count/decoded total=`LIMIT-002`、JSON/string/array/stdout/public diagnostic stderr/adapter stderr capture=`LIMIT-003`、V8 old-space=`LIMIT-004`、model records/entity budget=`LIMIT-005`。timeoutは`NODE-003`。adapter stderr captureはpublic diagnostic emissionとは別のincremental process-group trust boundaryであり、超過時はraw/partial bytesを破棄する。
+diagnostic mappingはfile bytes/encoded stdin=`LIMIT-001`、file count/decoded total=`LIMIT-002`、JSON/string/array/stdout/public diagnostic stderr/adapter stderr capture/adapter stdout capture=`LIMIT-003`、V8 old-space=`LIMIT-004`、model records/entity budget=`LIMIT-005`。timeoutは`NODE-003`。adapter stdout/stderr captureはpublic diagnostic emissionとは別のincremental process-group trust boundaryであり、超過時はraw/partial bytesを破棄する。stdout decoderはcapture成功後に一度だけ呼び、partial bytesからmodelやdiagnosticを作らない。
 
 ### Complete PropsTypeIR and JavaScript extraction
 
@@ -983,9 +1049,23 @@ taint kindは`parse_file|read_file|type_symbol|export_binding|props_subtree|comp
 | module relation | edgeとそのedgeに依存するderived boundary role |
 | boundary derivation | derived role/effectだけ。primitive fact/edgeは保持 |
 
-responseはpublic candidate modelに加え`proof`を返す。proofは`discovered_records[]`（全record payload + `taints[]`）、`failure_roots[{id,kind,path_ref}]`、`causal_edges[{failure_or_record_id,record_id,rule}]`、`target_resolutions[{target_key,status,record_ids}]`、`excluded[{record_id,reason}]`をclosed schemaで持つ。Pythonが規範taint rulesを適用してpublished subsetを生成し、adapter proposed modelとexact bytes比較する。
+responseはpublic candidate modelに加え`proof`を返す。proofの
+`discovered_records[]`は公開model recordについて
+`{collection,record_id,taints[]}`だけを持ち、Pythonが同一response modelから
+ID joinする。公開modelに存在しないproof-only recordだけが任意の`record`
+payloadを持てる。併せて`failure_roots[{id,kind,path_ref,record_ids}]`、
+`causal_edges[{failure_or_record_id,record_id,rule}]`、
+`target_resolutions[{target_key,status,record_ids}]`、
+`excluded[{record_id,reason}]`をclosed schemaで持つ。Pythonが規範taint rulesを
+適用してpublished subsetを生成し、adapter proposed modelとexact bytes比較する。
 
 published subsetはtainted recordを除き、全refがun-tainted recordまたはclosed frontierへ解決し、collectionごとに`discovered = published + excluded + failed`が成立する場合だけ安全。Python validatorはproofからcoverage、taint closure、dangling ref、target completeness、renderer subsetを独立再計算する。countだけの自己申告は受理しない。
+`proof.discovered_records`のschema上限は20,000（構造上限）とし、意味上限
+`max_model_records=10,000`とは分離する。これにより10,001件のschema-valid
+responseをmodel validatorまで運び、`CSV-NEXT-LIMIT-005`として扱える。ID-only
+proofはpayloadの重複を除くが、model arrayとproof arrayのID行は別itemなので、
+100,000 aggregate itemと16 MiB raw-byteを維持したまま10,000を到達可能な
+semantic capとする。
 
 | target | partial_safe permission |
 | --- | --- |
@@ -994,6 +1074,25 @@ published subsetはtainted recordを除き、全refがun-tainted recordまたは
 | `path:DIRECTORY` | 全descendantのfrozen file/Module/Component集合を同時に選び、いずれかのidentity taintは不可。局所prop/flow/derived boundaryだけ可 |
 
 `NextCoverageRecord`はdiscovered/published/excluded/failed counts、failed safe paths/reasons、affected IDs、taint frontier、opaque reason counts、unknown relation counts、correlation losses、non-component/type-only export counts、target completenessを持つ。source body/raw diagnosticは持たない。
+
+### Proof reason semantics and outcome ownership
+
+proof reasonからoutcomeへの写像はclosedである。`not_selected`とselection-only `target_excluded`は
+意味欠落を表さないためstatusを下げない。intentional `unsupported`はunknown coverageと
+`CSV-NEXT-UNSUPPORTED-001`を伴う`complete`である。`tainted`または`failed`は、対象identityを汚染せず
+locality proofが成立する場合だけ`partial_safe`へ写像する。adapter proof vocabularyに`over_budget`は
+存在せず、現行Pythonの独立`EntityBudgetGate`だけがactual entity countに基づいて`payload_unavailable`
+を決める。explicit target identity failure（missing/component_only/duplicate等）はtyped target failureと
+して`payload_unavailable`であり、partial-safeへ降格しない。
+
+この写像は少なくとも次のnegative/positive vectorsで固定する。
+
+| proof vector | expected outcome |
+| --- | --- |
+| unrelated `not_selected` | `complete` / exit 0 |
+| intentional `unsupported` | `complete` + `CSV-NEXT-UNSUPPORTED-001` |
+| localized taint with locality proof | `partial_safe` / exit 3 |
+| adapter `over_budget` | protocol rejection; Python gate not bypassed |
 
 ### Public schema, config, renderer, and distribution contract
 
@@ -1059,7 +1158,7 @@ Python bridgeはprotocol family `code-structure-viz.next-adapter/v1`の`next-ada
 
 ### entity budget and publication
 
-responseの構造・参照・`max_model_records`検証を先に完了し、その後render/publication直前に独立`EntityBudgetGate`を一度だけ適用する。Gateはsubmitted countを信用せず、selected/published internal Module+Componentのactualを再計算する。501以上はdomain `incomplete/payload_unavailable`、`CSV-NEXT-LIMIT-005`、exit 3、affected JSON/PlantUMLなし、safe run manifestのrequested/resolved/actual countとunavailable stdoutを記録する。member/relation/external/frontier/project descriptorは数えない。500は受理し、600 overrideで501は受理する。all-record 100001は別の`max_model_records` failureとして扱う。invalid valueはexit 2。snapshot pipelineは`ChangedPathAdmissionGate`を構築・実行せず、diff専用optionはusage error、Artifactなし。OutputTransactionはabsolute path/protocol noise/unsafe fieldをpublish前に拒否する。
+responseの構造・参照・`max_model_records`検証を先に完了し、その後render/publication直前に独立`EntityBudgetGate`を一度だけ適用する。Gateはsubmitted countを信用せず、selected/published internal Module+Componentのactualを再計算する。501以上はdomain `incomplete/payload_unavailable`、`CSV-NEXT-LIMIT-005`、exit 3、affected JSON/PlantUMLなし、safe run manifestのrequested/resolved/actual countとunavailable stdoutを記録する。member/relation/external/frontier/project descriptorは数えない。500は受理し、600 overrideで501は受理する。all-record 10,001は別の`max_model_records` failureとして扱う。invalid valueはexit 2。snapshot pipelineは`ChangedPathAdmissionGate`を構築・実行せず、diff専用optionはusage error、Artifactなし。OutputTransactionはabsolute path/protocol noise/unsafe fieldをpublish前に拒否する。
 
 ### determinism and optionality
 

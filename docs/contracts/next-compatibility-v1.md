@@ -17,6 +17,22 @@ version in compatibility and run-fingerprint preimages. Fresh exact-SHA Strict
 is pending, readiness is unconfirmed, and production implementation has not
 started; the historical fail remains unchanged.
 
+Round 14 closes the implementation provenance: the profile is a checked-in,
+dependency-free interval table in
+`tests/contracts/ecmascript_unicode_15_0.py`, with table digest
+`c9336daa555ce98e93cbd48e6b91df22f50a221881bd10b3ed79cf9180297969`.
+The table is based on Unicode 15.0.0 `ID_Start`/`ID_Continue` plus the
+explicit `Other_ID_Start`, `Other_ID_Continue` (including U+00B7), and
+join-control sets. Runtime classification must not call the host Python UCD;
+the profile version and exact table digest are checked in the trusted
+environment, compatibility descriptor, and run-fingerprint preimage. The
+TypeScript 5.9.2 scanner remains the pinned semantic consumer; changing the
+table requires a new compatibility/profile version and known-answer digest.
+Operational resource limits such as `max_model_records` are intentionally
+excluded from this semantic compatibility preimage. They are included in the
+request/run-fingerprint preimages, so changing the resolved limit changes run
+identity while leaving semantic compatibility unchanged.
+
 `code-structure-viz.next-semantic-compatibility/v1` is a closed descriptor,
 not a caller-supplied label. It contains the public semantic schema ID, the
 eight identity versions (project, file, module, component, member, relation,

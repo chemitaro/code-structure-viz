@@ -17,6 +17,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
 )
 from code_structure_viz.adapters.sqlalchemy.semantic_json import render_semantic_snapshot
 from code_structure_viz.source.source_view import SourceView
+from tests.contracts.ecmascript_unicode_15_0 import TABLE_DIGEST
 from tests.helpers.acceptance import (
     initialize_fixture_repository,
     initialize_repository,
@@ -139,10 +140,11 @@ def _next_limits(*, max_entities: int = 500) -> dict[str, int]:
         "max_array_items": 100000,
         "max_total_array_items": 100000,
         "max_collection_items": 20000,
-        "max_model_records": 100000,
+        "max_model_records": 10000,
         "max_stdout_bytes": 16777216,
         "max_stderr_bytes": 65536,
         "max_adapter_stderr_capture_bytes": 65536,
+        "max_adapter_stdout_capture_bytes": 16777216,
         "timeout_seconds": 60,
         "v8_old_space_mib": 512,
         "max_type_depth": 16,
@@ -226,6 +228,7 @@ def _next_compatibility_descriptor() -> dict[str, object]:
             "fact": 1,
             "boundary": 1,
             "identifier_unicode": "ecma-unicode-15.0",
+            "identifier_unicode_table_digest": TABLE_DIGEST,
         },
         "semantic_profile_id": "next-trusted-profile-v1",
         "compatibility_id": "a" * 64,
@@ -259,6 +262,7 @@ def _next_trusted_environment() -> dict[str, object]:
         "environment_version": "1",
         "semantic_profile_id": "next-trusted-profile-v1",
         "typescript_version": "5.9.2",
+        "identifier_unicode_table_digest": TABLE_DIGEST,
         "license_inventory_digest": (
             "473c908d234c02e497c4f0ff5bcc7a626dd8b488e487ec3c7f7202ae1c9e1ea8"
         ),
@@ -1836,6 +1840,9 @@ def test_stdout_result_schema_rejects_selector_status_and_reason_mismatches() ->
     ):
         mutation = {**unavailable, key: value}
         mutations.append(mutation)
+    # Target reasons are only valid inside the canonical target_failures array;
+    # the former top-level single-reason compatibility field is closed.
+    mutations.append({**unavailable, "reason": "missing"})
 
     for mutation in mutations:
         with pytest.raises(ValidationError):

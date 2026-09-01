@@ -44,8 +44,20 @@ duplicate, out-of-scope, non-canonical, or role-precedence-inconsistent rows.
 source_plan_digest = SHA-256(canonical-json(SourceAcquisitionPlan/v1))
 ```
 
-The source plan is resolved after the SourceView freeze and before the adapter
-starts. It does not re-read control files during analysis. A digest mismatch
-is a payload-unavailable protocol failure; no semantic or PlantUML artifact is
+Acquisition is a two-phase, single-read protocol. `SourceDiscoveryIntent`
+records the selected project roots and descriptor-safe control candidates.
+Phase 1 reads each candidate control/config/`extends` path once and retains
+its bytes; the resolver computes the local extends closure and role intent from
+those retained bytes. Phase 2 reads each final program/context path once and
+performs the final inventory/drift check. Only after that check does the
+implementation atomically seal `FinalSourceAcquisitionPlan` and `SourceView`
+with one seal operation and their digests. The adapter receives that sealed
+pair and no filesystem path; no filesystem read is permitted after the seal.
+An already-read path is never read again when it appears in both phases.
+
+A phase or inventory drift, descriptor/path mismatch, duplicate read, or
+post-seal read is a fatal source-integrity failure. A digest mismatch is a
+payload-unavailable protocol failure; no semantic or PlantUML artifact is
 published. Known-answer mutations cover local extends, control-path identity,
-file-role assignment, and project order.
+file-role assignment, project order, single-read counts, drift rejection, and
+the atomic plan/view seal.

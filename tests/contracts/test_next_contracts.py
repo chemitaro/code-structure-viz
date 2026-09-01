@@ -11,8 +11,15 @@ from jsonschema import ValidationError  # type: ignore[import-untyped]
 from code_structure_viz.artifacts.streams import StdoutEmitter
 from code_structure_viz.cli.parser import DomainFormatSelector, ManifestSelector
 from code_structure_viz.core.outcomes import RunOutcome
+from tests.contracts.ecmascript_unicode_15_0 import (
+    TABLE_DIGEST as ECMASCRIPT_UNICODE_TABLE_DIGEST,
+)
+from tests.contracts.ecmascript_unicode_15_0 import (
+    canonical_table_bytes,
+)
 from tests.contracts.next_reference_validation import (
     COLLECTIONS,
+    ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
     LIMIT_CONTRACTS,
     ROLE_ORDER,
     ROLE_PRECEDENCE,
@@ -27,8 +34,12 @@ from tests.contracts.next_reference_validation import (
     TRUSTED_PROFILE_PHYSICAL_TO_VIRTUAL,
     TRUSTED_PROFILE_SHADOWING_WITNESS,
     VALIDATOR_SCHEMA,
+    InstrumentedSourceReader,
     NextRunContext,
+    NextRunDecision,
     NextValidatedDecision,
+    NotApplicableDecision,
+    PreResponseFailureDecision,
     _assert_file_path,
     _assert_path,
     _derived_taint_fixed_point,
@@ -44,7 +55,10 @@ from tests.contracts.next_reference_validation import (
     canonical_run_context,
     canonical_target_key,
     capture_adapter_stderr,
+    capture_adapter_stdout,
+    classify_response_limit,
     count_array_items_before_materialization,
+    derive_pre_budget_outcome,
     derive_required_causal_edges,
     digest,
     encoded_request_bytes,
@@ -56,13 +70,17 @@ from tests.contracts.next_reference_validation import (
     expected_export_resolution_witness,
     export_failure_decision,
     export_reexport_failure_rows,
+    freeze_source_acquisition,
     internal_entity_count,
+    is_next_run_decision,
     join_reexport_observations_to_edges,
     load_export_census_fixture,
     load_export_graph_cases,
     load_export_graph_fixture,
     load_export_graph_raw_fixture,
     model_record_budget_allowed,
+    model_wire_record_count,
+    pre_response_failure_decision,
     project_config_digest,
     recompute_compatibility_id,
     recompute_export_graph_case,
@@ -73,6 +91,7 @@ from tests.contracts.next_reference_validation import (
     render_plantuml,
     render_public_diagnostic_stderr,
     resolve_target_resolutions,
+    response_boundary_decision,
     scan_export_syntax_census,
     source_plan_descriptor,
     target_completeness_failure,
@@ -641,6 +660,45 @@ def _model() -> dict[str, Any]:
     return model
 
 
+def _generated_context_model(file_count: int) -> dict[str, Any]:
+    """Generate a compact, schema-valid model for wire-limit boundaries."""
+
+    assert file_count >= 1
+    empty_sha256 = hashlib.sha256(b"").hexdigest()
+    files: list[dict[str, Any]] = []
+    for index in range(file_count):
+        file_record: dict[str, Any] = {
+            "kind": "file",
+            "id": "",
+            "path": f"src/generated/{index:05d}.d.ts",
+            "project_id": _id("project", "0"),
+            "roles": ["context"],
+            "effective_role": "context",
+            "size_bytes": 0,
+            "sha256": empty_sha256,
+        }
+        file_record["id"] = recompute_record_id(file_record)
+        files.append(file_record)
+    files.sort(key=lambda record: record["id"])
+    project = _project()
+    project["file_ids"] = sorted(record["id"] for record in files)
+    project["config_digest"] = project_config_digest(project)
+    model: dict[str, Any] = {
+        "schema": "code-structure-viz.next-model/v1",
+        "projects": [project],
+        "files": files,
+        "modules": [],
+        "components": [],
+        "members": [],
+        "relations": [],
+        "facts": [],
+        "coverage": _next_coverage(),
+        "diagnostics": [],
+    }
+    _refresh_model_counts(model)
+    return model
+
+
 def _model_with_positive_reexports() -> dict[str, Any]:
     """Build a complete model that carries component and star re-exports."""
 
@@ -1111,6 +1169,7 @@ def _request(
     targets: list[str] | None = None,
     limits: dict[str, int] | None = None,
     run_context: NextRunContext | None = None,
+    default_content: bytes | None = None,
 ) -> dict[str, Any]:
     model = model or _model()
     trusted_environment_digest = _trusted_environment()["sha256"]
@@ -1134,6 +1193,8 @@ def _request(
             content = contents["src/Card.tsx"]
         elif content is None and file_record["path"].endswith("types.d.ts"):
             content = contents["src/types.d.ts"]
+        elif content is None and default_content is not None:
+            content = default_content
         assert content is not None
         files.append(
             {
@@ -1184,7 +1245,7 @@ def _complete_proof(model: dict[str, Any]) -> dict[str, Any]:
             if record["id"] in seen_ids:
                 continue
             seen_ids.add(record["id"])
-            records.append({"collection": collection, "record": record, "taints": []})
+            records.append({"collection": collection, "record_id": record["id"], "taints": []})
     return {
         "discovered_records": records,
         "failure_roots": [],
@@ -1279,19 +1340,30 @@ def _target_proof_resolutions(
     return sorted(rows, key=canonical_json_bytes)
 
 
-def _discovered_index(proof: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
+def _discovered_index(
+    proof: dict[str, Any], model: dict[str, Any] | None = None
+) -> dict[str, dict[str, dict[str, Any]]]:
     discovered: dict[str, dict[str, dict[str, Any]]] = {
         collection: {} for collection in COLLECTIONS
     }
     for item in proof["discovered_records"]:
-        discovered[item["collection"]][item["record"]["id"]] = item
+        if "record" in item:
+            discovered[item["collection"]][item["record_id"]] = item
+            continue
+        assert model is not None
+        record = next(
+            record for record in model[item["collection"]] if record["id"] == item["record_id"]
+        )
+        discovered[item["collection"]][item["record_id"]] = {**item, "record": record}
     return discovered
 
 
-def _materialize_single_root_taints(proof: dict[str, Any]) -> None:
+def _materialize_single_root_taints(
+    proof: dict[str, Any], model: dict[str, Any] | None = None
+) -> None:
     """Populate one root's labels from the independently generated edge witness."""
 
-    discovered = _discovered_index(proof)
+    discovered = _discovered_index(proof, model or _model())
     edges = derive_required_causal_edges(proof, discovered)
     proof["causal_edges"] = edges
     adjacency: dict[str, set[str]] = {}
@@ -1307,7 +1379,7 @@ def _materialize_single_root_taints(proof: dict[str, Any]) -> None:
                 reachable.add(record_id)
                 pending.append(record_id)
     for item in proof["discovered_records"]:
-        item["taints"] = [root["kind"]] if item["record"]["id"] in reachable else []
+        item["taints"] = [root["kind"]] if item["record_id"] in reachable else []
 
 
 def _response(
@@ -1368,6 +1440,7 @@ def _response(
 
 def _trusted_environment() -> dict[str, Any]:
     value = _next_trusted_environment()
+    value["identifier_unicode_table_digest"] = ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST
     value["license_inventory_digest"] = TRUSTED_PROFILE_LICENSE_DIGEST
     value["files"] = [
         {
@@ -1437,7 +1510,7 @@ class _DomainProjection(dict[str, Any]):
         value: dict[str, Any],
         *,
         validated_model: dict[str, Any],
-        validated_decision: NextValidatedDecision | None,
+        validated_decision: NextRunDecision | None,
     ) -> None:
         super().__init__(value)
         self.validated_model = copy.deepcopy(validated_model)
@@ -1475,10 +1548,27 @@ def _target_reason_for_domain(domain: dict[str, Any], target_key: str | None = N
     return reason if reason in {"missing", "component_only", "duplicate"} else None
 
 
+def _target_failures_for_domain(domain: dict[str, Any]) -> list[dict[str, str]]:
+    """Return every typed target failure in canonical stdout order."""
+
+    decision = getattr(domain, "validated_decision", None)
+    if not isinstance(decision, NextValidatedDecision):
+        return []
+    failures = [
+        {
+            "target_key": item["target_key"],
+            "reason": item["reason"],
+        }
+        for item in decision.target_failures
+        if item.get("reason") in {"missing", "component_only", "duplicate"}
+    ]
+    return sorted(failures, key=canonical_json_bytes)
+
+
 _UNSET = object()
 
 
-def _domain(
+def _legacy_domain_fixture(
     status: str | object = _UNSET,
     *,
     overrun: bool = False,
@@ -1633,32 +1723,20 @@ def _domain(
     budget_overrun = measured_actual > max_entities
     if target_failed:
         assert status != "not_applicable"
-        failed_target = next(item for item in target_resolutions if item["status"] == "failed")
-        failed_reason = (
-            next(
-                (
-                    item.get("reason")
-                    for item in validated_decision.target_failures
-                    if item.get("target_key") == failed_target["target_key"]
-                ),
-                None,
+        target_reason_by_key = {
+            item["target_key"]: item.get("reason")
+            for item in (
+                validated_decision.target_failures if validated_decision is not None else ()
             )
-            if validated_decision is not None
-            else None
-        )
-        if failed_reason is None and validated_decision is None:
+        }
+        if validated_decision is None:
             fallback_failure = target_completeness_failure(model, target_values)
-            if fallback_failure is not None:
-                failed_reason = next(
-                    (
-                        item["reason"]
-                        for item in fallback_failure.failures
-                        if item["target_key"] == failed_target["target_key"]
-                    ),
-                    None,
-                )
-        if validated_decision is not None:
-            assert failed_reason is not None
+            target_reason_by_key.update(
+                {
+                    item["target_key"]: item["reason"]
+                    for item in (fallback_failure.failures if fallback_failure else ())
+                }
+            )
         status = "incomplete"
         entity_count = None
         payload_available = False
@@ -1669,11 +1747,14 @@ def _domain(
                 "CSV-NEXT-TARGET-001",
                 path=failed_target["target_key"].removeprefix("path:"),
                 reason=(
-                    failed_reason
-                    if failed_reason in {"missing", "component_only", "duplicate"}
+                    target_reason_by_key.get(failed_target["target_key"])
+                    if target_reason_by_key.get(failed_target["target_key"])
+                    in {"missing", "component_only", "duplicate"}
                     else None
                 ),
             )
+            for failed_target in target_resolutions
+            if failed_target["status"] == "failed"
         ]
         actual = None
     elif export_failure:
@@ -1913,6 +1994,116 @@ def _domain(
     )
 
 
+def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
+    """Project one closed run decision into the domain publication boundary.
+
+    The older fixture builder below remains available for status-vector tests,
+    but it is deliberately not a second authority.  New pre-response vectors
+    enter here with the immutable decision object; the structural fixture is
+    used only to supply the schema-required manifest shape and is overwritten
+    with the decision's diagnostic, context, and zero-publication outcome.
+    """
+
+    assert isinstance(
+        decision, (NextValidatedDecision, PreResponseFailureDecision, NotApplicableDecision)
+    )
+    if isinstance(decision, NextValidatedDecision):
+        return _legacy_domain_fixture(response_decision={"validated_decision": decision})
+
+    request = decision.request
+    context = decision.run_context
+    base = _legacy_domain_fixture(
+        "not_applicable" if isinstance(decision, NotApplicableDecision) else "incomplete",
+        runtime_unavailable=isinstance(decision, PreResponseFailureDecision),
+        targets=copy.deepcopy(request["targets"]),
+        formats=list(context["requested_formats"]),
+        max_entities=context["budget_resolved"],
+        budget_source=context["budget_source"],
+        budget_requested=context["budget_requested"],
+        stdout_selector=context["stdout_selector"],
+    )
+    value = copy.deepcopy(dict(base))
+    value["diagnostics"] = [copy.deepcopy(decision.diagnostic)]
+    value["run_context"] = copy.deepcopy(context)
+    value["request"]["targets"] = copy.deepcopy(request["targets"])
+    value["request"]["formats"] = list(context["requested_formats"])
+    value["request"]["limits"] = copy.deepcopy(request["limits"])
+    value["limits"] = copy.deepcopy(request["limits"])
+    value["status"] = (
+        "not_applicable" if isinstance(decision, NotApplicableDecision) else "incomplete"
+    )
+    value["payload_available"] = False
+    value["entity_count"] = 0 if isinstance(decision, NotApplicableDecision) else None
+    value["artifact_paths"] = []
+    if isinstance(decision, PreResponseFailureDecision):
+        value["incomplete_kind"] = "payload_unavailable"
+        node_stages = {"node_discovery", "node_spawn", "node_timeout", "node_process"}
+        if decision.stage in node_stages:
+            failure_kind = {
+                "node_discovery": "missing",
+                "node_spawn": "spawn_failed",
+                "node_timeout": "timeout",
+                "node_process": "process_failed",
+            }[decision.stage]
+            value["toolchain"]["node"] = {
+                "status": "unavailable",
+                "version": None,
+                "failure_kind": failure_kind,
+            }
+            value["toolchain"]["node_version"] = None
+        else:
+            value["toolchain"]["node"] = {
+                "status": "available",
+                "version": "22.14.0",
+                "failure_kind": None,
+            }
+            value["toolchain"]["node_version"] = "22.14.0"
+        value["budget"]["actual"] = None
+        value["budget"]["outcome"] = "payload_unavailable"
+    else:
+        value.pop("incomplete_kind", None)
+        value["budget"]["actual"] = 0
+        value["budget"]["outcome"] = "not_applicable"
+        value["toolchain"]["node"] = {
+            "status": "not_applicable",
+            "version": None,
+            "failure_kind": None,
+        }
+        value["toolchain"]["node_version"] = None
+    value["run_fingerprint"] = recompute_run_fingerprint(
+        source_view_fingerprint=value["source"]["fingerprint"],
+        source_plan_digest=value["source_plan_digest"],
+        domain_config_digest=value["domain_config_digest"],
+        projects=value["projects"],
+        targets=value["targets"],
+        formats=value["formats"],
+        stdout_selector=context["stdout_selector"],
+        limits=value["limits"],
+        node_version=value["toolchain"]["node_version"],
+        typescript_version=value["toolchain"]["typescript_version"],
+        adapter_version=value["toolchain"]["adapter_version"],
+        protocol=value["toolchain"]["protocol"],
+        trusted_environment_digest=value["trusted_environment"]["sha256"],
+    )
+    value["request"]["run_fingerprint"] = value["run_fingerprint"]
+    return _DomainProjection(
+        value,
+        validated_model=base.validated_model,
+        validated_decision=decision,
+    )
+
+
+def _domain(*, decision: NextRunDecision) -> _DomainProjection:
+    """Project only the closed decision union into publication surfaces.
+
+    Legacy status vectors use ``_legacy_domain_fixture`` directly and never
+    represent a production downstream authority path.
+    """
+
+    assert is_next_run_decision(decision)
+    return _domain_from_run_decision(decision)
+
+
 def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
     base = cast(
         dict[str, Any],
@@ -2000,6 +2191,9 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
 
 def _published_bytes(domain: dict[str, Any]) -> dict[str, bytes]:
     decision = getattr(domain, "validated_decision", None)
+    if isinstance(decision, (PreResponseFailureDecision, NotApplicableDecision)):
+        assert domain["artifact_paths"] == []
+        return {}
     assert isinstance(decision, NextValidatedDecision), "publication requires validated decision"
     validated_model = decision.validated_model
     semantic = _semantic(
@@ -2044,7 +2238,8 @@ def _stdout_result_for_domain(
         if domain["status"] == "incomplete":
             result["incomplete_kind"] = "partial_safe"
         return result
-    return {
+    target_failures = _target_failures_for_domain(domain)
+    result = {
         "type": "stdout_result",
         "schema": "code-structure-viz.stdout-result/v1",
         "selector": selector,
@@ -2053,15 +2248,15 @@ def _stdout_result_for_domain(
         "stable_reason": (
             "domain_not_applicable"
             if domain["status"] == "not_applicable"
+            else "target_payload_unavailable"
+            if target_failures
             else "domain_payload_unavailable"
         ),
         "artifact": None,
-        **(
-            {"reason": _target_reason_for_domain(domain)}
-            if _target_reason_for_domain(domain) is not None
-            else {}
-        ),
     }
+    if target_failures:
+        result["target_failures"] = target_failures
+    return result
 
 
 def _run_summary_value(run_status: str, domain: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2611,6 +2806,14 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     }
     validate_model(response["model"])
     validate_proof(response["proof"], response["model"])
+    assert all("record" not in item for item in response["proof"]["discovered_records"])
+    duplicated_proof_payload = copy.deepcopy(response)
+    duplicated_proof_payload["proof"]["discovered_records"][0]["record"] = copy.deepcopy(
+        response["model"]["projects"][0]
+    )
+    _validator("next-adapter-response-v1.schema.json").validate(duplicated_proof_payload)
+    with pytest.raises(AssertionError):
+        validate_response_envelope(canonical_json_bytes(duplicated_proof_payload), request)
 
     wrong_schema = copy.deepcopy(response)
     wrong_schema["schema"] = "code-structure-viz.next-adapter-response/v0"
@@ -2658,10 +2861,30 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     partial_proof = _complete_proof(partial_model)
     partial_proof["discovered_records"].extend(
         [
-            {"collection": "files", "record": extra_file, "taints": ["parse_file"]},
-            {"collection": "modules", "record": extra_module, "taints": ["parse_file"]},
-            {"collection": "members", "record": extra_import, "taints": ["parse_file"]},
-            {"collection": "members", "record": extra_import_alias, "taints": ["parse_file"]},
+            {
+                "collection": "files",
+                "record_id": extra_file["id"],
+                "record": extra_file,
+                "taints": ["parse_file"],
+            },
+            {
+                "collection": "modules",
+                "record_id": extra_module["id"],
+                "record": extra_module,
+                "taints": ["parse_file"],
+            },
+            {
+                "collection": "members",
+                "record_id": extra_import["id"],
+                "record": extra_import,
+                "taints": ["parse_file"],
+            },
+            {
+                "collection": "members",
+                "record_id": extra_import_alias["id"],
+                "record": extra_import_alias,
+                "taints": ["parse_file"],
+            },
         ]
     )
     partial_proof["excluded"] = [
@@ -2689,7 +2912,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     ]
     _materialize_single_root_taints(partial_proof)
     tainted_ids = {
-        item["record"]["id"] for item in partial_proof["discovered_records"] if item["taints"]
+        item["record_id"] for item in partial_proof["discovered_records"] if item["taints"]
     }
     partial_model["coverage"]["affected_ids"] = sorted(tainted_ids)
     partial_model["coverage"]["taint_frontier"] = [_id("module", "3")]
@@ -2783,7 +3006,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     next(
         item
         for item in missing_taint["discovered_records"]
-        if item["record"]["id"] == extra_module["id"]
+        if item["record_id"] == extra_module["id"]
     )["taints"] = []
     with pytest.raises(AssertionError):
         validate_proof(missing_taint, partial_response["model"])
@@ -2792,7 +3015,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     next(
         item
         for item in excess_taint["discovered_records"]
-        if item["record"]["id"] == extra_module["id"]
+        if item["record_id"] == extra_module["id"]
     )["taints"] = ["parse_file", "read_file"]
     with pytest.raises(AssertionError):
         validate_proof(excess_taint, partial_response["model"])
@@ -2997,7 +3220,7 @@ def test_export_resolution_witness_uses_complete_source_census_and_coverage_only
     coordinated_proof["discovered_records"] = [
         item
         for item in coordinated_proof["discovered_records"]
-        if item["record"]["id"] != component_member_id
+        if item["record_id"] != component_member_id
     ]
     with pytest.raises(AssertionError):
         validate_proof(coordinated_proof, coordinated_model)
@@ -3126,6 +3349,10 @@ def test_export_scanner_closes_unicode_paired_member_and_namespace_jsx_tags() ->
 
 
 def test_round13_ecmascript_identifier_tables_are_pinned_and_complete() -> None:
+    import unicodedata
+
+    assert hashlib.sha256(canonical_table_bytes()).hexdigest() == ECMASCRIPT_UNICODE_TABLE_DIGEST
+    assert ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST == ECMASCRIPT_UNICODE_TABLE_DIGEST
     assert _is_jsx_identifier_start("\u1885")
     assert _is_jsx_identifier_start("\u212e")
     assert not _is_jsx_identifier_start("\u00b7")
@@ -3137,12 +3364,28 @@ def test_round13_ecmascript_identifier_tables_are_pinned_and_complete() -> None:
 
     descriptor = _descriptor()
     assert descriptor["algorithm_versions"]["identifier_unicode"] == "ecma-unicode-15.0"
+    assert descriptor["algorithm_versions"]["identifier_unicode_table_digest"] == (
+        ECMASCRIPT_UNICODE_TABLE_DIGEST
+    )
+    environment = _trusted_environment()
+    assert environment["identifier_unicode_table_digest"] == ECMASCRIPT_UNICODE_TABLE_DIGEST
+    original_category = unicodedata.category
+    unicodedata.category = lambda _character: (_ for _ in ()).throw(AssertionError("host UCD"))
+    try:
+        assert _is_jsx_identifier_start("\u1885")
+        assert _is_jsx_identifier_part("\u00b7")
+    finally:
+        unicodedata.category = original_category
     wrong_descriptor = copy.deepcopy(descriptor)
     wrong_descriptor["algorithm_versions"]["identifier_unicode"] = "ecma-unicode-14.0"
     with pytest.raises(AssertionError):
         validate_compatibility_descriptor(wrong_descriptor)
+    wrong_table = copy.deepcopy(descriptor)
+    wrong_table["algorithm_versions"]["identifier_unicode_table_digest"] = "f" * 64
+    with pytest.raises(AssertionError):
+        validate_compatibility_descriptor(wrong_table)
 
-    domain = _domain()
+    domain = _legacy_domain_fixture()
     fingerprint = recompute_run_fingerprint(
         source_view_fingerprint=domain["source"]["fingerprint"],
         source_plan_digest=domain["source_plan_digest"],
@@ -3160,6 +3403,59 @@ def test_round13_ecmascript_identifier_tables_are_pinned_and_complete() -> None:
         identifier_unicode_version="ecma-unicode-14.0",
     )
     assert fingerprint != domain["run_fingerprint"]
+    table_fingerprint = recompute_run_fingerprint(
+        source_view_fingerprint=domain["source"]["fingerprint"],
+        source_plan_digest=domain["source_plan_digest"],
+        domain_config_digest=domain["domain_config_digest"],
+        projects=domain["projects"],
+        targets=domain["targets"],
+        formats=domain["formats"],
+        stdout_selector=domain["run_context"]["stdout_selector"],
+        limits=domain["limits"],
+        node_version=domain["toolchain"]["node_version"],
+        typescript_version=domain["toolchain"]["typescript_version"],
+        adapter_version=domain["toolchain"]["adapter_version"],
+        protocol=domain["toolchain"]["protocol"],
+        trusted_environment_digest=domain["trusted_environment"]["sha256"],
+        identifier_unicode_table_digest="f" * 64,
+    )
+    assert table_fingerprint != domain["run_fingerprint"]
+
+
+def test_round14_proof_reason_semantics_keep_selection_and_unsupported_complete() -> None:
+    model = {
+        "diagnostics": [
+            _public_diagnostic("CSV-NEXT-UNSUPPORTED-001", symbol=_id("component", "5"))
+        ],
+        "coverage": {"unknown_relation_count": 1},
+    }
+    for reason in ("not_selected", "target_excluded", "unsupported"):
+        proof = {"failure_roots": [], "excluded": [{"reason": reason}], "failed": []}
+        assert derive_pre_budget_outcome(proof, model) == "complete"
+    localized = {
+        "failure_roots": [{"id": "next:failure:" + "0" * 64}],
+        "excluded": [{"reason": "tainted"}],
+        "failed": [],
+    }
+    assert derive_pre_budget_outcome(localized, {"diagnostics": []}) == "partial_safe"
+    with pytest.raises(AssertionError):
+        derive_pre_budget_outcome(
+            {"failure_roots": [], "excluded": [{"reason": "tainted"}], "failed": []},
+            {"diagnostics": []},
+        )
+
+
+def test_round14_adapter_proof_cannot_claim_entity_over_budget() -> None:
+    response = _response(_model())
+    response["proof"]["failed"] = [
+        {"collection": "modules", "record_id": _id("module", "3"), "reason": "over_budget"}
+    ]
+    with pytest.raises(ValidationError):
+        _validator("next-adapter-response-v1.schema.json").validate(response)
+    response["proof"]["failed"][0]["reason"] = "parse_file"
+    _validator("next-adapter-response-v1.schema.json").validate(response)
+    with pytest.raises(AssertionError):
+        validate_response_envelope(canonical_json_bytes(response), _request())
 
 
 def test_export_scanner_type_alias_span_includes_generic_object_terminator() -> None:
@@ -3413,7 +3709,7 @@ def test_round12_positive_reexport_witness_reaches_response_domain_and_root() ->
         for member in model["members"]
         if member["kind"] == "export_binding"
     )
-    domain = _domain(response_decision=decision)
+    domain = _domain(decision=decision["validated_decision"])
     assert (
         domain["coverage"]["non_component_value_export_count"]
         == expected_export_coverage_counts(model)["non_component_value_export_count"]
@@ -3495,7 +3791,7 @@ def test_reexport_failure_graph_is_schema_valid_and_projects_whole_run(
     assert decision["diagnostic_code"] == "CSV-NEXT-EXPORT-001"
     assert decision["payload_available"] is False
     assert decision["export_failures"]
-    domain = _domain(response_decision=decision)
+    domain = _domain(decision=decision["validated_decision"])
     assert domain["status"] == "incomplete"
     assert domain["incomplete_kind"] == "payload_unavailable"
     assert domain["artifact_paths"] == []
@@ -3569,7 +3865,7 @@ def test_reexport_conflict_projects_export_failure_through_whole_run() -> None:
     assert decision["outcome"] == "payload_unavailable"
     assert decision["artifact_paths"] == []
 
-    domain = _domain(
+    domain = _legacy_domain_fixture(
         "incomplete",
         export_failure=True,
         formats=["plantuml"],
@@ -3645,6 +3941,54 @@ def test_source_plan_descriptor_hashes_every_resolved_field_and_known_mutations(
         assert digest(mutated_descriptor) != digest(descriptor)
 
 
+def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None:
+    plan = copy.deepcopy(_config_projection()["source_plan"])
+    reader = InstrumentedSourceReader(
+        {
+            "package.json": b'{"name":"fixture"}',
+            "tsconfig.json": b'{"compilerOptions":{}}',
+            "src/Button.tsx": b"export default Button;\n",
+            "src/types.d.ts": b"export interface Props {}\n",
+        }
+    )
+    seal = freeze_source_acquisition(
+        reader,
+        discovery_paths=("package.json", "tsconfig.json"),
+        final_paths=("package.json", "tsconfig.json", "src/Button.tsx", "src/types.d.ts"),
+        final_plan=plan,
+    )
+    assert reader.sealed is True
+    assert reader.seal_calls == 1
+    assert seal.seal_operation == 1
+    assert seal.final_plan == plan
+    assert seal.plan_digest == digest(plan)
+    assert seal.source_view["file_count"] == 4
+    assert seal.source_view_fingerprint == digest(seal.source_view)
+    assert seal.seal_id == digest(
+        {
+            "plan_digest": seal.plan_digest,
+            "source_view_fingerprint": seal.source_view_fingerprint,
+            "seal_operation": seal.seal_operation,
+        }
+    )
+    assert reader.read_counts == {
+        "package.json": 1,
+        "tsconfig.json": 1,
+        "src/Button.tsx": 1,
+        "src/types.d.ts": 1,
+    }
+    with pytest.raises(AssertionError):
+        reader.read("src/Button.tsx")
+    with pytest.raises(AssertionError):
+        freeze_source_acquisition(
+            InstrumentedSourceReader({"package.json": b"{}"}),
+            discovery_paths=("package.json",),
+            final_paths=("package.json",),
+            final_plan=plan,
+            inventory_revision_after="inventory-v2",
+        )
+
+
 def test_project_surface_order_is_root_path_while_semantic_records_remain_id_order() -> None:
     first = _project()
     first["root"] = "zeta"
@@ -3694,9 +4038,7 @@ def test_round11_inverse_project_order_reaches_response_domain_root_and_fingerpr
     assert decision["run_context"] == context
     assert decision["allowed"] is True
 
-    domain = _domain(
-        response_decision=decision,
-    )
+    domain = _domain(decision=decision["validated_decision"])
     validate_domain_manifest(domain)
     manifest = _run_manifest(domain)
     validate_run_manifest(manifest, domain, _published_bytes(domain))
@@ -3907,9 +4249,9 @@ def test_taint_edges_are_derived_for_boundary_and_shared_frontier() -> None:
             "record_ids": [_id("module", "4")],
         }
     ]
-    discovered = _discovered_index(proof)
+    discovered = _discovered_index(proof, model)
     edges = derive_required_causal_edges(proof, discovered)
-    _materialize_single_root_taints(proof)
+    _materialize_single_root_taints(proof, model)
     tainted = _derived_taint_fixed_point(proof, discovered)
     assert boundary_relation["id"] in tainted
     assert {
@@ -3992,14 +4334,39 @@ def test_export_root_seeds_include_target_barrel_and_consumer_records() -> None:
     proof = _complete_proof(model)
     proof["discovered_records"].extend(
         [
-            {"collection": "modules", "record": barrel_module, "taints": []},
-            {"collection": "modules", "record": consumer_module, "taints": []},
-            {"collection": "members", "record": barrel_export, "taints": []},
-            {"collection": "members", "record": consumer_binding, "taints": []},
-            {"collection": "relations", "record": incoming_reexport, "taints": []},
+            {
+                "collection": "modules",
+                "record_id": barrel_module["id"],
+                "record": barrel_module,
+                "taints": [],
+            },
+            {
+                "collection": "modules",
+                "record_id": consumer_module["id"],
+                "record": consumer_module,
+                "taints": [],
+            },
+            {
+                "collection": "members",
+                "record_id": barrel_export["id"],
+                "record": barrel_export,
+                "taints": [],
+            },
+            {
+                "collection": "members",
+                "record_id": consumer_binding["id"],
+                "record": consumer_binding,
+                "taints": [],
+            },
+            {
+                "collection": "relations",
+                "record_id": incoming_reexport["id"],
+                "record": incoming_reexport,
+                "taints": [],
+            },
         ]
     )
-    records = _discovered_index(proof)
+    records = _discovered_index(proof, model)
     root = {
         "id": "next:failure:" + "c" * 64,
         "collection": "members",
@@ -4042,7 +4409,7 @@ def test_export_root_seeds_include_target_barrel_and_consumer_records() -> None:
 def test_limits_are_one_resolved_record_across_all_projections() -> None:
     limits = _next_limits()
     validate_limits(limits)
-    domain = _domain()
+    domain = _legacy_domain_fixture()
     validate_limits_consistency(
         limits,
         _semantic(_model())["request"]["limits"],
@@ -4077,11 +4444,106 @@ def test_entity_and_record_budgets_use_distinct_non_allocating_counters() -> Non
     assert not entity_budget_allowed(501, 500)
     assert entity_budget_allowed(501, 600)
 
-    # 99,500 non-Module/Component records can coexist with 500 published
+    # 9,500 non-Module/Component records can coexist with 500 published
     # internal entities at the all-record boundary.
-    assert model_record_budget_allowed(500 + 99_500, 100_000)
-    assert not model_record_budget_allowed(500 + 99_501, 100_000)
-    assert not model_record_budget_allowed(100_001, 100_000)
+    assert model_record_budget_allowed(500 + 9_500, 10_000)
+    assert not model_record_budget_allowed(500 + 9_501, 10_000)
+    assert not model_record_budget_allowed(10_001, 10_000)
+
+
+def test_model_proof_wire_budget_and_response_precedence() -> None:
+    limit = _next_limits()["max_model_records"]
+    assert model_wire_record_count(limit) == limit
+    assert model_wire_record_count(limit - 1, 1) == limit
+    assert not model_record_budget_allowed(model_wire_record_count(limit), limit - 1)
+    assert not model_record_budget_allowed(model_wire_record_count(limit, 1), limit)
+
+    exact_model = classify_response_limit(
+        raw_bytes=1024,
+        aggregate_array_items=10,
+        model_records=limit,
+    )
+    assert exact_model["allowed"] is True
+    model_plus_one = classify_response_limit(
+        raw_bytes=1024,
+        aggregate_array_items=10,
+        model_records=limit,
+        proof_only_records=1,
+    )
+    assert model_plus_one["diagnostic_code"] == "CSV-NEXT-LIMIT-005"
+    aggregate_plus_one = classify_response_limit(
+        raw_bytes=1024,
+        aggregate_array_items=100_001,
+        model_records=10,
+    )
+    assert aggregate_plus_one["diagnostic_code"] == "CSV-NEXT-PROTOCOL-001"
+    raw_plus_one = classify_response_limit(
+        raw_bytes=16_777_217,
+        aggregate_array_items=100_001,
+        model_records=limit + 1,
+    )
+    assert raw_plus_one["diagnostic_code"] == "CSV-NEXT-LIMIT-003"
+    assert raw_plus_one["stage"] == "response_raw_bytes"
+
+
+def test_schema_valid_model_record_limit_is_reachable_on_generated_wire() -> None:
+    limit = _next_limits()["max_model_records"]
+
+    exact_model = _generated_context_model(limit - 1)
+    exact_request = _request(exact_model, default_content=b"")
+    exact_response = _response(exact_model, request=exact_request)
+    _validator("next-adapter-response-v1.schema.json").validate(exact_response)
+    exact_bytes = canonical_json_bytes(exact_response)
+    exact_bounded = bounded_decode_json(exact_bytes, limits=exact_request["limits"])
+    assert exact_bounded["allowed"] is True
+    assert exact_bounded["materialized"] is True
+    assert exact_bounded["total_array_items"] < exact_request["limits"]["max_total_array_items"]
+    assert len(exact_bytes) < exact_request["limits"]["max_stdout_bytes"]
+    assert validate_response_envelope(exact_bytes, exact_request)["allowed"] is True
+    exact_decision = response_boundary_decision(exact_bytes, exact_request)
+    assert isinstance(exact_decision, NextValidatedDecision)
+
+    over_model = _generated_context_model(limit)
+    over_request = _request(over_model, default_content=b"")
+    over_response = _response(over_model, request=over_request)
+    _validator("next-adapter-response-v1.schema.json").validate(over_response)
+    over_bytes = canonical_json_bytes(over_response)
+    over_bounded = bounded_decode_json(over_bytes, limits=over_request["limits"])
+    assert over_bounded["allowed"] is True
+    assert over_bounded["total_array_items"] < over_request["limits"]["max_total_array_items"]
+    assert len(over_bytes) < over_request["limits"]["max_stdout_bytes"]
+    with pytest.raises(AssertionError):
+        validate_response_envelope(over_bytes, over_request)
+    over_decision = response_boundary_decision(over_bytes, over_request)
+    assert isinstance(over_decision, PreResponseFailureDecision)
+    assert over_decision.stage == "model_validation"
+    assert over_decision.diagnostic_code == "CSV-NEXT-LIMIT-005"
+    assert over_decision.known_counts["model_records"] == limit + 1
+    assert over_decision.payload_available is False
+
+
+def test_actual_json_aggregate_boundary_precedes_schema_validation() -> None:
+    request = _request()
+    aggregate_limit = request["limits"]["max_total_array_items"]
+    aggregate_payload = (
+        b'{"first":['
+        + b"0," * (aggregate_limit // 2)
+        + b"0],"
+        + b'"second":['
+        + b"0," * (aggregate_limit - aggregate_limit // 2 - 1)
+        + b"0],"
+        + b'"last":[0]}'
+    )
+    bounded = bounded_decode_json(aggregate_payload, limits=request["limits"])
+    assert bounded["allowed"] is False
+    assert bounded["reason"] == "max_total_array_items"
+    assert bounded["total_array_items"] == aggregate_limit + 1
+    decision = response_boundary_decision(aggregate_payload, request)
+    assert isinstance(decision, PreResponseFailureDecision)
+    assert decision.stage == "response_decode"
+    assert decision.diagnostic_code == "CSV-NEXT-PROTOCOL-001"
+    assert decision.known_counts["stdout_bytes"] == len(aggregate_payload)
+    assert decision.payload_available is False
 
 
 def test_role_precedence_and_exact_encoded_request_boundaries_cover_every_subset() -> None:
@@ -4112,7 +4574,7 @@ def test_role_precedence_and_exact_encoded_request_boundaries_cover_every_subset
 
 
 def test_run_fingerprint_preimage_includes_limits_and_toolchain() -> None:
-    domain = _domain()
+    domain = _legacy_domain_fixture()
     fingerprint = recompute_run_fingerprint(
         source_view_fingerprint=domain["source"]["fingerprint"],
         source_plan_digest=domain["source_plan_digest"],
@@ -4141,6 +4603,26 @@ def test_run_fingerprint_preimage_includes_limits_and_toolchain() -> None:
             formats=domain["formats"],
             stdout_selector=domain["run_context"]["stdout_selector"],
             limits=changed,
+            node_version=domain["toolchain"]["node_version"],
+            typescript_version=domain["toolchain"]["typescript_version"],
+            adapter_version=domain["toolchain"]["adapter_version"],
+            protocol=domain["toolchain"]["protocol"],
+            trusted_environment_digest=domain["trusted_environment"]["sha256"],
+        )
+        != fingerprint
+    )
+    changed_model_limit = copy.deepcopy(domain["limits"])
+    changed_model_limit["max_model_records"] -= 1
+    assert (
+        recompute_run_fingerprint(
+            source_view_fingerprint=domain["source"]["fingerprint"],
+            source_plan_digest=domain["source_plan_digest"],
+            domain_config_digest=domain["domain_config_digest"],
+            projects=domain["projects"],
+            targets=domain["targets"],
+            formats=domain["formats"],
+            stdout_selector=domain["run_context"]["stdout_selector"],
+            limits=changed_model_limit,
             node_version=domain["toolchain"]["node_version"],
             typescript_version=domain["toolchain"]["typescript_version"],
             adapter_version=domain["toolchain"]["adapter_version"],
@@ -4197,14 +4679,14 @@ def test_next_diagnostic_catalog_is_the_public_and_manifest_authority() -> None:
             both_references["symbol"] = _id("component", "5")
             with pytest.raises(ValidationError):
                 validator.validate(both_references)
-    manifest = _run_manifest(_domain("not_applicable"))
+    manifest = _run_manifest(_legacy_domain_fixture("not_applicable"))
     _validator("run-manifest-v1.schema.json").validate(manifest)
     assert manifest["domains"][0]["diagnostics"][0]["code"] == "CSV-NEXT-APPLICABILITY-001"
 
 
 @pytest.mark.parametrize("status", ["complete", "not_applicable", "incomplete"])
 def test_next_run_manifest_status_matrix_and_public_stream_extensions(status: str) -> None:
-    domain = _domain(status)
+    domain = _legacy_domain_fixture(status)
     validate_domain_manifest(domain)
     manifest = _run_manifest(domain)
     validate_run_manifest(manifest, domain, _published_bytes(domain))
@@ -4252,7 +4734,7 @@ def test_next_run_manifest_status_matrix_and_public_stream_extensions(status: st
 
 
 def test_next_non_empty_run_manifest_discriminates_path_targets_and_projections() -> None:
-    domain = _domain(targets=["path:src", "path:src/Button.tsx"])
+    domain = _legacy_domain_fixture(targets=["path:src", "path:src/Button.tsx"])
     manifest = _run_manifest(domain)
     validate_domain_manifest(domain)
     validate_run_manifest(manifest, domain, _published_bytes(domain))
@@ -4310,7 +4792,7 @@ def test_next_non_empty_run_manifest_discriminates_path_targets_and_projections(
 def test_next_stdout_matrix_has_exact_bytes_for_core_outcomes(
     status: str, overrun: bool, selector: str | None
 ) -> None:
-    domain = _domain(status, overrun=overrun)
+    domain = _legacy_domain_fixture(status, overrun=overrun)
     manifest = _run_manifest(domain)
     published = _published_bytes(domain)
     validate_domain_manifest(domain)
@@ -4407,7 +4889,7 @@ def test_next_stdout_matrix_usage_is_empty_and_manifest_free(selector: str | Non
 
 
 def test_entity_budget_overrun_is_payload_unavailable_without_artifacts() -> None:
-    domain = _domain("incomplete", overrun=True)
+    domain = _legacy_domain_fixture("incomplete", overrun=True)
     validate_domain_manifest(domain)
     _validator("next-domain-manifest-v1.schema.json").validate(domain)
     manifest = _run_manifest(domain)
@@ -4445,7 +4927,7 @@ def test_entity_budget_overrun_is_payload_unavailable_without_artifacts() -> Non
 
 
 def test_direct_context_target_is_manifest_and_stdout_payload_unavailable() -> None:
-    domain = _domain("incomplete", targets=["path:src/types.d.ts"])
+    domain = _legacy_domain_fixture("incomplete", targets=["path:src/types.d.ts"])
     domain["payload_available"] = False
     domain["entity_count"] = None
     domain["incomplete_kind"] = "payload_unavailable"
@@ -4493,8 +4975,9 @@ def test_entity_budget_gate_composes_entity_and_model_record_boundaries() -> Non
         assert outcome["artifact_paths"] == (
             ["next.snapshot.semantic.json", "next.snapshot.puml"] if allowed else []
         )
-    assert model_record_budget_allowed(100000, 100000)
-    assert not model_record_budget_allowed(100001, 100000)
+    limit = _next_limits()["max_model_records"]
+    assert model_record_budget_allowed(limit, limit)
+    assert not model_record_budget_allowed(limit + 1, limit)
 
 
 def test_entity_budget_gate_preserves_partial_safe_and_overrun_is_unavailable() -> None:
@@ -4628,7 +5111,7 @@ def test_round11_run_context_is_explicit_across_budget_domain_root_and_stdout() 
             budget_source="explicit",
             stdout_selector="next:plantuml",
         )
-    domain = _domain(
+    domain = _legacy_domain_fixture(
         formats=["plantuml"],
         max_entities=600,
         budget_source="explicit",
@@ -4661,9 +5144,7 @@ def test_round12_run_context_selector_is_exactly_echoed_across_request_response_
     decision = validate_response_envelope(canonical_json_bytes(response), request)
     assert decision["run_context"] == context
 
-    domain = _domain(
-        response_decision=decision,
-    )
+    domain = _domain(decision=decision["validated_decision"])
     validate_domain_manifest(domain)
     manifest = _run_manifest(domain)
     published = _published_bytes(domain)
@@ -4782,7 +5263,7 @@ def test_round11_target_completeness_is_typed_and_projects_to_unavailable_run(
     )
     assert proof_target["reason"] == expected_reason
 
-    domain = _domain(response_decision=decision)
+    domain = _domain(decision=decision["validated_decision"])
     assert domain["incomplete_kind"] == "payload_unavailable"
     assert domain["payload_available"] is False
     assert domain["artifact_paths"] == []
@@ -4805,7 +5286,7 @@ def test_round11_target_completeness_is_typed_and_projects_to_unavailable_run(
     stream = _stdout_result_for_domain(domain, manifest, "next:semantic-json")
     _validator("stdout-result-v1.schema.json").validate(stream)
     assert stream["availability"] is False
-    assert stream["reason"] == expected_reason
+    assert stream["target_failures"] == [{"target_key": target, "reason": expected_reason}]
     summary = _run_summary_value("incomplete", domain)
     validate_run_status_vector(
         manifest,
@@ -4926,8 +5407,8 @@ def test_target_failure_validates_complete_proof_before_typed_routing(
         records = proof["discovered_records"]
         proof["causal_edges"].append(
             {
-                "source_id": records[0]["record"]["id"],
-                "record_id": records[1]["record"]["id"],
+                "source_id": records[0]["record_id"],
+                "record_id": records[1]["record_id"],
                 "rule": "identity_dependency",
             }
         )
@@ -4977,6 +5458,63 @@ def test_array_and_adapter_stderr_limits_have_independent_incremental_boundaries
     assert exceeded["diagnostic_code"] == "CSV-NEXT-LIMIT-003"
 
 
+def test_adapter_stdout_capture_is_incremental_and_disposes_overrun() -> None:
+    """Exercise a faithful chunk-reader harness, not an OS process test."""
+
+    limit = 32
+    decoded: list[bytes] = []
+    exact_reads: list[int] = []
+
+    def exact_chunks() -> Any:
+        for chunk in (b"a" * 17, b"b" * 15):
+            exact_reads.append(len(chunk))
+            yield chunk
+
+    exact = capture_adapter_stdout(exact_chunks(), limit=limit, decoder=decoded.append)
+    assert exact["allowed"] is True
+    assert exact["captured_bytes"] == limit
+    assert exact["retained_bytes"] == limit
+    assert exact["retained"] == b"a" * 17 + b"b" * 15
+    assert exact["decoder_called"] is True
+    assert decoded == [b"a" * 17 + b"b" * 15]
+    assert exact_reads == [17, 15]
+
+    over_decoded: list[bytes] = []
+    over_reads: list[int] = []
+
+    def over_chunks() -> Any:
+        for chunk in (b"a" * limit, b"b"):
+            over_reads.append(len(chunk))
+            yield chunk
+        raise AssertionError("capture continued reading after process-group termination")
+
+    over = capture_adapter_stdout(over_chunks(), limit=limit, decoder=over_decoded.append)
+    assert over["allowed"] is False
+    assert over["captured_bytes"] == limit + 1
+    assert over["retained_bytes"] == 0
+    assert over["retained"] == b""
+    assert over["process_group_terminated"] is True
+    assert over["raw_disposed"] is True
+    assert over["partial_disposed"] is True
+    assert over["decoder_called"] is False
+    assert over_decoded == []
+    assert over["diagnostic_code"] == "CSV-NEXT-LIMIT-003"
+    assert over_reads == [limit, 1]
+
+    unbounded_reads: list[int] = []
+
+    def unbounded_chunks() -> Any:
+        for index in range(100):
+            unbounded_reads.append(index)
+            yield b"x" * 7
+
+    unbounded = capture_adapter_stdout(unbounded_chunks(), limit=10)
+    assert unbounded["allowed"] is False
+    assert unbounded["retained_bytes"] <= 10
+    assert unbounded["retained"] == b""
+    assert unbounded_reads == [0, 1]
+
+
 def test_public_diagnostic_stderr_is_utf8_jsonl_all_or_none() -> None:
     diagnostic = _public_diagnostic("CSV-NEXT-TARGET-001", path="src/表示.tsx")
     gate = render_public_diagnostic_stderr([diagnostic], limit=10_000)
@@ -5003,7 +5541,7 @@ def test_public_diagnostic_stderr_is_utf8_jsonl_all_or_none() -> None:
 
 
 def test_public_stderr_limit_is_projected_through_manifest_and_selector_end_to_end() -> None:
-    source_domain = _domain(
+    source_domain = _legacy_domain_fixture(
         "incomplete",
         formats=["plantuml"],
         stdout_selector="next:plantuml",
@@ -5154,15 +5692,15 @@ def test_raw_response_stdout_byte_cap_has_exact_and_plus_one_whole_run_projectio
 
     # A raw response cap has no trusted model to publish.  The stable limit
     # diagnostic is the only manifest projection, and all selectors become
-    # unavailable with exit 3; no artifact bytes are retained.
-    unavailable = _domain("incomplete")
-    unavailable["incomplete_kind"] = "payload_unavailable"
-    unavailable["payload_available"] = False
-    unavailable["entity_count"] = None
-    unavailable["artifact_paths"] = []
-    unavailable["budget"]["actual"] = None
-    unavailable["budget"]["outcome"] = "payload_unavailable"
-    unavailable["diagnostics"] = [_public_diagnostic("CSV-NEXT-LIMIT-003")]
+    # unavailable with exit 3; no artifact bytes are retained.  The decision
+    # is created at the raw-response boundary, rather than by synthesizing an
+    # incomplete domain object downstream.
+    decision = response_boundary_decision(plus_one, request)
+    assert isinstance(decision, PreResponseFailureDecision)
+    assert decision.stage == "response_raw_bytes"
+    assert decision.diagnostic_code == "CSV-NEXT-LIMIT-003"
+    assert decision.known_counts["stdout_bytes"] == limit + 1
+    unavailable = _domain(decision=decision)
     manifest = _run_manifest(unavailable)
     validate_domain_manifest(unavailable)
     validate_run_manifest(manifest, unavailable, {})
@@ -5223,7 +5761,7 @@ def test_raw_response_mutations_all_cross_the_same_bounded_entrypoint() -> None:
 
 
 def test_whole_run_validator_rejects_projection_and_artifact_mutations() -> None:
-    domain = _domain()
+    domain = _legacy_domain_fixture()
     manifest = _run_manifest(domain)
     published = _published_bytes(domain)
     validate_run_manifest(manifest, domain, published)
@@ -5250,7 +5788,7 @@ def test_whole_run_validator_rejects_projection_and_artifact_mutations() -> None
 
 
 def test_publication_bytes_are_exact_model_payloads_and_digest_roots() -> None:
-    domain = _domain(model=_inverse_order_two_project_model())
+    domain = _legacy_domain_fixture(model=_inverse_order_two_project_model())
     manifest = _run_manifest(domain)
     published = _published_bytes(domain)
     validate_run_manifest(manifest, domain, published)
@@ -5337,16 +5875,25 @@ def test_validated_decision_is_the_only_publication_authority() -> None:
     original_model["modules"].clear()
     assert decision.validated_model == decision_projection["validated_model"]
 
-    domain = _domain(response_decision=decision_projection)
+    domain = _domain(decision=decision_projection["validated_decision"])
     assert domain["run_context"] == context
-    with pytest.raises(AssertionError):
-        _domain(response_decision=decision_projection, formats=["semantic-json"])
-    with pytest.raises(AssertionError):
-        _domain(response_decision=decision_projection, budget_source="explicit")
-    with pytest.raises(AssertionError):
-        _domain(response_decision=decision_projection, stdout_selector="next:semantic-json")
-    with pytest.raises(AssertionError):
-        _domain(response_decision=decision_projection, status="incomplete")
+    with pytest.raises(TypeError):
+        _domain(  # type: ignore[call-arg]
+            decision=decision_projection["validated_decision"], formats=["semantic-json"]
+        )
+    with pytest.raises(TypeError):
+        _domain(  # type: ignore[call-arg]
+            decision=decision_projection["validated_decision"], budget_source="explicit"
+        )
+    with pytest.raises(TypeError):
+        _domain(
+            decision=decision_projection["validated_decision"],
+            stdout_selector="next:semantic-json",
+        )  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        _domain(  # type: ignore[call-arg]
+            decision=decision_projection["validated_decision"], status="incomplete"
+        )
 
     published = _published_bytes(domain)
     validate_published_projection(domain, published)
@@ -5394,7 +5941,13 @@ def test_fatal_and_interrupt_status_vectors_are_manifest_free(
 
 
 def test_runtime_unavailable_is_a_manifest_only_payload_unavailable_vector() -> None:
-    domain = _domain("incomplete", runtime_unavailable=True)
+    request = _request()
+    decision = pre_response_failure_decision(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+    )
+    domain = _domain(decision=decision)
     validate_domain_manifest(domain)
     _validator("next-domain-manifest-v1.schema.json").validate(domain)
     manifest = _run_manifest(domain)
@@ -5432,10 +5985,151 @@ def test_runtime_unavailable_is_a_manifest_only_payload_unavailable_vector() -> 
     )
 
 
+@pytest.mark.parametrize(
+    ("stage", "diagnostic_code"),
+    [
+        ("node_discovery", "CSV-NEXT-NODE-001"),
+        ("node_spawn", "CSV-NEXT-NODE-002"),
+        ("node_timeout", "CSV-NEXT-NODE-003"),
+        ("node_process", "CSV-NEXT-NODE-004"),
+        ("response_protocol", "CSV-NEXT-PROTOCOL-001"),
+        ("source_read", "CSV-NEXT-LIMIT-001"),
+        ("source_selection", "CSV-NEXT-LIMIT-002"),
+        ("adapter_stdout_capture", "CSV-NEXT-LIMIT-003"),
+        ("adapter_heap", "CSV-NEXT-LIMIT-004"),
+        ("model_validation", "CSV-NEXT-LIMIT-005"),
+    ],
+)
+def test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exit(
+    stage: str, diagnostic_code: str
+) -> None:
+    request = _request()
+    decision = pre_response_failure_decision(
+        request,
+        stage=stage,
+        diagnostic_code=diagnostic_code,
+        stdout_bytes=(request["limits"]["max_stdout_bytes"] + 1)
+        if diagnostic_code == "CSV-NEXT-LIMIT-003"
+        else None,
+    )
+    assert isinstance(decision, PreResponseFailureDecision)
+    assert decision.payload_available is False
+    assert decision.artifact_paths == ()
+    assert decision.exit_code == 3
+    assert decision.request["request_id"] == request["request_id"]
+
+    domain = _domain(decision=decision)
+    assert domain.validated_decision is decision
+    assert domain["status"] == "incomplete"
+    assert domain["incomplete_kind"] == "payload_unavailable"
+    assert domain["payload_available"] is False
+    assert domain["entity_count"] is None
+    assert domain["artifact_paths"] == []
+    assert domain["diagnostics"] == [decision.diagnostic]
+    validate_domain_manifest(domain)
+    manifest = _run_manifest(domain)
+    published = _published_bytes(domain)
+    validate_run_manifest(manifest, domain, published)
+    stream = _stdout_result_for_domain(domain, manifest)
+    _validator("stdout-result-v1.schema.json").validate(stream)
+    assert stream["availability"] is False
+    assert stream["artifact"] is None
+    assert stream["stable_reason"] == "domain_payload_unavailable"
+    summary = _run_summary_value("incomplete", domain)
+    validate_run_status_vector(
+        manifest,
+        summary,
+        stream,
+        published,
+        canonical_json_bytes(stream) + b"\n",
+        manifest["diagnostics"],
+        stderr_bytes=_diagnostic_jsonl(manifest["diagnostics"]),
+    )
+
+
+@pytest.mark.parametrize("mutation", ["malformed_json", "duplicate_key", "schema", "reference"])
+def test_response_boundary_failures_are_pre_response_decisions(mutation: str) -> None:
+    request = _request()
+    if mutation == "malformed_json":
+        response_bytes = b'{"schema":'
+    elif mutation == "duplicate_key":
+        response_bytes = b'{"schema":"first","schema":"second"}'
+    else:
+        response = _response(_model(), request=request, run_context=_run_context())
+        if mutation == "schema":
+            response["unexpected"] = True
+        else:
+            relation = next(
+                relation
+                for relation in response["model"]["relations"]
+                if relation["kind"] == "static_import"
+            )
+            relation["target"]["module_id"] = _id("module", "dead")
+            relation["id"] = recompute_record_id(relation)
+            response["model_digest"] = digest(response["model"])
+        response_bytes = canonical_json_bytes(response)
+
+    decision = response_boundary_decision(response_bytes, request)
+    assert isinstance(decision, PreResponseFailureDecision)
+    assert decision.stage in {"response_decode", "response_validation"}
+    assert decision.diagnostic_code == "CSV-NEXT-PROTOCOL-001"
+    assert decision.payload_available is False
+    assert decision.artifact_paths == ()
+    domain = _domain(decision=decision)
+    manifest = _run_manifest(domain)
+    stream = _stdout_result_for_domain(domain, manifest)
+    validate_run_status_vector(
+        manifest,
+        _run_summary_value("incomplete", domain),
+        stream,
+        {},
+        canonical_json_bytes(stream) + b"\n",
+        manifest["diagnostics"],
+        stderr_bytes=_diagnostic_jsonl(manifest["diagnostics"]),
+    )
+
+
+def test_stdout_target_failures_are_bijective_sorted_and_target_only() -> None:
+    model = _model()
+    model["modules"].append(
+        copy.deepcopy(
+            next(module for module in model["modules"] if module["path"] == "src/Button.tsx")
+        )
+    )
+    _refresh_model_counts(model)
+    targets = ["path:src/Button.tsx", "path:src/Missing.tsx", "path:src/Other.tsx"]
+    request = _request(model, targets=targets)
+    response = _response(model, request=request, run_context=_run_context())
+    decision_projection = validate_response_envelope(canonical_json_bytes(response), request)
+    domain = _domain(decision=decision_projection["validated_decision"])
+    manifest = _run_manifest(domain)
+    stream = _stdout_result_for_domain(domain, manifest)
+    _validator("stdout-result-v1.schema.json").validate(stream)
+    assert stream["target_failures"] == [
+        {"target_key": "path:src/Button.tsx", "reason": "duplicate"},
+        {"target_key": "path:src/Missing.tsx", "reason": "missing"},
+        {"target_key": "path:src/Other.tsx", "reason": "missing"},
+    ]
+    assert "reason" not in stream
+
+    for base_domain in (
+        _legacy_domain_fixture(),
+        _legacy_domain_fixture("not_applicable"),
+        _legacy_domain_fixture("incomplete", overrun=True),
+    ):
+        base_manifest = _run_manifest(base_domain)
+        base_stream = _stdout_result_for_domain(base_domain, base_manifest)
+        base_stream["target_failures"] = [
+            {"target_key": "path:src/Missing.tsx", "reason": "missing"}
+        ]
+        with pytest.raises(ValidationError):
+            _validator("stdout-result-v1.schema.json").validate(base_stream)
+
+
 def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests() -> None:
     environment = _trusted_environment()
     assert environment["sha256"] == (
-        "a437f12d35d8ad909e63d6f41b451d25c35e46d3726bd108d63acaede14f02c5"
+        "2e232edf27d832b12ecd8159295681145eb27ce906a06abfa0e666eaa82de77d"
     )
     validate_trusted_environment(environment)
     validate_trusted_environment(environment, ["src/Button.tsx"])
@@ -5677,7 +6371,7 @@ def test_compatibility_descriptor_known_answer_is_content_independent() -> None:
     descriptor = _descriptor()
     validate_compatibility_descriptor(descriptor)
     assert descriptor["compatibility_id"] == (
-        "7389d391abe3a17eac9e0731cbc63fe96a778831d0636d6329ddbcbd6e5741cf"
+        "927c4a8619d7d3550db6dc817f5c359df8fe5f7443eef66aeaa1774b375192ca"
     )
     assert descriptor["compatibility_id"] == recompute_compatibility_id(descriptor)
     changed_content = copy.deepcopy(descriptor)
