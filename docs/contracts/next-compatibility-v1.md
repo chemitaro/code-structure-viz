@@ -84,3 +84,18 @@ compatibility descriptor and identity versions, toolchain, trusted
 environment, and run-fingerprint inputs, so an artifact cannot claim
 semantic compatibility while silently using a different source, identity, or
 trust profile.
+
+## Round 16 provenance and contextual semantics
+
+The compatibility descriptor is owned by the sealed `NextPublicationContext`.
+The checked-in Unicode 15.0.0 table digest, identity/algorithm versions, and
+trusted semantic profile are part of its preimage; the observed process-launch
+descriptor is separately included in the run fingerprint. A writer must not
+replace either value with a host-derived or fixture-derived default.
+
+IdentifierName checks are contextual: binding identifiers exclude reserved
+words, declaration/export property keys may use them, and explicit anonymous
+default declarations use the reserved `@anonymous-default` slot at most once
+per module. The same table covers import/export, JSX, re-export, and trusted
+reference names. Round 16 keeps this as a data-only contract; fresh Strict is
+pending and the historical verdict remains fail.

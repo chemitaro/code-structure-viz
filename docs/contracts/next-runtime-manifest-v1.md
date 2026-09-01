@@ -80,3 +80,31 @@ failure kind, diagnostic, known/null counts, and exit behavior; a writer must
 not substitute a local default runtime inventory. The Unicode 15.0.0 table
 version and exact table digest are part of this trusted profile and its
 compatibility/run-fingerprint preimages.
+
+## Round 16 launch provenance
+
+The runtime manifest is also the source of the versioned Next process-launch
+descriptor. The descriptor records verified absolute Node realpath and digest,
+symlink policy, fixed argv and cwd, the exact environment allowlist and denied
+variables, piped stdio, close-on-exec FD policy, and process-group termination
+scope. PATH shadow, symlink replacement, hostile environment/locale/TZ, and
+extra FD mutations are rejected before a publication decision exists. Its
+digest is carried by `NextPublicationContext` and the run fingerprint; it is
+not reconstructed from a host default.
+
+The descriptor is mandatory for every decision variant, including
+request-independent pre-response failures and not-applicable runs. Its
+`node_status` must agree with the observed toolchain, and omission or
+substitution is rejected before any projection is created. A writer must not
+construct a replacement descriptor from a default, PATH lookup, or fixture.
+
+Once child capture, private response, public stderr, and selected-copy
+measurements are sealed, the immutable `PublicationBoundaryDecision` is the
+sole input for domain, root manifest, artifact, stdout, stderr, and exit
+projection. No surface may accept an independent publication outcome or
+measurement map. This keeps selected-copy failure separate from the semantic
+domain while still making the root publication result incomplete with exit 3.
+
+The reference harness proves incremental capture semantics but does not claim
+OS process-level coverage. Fresh current-SHA Strict is pending and production
+implementation remains absent.

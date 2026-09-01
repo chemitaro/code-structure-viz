@@ -377,7 +377,7 @@ serializer と manifest builder は `incomplete_kind` と `payload_available` �
 - compiled first-party adapter、exact TypeScript runtime、lockfile、license inventoryを一つのcompatibility unitとしてbundleする。
 - Node 22 LTS以上はapplicable Next runだけで必要とし、Python/SQLAlchemy core install/run/testへ持ち込まない。
 
-v1 finite limitsは4 MiB/file、64 MiB decoded total、20,000 files、96 MiB encoded stdin、各array/aggregate array 100,000、collection 20,000、model records 10,000、16 MiB stdout、public diagnostic stderr 64 KiB、adapter stderr capture 64 KiB、60秒、512 MiB old-spaceとRound 2 decoder/model limitsに固定する。adapter captureとpublic diagnostic emissionは別のincremental counterとし、unbounded/silent truncationは不可。
+v1 finite limitsは4 MiB/file、64 MiB decoded total、20,000 files、96 MiB encoded stdin、各array/aggregate array 100,000、collection 20,000、model records 10,000、`max_adapter_stdout_capture_bytes`・`max_adapter_response_bytes`・`max_selected_stdout_bytes`の三つの16 MiB境界、public diagnostic stderr 64 KiB、adapter stderr capture 64 KiB、60秒、512 MiB old-spaceとRound 2 decoder/model limitsに固定する。adapter capture、private response、public selected copy、public diagnostic emissionは別のincremental counterとし、旧`max_stdout_bytes`はselected stdoutの互換aliasに限る。unbounded/silent truncationは不可。
 
 ### Identity and members
 
@@ -421,7 +421,7 @@ downstreamはsource→dependency/render target、upstreamはreverse。depth trav
 - derived `client_dependency`: direct client_entry factをseedにしたinternal static value closureのtargetとして到達。seed自身はこのroleに含めない。
 - derived `server_candidate`: closed App Router UI seedからclient entry直前まで到達。seedがclient entryなら含めず停止し、runtime server claimではない。
 - `unknown`: positive evidenceなし。Pages Routerも自動server扱いしない。
-- 同一Moduleのclient_dependency/server_candidate dual roleを許す。type-only/dynamic/JSX/external/unresolved edgeはpropagationに使わない。
+- 同一Moduleの`client_dependency`/`server_candidate` dual roleは、異なるclosureから各々のpositive evidenceが得られた場合だけ許す。direct `client_entry` seedだけではどちらのderived roleも付与しない。type-only/dynamic/JSX/external/unresolved edgeはpropagationに使わない。
 - boundary crossingはunderlying value edgeの`boundary_effect` facetでduplicate traversal edgeを作らない。Issue #9はprimitive fact/edgeをprimary diffにする。
 
 ### Adapter validation and public contracts
@@ -1324,3 +1324,55 @@ client entryの直前で止める。別closureの結果のみdual roleとなり�
 stdoutは別order encoderを持たず、既存canonical JSON（sorted keys、NFC、UTF-8、LF）を唯一のbyte contractとする。
 target_failuresを含むunavailable resultも同じencoderでgolden化する。HTMLのresource limit説明は固定個数の断定を
 避け、schema/catalogが追加可能なdrift-resistant wordingにする。
+
+## Round 16 sealed boundaries and implementation handoff
+
+Round 16の設計正本は、production adapterをまだ追加せず、reference
+validator・schema・fixtureで入力からpublicationまでのauthorityを閉じる。
+
+1. **Acquisition intent:** `SourceDiscoveryIntent`にはproject roots、control
+   candidates、固定 discovery rulesだけを許す。config、local `extends`
+   closure、final paths、role mapは凍結control bytesとinventoryから
+   `seal_source_acquisition(intent, reader, inventory)`が導出し、planと
+   SourceViewを同一sealで返す。caller注入、plan-only/view-only、duplicate
+   read、drift後のreadを拒否する。
+2. **Request and decision:** 実際のseal、resolved public request/config、
+   observed toolchain、trusted environment、compatibility descriptor、versioned
+   process-launch descriptorを一度だけ`NextPublicationContext`へ束ね、全
+   `NextRunDecision` variantに持たせる。descriptorは必須でtoolchainのNode
+   statusと一致し、digestをfingerprintへ含める。private
+   `ValidatedAdapterRequest`はdeep copyし、ID、filesのbase64/size/digest/
+   canonical bytes、limits、targets、run contextをresponse前に検証する。
+   pre-response/not-applicableの`NextDecisionContext`も必須とし、requestが
+   作れないfailureはsynthetic request/default contextを作らず、known/null factsを
+   持つschema-valid branchへ進む。
+3. **Failure and precedence:** catalog-derived closed matrixだけがstage/code/
+   ref/count/outcome/exitを決める。raw cap、bounded decode/aggregate、closed
+   schema、base/path/ref/proof、actual model/proof-only count、model gate、
+   entity gate、selected copyの順を守る。structural overrunは
+   `CSV-NEXT-LIMIT-003`、malformed/schema/proof違反は
+   `CSV-NEXT-PROTOCOL-001`とする。`SourceFailureLedger`でlocalityを証明し、
+   local safeだけ`SOURCE-001`/partial、非分離は`SOURCE-003`/unavailableとする。
+4. **Counts and publication:** published model collectionの合計、modelにない
+   proof-only、両者のsumを別々に再計算する。capture/private response/public
+   stderr/selected copyの測定結果を一つのfinal `PublicationBoundaryDecision`へsealし、
+   そのdecisionだけをdomain、root manifest、artifact、stdout、stderr、exitの
+   projectionへ渡す。projectionは独立status/measurement map/retained bytesを受けず、
+   selected-copy overrunがsemantic outcomeを書き換えないことを検証する。
+5. **Identity, targets, roles:** Unicode 15.0.0 checked-in tableを全context
+   predicateへ適用し、full scalar known-answer digestを固定する。target failure
+   はclosed eight reasonsを一target一行でNext unavailable selectorへだけ出す。
+   `BoundaryRolePropagation/v1`はfacts/router/static value closureから再計算し、
+   client seed自身をderived roleにせず、dual roleは別closureだけで許す。
+6. **Process and bytes:** process-launch descriptorはverified Node realpath、
+   symlink policy、fixed argv/env/FD/process groupをversion付きでsealする。
+   descriptor omission/substitutionとpreimage-only replacementを拒否する。
+   stdoutはmanual encoderを持たず、sort_keys/NFC/UTF-8/LFを全surfaceで共有する。
+   captureのreference evidenceはfaithful iterable harnessであり、OS process-level
+   testとは主張しない。
+
+この設計は、Round 16 content review（SHA
+`732477c72c7e05d3f15818ba8a3f75a4c97dc5a9`、CI `33494926439`、P0=0/P1=16/P2=3、
+fail）へのdata-only remediationである。fresh current-SHA Strictはpending、
+readinessは未確認、production implementationは未着手であり、Strict pass後に
+初めてI05-PLAN-002以降を開始する。

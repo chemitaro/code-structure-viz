@@ -188,6 +188,50 @@ source plan, or output limit after an early failure.
 The aggregate boundary is tested using a schema-valid generated response whose
 extra `proof.excluded` and `proof.failed` rows make the decoded array-item
 counter exactly 100,001 while the raw response remains below 16 MiB. The test
-therefore proves the actual byte/decode path and its `CSV-NEXT-PROTOCOL-001`
+therefore proves the actual byte/decode path and its `CSV-NEXT-LIMIT-003`
 precedence; it is not a direct call to the arithmetic classifier. The model
 cap test separately reaches 10,000 and 10,001 model records below both caps.
+
+## Round 16 boundary ordering and publication seal
+
+Round 16 fixes the limit authority to one ordered path:
+
+```text
+child capture
+  -> max_adapter_response_bytes (complete private bytes, before decode)
+  -> bounded decode and aggregate array counter
+  -> closed schema
+  -> base/path/reference/proof validation
+  -> actual model + proof-only count
+  -> max_model_records
+  -> EntityBudgetGate
+  -> max_selected_stdout_bytes (public artifact copy)
+```
+
+`max_adapter_stdout_capture_bytes`, `max_adapter_response_bytes`, and
+`max_selected_stdout_bytes` are three named boundaries even when their v1
+values are equal. The old `max_stdout_bytes` spelling is accepted only as the
+selected-output compatibility alias; it is never a private response limit.
+`CSV-NEXT-LIMIT-003` is the stable code for configured byte/structural
+resource boundaries (including raw response, aggregate array, string, depth,
+and capture); malformed JSON, closed-schema, reference, and proof failures
+remain `CSV-NEXT-PROTOCOL-001`. Every boundary is inclusive and is tested at
+exact and +1 bytes/items without constructing an unnecessarily large fixture.
+
+All measurements are collected before publication and then sealed into one
+immutable publication decision together with the validated semantic decision.
+An adapter capture or public stderr breach yields zero raw/partial publication;
+a selected-artifact copy breach yields `selected_artifact_unavailable` while
+preserving the semantic decision and its persisted artifact descriptor. The
+reference stdout/stderr harness uses faithful `Iterable[bytes]` chunk reads and
+does not claim to be an OS process-level test. Round 16 remains a data-only
+pre-implementation contract: fresh current-SHA Strict is pending, readiness is
+unconfirmed, and the production adapter/CLI is absent.
+
+The resulting `PublicationBoundaryDecision` is the only input to domain, root
+manifest, selected stdout, public stderr, artifact, and exit projections. A
+caller cannot replace any measured byte count or publication outcome by
+passing a second status/map to one of those projection functions. The launch
+descriptor used for the capture boundary is also an explicit required field
+of the decision's `NextPublicationContext`; it is fingerprinted and is never
+reconstructed from a host default.

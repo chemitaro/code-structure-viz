@@ -62,3 +62,26 @@ complete private response raw bytes before decode, aggregate arrays before
 materialization, model records after schema/proof validation, and public
 selected-artifact copy after rendering. Exact values are accepted; +1 is
 all-or-none and never exposes partial adapter or artifact text.
+
+## Round 16 catalog-derived routing
+
+The failure matrix is derived from the diagnostic catalog rather than from a
+free stage/code cross product. Each row fixes its failure kind, allowed stage,
+diagnostic code, reference permission, known/null counts, outcome, and exit
+code. A mismatched stage or outcome is a contract error; a generic assertion
+must not erase a specific source, trust, schema, reference, or semantic code.
+
+Validation precedence is raw response byte cap, bounded decode and aggregate
+array measurement, closed schema, base/path/reference/proof validation, actual
+model/proof-only count, model gate, and entity gate. Structural resource
+overruns (per-array, aggregate, string, and depth) use
+`CSV-NEXT-LIMIT-003`; malformed JSON, closed-schema violations, and proof
+violations use `CSV-NEXT-PROTOCOL-001`. A compound response with both a proof
+error and model overrun therefore reports the protocol error first.
+
+`CSV-NEXT-SOURCE-001` is reserved for an independently proven local safe
+subset. Non-isolatable source failure is `CSV-NEXT-SOURCE-003` and is a
+schema-valid request-independent manifest-only `payload_unavailable` branch.
+Intentional unsupported behavior is complete with
+`CSV-NEXT-UNSUPPORTED-001`. The eight target reasons remain target-scoped and
+are emitted only by the Next target-unavailable stdout branch.

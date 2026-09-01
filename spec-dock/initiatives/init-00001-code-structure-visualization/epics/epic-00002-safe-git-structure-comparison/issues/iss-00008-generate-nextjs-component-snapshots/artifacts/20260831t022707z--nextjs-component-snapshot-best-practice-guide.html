@@ -798,7 +798,69 @@ Fatal --> [*]
           </tbody>
         </table>
       </div>
-      <p>候補上限は 1 file 4 MiB、total 64 MiB、20,000 files、stdout 16 MiB、public diagnostic 64 KiB、adapter stderr capture 64 KiB、60 秒、Node old-space 512 MiB です。adapter captureはlimit+1でprocess groupを終了し、raw/partial textを破棄します。実測で調整可能ですが、silent truncation と unlimited は不可です。</p>
+      <p>resource limit の固定値や項目数はこのHTMLへ重複記載しません。正本は <code>schemas/next-limits-v1.schema.json</code> と関連する canonical contract docs です。child capture、private response、public selected copy は別の計測境界であり、同じ値でも意味は同じではありません。各境界は inclusive とし、exact は受理、+1 は raw/partial を公開せず <code>LIMIT-003</code> 系の typed unavailable へ進めます。silent truncation と unlimited は許しません。</p>
+    </section>
+
+    <section>
+      <h2>Round 16: sealed acquisition、typed request、final publication</h2>
+      <p>Round 16は、入力・検証・失敗・公開のauthorityを一つの閉じた流れにします。<code>SourceDiscoveryIntent</code>はproject root、control candidate、固定されたdiscover ruleだけを持ち、config・extends closure・final path・role mapを注入できません。凍結したcontrol bytesとinventoryから一度だけ <code>SourceView</code> と <code>FinalSourceAcquisitionPlan</code> をsealし、そのsealを必須の <code>NextPublicationContext</code>へ渡します。</p>
+
+      <script type="text/plain"
+              class="plantuml-source"
+              id="source-round16-boundary"
+              data-target="diagram-round16-boundary">
+@startuml
+title Round 16: 凍結取得から最終公開まで
+left to right direction
+
+component "SourceDiscoveryIntent\nroots / control candidates / fixed rules" as Intent
+component "凍結したcontrol bytes + inventory" as Frozen
+component "一つのseal\nSourceView + FinalSourceAcquisitionPlan" as Seal
+component "ValidatedAdapterRequest\nprivate request" as Request
+component "bounded response order\nraw -> aggregate -> schema -> proof -> gate" as Boundary
+component "NextRunDecision\n+ NextPublicationContext" as Decision
+component "capture / stderr / selected copy\nPublicationBoundaryDecision" as Publication
+component "domain / root / manifest / stdout / stderr / artifacts / exit" as Surfaces
+
+Intent --> Frozen : discovery only
+Frozen --> Seal : closure と role を導出
+Seal --> Request : virtual files
+Request --> Boundary : one response boundary
+Boundary --> Decision : typed outcome
+Decision --> Publication : measurements をseal
+Publication --> Surfaces : one authority
+
+note right of Decision
+request-independent failure は
+invented project/request/config を持たない
+end note
+note right of Publication
+全projectionはこのimmutable decisionだけを受ける
+独立status/measurement mapは禁止
+end note
+@enduml
+      </script>
+
+      <div id="diagram-round16-boundary" class="plantuml-diagram">
+        Round 16のsealed acquisition flowを描画しています。
+      </div>
+
+      <details>
+        <summary>Round 16 sealed acquisition flowのPlantUMLソースを確認する</summary>
+        <pre data-source-copy="source-round16-boundary"></pre>
+      </details>
+
+      <div class="grid">
+        <article class="card"><h3>一つのpublication context</h3><p>全ての <code>NextRunDecision</code> variant が、sealed source view/plan、resolved public request/config、observed toolchain、trusted environment、compatibility descriptor、必須のversioned process launch descriptor、run context、fingerprint preimageを持つ <code>NextPublicationContext</code> を保持します。pre-response/not-applicableの <code>NextDecisionContext</code> も明示的にsealし、requestが作れない失敗にはsynthetic defaultを作らず、known/null factsだけを持つrequest-independent branchを使います。</p></article>
+        <article class="card"><h3>source failureのlocality</h3><p>Python-owned immutable <code>SourceFailureLedger</code> をproof/modelと照合します。safe subsetが独立に証明できるlocal failureだけが <code>SOURCE-001</code>/<code>partial_safe</code>、隔離できないfailureは <code>SOURCE-003</code>/<code>payload_unavailable</code>です。</p></article>
+        <article class="card"><h3>validationとlimit</h3><p>順序はchild capture、raw response、aggregate、closed schema、base/path/ref/proof、actual model/proof-only count、model gate、entity gate、selected copyです。全byte境界はexact/+1を検査し、+1はdecoderやpublicationへpartial bytesを渡しません。structural overrunは <code>LIMIT-003</code>、malformed/proof violationは <code>PROTOCOL-001</code>です。</p></article>
+        <article class="card"><h3>targetとrole</h3><p>target failureはNextの二つのselectorだけに、8種類のclosed reasonをtargetごとに一件だけ出します。<code>BoundaryRolePropagation/v1</code>ではclient seed自身をdependency/server candidateにせず、別closureのpositive evidenceがそろうときだけdual roleを許します。</p></article>
+        <article class="card"><h3>Unicodeとprocess</h3><p>component、import/export、external/trusted reference、JSX segment、re-export witnessは同じUnicode 15.0.0 checked-in tableとcontext predicateを使います。full scalar bitstream digest、Other_ID、U+00B7、Join_Control、reserved wordをknown-answerで固定します。process launchはverified Node realpath、固定env/FD、process groupをdescriptorへsealします。</p></article>
+        <article class="card"><h3>canonical bytes</h3><p>専用field-order encoderは作らず、既存の <code>sort_keys=True</code>、NFC、UTF-8、LFを全surfaceで共有します。child capture、private response、public stderr、selected copyを一つの <code>PublicationBoundaryDecision</code> にsealし、domain/root/manifest/stdout/stderr/artifact/exitはこのdecisionだけから投影します。selected copy overrunはsemantic decisionを改変せず、保存済みartifact descriptorを維持したpublication resultとして扱います。</p></article>
+      </div>
+
+      <div class="callout">
+        <strong>Round 16の状態:</strong> 対象SHA <code>732477c72c7e05d3f15818ba8a3f75a4c97dc5a9</code>、CI <code>33494926439</code>（7/7 green）に対するhistorical Strict content reviewは <code>P0=0 / P1=16 / P2=3 / fail</code>、<code>implementation_ready=no</code>でした。利用可能な証跡はverification-onlyとcontent reviewの二試行としてartifactへ保存し、fresh current-SHA Strictはpending、readinessは未確認、production implementationは未着手です。local contract greenだけでこの状態をpassへ変更しません。</div>
     </section>
 
     <section>

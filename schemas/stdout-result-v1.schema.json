@@ -12,12 +12,31 @@
     "availability": {"type": "boolean"},
     "domain_status": {"enum": ["complete", "not_applicable", "incomplete"]},
     "incomplete_kind": {"const": "partial_safe"},
+    "selected_stdout_unavailable": {"const": true},
     "run_status": {"enum": ["fatal", "interrupted"]},
     "target_failures": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/target_failure"}},
-    "stable_reason": {"enum": ["published_artifact", "domain_not_applicable", "domain_payload_unavailable", "target_payload_unavailable", "run_fatal", "final_manifest_unavailable", "run_interrupted"]},
+    "stable_reason": {"enum": ["published_artifact", "domain_not_applicable", "domain_payload_unavailable", "target_payload_unavailable", "selected_artifact_unavailable", "run_fatal", "final_manifest_unavailable", "run_interrupted"]},
     "artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifact"}]}
   },
   "oneOf": [
+    {
+      "required": ["domain_status", "artifact", "selected_stdout_unavailable"],
+      "properties": {
+        "selector": {"enum": ["next:semantic-json", "next:plantuml"]},
+        "availability": {"const": false},
+        "domain_status": {"enum": ["complete", "incomplete"]},
+        "stable_reason": {"const": "selected_artifact_unavailable"},
+        "selected_stdout_unavailable": {"const": true},
+        "artifact": {"type": "object"}
+      },
+      "allOf": [
+        {"anyOf": [
+          {"properties": {"domain_status": {"const": "complete"}}, "not": {"required": ["incomplete_kind"]}},
+          {"properties": {"domain_status": {"const": "incomplete"}, "incomplete_kind": {"const": "partial_safe"}}, "required": ["incomplete_kind"]}
+        ]},
+        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
+      ]
+    },
     {
       "required": ["domain_status", "artifact"],
       "properties": {

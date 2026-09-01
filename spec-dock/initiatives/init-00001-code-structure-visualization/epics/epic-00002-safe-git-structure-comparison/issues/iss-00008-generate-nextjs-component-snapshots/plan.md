@@ -441,3 +441,64 @@ fresh current-SHA Strictはpending/readiness unconfirmed/product implementation 
 | P1-12 boundary role sole authority | `derive_boundary_roles` independent recomputation and Button/Card fixtures |
 | P1-13 canonical stdout bytes | canonical JSON exact-byte and target-failure goldens |
 | HTML/evidence durability | pinned PlantUML validator and Round15 artifact hash/provenance table |
+
+#### Round 16 remediation plan and executable trace
+
+Round 16 content reviewの固定点は SHA
+`732477c72c7e05d3f15818ba8a3f75a4c97dc5a9`、CI `33494926439`（7/7 green）、
+判定 `P0=0 / P1=16 / P2=3 / fail / implementation_ready=no` である。
+verification-onlyとcontent reviewのtranscriptは新規Round16 artifactへ保存し、
+fresh current-SHA Strictはpending、readinessは未確認、production implementationは
+未着手とする。
+
+実装前に次の順でdata-only contractを閉じる。
+
+1. `SourceDiscoveryIntent`をroots/control candidates/fixed rulesだけに縮小し、
+   frozen control bytes + inventoryからconfig、extends closure、final paths、role mapを
+   一回の`seal_source_acquisition`で導出する。plan/view caller injection、duplicate read、
+   drift後のreadをnegative testする。
+2. 実SourceAcquisitionSeal、resolved public/private request、observed toolchain、trusted
+   environment、compatibility descriptor、versioned process-launch descriptorからimmutable
+   `NextPublicationContext`を一度だけ構築し、全decision variantと全projectionへ渡す。
+   descriptorは省略不可でtoolchainのNode statusと一致し、fingerprint preimageへ含める。
+   pre-response/not-applicableの`NextDecisionContext`も明示的にsealし、後段のfallbackを
+   禁止する。`ValidatedAdapterRequest`はdeep copyし、ID/files/base64/size/digest/canonical
+   bytes/limitsをresponse前に検証する。
+3. request-independent config/project/source failure branch、SourceFailureLedger、catalog
+   derived failure matrixを固定する。locality proof付きSOURCE-001/partialと非分離SOURCE-003/
+   unavailable、unsupported complete、adapter over_budget rejectionを全surfaceへ写す。
+4. raw cap→decode/aggregate→schema→base/path/ref/proof→actual model/proof-only→model gate→
+   entity gate→selected copyの順を守る。structural overrunはLIMIT-003、malformed/schema/
+   proofはPROTOCOL-001。child capture、private response、public stderr、selected copyの
+   測定を一つの`PublicationBoundaryDecision`へsealし、そのdecisionだけをdomain/root
+   manifest/stdout/stderr/artifact/exit projectionへ渡す。独立status/measurement mapを
+   受け付けず、selected copy failureはsemantic statusを変えずpublication resultへsealする。
+5. target failure eight reasonsの一target一行、Unicode 15.0 contextual predicates/full
+   scalar KAT、BoundaryRolePropagationのclient seed/server traversal規則、canonical
+   sort_keys/NFC/UTF-8/LF bytes、versioned process launch descriptorを各golden/schemaへ
+   同期する。faithful capture harnessはOS process-level testと主張しない。
+6. Round 16 artifactへ三試行の利用可能なprovenance、findings→remediation→test map、全gate
+   command/resultを追記する。artifactのhistorical failは上書きせず、fresh Strict passまで
+   I05-PLAN-002以降のproduction implementationを開始しない。
+
+| Round 16 criterion | executable evidence |
+| --- | --- |
+| P1-1 SourceDiscoveryIntent / atomic seal | `test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift` |
+| P1-2 PublicationContext sole authority | `test_all_decision_variants_project_without_legacy_fixture_authority`; `test_round16_publication_context_requires_explicit_launch_and_decision_context` |
+| P1-3 validated private request | `test_response_validation_accepts_only_the_bounded_raw_bytes_entrypoint` |
+| P1-4 request-independent unavailable | `test_round16_request_independent_source_failure_projects_schema_valid_whole_run` |
+| P1-5 SourceFailureLedger locality | `test_round15_source_failure_preserves_locality_boundary` |
+| P1-6 closed failure matrix | `test_round16_failure_matrix_is_catalog_derived_and_rejects_cross_product` |
+| P1-7 validation precedence | `test_raw_response_mutations_all_cross_the_same_bounded_entrypoint` |
+| P1-8 structural limit code | `test_actual_json_aggregate_boundary_precedes_schema_validation` |
+| P1-9 selected stdout branch | `test_selected_stdout_copy_has_exact_and_plus_one_publication_boundaries` |
+| P1-10 final publication seal | `test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy` (final boundary-only projections, exact/+1, substitution rejection) |
+| P1-11 canonical bytes | `test_publication_bytes_are_exact_model_payloads_and_digest_roots` |
+| P1-12 anonymous default/context | `test_round16_identifier_contexts_cover_reserved_exports_and_anonymous_default` |
+| P1-13 Unicode context | `test_round15_identifier_name_is_contextual_and_host_ucd_independent` |
+| P1-14 target reason cardinality | `test_round16_target_resolution_exposes_all_closed_failure_reasons` |
+| P1-15 boundary roles | `test_taint_edges_are_derived_for_boundary_and_shared_frontier` |
+| P1-16 process launch descriptor | `test_round16_process_launch_descriptor_is_closed_and_security_deterministic`; `test_round16_publication_context_requires_explicit_launch_and_decision_context` |
+| P2-1 HTML drift resistance | `test_round16_html_has_no_fixed_limit_inventory` |
+| P2-2 vector index bijection | `test_contract_fixture_index_materializes_plan_008_vectors` |
+| P2-3 limit message/catalog | `test_next_diagnostic_catalog_is_the_public_and_manifest_authority` |

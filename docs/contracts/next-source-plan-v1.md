@@ -83,3 +83,24 @@ subsequent filesystem read. Cross-phase overlap is allowed only because the
 path is read once and shared by both phases. Domain and publication contexts
 carry the resulting descriptors/fingerprints; downstream writers never reopen
 the repository.
+
+## Round 16 intent and single authority
+
+`SourceDiscoveryIntent` is deliberately smaller than the final plan. It may
+contain only explicit project roots, control candidates, and fixed discovery
+rules. It cannot contain caller-chosen resolved config, local-extends closure,
+final file paths, or a role map. `seal_source_acquisition(intent, reader,
+inventory)` derives those values from frozen control bytes and the inventory,
+then seals the resulting `SourceView` and `FinalSourceAcquisitionPlan` in one
+operation. A caller-injected plan/view, plan-only or view-only reconstruction,
+role/effective-role substitution, control/extends closure substitution,
+digest/size mutation, duplicate read, or post-drift read is rejected.
+
+The seal is the input to `NextPublicationContext`; all decision variants carry
+the same sealed source descriptor, plan digest, and seal identity. If source
+selection or discovery fails before a validated adapter request exists, the
+request-independent decision keeps only the source facts and known/null
+measurements that were actually observed. It must not invent a project,
+request, config, or source plan from a default fixture. This is a
+pre-implementation contract; fresh current-SHA Strict is pending and product
+implementation is absent.

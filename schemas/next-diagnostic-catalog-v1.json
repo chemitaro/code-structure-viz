@@ -10,7 +10,7 @@
     {"code":"CSV-NEXT-IDENTITY-001","severity":"error","recoverable":false,"message":"Canonical Next.js semantic identities collide.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-LIMIT-001","severity":"error","recoverable":false,"message":"A source transport limit was exceeded.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-LIMIT-002","severity":"error","recoverable":false,"message":"The source file count or decoded source total exceeded its configured limit.","ref_permission":"none","outcome":"payload_unavailable"},
-    {"code":"CSV-NEXT-LIMIT-003","severity":"error","recoverable":false,"message":"Adapter output exceeded a configured byte limit.","ref_permission":"none","outcome":"payload_unavailable"},
+    {"code":"CSV-NEXT-LIMIT-003","severity":"error","recoverable":false,"message":"A configured byte limit was exceeded at a bounded publication boundary.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-LIMIT-004","severity":"error","recoverable":false,"message":"The adapter exceeded its V8 old-space limit.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-LIMIT-005","severity":"error","recoverable":false,"message":"The semantic model or entity count exceeded its configured limit.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-NODE-001","severity":"error","recoverable":false,"message":"A supported Node.js runtime is unavailable.","ref_permission":"none","outcome":"payload_unavailable"},

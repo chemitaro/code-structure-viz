@@ -90,7 +90,7 @@ code-structure-viz snapshot --repo . --domain next --format semantic-json --stdo
 - program filesはTS/TSX/JS/JSX、`.d.ts`はcontext-only。`.git`、`node_modules`、`.next`、`out`、`dist`、`build`、`coverage`はhard exclude。test/spec/storyはdefault excludeにしない。
 - config lookupは`tsconfig.json`、`jsconfig.json`、versioned built-in safe configの順。repository-local `extends`、`baseUrl`、`paths`だけをfrozen SourceView内で解決し、package-based extendsやtarget `node_modules`を暗黙に読まない。
 - one-shot Node adapterはrequest virtual files、bundled TypeScript standard library、`code-structure-viz.next-trusted-types/v1`だけを読むin-memory CompilerHostを使う。TrustedTypeEnvironmentはminimal JSX/React/Next wrapper declarations、exact version/digest/licenseを持ち、target type roots/node_modules/networkを参照しない。Node.js 22 LTS以上はapplicable runだけで要求する。
-- transport/processは20,000 files、4 MiB/file、64 MiB decoded source、96 MiB encoded stdin、JSON nesting 64、8 MiB/string、100,000 total/20,000 per collection array items、10,000 model records、16 MiB stdout、64 KiB stderr、60秒、512 MiB V8 old-spaceをv1上限とし、超過はsilent truncationせず`payload_unavailable`とする。総RSS上限はv1で保証しない。
+- transport/processは20,000 files、4 MiB/file、64 MiB decoded source、96 MiB encoded stdin、JSON nesting 64、8 MiB/string、100,000 total/20,000 per collection array items、10,000 model records、`max_adapter_stdout_capture_bytes`・`max_adapter_response_bytes`・`max_selected_stdout_bytes`の三つの16 MiB境界、64 KiB stderr、60秒、512 MiB V8 old-spaceをv1上限とし、超過はsilent truncationせず`payload_unavailable`とする。旧`max_stdout_bytes`はselected stdoutの互換aliasに限る。総RSS上限はv1で保証しない。
 
 ### public target grammar
 
@@ -350,7 +350,7 @@ Round 14で追加する実行可能な受入条件は次のとおりである。
 - Component認定はsafe React callable/construct signature、closed React class provenance、recognized UI route default、proven JSX output-flow、closed wrapper allowlistのpositive evidenceを要求し、PascalCaseだけで認定しない。
 - propsはTypeCheckerのeffective signatureから取得し、primitive/type-parameter/redacted-literal/reference/array/tuple/union/intersection/function/object/opaqueのclosed type IRへ正規化する。literal value、function parameter名、generic名を公開せず、complexity limitはtruncationではなくopaque+coverageで表す。
 - relationはmodule planeの`static_import`/`literal_dynamic_import`とcomponent planeの`jsx_render`/`component_wrap`を分離する。lexical scanやruntime tree推測をせず、return outputへ流れるbounded expressionだけを追う。
-- client boundaryはdirect `client_entry` fact、router context、static value edgeから導く`client_dependency`/`server_candidate` role、`unknown`で表す。同一Moduleのdual roleを許し、no directiveをserverと断定しない。boundary crossingはunderlying edgeのfacetとする。
+- client boundaryはdirect `client_entry` fact、router context、static value edgeから導く`client_dependency`/`server_candidate` role、`unknown`で表す。client-entry seed自身は`client_dependency`でも`server_candidate`でもなく、dual roleは異なるclosureのpositive evidenceが揃う場合だけ許す。no directiveをserverと断定しない。boundary crossingはunderlying edgeのfacetとする。
 
 ### output contract
 
@@ -389,7 +389,7 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 
 有効な selector の対象 Artifact が公開可能な場合、stdout は output directory に公開した対象 file と正確に同じ bytes だけを出す。前後に summary、label、diagnostic を付けない。`--output-dir` は引き続き必須であり、stdout は永続 Artifact の代替ではなく複製である。
 
-有効な selector の対象が `not_applicable`、`payload_unavailable`、run fatal、または handled interrupt により利用不能な場合、stdout は次の `code-structure-viz.stdout-result/v1` JSONを決定的な1行で出す。field order は `type`、`schema`、`selector`、`availability`、`domain_status` または `run_status`、`stable_reason`、`artifact` とし、`availability` は false、`artifact` は null である。domain selector で domain outcome が確定している場合だけ `domain_status`、run-level outcome では `run_status` を使う。`manifest` selector も final manifest が存在しない場合は同じ規則を使う。既存の exit 0/1/3/130 を変更しない。
+有効な selector の対象が `not_applicable`、`payload_unavailable`、run fatal、または handled interrupt により利用不能な場合、stdout は次の `code-structure-viz.stdout-result/v1` JSONをcanonical encoderで決定的な1行にする。object keyは既存のlexicographic `sort_keys=True`、文字列はNFC、encodingはUTF-8、行末はLF一つとし、専用の手書きfield orderは持たない。`availability` は false、`artifact` は null である。domain selector で domain outcome が確定している場合だけ `domain_status`、run-level outcome では `run_status` を使う。`manifest` selector も final manifest が存在しない場合は同じ規則を使う。既存の exit 0/1/3/130 を変更しない。
 
 ```json
 {"type":"stdout_result","schema":"code-structure-viz.stdout-result/v1","selector":"next:semantic-json","availability":false,"domain_status":"not_applicable","stable_reason":"domain_not_applicable","artifact":null}
@@ -540,3 +540,71 @@ Round 15で実装前に閉じる契約は次のとおりである。
 
 これらはproduction implementationの完了宣言ではない。全てのlocal contract testがgreenでも、fresh
 current-SHA Strictの`P0=0/P1=0`と`review_status=pass`が確認されるまで実装開始可能性は未確定である。
+
+### Round 16 review state and remediation contract
+
+Round 16 Strictは、verification-onlyの`issue-eight-strict-round-sixteen`とcontent reviewの
+`required-strict-github-connector-verificati-627`を別の証跡として扱う。前者のtranscript SHA-256は
+`e9027c5ce26d0f5f953a84a8dc10ef78252f65aed65ac47c22a82346991afb74`、後者は
+`0a1fdfda86bf46e12cd3e1547ce05c1208209265a8d6e8b8a6ac6a3cccf8d895`である。content reviewは対象SHA
+`732477c72c7e05d3f15818ba8a3f75a4c97dc5a9`、CI `33494926439`（7/7 green）を確認し、
+`review_status: fail`、P0=0、P1=16、P2=3、`implementation_ready: no`を返した。この履歴は
+`artifacts/20260901t090000z-disc-strict-spec-review-round-16.md`へ保存し、fresh current-SHA Strictは
+pending、readinessは未確認、production implementationは未着手とする。
+
+Round 16で実装前に閉じる要件は次のとおりである。
+
+1. `SourceDiscoveryIntent`はproject roots、control candidates、固定されたdiscovery rulesだけを持つ。
+   config、local extends、final paths、role mapは、凍結したcontrol bytesとinventoryから
+   `seal_source_acquisition(intent, reader, inventory)`内で導出する。callerがfinal plan/viewを注入する経路、
+   plan-only/view-onlyの再構成、seal後のfilesystem readを許さない。
+2. 全`NextRunDecision` variantは実際の`SourceAcquisitionSeal`、resolved public request/config、観測済み
+   toolchain、検証済みtrusted environment、compatibility descriptor、versioned process launch descriptorから
+   一度だけ構築した`NextPublicationContext`を必須保持する。private `ValidatedAdapterRequest`とpublic request snapshotを
+   分離し、fixture/default合成をdomain/root/manifest/stdout/stderr/publicationのauthorityにしない。
+   `process_launch_descriptor`は省略不可であり、そのdigestをrun-fingerprintへ含める。
+   pre-response/not-applicable variantの`NextDecisionContext`も省略不可で、known/null countsやfailure stage/codeを
+   writerが後から再構成してはならない。
+3. adapter requestはresponse前にschema、request ID、filesのbase64/size/digest/canonical bytes、limitsを検証・
+   immutable sealし、response boundaryは`ValidatedAdapterRequest`だけを受ける。private responseは
+   `max_adapter_response_bytes`を使い、旧`max_stdout_bytes`へfallbackしない。
+4. requestを作れないconfig/project/source-discovery失敗には、invented project/request/configを持たない
+   schema-validなrequest-independent `payload_unavailable` domain/root manifest branchを使う。known countsは
+   実測できない項目をnull、artifactsは空、exitは3とし、stderr/stdoutも同じdecisionから投影する。
+5. source localityの契約は、Python-owned immutable `SourceFailureLedger`をsealed contextへ含め、proof/modelと
+   独立照合する方式とする。isolatedかつtarget-taintedでないsubsetだけ`CSV-NEXT-SOURCE-001`/`partial_safe`、
+   非分離は`CSV-NEXT-SOURCE-003`/`payload_unavailable`、explicit target taintは全体unavailableとする。
+6. failureはcatalog-derived closed matrix（kind、allowed stage、code、ref permission、known counts、outcome、
+   exit）からのみ選ぶ。stage/codeの自由なcross product、意味を失う`AssertionError`への丸めを禁止する。
+7. validation順序は、raw cap → bounded decode/aggregate → closed schema → base/path/ref/proof → actual
+   model/proof-only count → model gate → entity gateとし、schema/ref invalidとmodel+1の複合入力はprotocolを先に返す。
+8. per-array、aggregate、string、depthの超過はconfigured structural resource limitとして`CSV-NEXT-LIMIT-003`へ
+   統一し、malformed/closed-schema/proof violationだけを`CSV-NEXT-PROTOCOL-001`とする。precedenceとmessageは
+   catalog、docs、classifier、goldenで同じにする。
+9. `selected_stdout_unavailable`はschema-validなcomplete/partial_safeのselected artifact branchとし、保存済み
+   artifact descriptorを維持する。exact/+1 copyを検査し、copy failureでvalidated semantic outcomeを書き換えない。
+10. child stdout/stderr capture、public stderr、selected copyのmeasurementsを一つのimmutable
+    `PublicationBoundaryDecision`へsealしてから、domain/root/manifest/stdout/stderr/artifact/exitを投影する。
+    これらのprojectionはboundary decisionだけを受け、semantic decisionと独立したpublication outcome・measurement map・
+    retained bytesを受け取らない。faithful iterable harnessはread-stop、dispose、process-group termination flag、child text非漏洩を
+    検査するが、OS process-level試験とは主張しない。
+11. stdout field orderはmanual encoderを持たず、既存のcanonical JSON（sort_keys=True、NFC、UTF-8、LF）だけを使う。
+    `target_failures`も同じorderでexact UTF-8+LF golden化する。
+12. Component declarationには`@anonymous-default`を許可し、moduleごとに高々一つとする。通常のbinding positionは
+    reserved wordを除く`is_binding_identifier`、property/export keyは`is_declaration_key`、明示的defaultは専用規則を使う。
+13. import/export/re-export、external/trusted reference、JSX tag segmentを含む全identifier contextへUnicode 15.0.0
+    checked-in tableを適用し、Other_ID、U+00B7、Join_Control、reserved、non-NFC、control、post-15.0を拒否/受理表で固定する。
+    full scalar bitstream digestをminimum/latest CI laneでknown-answer検査する。
+14. resolverはsealed roots/taintからmissing、component_only、duplicate、out_of_scope、non_program、control_context、
+    project_ambiguity、selected_taintの8理由を導出し、失敗targetごとに一つだけreasonを要求する。混在targetの
+    resolver→proof→decision→diagnostic→domain→root→stdoutを検査する。
+15. `BoundaryRolePropagation/v1`はfacts/router/static value closureからのみ導出する。client entry seed自身は
+    `client_dependency`でも`server_candidate`でもなく、server traversalはclient entry前で停止する。dual roleは別の
+    closureが両方を証明した場合だけ許し、PlantUMLのstale allowanceを残さない。
+16. process launch descriptorはverified absolute Node realpath、symlink policy、argv、固定env allowlist/denied env、
+    stdio、FD inheritance、process groupをversion付きでsealする。available/unavailable/not-applicable各variantで
+    toolchainのnode statusと一致する実測descriptorを明示し、PATH shadow、symlink、hostile env、locale/TZ、extra FD、
+    descriptor省略・preimage差し替えをclosed schema/reference testで拒否する。
+
+これらの要件は後続実装の完了宣言ではない。local契約がgreenでも、fresh current-SHA StrictのP0=0/P1=0と
+`review_status: pass`が確認されるまでreadinessは未確認のままとする。

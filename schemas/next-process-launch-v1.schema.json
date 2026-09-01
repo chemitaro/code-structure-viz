@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-process-launch-v1",
+  "title": "CodeStructureViz Next adapter process launch descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "node_status", "node_realpath", "node_sha256", "symlink_policy", "argv", "shell", "cwd", "env_allowlist", "denied_env", "stdio", "fd_inheritance", "process_group"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-process-launch/v1"},
+    "version": {"const": 1},
+    "node_status": {"enum": ["available", "unavailable", "not_applicable"]},
+    "node_realpath": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "node_sha256": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{64}$"}, {"type": "null"}]},
+    "symlink_policy": {"const": "resolve_and_verify_realpath"},
+    "argv": {"const": ["node", "/.code-structure-viz/next-adapter.mjs"]},
+    "shell": {"const": false},
+    "cwd": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
+    "env_allowlist": {"const": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"}},
+    "denied_env": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "stdio": {"const": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"}},
+    "fd_inheritance": {"const": {"close_fds": true, "allowed": [0, 1, 2]}},
+    "process_group": {"const": {"create": true, "terminate_scope": "group", "wait_after_terminate": true}}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"node_status": {"const": "available"}}},
+      "then": {
+        "properties": {
+          "node_realpath": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
+          "node_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      },
+      "else": {"properties": {"node_realpath": {"const": null}, "node_sha256": {"const": null}}}
+    }
+  ]
+}

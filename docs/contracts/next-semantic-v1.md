@@ -465,3 +465,51 @@ Roles are recomputed from facts, router context, and static value edges and
 must exactly equal submitted model roles. All public JSON and stdout-result
 bytes use the existing lexicographic canonical encoder (`sort_keys=True`,
 NFC, UTF-8, LF), including `target_failures`.
+
+## Round 16 contract closure
+
+Round 16 keeps the semantic model data-only and closes the remaining
+implementation choices before a production adapter is started. The
+`NextPublicationContext` is mandatory on every `NextRunDecision` variant and
+binds the actual source seal, public/private request snapshots, observed
+toolchain, trusted environment, compatibility descriptor, and run-fingerprint
+preimage. A pre-response config/project/source failure uses a request-
+independent context with nulls for unobserved values; it never invents a
+project, request, or config from a fixture.
+
+The private request is a deep-copied `ValidatedAdapterRequest`. Its request ID,
+virtual files' base64/size/digest/canonical bytes, limits, targets, and run
+context are checked before the response boundary accepts it. The boundary
+order is raw cap, bounded decode/aggregate, closed schema, base/path/reference/
+proof validation, actual model/proof-only count, model gate, entity gate, and
+selected artifact copy. Structural resource overrun uses `CSV-NEXT-LIMIT-003`;
+malformed, closed-schema, and proof violations use `CSV-NEXT-PROTOCOL-001`.
+
+Record counts are derived from actual wire data: published model collections
+are summed, proof-only records count only payload records absent from those
+collections, and `discovered_records` is their sum. The selected artifact copy
+has its own exact/+1 boundary and may become unavailable without rewriting the
+validated semantic status. All capture, stderr, and selected-copy measurements
+are sealed in the final publication decision before any projection is written.
+
+Source acquisition derives the final plan and source view together from one
+intent/seal operation. Source locality is represented by an immutable
+`SourceFailureLedger`: independently proven local safe subsets use
+`CSV-NEXT-SOURCE-001`/`partial_safe`, while non-isolatable failures use
+`CSV-NEXT-SOURCE-003`/`payload_unavailable`. Target failures use the eight
+closed reasons and exactly one row per failed target only on the two Next
+target-unavailable selectors.
+
+The contextual Unicode 15.0.0 table is used for binding identifiers,
+declaration/export keys, JSX segments, re-export witnesses, and
+external/trusted references. Other_ID sets, U+00B7, Join_Control, reserved
+words, NFC/control/post-15.0 cases, and the full scalar classification digest
+are known-answer tested. `BoundaryRolePropagation/v1` derives roles from
+facts/router/static value closure only: a client seed is neither derived role,
+server traversal stops before a client entry, and dual role requires two
+distinct closures. Canonical output remains sorted-key JSON, NFC, UTF-8, LF.
+
+Round 16 review of SHA `732477c72c7e05d3f15818ba8a3f75a4c97dc5a9` (CI
+`33494926439`, 7/7 green) historically returned `P0=0 / P1=16 / P2=3 / fail`.
+Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
+implementation is absent.

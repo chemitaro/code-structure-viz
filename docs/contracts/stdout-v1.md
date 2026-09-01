@@ -45,3 +45,33 @@ adapter stdout captureとresponse decodeはpublic stdoutとは別境界である
 いずれも+1でread/decoderを継続せず、manifest-onlyのtyped unavailableとexit 3へ
 進む。stderr harnessも同じcount-before-retain契約であり、child textをstdoutへ
 漏らさない（faithful iterable testでありOS process-level testではない）。
+
+## Round 16 final publication seal
+
+Child stdout capture, complete private response, public diagnostic stderr, and
+selected artifact copy are separate measurement points. Their exact/+1
+results are sealed once in the final immutable publication decision before
+domain, root manifest, stdout, stderr, or exit is projected. A selected-copy
+overrun preserves the validated semantic decision and artifact descriptor but
+returns a typed selected-artifact-unavailable result; it does not silently
+change `complete` to another semantic outcome. Capture harness evidence uses
+incremental `Iterable[bytes]` reads with read-stop/dispose/process-group flags,
+and is explicitly not an OS process-level test.
+
+`PublicationBoundaryDecision` is the sole input to the publication projections:
+domain, root manifest, artifact bytes/descriptors, selected stdout, public
+stderr, and exit code all receive that one immutable object. They must not
+accept a semantic decision plus a separately reconstructed publication status,
+measurement dictionary, or retained-byte value. The decision is sealed only
+after the four measurements are complete; an omitted or substituted process
+launch descriptor is likewise invalid because the descriptor is mandatory in
+every decision's `NextPublicationContext` and its fingerprint preimage.
+The final object also carries a digest over the four measurement records, so
+replacing a retained buffer or counter without resealing the boundary is
+rejected.
+
+All result JSON, including target failures, uses the existing canonical
+lexicographic encoder (`sort_keys=True`, NFC, UTF-8, LF). No manual field-order
+encoder is allowed. Fresh Round 16 Strict remains pending; the historical
+review was `P0=0 / P1=16 / P2=3 / fail` at SHA
+`732477c72c7e05d3f15818ba8a3f75a4c97dc5a9`.

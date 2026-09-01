@@ -7,17 +7,48 @@
   "required": ["schema", "projects", "targets", "upstream_depth", "downstream_depth", "formats", "limits", "trusted_environment_digest", "source_plan", "source_plan_digest", "domain_config_digest"],
   "properties": {
     "schema": {"const": "code-structure-viz.domain-config/next/v1"},
-    "projects": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/project"}},
+    "projects": {"type": "array", "items": {"$ref": "#/$defs/project"}},
     "targets": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/target_key"}},
-    "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
-    "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
+    "upstream_depth": {"type": ["integer", "null"], "minimum": 0, "maximum": 64},
+    "downstream_depth": {"type": ["integer", "null"], "minimum": 0, "maximum": 64},
     "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},
     "limits": {"$ref": "#/$defs/limits"},
     "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "source_plan": {"$ref": "urn:code-structure-viz:schema:next-source-plan-v1"},
     "source_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "domain_config_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    "domain_config_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "request_independent": {"type": "boolean"},
+    "failure_stage": {"type": "string", "minLength": 1},
+    "failure_code": {"type": "string", "pattern": "^CSV-NEXT-[A-Z0-9-]+$"}
   },
+  "anyOf": [
+    {
+      "properties": {
+        "request_independent": {"const": false},
+        "projects": {"minItems": 1},
+        "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
+        "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64}
+      },
+      "not": {"required": ["failure_stage", "failure_code"]}
+    },
+    {
+      "required": ["request_independent", "failure_stage", "failure_code"],
+      "properties": {
+        "request_independent": {"const": true},
+        "projects": {"const": []},
+        "upstream_depth": {"const": null},
+        "downstream_depth": {"const": null}
+      }
+    },
+    {
+      "not": {"required": ["request_independent"]},
+      "properties": {
+        "projects": {"minItems": 1},
+        "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
+        "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64}
+      }
+    }
+  ],
   "$defs": {
     "path": {"$ref": "urn:code-structure-viz:schema:next-path-v1"},
     "root_path": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"},

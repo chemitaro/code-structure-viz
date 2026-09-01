@@ -107,8 +107,26 @@
     "target_resolution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["target_key", "status", "record_ids"],
-      "properties": {"target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"}, "status": {"enum": ["resolved", "failed"]}, "record_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"}}, "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]}}
+      "properties": {
+        "target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"},
+        "status": {"enum": ["resolved", "failed"]},
+        "record_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"}},
+        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]}
+      },
+      "oneOf": [
+        {
+          "required": ["target_key", "status", "record_ids"],
+          "properties": {"status": {"const": "resolved"}},
+          "not": {"required": ["reason"]}
+        },
+        {
+          "required": ["target_key", "status", "record_ids", "reason"],
+          "properties": {
+            "status": {"const": "failed"},
+            "record_ids": {"maxItems": 0}
+          }
+        }
+      ]
     },
     "export_resolution_witness": {
       "type": "object",

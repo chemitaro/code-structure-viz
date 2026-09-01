@@ -50,6 +50,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-adapter-response-v1",
         "next-config-v1",
         "next-domain-manifest-v1",
+        "next-process-launch-v1",
         "next-export-graph-raw-v1",
         "next-limits-v1",
         "next-semantic-v1",
@@ -78,6 +79,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-adapter-response-v1.schema.json",
         "next-config-v1.schema.json",
         "next-domain-manifest-v1.schema.json",
+        "next-process-launch-v1.schema.json",
         "next-export-graph-raw-v1.schema.json",
         "next-limits-v1.schema.json",
         "next-runtime-manifest-v1.schema.json",
@@ -507,6 +509,7 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
 
     domain: dict[str, Any] = {
         "domain": "next",
+        "request_independent": False,
         "status": "complete",
         "payload_available": True,
         "entity_count": 0,

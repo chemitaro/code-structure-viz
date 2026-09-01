@@ -189,3 +189,42 @@ stdout branch. All other result branches reject them. Source acquisition
 consumes one `SourceDiscoveryIntent` and atomically seals plan plus view after
 the final drift check; caller-injected final paths/plan/view are not an
 authority.
+
+## Round 16 typed request and failure context
+
+`SourceDiscoveryIntent` is intentionally not a resolved config. It contains
+only project roots, control candidates, and fixed discovery rules. The sealed
+source acquisition derives config, local `extends` closure, final paths, and
+effective roles from frozen bytes and inventory in one operation. The returned
+seal is copied into the mandatory `NextPublicationContext` of every decision.
+
+The private adapter request is a separate immutable
+`ValidatedAdapterRequest`. It is deep-copied and checked for schema, request
+ID, file base64/size/digest/canonical bytes, limits, targets, and run context
+before it can enter the response boundary. That boundary accepts no untyped
+request and never falls back from `max_adapter_response_bytes` to the legacy
+`max_stdout_bytes` alias. If config, project, or source discovery fails before
+a request exists, the request-independent branch carries only observed values,
+explicit nulls, a closed failure stage/code, and `payload_unavailable`/exit 3;
+it does not synthesize public project/request/config fields.
+
+The final publication decision seals child capture, private response, public
+stderr, and selected artifact-copy results. This keeps the semantic outcome
+stable when a selected copy is unavailable. The process launch descriptor is a
+separate versioned provenance value covering verified Node realpath, fixed
+argv/environment/FDs, and process-group behavior.
+
+The descriptor is not optional: every `NextPublicationContext`, including
+request-independent pre-response and not-applicable decisions, carries the
+validated process-launch descriptor explicitly and fingerprints it. Likewise,
+`PreResponseFailureDecision` and `NotApplicableDecision` carry an explicit
+`NextDecisionContext`; their constructors do not rebuild a context from a
+fixture, default limits, or a later writer.
+
+After the measurements are sealed, all publication surfaces consume only the
+single `PublicationBoundaryDecision`. A projection API cannot combine a
+semantic decision with an independently supplied publication outcome,
+capture measurement, stderr status, or selected-copy status. Child capture or
+public stderr failure produces the typed unavailable/no-artifact branch; a
+selected-copy failure preserves the semantic decision and persisted artifact
+descriptor while the root publication result reports exit 3.

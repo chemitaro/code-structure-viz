@@ -79,8 +79,10 @@ ID order feed semantic JSON and PlantUML.
 
 The module marker tokens are ordered as `client_entry`, its non-`none` router
 context, then sorted derived roles. If no token exists, the marker is
-`unknown`. A module may intentionally emit both `client_entry` and
-`server_candidate`; this is a dual role, not a conflict.
+`unknown`. A direct client-entry seed is never a derived
+`client_dependency` or `server_candidate`; only a distinct static-value
+closure can provide those roles. A dual role is valid only when two distinct
+closures independently prove `client_dependency` and `server_candidate`.
 
 ## Shapes, facets, and external frontier
 
@@ -153,3 +155,42 @@ enum is `missing`, `component_only`, `duplicate`, `out_of_scope`,
 with exactly one row per target. All bytes use the existing sorted-key,
 NFC-normalized UTF-8 JSON/LF contract; PlantUML aliases and labels remain
 deterministic and contain no manual stdout field-order variant.
+
+## Round 16 sealed publication contract
+
+PlantUML is one projection of the immutable `NextRunDecision`; it is never
+allowed to rebuild source roles, request/config, limits, toolchain, or target
+failures from a fixture. Every decision variant owns a `NextPublicationContext`
+whose source view and final source plan came from one
+`seal_source_acquisition(intent, reader, inventory)` operation. The intent
+contains only project roots, control candidates, and fixed discovery rules;
+config, local-extends closure, final paths, and role/effective-role are
+derived from frozen bytes and inventory before the seal. No filesystem read is
+allowed after it.
+
+The renderer consumes a `ValidatedAdapterRequest` only after the request ID,
+file base64/size/digest/canonical bytes, limits, and schema have been sealed.
+Response validation precedes rendering in this order: raw response cap,
+bounded decode/aggregate, closed schema, base/path/reference/proof checks,
+actual model and proof-only counts, model gate, entity gate, then public
+selected-copy measurement. A structural resource overrun uses
+`CSV-NEXT-LIMIT-003`; malformed, closed-schema, or proof violations use
+`CSV-NEXT-PROTOCOL-001`. Exact boundaries are accepted and +1 never reaches a
+decoder or renderer.
+
+The public target-unavailable branch retains one sorted `{target_key, reason}`
+row per Next selector target, from the eight closed reasons only. Other
+branches omit target failures. Roles are derived from facts, router context,
+and static value closure: a client seed itself is neither derived role, server
+traversal stops before client entry, and dual role requires separate positive
+closures. IdentifierName classification uses the checked-in Unicode 15.0.0
+table and context-specific predicates for bindings, declaration/export keys,
+JSX segments, and external/trusted references. Canonical JSON remains
+lexicographic sorted keys, NFC, UTF-8, and LF.
+
+The process launch descriptor is versioned and seals verified Node realpath,
+symlink policy, fixed argv, cwd, environment allowlist/denied variables,
+stdio, FD inheritance, and process-group termination. Reference capture tests
+use a faithful iterable harness and do not claim OS process-level coverage.
+Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
+production implementation has not started.
