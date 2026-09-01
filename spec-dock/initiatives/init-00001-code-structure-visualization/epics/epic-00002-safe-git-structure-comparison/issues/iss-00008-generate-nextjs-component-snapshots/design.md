@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-01"
+最終更新: "2026-09-02"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -19,6 +19,84 @@ package_sequence_key: "ISSUE-05"
 - `next` domain の `snapshot` を、CLI から source acquisition、analysis、versioned JSON、PlantUML、manifest、diagnostic まで一つの vertical pipeline として設計する。
 - accepted ADR の独立 product ownership、named endpoint、dual snapshot、adapter boundary、agent-first Artifact、安全な static analysis、product HTML exclusion、vertical slicing を破らない。
 - common abstraction は lifecycle、diagnostic、Artifact descriptor、graph primitive に限定し、domain-specific identity/member/relation/matching を adapter が所有する。
+
+### Round 19 authority design
+
+Round 19のcontent review固定点は SHA `0b80bff7706ca4bec770dbdf25620fbb5d2ecc2d`、CI
+`33557963556`（7/7 success）であり、historical verdictは `P0=0 / P1=5 / P2=1 / fail /
+implementation_ready=no` である。Strict session `required-strict-github-connector-verificati-687`
+のtranscript SHA-256は `a64f04b5948db0df3106803c659cc27c6ee8edd5abf300afa15e81d64691e351` である。
+この履歴は新しいRound19 artifactへ記録し、fresh current-SHA Strictはpending、readinessは未確認、
+production implementationは未着手とする。
+
+#### 取得の因果境界
+
+`SourceDiscoveryIntent`は解決済みのplanではなく、project roots、known control candidates、固定rulesだけを
+表す。trusted enumeratorはsnapshot/revisionを固定し、候補controlをduplicate-key rejecting JSONC parserで
+処理する。BOM/comment/trailing commaは文字列外に限り許可するが、unknown type、duplicate key、extends array、
+path escape、malformed controlは`CSV-NEXT-CONFIG-002`系のtyped fail-closedとする。single local extends closure、
+include/exclude/files、source roots、effective role、最終membershipを凍結control bytesから導出してから、
+control/program/contextを一度だけ読む。`FinalSourceAcquisitionPlan`と`SourceView`は同一seal operationで生成し、
+request起点のsource seal再構築経路を設けない。
+
+結果は次のclosed unionである。
+
+```plantuml
+@startuml
+title Round 19: 観測からsafe subsetまで
+left to right direction
+
+component "SourceDiscoveryIntent\nroots / control candidates / fixed rules" as Intent
+component "凍結snapshot + control bytes\nJSONC / extends / membership" as Frozen
+component "SourceAcquisitionSeal\nplan + view + raw graph" as Seal
+component "CompleteSourceSeal" as Complete
+component "PartialSourceSeal\nledger + safe file set" as Partial
+component "Unavailable / IntegrityFatal" as Failed
+
+Intent --> Frozen : known candidatesだけ観測
+Frozen --> Seal : config / roles / pathsを導出
+Seal --> Complete : 全read成功
+Seal --> Partial : isolated failure + proof
+Seal --> Failed : malformed / drift / non-isolatable
+@enduml
+```
+
+`SourceFailureLedger`はseal-owned raw graph、failure roots、targets、proof rootsからreachability、target taint、
+safe subsetを再計算する。callerが`reachable_target_keys`、`closure_complete`、isolated等のboolean、graph、seal
+identity、digestを注入する構造は持たない。ledger digest preimageにはsource seal digestを含め、edge deletionと
+digest再計算の組み合わせも拒否する。`PartialSourceSeal`からはsafe file setだけを使ってprivate requestを作り、
+同じseal/ledger identityを`ValidatedResponseDecision`と`NextPublicationContext`へ伝播する。
+
+#### 公開とprocess identity
+
+response boundaryは、事前にvalidatedされたprivate requestとcanonical raw response bytesだけを受ける。
+`ValidatedAdapterRequest`のfilesはbase64/size/digest/canonical request IDをseal前後で照合し、raw responseの
+SHA-256もdecisionへopaqueに保持する。最終化はsemantic decisionと実際のcapture measurementから全candidateを
+内部生成する。summary、root manifest、selected artifact、typed unavailableは二段階のstatus algorithmで
+保存し、最初に測ったsuccess candidateを再copyしてstatus循環を起こさない。projectionはそのfinal objectの
+sealed bytesだけを返し、候補、status、measurement、selected payloadを外から差し替えられない。
+
+process observationは`schemas/next-process-launch-observation-v1.schema.json`でfixture/productionを分離する。
+productionはdarwin/linuxのOS-native identity、verified-open handle、hash/version、actual spawn primitive、
+post-spawn identity equality、FD lifecycle、process group、TOCTOU failure pointを必須にする。fixtureはreference
+testの証人であってproduction evidenceではない。host executableに触れないreference validationをprocess-level
+acceptanceと誤認せず、後続production planへ引き継ぐ。
+
+#### stage-dependent provenanceと順序
+
+`schemas/next-provenance-v1.schema.json`の`request_independent` branchは、failure stage/codeと同時に各値の
+observation state/valueを持つ。stageより後のrequest、limits、source plan、toolchain、trusted environment、
+compatibility、process launch、budgetを`unobserved`/`null`で表し、先に観測したprefixを削除できない。
+`next-config`は`request_independent`を必須booleanとし、normal/independent branchを`oneOf`で排他的にする。
+`NextRunContext`はselectorとrequested formats、budget sourceとrequested/resolvedの相関を検証する。
+
+semantic collectionはrecord ID順、root/source-plan/configのpath-only rowsは`path:`を除いたNFC UTF-8 bytes順、
+object rowsはcanonical JSON bytes順とする。submitted orderを並べ替える前に検査し、quoteを含むinverse vectorで
+JSON escapingとの差を検出する。canonical stdoutは既存のlexicographic `sort_keys=True`、NFC、UTF-8、LFだけを使う。
+
+この設計はdata-only reference contractであり、production adapter/CLIの実装を含まない。local testsのgreenやCI
+greenはStrict passを意味せず、fresh current-SHA Strictが`P0=0 / P1=0 / review_status=pass`になるまでreadinessは
+未確認のままとする。
 
 | Design ID | Requirement trace | 判断 |
 | --- | --- | --- |

@@ -33,7 +33,9 @@ Round 14 remediation closes the remaining pre-implementation boundary. The
 closed `NextRunDecision` union is the only input accepted by domain, root
 manifest, stdout, and stderr projections:
 `ValidatedResponseDecision` carries the schema-valid model/proof;
-`PreResponseFailureDecision` owns request-derived context, a closed stage and
+`PreResponseFailureDecision` owns a request-bound context when a validated
+request exists, or an explicit request-independent context when it does not;
+both carry a closed stage and
 diagnostic, known/null counters, `payload_unavailable`, zero artifacts, and
 exit 3; `NotApplicableDecision` owns the corresponding complete no-Next
 outcome and exit 0. Node discovery/spawn/timeout/nonzero, adapter capture,
@@ -51,6 +53,8 @@ The machine-readable authority is:
 - `schemas/next-domain-manifest-v1.schema.json`
 - `schemas/next-limits-v1.schema.json`
 - `schemas/next-source-plan-v1.schema.json`
+- `schemas/next-process-launch-observation-v1.schema.json`
+- `schemas/next-provenance-v1.schema.json`
 - `schemas/next-compatibility-v1.schema.json`
 
 These schemas materialize the field-level branch that will be integrated into the existing public registries during Issue #8 production implementation. They do not make the current CLI accept `--domain next` before that implementation.
@@ -541,3 +545,46 @@ request/config/source-plan/root paths are root ordered; validators inspect
 submitted order before canonical sorting. The full projection still uses
 lexicographic sorted-key JSON, NFC, UTF-8, and LF. Fresh current-SHA Strict is
 pending, readiness is unconfirmed, and production implementation is absent.
+
+## Round 19 source, publication, and provenance closure
+
+Round 19 requires the source seal to exist before the private request. The
+trusted enumerator accepts only `SourceDiscoveryIntent` (project roots,
+known control candidates, fixed rules), decodes the frozen control closure
+with duplicate-key rejecting JSONC rules, and derives config, local extends,
+source roots, roles, and final membership internally. The request file set is
+checked against that immutable seal; no request-derived seal reconstruction
+is a source authority.
+
+Source acquisition returns the closed union
+`CompleteSourceSeal | PartialSourceSeal | SourceAcquisitionUnavailable |
+SourceIntegrityFatal`. `PartialSourceSeal` carries a safe file set and a
+`SourceFailureLedger` derived from seal-owned raw graph reachability. Local
+safe proof emits `CSV-NEXT-SOURCE-001`/`partial_safe`; an unisolated or
+integrity-safe failure emits `CSV-NEXT-SOURCE-003`/`payload_unavailable`.
+The same source seal and ledger identity flow into the safe request,
+`ValidatedResponseDecision`, and `NextPublicationContext`.
+
+Validated response bytes are opaque decision authority. The final
+`PublicationBoundaryDecision` internally derives and seals all summary,
+manifest, artifact, and typed-unavailable candidate bytes from the semantic
+decision and actual measurements. No external candidate map, preselected
+payload, status, or diagnostic bytes are accepted. Selected-copy exact/+1 is
+two-stage and non-circular: a success candidate is measured once; overrun
+disposes partial bytes and persists one failure descriptor without re-copying
+it. The semantic outcome is not silently rewritten.
+
+Process launch observation is the closed fixture/production union in
+`next-process-launch-observation-v1.schema.json`. Production records
+darwin/linux OS identity, verified handle, hash/version, actual spawn
+primitive, post-spawn equality, FD lifecycle, process group, and TOCTOU
+failure point. Reference validation does not exercise a host process and is
+not an OS process-level acceptance claim.
+
+`next-provenance-v1` records an observed prefix and explicit unobserved suffix
+for request-independent failures. `next-config-v1` requires a disjoint
+`request_independent` boolean branch, and `NextRunContext` checks selector,
+format, and budget correlations. Path-only ordering is NFC UTF-8 byte order
+after `path:` removal; object rows retain canonical JSON order. Fresh
+current-SHA Strict is pending, readiness is unconfirmed, and production
+implementation is absent.

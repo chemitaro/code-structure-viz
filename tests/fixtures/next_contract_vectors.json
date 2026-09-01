@@ -121,7 +121,11 @@
     "round18-request-independent-discriminator",
     "round18-stdout-closed-union",
     "round18-html-validation-order",
-    "round18-path-byte-order"
+    "round18-path-byte-order",
+    "round19-source-partial-safe-union",
+    "round19-process-observation-union",
+    "round19-stage-provenance",
+    "round19-target-path-byte-order"
   ],
   "negative": [
     "cross-domain",
@@ -226,7 +230,13 @@
     "round18-request-independent-omission",
     "round18-stdout-branch-field",
     "round18-html-order-reversal",
-    "round18-path-quote-inverse"
+    "round18-path-quote-inverse",
+    "round19-source-partial-read-abort",
+    "round19-ledger-edge-substitution",
+    "round19-process-observation-substitution",
+    "round19-stage-provenance-injection",
+    "round19-config-discriminator-omission",
+    "round19-target-quote-inverse"
   ],
   "criterion_test_map": {
     "round14.p1-1": ["test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exit"],
@@ -349,6 +359,28 @@
     ],
     "round18.p2-2": [
       "test_round18_path_only_order_is_nfc_utf8_and_object_rows_are_canonical_json"
+    ],
+  "round19.p1-1": [
+    "test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift",
+    "test_round19_html_describes_closed_source_union_without_adding_a_diagram"
+  ],
+    "round19.p1-2": [
+      "test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity",
+      "test_round18_source_failure_ledger_recomputes_reachability"
+    ],
+    "round19.p1-3": [
+      "test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy",
+      "test_round17_publication_artifacts_are_bound_to_the_immutable_decision"
+    ],
+    "round19.p1-4": [
+      "test_round16_process_launch_descriptor_is_closed_and_security_deterministic"
+    ],
+  "round19.p1-5": [
+    "test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations",
+    "test_round19_next_config_discriminator_is_required_and_disjoint"
+  ],
+    "round19.p2-1": [
+      "test_round19_target_path_order_uses_nfc_utf8_bytes_not_json_escaping"
     ]
   }
 }

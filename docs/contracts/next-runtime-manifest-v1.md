@@ -109,6 +109,31 @@ The reference harness proves incremental capture semantics but does not claim
 OS process-level coverage. Fresh current-SHA Strict is pending and production
 implementation remains absent.
 
+## Round 19 stage provenance and config correlation
+
+For the Next branch, `request_independent` is a required boolean at both the
+top-level run manifest projection and the nested domain/config projection.
+The `true` branch is a closed request-independent failure: it has a catalog
+stage/code pair, empty project/request/config payloads, and explicit nulls for
+values not observed before that stage. The `false` branch is the normal
+observed request branch and carries the resolved source plan, limits, toolchain,
+and trusted environment. The two branches are disjoint; deleting the
+discriminator or injecting normal fields into the independent branch is a
+schema/reference failure.
+
+`next-provenance-v1` records each observation as `{state, value}`. A failure
+may retain only its observed prefix: source-selection/read/integrity keeps
+limits and source-plan facts already observed, while config/project failures
+keep them unobserved. The same stage/code catalog row controls reference
+permissions, counts, outcome, and exit code. `CSV-NEXT-TARGET-001` requires a
+closed target reason, while other diagnostic codes forbid that reason.
+
+Round 19 evidence is covered by
+`test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations`,
+`test_round19_next_config_discriminator_is_required_and_disjoint`, and the
+schema tests for `next-provenance-v1`. Fresh current-SHA Strict is pending,
+readiness is unconfirmed, and production implementation is absent.
+
 ## Round 17 observed launch and publication provenance
 
 The process-launch descriptor is an observed boundary value, not a default

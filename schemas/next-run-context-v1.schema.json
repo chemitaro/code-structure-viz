@@ -28,5 +28,44 @@
     },
     "budget_source": {"enum": ["builtin", "repository", "explicit", "cli", "unobserved"]},
     "stdout_selector": {"enum": [null, "manifest", "next:semantic-json", "next:plantuml"]}
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"budget_source": {"const": "unobserved"}}},
+      "then": {
+        "properties": {
+          "budget_requested": {"const": null},
+          "budget_resolved": {"const": null}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"budget_source": {"const": "builtin"}}},
+      "then": {
+        "properties": {
+          "budget_requested": {"const": null},
+          "budget_resolved": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"budget_source": {"enum": ["repository", "explicit", "cli"]}}
+      },
+      "then": {
+        "properties": {
+          "budget_requested": {"type": "integer", "minimum": 1},
+          "budget_resolved": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"stdout_selector": {"const": "next:semantic-json"}}},
+      "then": {"properties": {"requested_formats": {"contains": {"const": "semantic-json"}}}}
+    },
+    {
+      "if": {"properties": {"stdout_selector": {"const": "next:plantuml"}}},
+      "then": {"properties": {"requested_formats": {"contains": {"const": "plantuml"}}}}
+    }
+  ]
 }

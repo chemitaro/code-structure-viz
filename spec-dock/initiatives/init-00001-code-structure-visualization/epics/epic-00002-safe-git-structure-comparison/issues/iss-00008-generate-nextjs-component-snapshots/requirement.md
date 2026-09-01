@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-01"
+最終更新: "2026-09-02"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -609,6 +609,56 @@ Round 16で実装前に閉じる要件は次のとおりである。
 
 これらの要件は後続実装の完了宣言ではない。local契約がgreenでも、fresh current-SHA StrictのP0=0/P1=0と
 `review_status: pass`が確認されるまでreadinessは未確認のままとする。
+
+### Round 19 review state and remediation contract
+
+Round 19 Strict content review は、対象SHA `0b80bff7706ca4bec770dbdf25620fbb5d2ecc2d`、
+CI `33557963556` を基準に `P0=0 / P1=5 / P2=1 / review_status=fail /
+implementation_ready=no` を返した。この判定は履歴として保存し、fresh current-SHA Strictは
+pending、readinessは未確認、production implementationは未着手とする。Strictのcontent review
+transcriptは session `required-strict-github-connector-verificati-687`、SHA-256
+`a64f04b5948db0df3106803c659cc27c6ee8edd5abf300afa15e81d64691e351` である。
+
+Round 19で実装前に閉じる契約は次のとおりである。
+
+1. `SourceDiscoveryIntent` は project roots、known project-root control candidates、固定 discovery
+   rulesだけを持つ。request作成後にrequest filesからsealを再構築する経路は持たない。trusted frozen
+   inventory/snapshotを先に一度だけ読み、BOM、コメント、trailing commaを許す限定JSONCをduplicate-key
+   rejection、型検査、単一local `extends` closure、include/exclude/files/source_roots解決とともに実行する。
+   control closureと最終membershipを確定してから該当control/program/contextを一読し、request file setと
+   `SourceAcquisitionSeal`のcaptured setを完全一致させる。malformed control、revision drift、unknown
+   nested config、suffixだけによるrole、`bool("false")`、extends array、callerのderived pathsはtyped
+   fail-closedとする。
+2. source failureは `CompleteSourceSeal | PartialSourceSeal | SourceAcquisitionUnavailable |
+   SourceIntegrityFatal` のclosed unionで表す。`PartialSourceSeal`は同じsealに結び付いた
+   `SourceFailureLedger`とsafe file setを持ち、ledgerのgraph reachabilityからlocalityを再計算する。一件の
+   isolated read failureはdict comprehensionの例外で全体を落とさず、proofされたsafe subsetだけを
+   `CSV-NEXT-SOURCE-001`/`partial_safe`へ進める。隔離不能またはcontrol/integrity failureは
+   `CSV-NEXT-SOURCE-003`/`payload_unavailable`へ進める。
+3. `SourceFailureLedger`のgraph、seal identity、digest、reachable target、closure complete、safe subsetは
+   caller authorityではない。ledgerは `from_seal(SourceAcquisitionSeal, failures, targets, proof_roots)`
+   だけで作成し、seal-owned raw graphから再探索する。ledger digest preimageはsource seal digestを含み、
+   edge削除やdigestの再計算だけで証拠をすり替えられない。
+4. validated responseはcanonical raw bytesとSHA-256をopaque authorityとしてdecisionに保持する。
+   adapter captureのchunkは境界で観測する入力であり、`stdout_candidates`、独立status、preselected payload、
+   再注入したdiagnostic bytesは受け取らない。最終化はsemantic decisionからsummary、root manifest、artifact、
+   typed unavailableを一度だけ生成し、成功候補を一度測定する。selected copyの超過時は保存済みfailure
+   manifest descriptorとtyped unavailable bytesを保持し、再copy・部分bytes・空文字列による回避を許さない。
+5. process launch observationは `fixture | production` のclosed unionである。productionでは対応OS（darwin/linux）、
+   OS-native file identity、verified-open handle、hash/version、具体的spawn primitive、post-spawn equality、
+   FD lifecycle、process group、TOCTOU fail-closed点を記録する。fixtureはnamed reference evidenceだけであり、
+   production launchの代用ではない。reference testはhost executableを操作せず、OS process-level acceptanceを
+   実施済みとは主張しない。実装計画には後続のprocess-level acceptanceを残す。
+6. request-independent failureはstage-dependent provenanceのclosed `oneOf`で表し、failure stageまでに観測した
+   prefixだけを `observed`、後続を `unobserved`/`null`とする。`next-run-context`のrequested formats、selector、
+   budget requested/resolved/sourceの相関、`next-config`の必須 `request_independent: true|false` と disjoint branch、
+   failure stage/code catalogの組み合わせをschemaとreference validatorで同じ規則にする。
+7. path-only target/root orderingは`path:` prefixを除いたNFC UTF-8 byte orderで比較する。canonical JSON bytesの
+   comparatorはobject rowsにだけ使う。quoteを含むinverse-orderをrequest、source view/configで拒否し、JSON escaping
+   がtarget orderを変えないことをexact bytesで検証する。
+
+これらはproduction implementationの完了宣言ではない。local contractがgreenでも、fresh current-SHA Strictの
+`P0=0 / P1=0` と `review_status: pass` が得られるまで実装開始可能性は未確定である。
 
 ### Round 17 authority and provenance remediation
 

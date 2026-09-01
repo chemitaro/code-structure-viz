@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-01"
+最終更新: "2026-09-02"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -21,6 +21,70 @@ package_sequence_key: "ISSUE-05"
 - risk factor: public CLI/schema、static-analysis safety、Artifact integrity、adapter compatibility、誤比較時の広い説明影響。
 - `critical` ではない理由: target repository と persistent user data を変更せず、release/commit 単位で戻せる設計である。
 - 再評価条件: secret/PII exposure、target mutation、不可逆 data loss、incident response が必要な rollout を追加する場合。
+
+### Round 19 remediation plan
+
+Round 19 Strict content reviewの固定点は SHA `0b80bff7706ca4bec770dbdf25620fbb5d2ecc2d`、CI
+`33557963556`（7/7 success）、判定 `P0=0 / P1=5 / P2=1 / fail /
+implementation_ready=no` である。session `required-strict-github-connector-verificati-687` の
+transcript SHA-256は `a64f04b5948db0df3106803c659cc27c6ee8edd5abf300afa15e81d64691e351` とする。
+Round18 artifactは履歴として保持し、Round19 artifactにfinding、修復、executable evidence、検証結果を追記する。
+fresh current-SHA Strictはpending、readinessは未確認、production implementationは未着手である。
+
+実装前の作業順と受入証拠は次のとおりである。
+
+1. **source seal:** `SourceDiscoveryIntent`をroots/control candidates/fixed rulesに限定し、trusted
+   frozen inventoryからknown control closureを先に観測する。duplicate-key rejecting JSONC、single local
+   extends、include/exclude/files/source_roots、effective role、final membershipをseal内で導出し、request
+   filesとのset/digest/sizeを照合する。malformed control、revision drift、duplicate/post-seal read、callerの
+   derived paths/roles/plansはfail-closedとする。`seal_source_acquisition`が一つのplan/view sealを返す。
+   Evidence: `test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift`、
+   `test_round18_source_seal_rejects_caller_membership_and_typed_drift`。
+2. **source result union:** 一件のprogram/context read failureを `CompleteSourceSeal | PartialSourceSeal |
+   SourceAcquisitionUnavailable | SourceIntegrityFatal` に分類する。`PartialSourceSeal`だけが同一sealに結び付いた
+   `SourceFailureLedger`とsafe file setを持ち、ledgerはraw graphからlocalityとtarget taintを再計算する。
+   Evidence: `test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity`、
+   `test_round19_source_acquisition_union_is_typed_and_fail_closed`。
+3. **request/response authority:** private requestはcomposition-based `ValidatedAdapterRequest`としてcanonical
+   id/bytes、file base64/size/digest、limitsをresponse boundaryで再検証する。request起点のsource seal再構築を
+   行わず、request前に観測済みのseal identityとfile setを一致させる。validated response raw bytes/SHAをdecisionへ
+   sealし、独立のcandidate/status/diagnostic bytesを受け取らない。Evidence: existing raw-byte boundary tests and
+   the partial-safe propagation test.
+4. **publication:** semantic decisionからsummary/root manifest/artifact/typed unavailable candidatesを一度だけ
+  生成し、capture→stderr→selected-copyの測定を`PublicationBoundaryDecision`へsealする。success candidate超過時は
+   persisted failure-manifest descriptorを一度生成し、再copyしない。exactは全量、+1はpartial bytesなしのclosed
+   unavailable。空stdoutはusage errorのみとし、target failure reasonをtarget selector以外へ出さない。
+   Evidence: `test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy`、
+   `test_round18_publication_projections_return_sealed_candidate_bytes`。
+5. **process identity:** `next-process-launch-observation-v1`のfixture/production unionを検証する。productionは
+   darwin/linuxだけにし、OS-native file identity、verified handle、hash/version、actual spawn primitive、
+   post-spawn equality、FD lifecycle、process group、TOCTOU pointを必須にする。referenceではhostを操作せず、
+   faithful harnessをprocess-level acceptanceと主張しない。Evidence: `test_round19_process_observation_is_fixture_or_supported_os_production`。
+6. **provenance and schema:** `next-provenance-v1`のstage/code/observed prefixをclosed oneOfにし、normal/
+   request-independent `next-config` branch、run-context budget/selector correlation、catalog code pairを同期する。
+   path-only rowsはNFC UTF-8 bytes、object rowsはcanonical JSON bytesで、quote inverseをrejectする。
+   Evidence: `test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations`、
+   `test_round19_next_config_discriminator_is_required_and_disjoint`、
+   `test_round19_target_path_order_uses_nfc_utf8_bytes_not_json_escaping`。
+7. **document and gate:** Requirement/Design/Plan、`docs/contracts/next-*`、関連schema、fixture、human HTML、
+   durable Round19 artifactを同じ語彙へ同期する。focused Next tests、contracts/full pytest、mypy、ruff、SpecDock、
+   pinned PlantUML、`git diff --check`、`src` diff empty、`node_modules` absentを記録する。これらはpre-implementation
+   evidenceであり、fresh Strict passやproduct implementationを意味しない。
+
+#### Round 19 criterion → executable evidence
+
+| criterion | reference evidence |
+| --- | --- |
+| R19-P1-01 source seal and control closure | `test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift`; `test_round18_source_seal_rejects_caller_membership_and_typed_drift` |
+| R19-P1-02 ledger seal-owned locality | `test_round18_source_failure_ledger_recomputes_reachability`; `test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity` |
+| R19-P1-03 opaque response/publication authority | `test_round18_validated_response_raw_bytes_are_opaque_authority`; `test_round18_publication_projections_return_sealed_candidate_bytes` |
+| R19-P1-04 process observation identity | `test_round19_process_observation_is_fixture_or_supported_os_production`; `test_round18_process_descriptor_requires_os_identity_and_spawn_binding` |
+| R19-P1-05 stage-dependent provenance | `test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations`; `test_round19_next_config_discriminator_is_required_and_disjoint` |
+| R19-P2-01 path byte ordering | `test_round19_target_path_order_uses_nfc_utf8_bytes_not_json_escaping`; `test_round18_path_only_order_is_nfc_utf8_and_object_rows_are_canonical_json` |
+| R19 partial-safe follow-up | `test_round19_source_acquisition_union_is_typed_and_fail_closed`; `test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity` |
+
+Production implementation remains outside this plan. Do not start I05-PLAN-002 or claim readiness until a fresh
+current-SHA Strict review returns `P0=0 / P1=0 / review_status=pass`.
 
 ## 目標
 

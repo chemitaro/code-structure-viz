@@ -44,6 +44,7 @@ from tests.contracts.next_reference_validation import (
     TRUSTED_PROFILE_PHYSICAL_TO_VIRTUAL,
     TRUSTED_PROFILE_SHADOWING_WITNESS,
     VALIDATOR_SCHEMA,
+    CompleteSourceSeal,
     InstrumentedSourceReader,
     NextDecisionContext,
     NextPublicationContext,
@@ -51,11 +52,14 @@ from tests.contracts.next_reference_validation import (
     NextRunDecision,
     NextValidatedDecision,
     NotApplicableDecision,
+    PartialSourceSeal,
     PreResponseFailureDecision,
     PublicationBoundaryDecision,
     SourceAcquisitionError,
+    SourceAcquisitionUnavailable,
     SourceDiscoveryIntent,
     SourceFailureLedger,
+    SourceIntegrityFatal,
     _assert_file_path,
     _assert_path,
     _canonical_json_line,
@@ -70,6 +74,7 @@ from tests.contracts.next_reference_validation import (
     _publication_context_for_validated_request,
     _scan_export_file,
     _toolchain_snapshot,
+    _trusted_fixture_source_seal,
     assert_encoded_stdin_boundary,
     assert_limit_boundary,
     bounded_decode_json,
@@ -122,12 +127,15 @@ from tests.contracts.next_reference_validation import (
     recompute_record_id,
     recompute_request_id,
     recompute_run_fingerprint,
+    register_source_acquisition_seal,
     render_plantuml,
     render_public_diagnostic_stderr,
+    request_from_partial_source_seal,
     resolve_target_resolutions,
     response_boundary_decision,
     scan_export_syntax_census,
     seal_source_acquisition,
+    seal_source_acquisition_result,
     source_plan_descriptor,
     target_completeness_failure,
     target_failure_from_proof,
@@ -141,6 +149,7 @@ from tests.contracts.next_reference_validation import (
     validate_no_trusted_shadowing,
     validate_plantuml_contract,
     validate_process_launch_descriptor,
+    validate_process_launch_observation,
     validate_proof,
     validate_published_projection,
     validate_request_envelope,
@@ -150,6 +159,7 @@ from tests.contracts.next_reference_validation import (
     validate_run_status_vector,
     validate_runtime_manifest,
     validate_semantic_snapshot,
+    validate_stage_dependent_provenance,
     validate_trusted_environment,
 )
 from tests.contracts.next_reference_validation import (
@@ -426,6 +436,7 @@ def _config_projection(
     )
     projection: dict[str, Any] = {
         "schema": "code-structure-viz.domain-config/next/v1",
+        "request_independent": False,
         "projects": config_projects,
         "targets": list(targets or []),
         "upstream_depth": 1,
@@ -1254,6 +1265,28 @@ def _request(
     else:
         context = canonical_run_context(**run_context)
         assert context["budget_resolved"] == (limits or _next_limits())["max_entities"]
+    project_values = sorted(
+        copy.deepcopy(model["projects"]), key=lambda item: canonical_json_bytes(item["root"])
+    )
+    limits_value = copy.deepcopy(limits or _next_limits())
+    fixture_files = {
+        record["path"]: base64.b64decode(record["content_base64"], validate=True)
+        for record in files
+    }
+    # The reference fixture seals the trusted snapshot before the request is
+    # handed to the response boundary.  It is an explicit test observation,
+    # not a source seal reconstructed from request metadata.
+    fixture_seal = seal_source_acquisition(
+        SourceDiscoveryIntent(
+            project_roots=tuple(project["root"] for project in project_values),
+            control_candidates=(),
+        ),
+        InstrumentedSourceReader(fixture_files),
+        {
+            "observed_limits": copy.deepcopy(limits_value),
+            "observed_trusted_environment_digest": trusted_environment_digest,
+        },
+    )
     request = {
         "schema": "code-structure-viz.next-adapter-request/v1",
         "protocol": "code-structure-viz.next-adapter/v1",
@@ -1265,16 +1298,34 @@ def _request(
             "semantic_profile_id": "next-trusted-profile-v1",
             "sha256": trusted_environment_digest,
         },
-        "projects": sorted(
-            copy.deepcopy(model["projects"]), key=lambda item: canonical_json_bytes(item["root"])
-        ),
+        "projects": project_values,
         "files": files,
         "targets": list(targets or []),
-        "limits": copy.deepcopy(limits or _next_limits()),
+        "limits": limits_value,
         "run_context": context,
     }
     request["request_id"] = recompute_request_id(request)
+    register_source_acquisition_seal(request, fixture_seal)
     return request
+
+
+def _source_seal_for_graph(graph: dict[str, Any], *, project_roots: tuple[str, ...]) -> Any:
+    """Build a trusted fixture seal for graph-locality counterexamples."""
+
+    normalized_graph = {
+        "nodes": tuple(sorted(copy.deepcopy(graph["nodes"]), key=canonical_json_bytes)),
+        "edges": tuple(sorted(copy.deepcopy(graph["edges"]), key=canonical_json_bytes)),
+        "open_edges": tuple(sorted(copy.deepcopy(graph["open_edges"]), key=canonical_json_bytes)),
+    }
+    files = {node["path"]: b"" for node in normalized_graph["nodes"]}
+    return seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=project_roots, control_candidates=()),
+        InstrumentedSourceReader(files, source_graph=normalized_graph),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
 
 
 def _complete_proof(model: dict[str, Any]) -> dict[str, Any]:
@@ -2082,6 +2133,7 @@ def _legacy_domain_fixture(
                 run_context=run_context,
             )
         )
+        legacy_source_seal = _trusted_fixture_source_seal(legacy_request, None)
         validated_decision = NextValidatedDecision(
             validated_model=model,
             validated_proof={},
@@ -2115,6 +2167,7 @@ def _legacy_domain_fixture(
             publication_context=_publication_context_for_validated_request(
                 legacy_request,
                 run_context,
+                source_seal=legacy_source_seal,
                 toolchain={
                     "node": {
                         "status": "not_applicable"
@@ -2454,6 +2507,7 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
             trusted_environment_digest=trusted_environment["sha256"],
             process_launch_descriptor_digest=digest(publication_context.process_launch_descriptor),
             source_failure_ledger=publication_context.source_failure_ledger,
+            source_failure_ledger_digest=publication_context.source_failure_ledger_digest,
         )
     if value["request"] is not None:
         value["request"]["run_fingerprint"] = value["run_fingerprint"]
@@ -2600,7 +2654,7 @@ def _publication_stdout(
     assert isinstance(publication, PublicationBoundaryDecision)
     domain = _publication_domain(publication)
     manifest = _publication_manifest(publication)
-    if publication.publication_outcome == "selected_artifact_unavailable":
+    if publication.publication_outcome in {"payload_unavailable", "selected_artifact_unavailable"}:
         sealed_result = publication.sealed_stdout_result
         assert sealed_result.endswith(b"\n")
         result = json.loads(sealed_result.decode("utf-8"))
@@ -2622,7 +2676,9 @@ def _publication_stdout_bytes(publication: PublicationBoundaryDecision) -> bytes
     assert isinstance(publication, PublicationBoundaryDecision)
     retained = publication.selected_stdout["retained"]
     if publication.publication_outcome == "payload_unavailable":
-        return b""
+        sealed_result = publication.sealed_stdout_result
+        assert sealed_result.endswith(b"\n")
+        return sealed_result
     if publication.selected_stdout["allowed"] and retained:
         return cast(bytes, retained)
     sealed_result = publication.sealed_stdout_result
@@ -2666,7 +2722,10 @@ def _validate_publication_chain(
         summary = _run_summary_value(manifest["run"]["status"], domain)
         _validator("run-summary-v1.schema.json").validate(summary)
         if publication.selected_stdout["allowed"] and publication.selected_stdout["retained"]:
-            assert stdout_bytes == _canonical_json_line(summary)
+            if publication.publication_outcome == "payload_unavailable":
+                assert stdout_bytes == publication.sealed_stdout_result
+            else:
+                assert stdout_bytes == _canonical_json_line(summary)
     elif selector == "manifest":
         manifest_bytes = _canonical_json_line(manifest)
         if stdout["availability"]:
@@ -3556,9 +3615,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     partial_model["coverage"]["counts"]["discovered"] += 4
     partial_model["coverage"]["counts"]["excluded"] = 3
     partial_model["coverage"]["counts"]["failed"] = 1
-    target_request = _request()
-    target_request["targets"] = ["path:src/Button.tsx"]
-    target_request["request_id"] = recompute_request_id(target_request)
+    target_request = _request(targets=["path:src/Button.tsx"])
     partial_proof["target_resolutions"] = [
         {
             "target_key": "path:src/Button.tsx",
@@ -4156,23 +4213,12 @@ def test_round15_source_failure_preserves_locality_boundary(
         graph["edges"] = ()
         graph["open_edges"] = ()
     graph["edges"] = tuple(graph["edges"])
-    seal_id = "d" * 64
     proof_roots = ({"id": "round15-root", "path_ref": "src/Broken.tsx"},)
-    ledger_material = {
-        "seal_id": seal_id,
-        "source_graph": graph,
-        "project_roots": ["."],
-        "targets": ["path:src/Other.tsx"],
-        "proof_roots": list(proof_roots),
-    }
-    ledger = SourceFailureLedger(
+    ledger = SourceFailureLedger.from_seal(
+        _source_seal_for_graph(graph, project_roots=(".",)),
         failures=({"path": "src/Broken.tsx", "stage": "source_read"},),
-        source_graph=graph,
-        project_roots=(".",),
         targets=("path:src/Other.tsx",),
         proof_roots=proof_roots,
-        seal_id=seal_id,
-        seal_digest=digest(ledger_material),
     )
     result = classify_source_failure(ledger)
     assert result == {
@@ -4716,6 +4762,7 @@ def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None
             "snapshot_id": seal.snapshot_id,
             "revision_before": seal.revision_before,
             "revision_after": seal.revision_after,
+            "source_graph_digest": digest(seal.source_graph),
         }
     )
     assert reader.read_counts == {
@@ -4853,6 +4900,9 @@ def test_round17_source_inventory_accepts_observations_only() -> None:
 
 def test_round17_request_owned_derived_source_claims_cannot_override_control_bytes() -> None:
     request = _request()
+    original_seal = _trusted_fixture_source_seal(
+        validate_adapter_request(copy.deepcopy(request)), None
+    )
     request["projects"][0]["compiler_options"]["module"] = "commonjs"
     request["projects"][0]["config_digest"] = project_config_digest(request["projects"][0])
     request["request_id"] = recompute_request_id(request)
@@ -4861,6 +4911,7 @@ def test_round17_request_owned_derived_source_claims_cannot_override_control_byt
         _publication_context_for_validated_request(
             sealed,
             _run_context(),
+            source_seal=original_seal,
             toolchain={
                 "node": {"status": "available", "version": "22.14.0", "failure_kind": None},
                 "node_version": "22.14.0",
@@ -4923,69 +4974,55 @@ def test_round18_source_seal_rejects_caller_membership_and_typed_drift() -> None
             InstrumentedSourceReader(files, revision="v1", revision_after="v2"),
             observed,
         )
-    assert drift.value.code == "CSV-NEXT-SOURCE-002"
+    assert drift.value.code == "CSV-NEXT-SOURCE-003"
 
 
 def test_round17_source_failure_ledger_derives_locality_without_caller_booleans() -> None:
-    base: dict[str, Any] = {
-        "failures": ({"path": "src/Broken.tsx", "stage": "source_read"},),
-        "source_graph": {
-            "nodes": (
-                {"id": "broken", "path": "src/Broken.tsx", "project_root": "."},
-                {"id": "unrelated", "path": "src/Other.tsx", "project_root": "."},
-            ),
-            "edges": (),
-            "open_edges": (),
-        },
-        "project_roots": (".",),
-        "targets": ("path:src/Other.tsx",),
-        "proof_roots": ({"id": "failure-root", "path_ref": "src/Broken.tsx"},),
-        "seal_id": "a" * 64,
+    graph: dict[str, Any] = {
+        "nodes": (
+            {"id": "broken", "path": "src/Broken.tsx", "project_root": "."},
+            {"id": "unrelated", "path": "src/Other.tsx", "project_root": "."},
+        ),
+        "edges": (),
+        "open_edges": (),
     }
-    base["seal_digest"] = digest(
-        {
-            "seal_id": base["seal_id"],
-            "source_graph": base["source_graph"],
-            "project_roots": list(base["project_roots"]),
-            "targets": list(base["targets"]),
-            "proof_roots": list(base["proof_roots"]),
-        }
+    source_seal = _source_seal_for_graph(graph, project_roots=(".",))
+    ledger = SourceFailureLedger.from_seal(
+        source_seal,
+        failures=({"path": "src/Broken.tsx", "stage": "source_read"},),
+        targets=("path:src/Other.tsx",),
+        proof_roots=({"id": "failure-root", "path_ref": "src/Broken.tsx"},),
     )
-    ledger = SourceFailureLedger(**base)
     assert ledger.safe_subset_proven is True
+    # Locality booleans are derived fields, not accepted evidence.
     for field in ("isolated", "target_tainted", "safe_subset_proven"):
-        injected = copy.deepcopy(base)
-        injected["failures"] = ({"path": "src/Broken.tsx", "stage": "source_read", field: True},)
         with pytest.raises(AssertionError):
-            SourceFailureLedger(**injected)
+            SourceFailureLedger.from_seal(
+                source_seal,
+                failures=({"path": "src/Broken.tsx", "stage": "source_read", field: True},),
+                targets=("path:src/Other.tsx",),
+                proof_roots=({"id": "failure-root", "path_ref": "src/Broken.tsx"},),
+            )
 
-    tainted = copy.deepcopy(base)
-    tainted["source_graph"]["edges"] = ({"source": "broken", "target": "unrelated"},)
-    tainted["seal_digest"] = digest(
-        {
-            "seal_id": tainted["seal_id"],
-            "source_graph": tainted["source_graph"],
-            "project_roots": list(tainted["project_roots"]),
-            "targets": list(tainted["targets"]),
-            "proof_roots": list(tainted["proof_roots"]),
-        }
+    tainted_graph = copy.deepcopy(graph)
+    tainted_graph["edges"] = ({"source": "broken", "target": "unrelated"},)
+    tainted_ledger = SourceFailureLedger.from_seal(
+        _source_seal_for_graph(tainted_graph, project_roots=(".",)),
+        failures=({"path": "src/Broken.tsx", "stage": "source_read"},),
+        targets=("path:src/Other.tsx",),
+        proof_roots=({"id": "failure-root", "path_ref": "src/Broken.tsx"},),
     )
-    tainted_ledger = SourceFailureLedger(**tainted)
     assert tainted_ledger.explicit_target_tainted is True
     assert tainted_ledger.safe_subset_proven is False
 
-    nonisolatable = copy.deepcopy(base)
-    nonisolatable["source_graph"]["open_edges"] = ({"source": "broken"},)
-    nonisolatable["seal_digest"] = digest(
-        {
-            "seal_id": nonisolatable["seal_id"],
-            "source_graph": nonisolatable["source_graph"],
-            "project_roots": list(nonisolatable["project_roots"]),
-            "targets": list(nonisolatable["targets"]),
-            "proof_roots": list(nonisolatable["proof_roots"]),
-        }
+    nonisolatable_graph = copy.deepcopy(graph)
+    nonisolatable_graph["open_edges"] = ({"source": "broken"},)
+    nonisolatable_ledger = SourceFailureLedger.from_seal(
+        _source_seal_for_graph(nonisolatable_graph, project_roots=(".",)),
+        failures=({"path": "src/Broken.tsx", "stage": "source_read"},),
+        targets=("path:src/Other.tsx",),
+        proof_roots=({"id": "failure-root", "path_ref": "src/Broken.tsx"},),
     )
-    nonisolatable_ledger = SourceFailureLedger(**nonisolatable)
     assert nonisolatable_ledger.safe_subset_proven is False
 
 
@@ -4993,6 +5030,149 @@ def test_round18_source_failure_ledger_recomputes_reachability() -> None:
     """Round 18 keeps the raw-graph counterexamples as executable evidence."""
 
     test_round17_source_failure_ledger_derives_locality_without_caller_booleans()
+
+
+def test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations() -> None:
+    def row(observed: bool) -> dict[str, Any]:
+        return {
+            "state": "observed" if observed else "unobserved",
+            "value": True if observed else None,
+        }
+
+    value = {
+        "kind": "request_independent",
+        "stage": "source_selection",
+        "failure_code": "CSV-NEXT-SOURCE-003",
+        "observed": {
+            "request": row(False),
+            "limits": row(True),
+            "source_plan": row(True),
+            "toolchain": row(False),
+            "trusted_environment": row(False),
+            "compatibility": row(False),
+            "process_launch": row(False),
+            "budget": row(False),
+        },
+    }
+    validate_stage_dependent_provenance(value)
+    _validator("next-provenance-v1.schema.json").validate(value)
+    observed = cast(dict[str, Any], value["observed"])
+    for mutation in (
+        {**value, "failure_code": "CSV-NEXT-CONFIG-001"},
+        {**value, "observed": {**observed, "limits": row(False)}},
+        {**value, "observed": {**observed, "request": row(True)}},
+    ):
+        with pytest.raises(AssertionError):
+            validate_stage_dependent_provenance(mutation)
+        with pytest.raises(ValidationError):
+            _validator("next-provenance-v1.schema.json").validate(mutation)
+
+
+def test_round19_next_config_discriminator_is_required_and_disjoint() -> None:
+    """The request-independent config branch cannot be inferred or mixed."""
+
+    config = _config_projection()
+    validator = _validator("next-config-v1.schema.json")
+    validator.validate(config)
+
+    omitted = copy.deepcopy(config)
+    omitted.pop("request_independent")
+    with pytest.raises(ValidationError):
+        validator.validate(omitted)
+
+    mixed = copy.deepcopy(config)
+    mixed["request_independent"] = True
+    mixed["failure_stage"] = "config_validation"
+    mixed["failure_code"] = "CSV-NEXT-CONFIG-001"
+    with pytest.raises(ValidationError):
+        validator.validate(mixed)
+
+
+def test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity() -> None:
+    """One read failure becomes a partial seal instead of aborting acquisition."""
+
+    request = _request()
+    source_files = {
+        record["path"]: base64.b64decode(record["content_base64"], validate=True)
+        for record in request["files"]
+    }
+    failed_path = "src/isolated.tsx"
+    source_files[failed_path] = b"export const isolated = true;\n"
+    reader = InstrumentedSourceReader(
+        source_files,
+        read_failures={failed_path: "CSV-NEXT-SOURCE-003"},
+    )
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        reader,
+        {
+            "observed_limits": copy.deepcopy(request["limits"]),
+            "observed_trusted_environment_digest": request["trusted_type_environment"]["sha256"],
+        },
+        targets=["path:src/Button.tsx"],
+        proof_roots=[{"id": "failure-root", "path_ref": failed_path}],
+    )
+    assert isinstance(result, PartialSourceSeal)
+    assert reader.sealed is True
+    assert reader.read_counts[failed_path] == 1
+    assert failed_path not in result.safe_file_set
+    assert set(result.safe_file_set) == set(source_files) - {failed_path}
+    assert result.ledger.safe_subset_proven is True
+    assert result.ledger.source_seal.seal_id == result.seal.seal_id
+
+    safe_request = request_from_partial_source_seal(result, request)
+    response_bytes = canonical_json_bytes(_response(_model(), request=safe_request.snapshot()))
+    projection = validate_response_envelope(
+        response_bytes,
+        safe_request,
+        source_seal=result.seal,
+        source_failure_ledger=result.ledger,
+    )
+    decision = projection["validated_decision"]
+    assert isinstance(decision, NextValidatedDecision)
+    context = decision.publication_context
+    assert context.source_failure_ledger_seal is not None
+    assert context.source_failure_ledger_seal.ledger_digest == result.ledger.ledger_digest
+    assert context.source_failure_ledger_digest == result.ledger.ledger_digest
+    assert context.run_fingerprint_preimage["source_failure_ledger_digest"] == (
+        result.ledger.ledger_digest
+    )
+
+    mutated = copy.deepcopy(result.seal.source_graph)
+    mutated["edges"] = ({"source": "failure-root", "target": "unrelated"},)
+    with pytest.raises(AssertionError):
+        SourceFailureLedger.from_seal(
+            replace(result.seal, source_graph=mutated),
+            failures=({"path": failed_path, "stage": "source_read"},),
+            targets=("path:src/Button.tsx",),
+            proof_roots=({"id": "failure-root", "path_ref": failed_path},),
+        )
+
+
+def test_round19_source_acquisition_union_is_typed_and_fail_closed() -> None:
+    files = {"src/Button.tsx": b"export default Button;\n"}
+    base = {
+        "observed_limits": copy.deepcopy(_next_limits()),
+        "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+    }
+    complete = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(files),
+        base,
+    )
+    assert isinstance(complete, CompleteSourceSeal)
+    malformed = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        InstrumentedSourceReader({"tsconfig.json": b"[]"}),
+        base,
+    )
+    assert isinstance(malformed, SourceAcquisitionUnavailable)
+    drift = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(files, revision="v1", revision_after="v2"),
+        base,
+    )
+    assert isinstance(drift, SourceIntegrityFatal)
 
 
 def test_project_surface_order_is_root_path_while_semantic_records_remain_id_order() -> None:
@@ -5061,6 +5241,51 @@ def test_round18_path_only_order_is_nfc_utf8_and_object_rows_are_canonical_json(
         },
     )
     assert seal.source_view["files"] == sorted(seal.source_view["files"], key=canonical_json_bytes)
+
+
+def test_round19_target_path_order_uses_nfc_utf8_bytes_not_json_escaping() -> None:
+    ordered_paths = sorted(['a"', "aA"], key=_path_sort_key)
+    request = _request(targets=[f"path:{path}" for path in ordered_paths])
+    validate_request_envelope(request)
+    reversed_request = copy.deepcopy(request)
+    reversed_request["targets"] = list(reversed(reversed_request["targets"]))
+    reversed_request["request_id"] = recompute_request_id(reversed_request)
+    with pytest.raises(AssertionError):
+        validate_request_envelope(reversed_request)
+
+
+def test_round19_html_describes_closed_source_union_without_adding_a_diagram() -> None:
+    html_path = (
+        ROOT
+        / "spec-dock"
+        / "initiatives"
+        / "init-00001-code-structure-visualization"
+        / "epics"
+        / "epic-00002-safe-git-structure-comparison"
+        / "issues"
+        / "iss-00008-generate-nextjs-component-snapshots"
+        / "artifacts"
+        / "20260831t022707z--nextjs-component-snapshot-best-practice-guide.html"
+    )
+    source = html_path.read_text(encoding="utf-8")
+    start = source.index('<section id="round19">')
+    end = source.index("</section>", start)
+    section = source[start:end]
+    for token in (
+        "CompleteSourceSeal",
+        "PartialSourceSeal",
+        "SourceAcquisitionUnavailable",
+        "SourceIntegrityFatal",
+        "SourceFailureLedger.from_seal",
+        "requestより先にsourceをseal",
+        "next-process-launch-observation-v1",
+        "next-provenance-v1",
+        "NFC UTF-8 byte order",
+        "fresh current-SHA Strictはpending",
+    ):
+        assert token in section
+    assert source.count('class="plantuml-source"') == 8
+    assert source.count('class="plantuml-diagram"') == 8
 
 
 def test_round11_inverse_project_order_reaches_response_domain_root_and_fingerprint() -> None:
@@ -6765,8 +6990,6 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     selected_payload = semantic_artifacts["next.snapshot.semantic.json"]
     exact = finalize_publication_decision(
         decision,
-        artifact_bytes=semantic_artifacts,
-        stdout_candidates=_sealed_candidates_for_publication(decision, semantic_artifacts),
         adapter_stdout_chunks=(canonical_json_bytes(response),),
         adapter_stderr_chunks=(b"diagnostic",),
         adapter_stdout_limit=len(canonical_json_bytes(response)),
@@ -6790,10 +7013,6 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
 
     selected_overrun = finalize_publication_decision(
         decision,
-        artifact_bytes=semantic_artifacts,
-        stdout_candidates=_sealed_candidates_for_publication(
-            decision, semantic_artifacts, selected_copy_failure=True
-        ),
         adapter_stdout_chunks=(canonical_json_bytes(response),),
         adapter_stdout_limit=len(canonical_json_bytes(response)),
         selected_stdout_limit=len(selected_payload) - 1,
@@ -6815,12 +7034,6 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
 
     capture_overrun = finalize_publication_decision(
         decision,
-        artifact_bytes={},
-        stdout_candidates=_sealed_candidates_for_publication(
-            decision,
-            {"next.snapshot.semantic.json": selected_payload},
-            transport_failure=True,
-        ),
         adapter_stdout_chunks=(b"ab",),
         adapter_stdout_limit=1,
     )
@@ -6836,15 +7049,14 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     assert capture_stream["stable_reason"] == "domain_payload_unavailable"
     assert capture_artifacts == {}
     assert capture_stderr == b""
+    assert _publication_stdout_bytes(capture_overrun) == capture_overrun.sealed_stdout_result
+    assert capture_overrun.sealed_stdout_result.endswith(b"\n")
+    _validator("stdout-result-v1.schema.json").validate(
+        json.loads(capture_overrun.sealed_stdout_result.decode("utf-8"))
+    )
 
     stderr_overrun = finalize_publication_decision(
         decision,
-        artifact_bytes={},
-        stdout_candidates=_sealed_candidates_for_publication(
-            decision,
-            {"next.snapshot.semantic.json": selected_payload},
-            transport_failure=True,
-        ),
         adapter_stdout_chunks=(canonical_json_bytes(response),),
         adapter_stdout_limit=len(canonical_json_bytes(response)),
         adapter_stderr_chunks=(b"ab",),
@@ -6861,6 +7073,10 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     assert stderr_stream["stable_reason"] == "domain_payload_unavailable"
     assert stderr_artifacts == {}
     assert stderr_bytes == b""
+    assert stderr_overrun.sealed_stdout_result.endswith(b"\n")
+    _validator("stdout-result-v1.schema.json").validate(
+        json.loads(stderr_overrun.sealed_stdout_result.decode("utf-8"))
+    )
 
     target_request = _request(targets=["path:src/Missing.tsx"])
     target_response_bytes = canonical_json_bytes(_response(_model(), request=target_request))
@@ -6870,10 +7086,6 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     assert isinstance(target_decision, NextValidatedDecision)
     public_stderr_overrun = finalize_publication_decision(
         target_decision,
-        artifact_bytes={},
-        stdout_candidates=_sealed_candidates_for_publication(
-            target_decision, {"next.snapshot.semantic.json": b""}
-        ),
         adapter_stdout_chunks=(target_response_bytes,),
         adapter_stdout_limit=len(target_response_bytes),
         public_stderr_limit=1,
@@ -6883,6 +7095,10 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     assert public_stderr_overrun.public_stderr["manifest_only"] is True
     assert _publication_stderr_bytes(public_stderr_overrun) == b""
     assert public_stderr_overrun.artifact_bytes == {}
+    assert public_stderr_overrun.sealed_stdout_result.endswith(b"\n")
+    _validator("stdout-result-v1.schema.json").validate(
+        json.loads(public_stderr_overrun.sealed_stdout_result.decode("utf-8"))
+    )
 
     measurement_snapshot = exact.adapter_stdout
     measurement_snapshot["retained"] = b"substituted"
@@ -6917,12 +7133,12 @@ def test_round17_publication_artifacts_are_bound_to_the_immutable_decision() -> 
         **artifacts,
         "next.snapshot.semantic.json": canonical_json_bytes(semantic) + b"\n",
     }
-    with pytest.raises(AssertionError):
-        finalize_publication_decision(
+    with pytest.raises(TypeError):
+        finalize_publication_decision(  # type: ignore[call-arg]
             decision,
-            artifact_bytes=substituted,
-            stdout_candidates=_sealed_candidates_for_publication(decision, substituted),
             adapter_stdout_chunks=(canonical_json_bytes(response),),
+            artifact_bytes=substituted,
+            stdout_candidates={"summary": b"substituted"},
         )
 
 
@@ -6944,8 +7160,6 @@ def test_round18_publication_projections_return_sealed_candidate_bytes() -> None
     }
     publication = finalize_publication_decision(
         decision,
-        artifact_bytes=artifacts,
-        stdout_candidates=candidates,
         adapter_stdout_chunks=(response_bytes,),
         adapter_stdout_limit=len(response_bytes),
         selected_stdout_limit=len(candidates["manifest"]),
@@ -7018,8 +7232,6 @@ def test_round17_final_publication_stdout_union_seals_summary_manifest_exact_and
 
     exact = finalize_publication_decision(
         decision,
-        artifact_bytes=artifacts,
-        stdout_candidates=_sealed_candidates_for_publication(decision, artifacts),
         adapter_stdout_chunks=(response_bytes,),
         adapter_stdout_limit=len(response_bytes),
         selected_stdout_limit=len(selected_payload),
@@ -7045,10 +7257,6 @@ def test_round17_final_publication_stdout_union_seals_summary_manifest_exact_and
 
     overrun = finalize_publication_decision(
         decision,
-        artifact_bytes=artifacts,
-        stdout_candidates=_sealed_candidates_for_publication(
-            decision, artifacts, selected_copy_failure=True
-        ),
         adapter_stdout_chunks=(response_bytes,),
         adapter_stdout_limit=len(response_bytes),
         selected_stdout_limit=len(selected_payload) - 1,
@@ -7100,6 +7308,22 @@ def test_round16_process_launch_descriptor_is_closed_and_security_deterministic(
     )
     validate_process_launch_descriptor(descriptor)
     _validator("next-process-launch-v1.schema.json").validate(descriptor)
+    validate_process_launch_observation(
+        {
+            "schema": "code-structure-viz.next-process-launch-observation/v1",
+            "version": 1,
+            "kind": "fixture",
+            "host_os": "fixture",
+            "node_status": "available",
+            "fixture_id": "reference-process-v1",
+            "identity_token": "fixture-node-identity",
+            "spawn_primitive": "recorded-fixture",
+            "toctou_failure_point": "not-exercised",
+            "argv": descriptor["argv"],
+            "shell": False,
+            "process_group": descriptor["process_group"],
+        }
+    )
     assert descriptor["node_realpath"].startswith("/")
     assert descriptor["shell"] is False
     assert descriptor["fd_inheritance"] == {"close_fds": True, "allowed": [0, 1, 2]}
@@ -8019,41 +8243,19 @@ def test_round16_pre_response_failure_is_narrowed_to_nonisolatable_source() -> N
     """Pre-adapter source failures never invent a partial model/request."""
 
     context = _run_context(independent=True)
-    ledger = SourceFailureLedger(
-        failures=(
-            {
-                "path": "src/Broken.tsx",
-                "stage": "source_read",
-            },
+    source_graph = {
+        "nodes": (
+            {"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},
+            {"id": "unrelated", "path": "src/Unrelated.tsx", "project_root": "src"},
         ),
-        source_graph={
-            "nodes": (
-                {"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},
-                {"id": "unrelated", "path": "src/Unrelated.tsx", "project_root": "src"},
-            ),
-            "edges": (),
-            "open_edges": (),
-        },
-        project_roots=("src",),
+        "edges": (),
+        "open_edges": (),
+    }
+    ledger = SourceFailureLedger.from_seal(
+        _source_seal_for_graph(source_graph, project_roots=("src",)),
+        failures=({"path": "src/Broken.tsx", "stage": "source_read"},),
         targets=("path:src/Unrelated.tsx",),
         proof_roots=({"id": "failure-root-1", "path_ref": "src/Broken.tsx"},),
-        seal_id="b" * 64,
-        seal_digest=digest(
-            {
-                "seal_id": "b" * 64,
-                "source_graph": {
-                    "nodes": (
-                        {"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},
-                        {"id": "unrelated", "path": "src/Unrelated.tsx", "project_root": "src"},
-                    ),
-                    "edges": (),
-                    "open_edges": (),
-                },
-                "project_roots": ["src"],
-                "targets": ["path:src/Unrelated.tsx"],
-                "proof_roots": [{"id": "failure-root-1", "path_ref": "src/Broken.tsx"}],
-            }
-        ),
     )
     assert classify_source_failure(ledger)["diagnostic_code"] == "CSV-NEXT-SOURCE-001"
     assert ledger.safe_subset_proven is True
@@ -8104,35 +8306,16 @@ def test_round16_pre_response_failure_is_narrowed_to_nonisolatable_source() -> N
 
 def test_round16_request_independent_source_failure_projects_schema_valid_whole_run() -> None:
     context = _run_context(independent=True)
-    ledger = SourceFailureLedger(
-        failures=(
-            {
-                "path": "src/Broken.tsx",
-                "stage": "source_selection",
-            },
-        ),
-        source_graph={
-            "nodes": ({"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},),
-            "edges": (),
-            "open_edges": ({"source": "broken"},),
-        },
-        project_roots=("src",),
+    source_graph = {
+        "nodes": ({"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},),
+        "edges": (),
+        "open_edges": ({"source": "broken"},),
+    }
+    ledger = SourceFailureLedger.from_seal(
+        _source_seal_for_graph(source_graph, project_roots=("src",)),
+        failures=({"path": "src/Broken.tsx", "stage": "source_selection"},),
         targets=(),
         proof_roots=({"id": "failure-root-2", "path_ref": "src/Broken.tsx"},),
-        seal_id="c" * 64,
-        seal_digest=digest(
-            {
-                "seal_id": "c" * 64,
-                "source_graph": {
-                    "nodes": ({"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},),
-                    "edges": (),
-                    "open_edges": ({"source": "broken"},),
-                },
-                "project_roots": ["src"],
-                "targets": [],
-                "proof_roots": [{"id": "failure-root-2", "path_ref": "src/Broken.tsx"}],
-            }
-        ),
     )
     decision_context = NextDecisionContext(
         run_context=context,
@@ -8905,6 +9088,10 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round18-stdout-closed-union",
         "round18-html-validation-order",
         "round18-path-byte-order",
+        "round19-source-partial-safe-union",
+        "round19-process-observation-union",
+        "round19-stage-provenance",
+        "round19-target-path-byte-order",
     } <= set(fixture["positive"])
     assert {
         "cross-domain",
@@ -8982,6 +9169,12 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round18-stdout-branch-field",
         "round18-html-order-reversal",
         "round18-path-quote-inverse",
+        "round19-source-partial-read-abort",
+        "round19-ledger-edge-substitution",
+        "round19-process-observation-substitution",
+        "round19-stage-provenance-injection",
+        "round19-config-discriminator-omission",
+        "round19-target-quote-inverse",
     } <= set(fixture["negative"])
 
     mapping = fixture["criterion_test_map"]
@@ -8998,6 +9191,8 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         *(f"round17.p2-{index}" for index in range(1, 4)),
         *(f"round18.p1-{index}" for index in range(1, 8)),
         *(f"round18.p2-{index}" for index in range(1, 3)),
+        *(f"round19.p1-{index}" for index in range(1, 6)),
+        "round19.p2-1",
     }
     assert set(mapping) == expected_criteria
     mapped_tests = {name for names in mapping.values() for name in names}

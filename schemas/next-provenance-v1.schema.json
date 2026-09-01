@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-provenance-v1",
+  "title": "CodeStructureViz Next stage-dependent observation provenance v1",
+  "description": "The observation prefix is explicit: an early failure cannot invent a suffix, and a later failure cannot erase an observed prefix.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "stage", "failure_code", "observed"],
+  "properties": {
+    "kind": {"enum": ["request_bound", "request_independent"]},
+    "stage": {"type": ["string", "null"], "enum": [null, "config_validation", "project_validation", "source_selection", "source_read", "source_integrity", "target_resolution", "trust_validation", "stdin_encode", "adapter_heap", "node_discovery", "node_spawn", "node_timeout", "node_process", "adapter_stderr_capture", "adapter_stdout_capture", "response_raw_bytes", "response_decode", "response_protocol", "response_schema", "response_validation", "model_validation", "public_stderr_capture"]},
+    "failure_code": {"type": ["string", "null"], "enum": [null, "CSV-NEXT-CONFIG-001", "CSV-NEXT-CONFIG-002", "CSV-NEXT-PROJECT-001", "CSV-NEXT-PROJECT-002", "CSV-NEXT-SOURCE-001", "CSV-NEXT-SOURCE-002", "CSV-NEXT-SOURCE-003", "CSV-NEXT-TARGET-001", "CSV-NEXT-TRUST-001", "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003", "CSV-NEXT-NODE-001", "CSV-NEXT-NODE-002", "CSV-NEXT-NODE-003", "CSV-NEXT-NODE-004", "CSV-NEXT-LIMIT-001", "CSV-NEXT-LIMIT-002", "CSV-NEXT-LIMIT-003", "CSV-NEXT-LIMIT-004", "CSV-NEXT-LIMIT-005", "CSV-NEXT-PROTOCOL-001", "CSV-NEXT-EXPORT-001", "CSV-NEXT-IDENTITY-001", "CSV-NEXT-FLOW-001", "CSV-NEXT-TYPE-001"]},
+    "observed": {"$ref": "#/$defs/observation_map"}
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {"const": "request_bound"},
+        "stage": {"const": null},
+        "failure_code": {"const": null},
+        "observed": {"$ref": "#/$defs/all_observed"}
+      }
+    },
+    {
+      "properties": {
+        "kind": {"const": "request_independent"},
+        "stage": {"type": "string", "minLength": 1},
+        "failure_code": {"type": "string", "minLength": 1},
+        "observed": {"$ref": "#/$defs/observation_map"}
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"kind": {"const": "request_independent"}, "stage": {"const": "source_selection"}}},
+      "then": {"properties": {"failure_code": {"const": "CSV-NEXT-SOURCE-003"}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent"}, "stage": {"const": "config_validation"}}},
+      "then": {"properties": {"observed": {"$ref": "#/$defs/early_observed"}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent"}, "stage": {"enum": ["source_selection", "source_read", "source_integrity"]}}},
+      "then": {"properties": {"observed": {"$ref": "#/$defs/source_observed"}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent"}, "stage": {"const": "trust_validation"}}},
+      "then": {"properties": {"observed": {"$ref": "#/$defs/trust_observed"}}}
+    }
+  ],
+  "$defs": {
+    "observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "value"],
+      "properties": {"state": {"const": "observed"}, "value": {"const": true}}
+    },
+    "unobserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "value"],
+      "properties": {"state": {"const": "unobserved"}, "value": {"const": null}}
+    },
+    "observation_map": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request", "limits", "source_plan", "toolchain", "trusted_environment", "compatibility", "process_launch", "budget"],
+      "properties": {
+        "request": {"oneOf": [{"$ref": "#/$defs/observed"}, {"$ref": "#/$defs/unobserved"}]},
+        "limits": {"oneOf": [{"$ref": "#/$defs/observed"}, {"$ref": "#/$defs/unobserved"}]},
+        "source_plan": {"oneOf": [{"$ref": "#/$defs/observed"}, {"$ref": "#/$defs/unobserved"}]},
+        "toolchain": {"oneOf": [{"$ref": "#/$defs/observed"}, {"$ref": "#/$defs/unobserved"}]},
+        "trusted_environment": {"oneOf": [{"$ref": "#/$defs/observed"}, {"$ref": "#/$defs/unobserved"}]},
+        "compatibility": {"oneOf": [{"$ref": "#/$defs/observed"}, {"$ref": "#/$defs/unobserved"}]},
+        "process_launch": {"oneOf": [{"$ref": "#/$defs/observed"}, {"$ref": "#/$defs/unobserved"}]},
+        "budget": {"oneOf": [{"$ref": "#/$defs/observed"}, {"$ref": "#/$defs/unobserved"}]}
+      }
+    },
+    "all_observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request", "limits", "source_plan", "toolchain", "trusted_environment", "compatibility", "process_launch", "budget"],
+      "properties": {
+        "request": {"$ref": "#/$defs/observed"}, "limits": {"$ref": "#/$defs/observed"}, "source_plan": {"$ref": "#/$defs/observed"}, "toolchain": {"$ref": "#/$defs/observed"}, "trusted_environment": {"$ref": "#/$defs/observed"}, "compatibility": {"$ref": "#/$defs/observed"}, "process_launch": {"$ref": "#/$defs/observed"}, "budget": {"$ref": "#/$defs/observed"}
+      }
+    },
+    "early_observed": {
+      "allOf": [
+        {"$ref": "#/$defs/observation_map"},
+        {"properties": {"request": {"$ref": "#/$defs/unobserved"}, "limits": {"$ref": "#/$defs/unobserved"}, "source_plan": {"$ref": "#/$defs/unobserved"}, "toolchain": {"$ref": "#/$defs/unobserved"}, "trusted_environment": {"$ref": "#/$defs/unobserved"}, "compatibility": {"$ref": "#/$defs/unobserved"}, "process_launch": {"$ref": "#/$defs/unobserved"}}}
+      ]
+    },
+    "source_observed": {
+      "allOf": [
+        {"$ref": "#/$defs/observation_map"},
+        {"properties": {"request": {"$ref": "#/$defs/unobserved"}, "limits": {"$ref": "#/$defs/observed"}, "source_plan": {"$ref": "#/$defs/observed"}, "toolchain": {"$ref": "#/$defs/unobserved"}, "trusted_environment": {"$ref": "#/$defs/unobserved"}, "compatibility": {"$ref": "#/$defs/unobserved"}, "process_launch": {"$ref": "#/$defs/unobserved"}}}
+      ]
+    },
+    "trust_observed": {
+      "allOf": [
+        {"$ref": "#/$defs/observation_map"},
+        {"properties": {"request": {"$ref": "#/$defs/unobserved"}, "limits": {"$ref": "#/$defs/observed"}, "source_plan": {"$ref": "#/$defs/observed"}, "toolchain": {"$ref": "#/$defs/observed"}, "trusted_environment": {"$ref": "#/$defs/observed"}, "compatibility": {"$ref": "#/$defs/observed"}, "process_launch": {"$ref": "#/$defs/observed"}}}
+      ]
+    }
+  }
+}

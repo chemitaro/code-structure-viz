@@ -4,7 +4,7 @@
   "title": "CodeStructureViz resolved Next domain config v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "projects", "targets", "upstream_depth", "downstream_depth", "formats", "limits", "trusted_environment_digest", "source_plan", "source_plan_digest", "domain_config_digest"],
+  "required": ["schema", "request_independent", "projects", "targets", "upstream_depth", "downstream_depth", "formats", "limits", "trusted_environment_digest", "source_plan", "source_plan_digest", "domain_config_digest"],
   "properties": {
     "schema": {"const": "code-structure-viz.domain-config/next/v1"},
     "projects": {"type": "array", "items": {"$ref": "#/$defs/project"}},
@@ -21,7 +21,7 @@
     "failure_stage": {"type": "string", "minLength": 1},
     "failure_code": {"type": "string", "pattern": "^CSV-NEXT-[A-Z0-9-]+$"}
   },
-  "anyOf": [
+  "oneOf": [
     {
       "properties": {
         "request_independent": {"const": false},
@@ -33,7 +33,7 @@
         "source_plan": {"$ref": "urn:code-structure-viz:schema:next-source-plan-v1"},
         "source_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       },
-      "not": {"required": ["failure_stage", "failure_code"]}
+      "not": {"anyOf": [{"required": ["failure_stage"]}, {"required": ["failure_code"]}]}
     },
     {
       "required": ["request_independent", "failure_stage", "failure_code"],
@@ -46,18 +46,6 @@
         "trusted_environment_digest": {"const": null},
         "source_plan": {"const": null},
         "source_plan_digest": {"const": null}
-      }
-    },
-    {
-      "not": {"required": ["request_independent"]},
-      "properties": {
-        "projects": {"minItems": 1},
-        "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
-        "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
-        "limits": {"$ref": "#/$defs/limits"},
-        "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "source_plan": {"$ref": "urn:code-structure-viz:schema:next-source-plan-v1"},
-        "source_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     }
   ],

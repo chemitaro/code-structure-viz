@@ -128,3 +128,38 @@ new status or measurement. Round18 reference vectors exercise positive and
 negative discriminator/reason cases, schema-valid bytes, and canonical path
 ordering. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
 production implementation is absent.
+
+## Round 19 closed stage provenance and source outcomes
+
+The stage-dependent provenance schema is a closed `oneOf`. A
+request-independent failure records the observed prefix together with its
+stage and catalog code; every later field is explicitly
+`{"state":"unobserved","value":null}`. A source-selection/read/integrity
+failure may retain limits and source-plan observations only when those values
+were measured before the failure. Configuration and project failures do not
+receive synthetic limits, toolchain, trusted environment, process descriptor,
+compatibility, budget, request, or source plan. The nested and top-level
+`request_independent` discriminators are mandatory and mutually exclusive
+with the normal resolved branch.
+
+The source acquisition result is a closed union. A proven safe local subset
+uses `CSV-NEXT-SOURCE-001` with `partial_safe`; an unisolated read or control
+failure uses `CSV-NEXT-SOURCE-003` with `payload_unavailable`. The ledger
+derives locality and target taint from the sealed raw graph and includes the
+source-seal digest. It does not accept caller booleans, replacement edges, or
+caller-provided seal identifiers. The safe subset request carries the same
+seal and ledger identity into the response decision and publication context.
+
+The diagnostic code and stage are validated together, before model/entity
+budget routing. Structural resource boundaries use `CSV-NEXT-LIMIT-003`, and
+malformed/schema/proof violations use the catalog's protocol code. Target
+reason rows remain restricted to `CSV-NEXT-TARGET-001` and its selected Next
+unavailable branch.
+
+Round 19 executable evidence includes
+`test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations`,
+`test_round19_next_config_discriminator_is_required_and_disjoint`,
+`test_round19_source_acquisition_union_is_typed_and_fail_closed`, and
+`test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity`.
+Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
+implementation is absent.

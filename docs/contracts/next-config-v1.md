@@ -292,3 +292,29 @@ request-independent fields are all closed schema branches. Path-only order is
 NFC UTF-8 byte order; object rows use canonical JSON bytes. Fresh current-SHA
 Strict is pending, readiness is unconfirmed, and production implementation is
 absent.
+
+## Round 19 configuration discriminator and provenance
+
+The resolved Next config has a required boolean `request_independent`. The
+normal branch is `request_independent=false` and must contain non-empty
+projects, resolved limits, trusted environment, source plan, and matching
+digests. The request-independent branch is `request_independent=true`, must
+contain `failure_stage` and `failure_code`, and must use empty projects,
+null limits, null trusted environment, null source plan/digest, and null
+depths. These branches are a disjoint JSON-Schema `oneOf`; omission or mixing
+normal values into the independent branch is invalid.
+
+`schemas/next-provenance-v1.schema.json` gives the failure-stage observation
+prefix its own closed union. A config/project failure cannot invent later
+limits, source-plan, toolchain, trusted-environment, compatibility, process,
+or budget observations. Source-selection/read/integrity branches retain the
+limits and source-plan values already observed, while later values remain
+`unobserved`/`null`. `NextRunContext` independently checks the budget source
+and requested/resolved values and requires a selected Next format to be in
+`requested_formats`.
+
+Round 19's executable negative coverage is
+`test_round19_next_config_discriminator_is_required_and_disjoint` and
+`test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations`.
+Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
+implementation is absent.

@@ -101,3 +101,34 @@ acceptance later. Request-independent provenance uses explicit
 `null`/`unobserved` values for facts not observed before the failure. Fresh
 current-SHA Strict remains pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 19 observed process identity union
+
+The launch boundary is represented by
+`schemas/next-process-launch-observation-v1.schema.json`, a closed union of
+`fixture` and `production`. A fixture row is named reference-test evidence
+(`fixture_id`, `identity_token`, and `recorded-fixture`); it must never be
+promoted to production launch evidence.
+
+The production branch is supported only on `darwin` and `linux`. It requires
+the absolute verified Node realpath, Node digest/version, file identity at
+hash and spawn (realpath, digest, version, device, inode), a verified open FD
+handle retained through spawn, the OS-specific verified-FD spawn primitive,
+an equal post-spawn identity check, and the close-on-exec/non-inheritance FD
+lifecycle. `argv`, `shell=false`, and process-group creation/termination are
+shared required fields. The identity algorithm is fail-closed: a path,
+symlink, mount/inode, hash, version, handle, spawn primitive, or post-spawn
+identity mismatch cannot produce an available observation. A host that cannot
+provide the guarantee produces an unavailable result rather than a fake
+default.
+
+`validate_process_launch_observation` and the JSON Schema are reference
+validation only. They intentionally do not open or spawn a host executable;
+the Plan must add a real OS process-level acceptance later. The local
+faithful iterable capture harness is not evidence for that future test.
+
+Round 19 provenance is tied to reviewed SHA
+`0b80bff7706ca4bec770dbdf25620fbb5d2ecc2d`, CI `33557963556`, and the
+historical Strict result `P0=0 / P1=5 / P2=1 / fail`. Fresh current-SHA
+Strict remains pending, readiness is unconfirmed, and production
+implementation is absent.

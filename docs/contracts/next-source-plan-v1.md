@@ -168,3 +168,52 @@ plan. The reference tests cover malformed controls, revision drift, duplicate
 reads, caller-derived mutations, ledger substitution, and the local/global
 failure split. This is a data-only contract: fresh current-SHA Strict is
 pending, readiness is unconfirmed, and production implementation is absent.
+
+## Round 19 trusted enumeration and source-result union
+
+Round 19 closes the remaining request-to-seal ambiguity. The only source
+authority is a seal created before the private adapter request. A request is
+checked against that already sealed identity and captured file set; no
+request-derived helper may construct a replacement `SourceAcquisitionSeal`.
+The reference fixture registry is only a lookup for an observation that was
+created before the request and is not a production source of paths or bytes.
+
+The trusted enumerator follows this order:
+
+1. Accept `SourceDiscoveryIntent` containing only project roots, known
+   project-root control candidates, and fixed discovery rules.
+2. Observe each candidate from the frozen snapshot once. Decode the limited
+   JSONC dialect (UTF-8 BOM, comments, and trailing commas outside strings),
+   reject duplicate keys and non-object/type-invalid values, and resolve one
+   local `extends` string. Arrays, package-based extends, unknown nested
+   configuration, path escapes, and malformed controls fail closed.
+3. Derive include/exclude/files, source roots, effective roles, control
+   closure, and final membership from those frozen control bytes. Suffixes do
+   not select a role by themselves, and string values are never coerced to
+   booleans.
+4. Read the final control/program/context membership once, perform the
+   revision and digest/size checks, then atomically seal
+   `FinalSourceAcquisitionPlan` and `SourceView` together. The request file set
+   must equal the seal's captured set exactly.
+
+The result is a closed union:
+
+| result | evidence and next action |
+| --- | --- |
+| `CompleteSourceSeal` | all planned reads and checks succeeded; create the normal request |
+| `PartialSourceSeal` | one or more program/context reads failed, and the seal-owned graph proves an isolated safe subset; create a filtered request with the same seal and ledger identity |
+| `SourceAcquisitionUnavailable` | control or non-isolatable source failure; manifest-only `CSV-NEXT-SOURCE-003`/`payload_unavailable` |
+| `SourceIntegrityFatal` | revision drift, seal/digest inconsistency, duplicate read, or post-seal read; fail closed without a publication |
+
+`SourceFailureLedger.from_seal(seal, failures, targets, proof_roots)` is the
+only ledger constructor. It recomputes reachability, safe subset, and target
+taint from the seal-owned raw graph; caller booleans, graph replacement,
+`seal_id`, and digest claims are not accepted. The ledger digest includes the
+source-seal digest. `CSV-NEXT-SOURCE-001` is emitted only for the proven
+localized partial branch; `CSV-NEXT-SOURCE-003` covers the unavailable and
+integrity-safe failure branches. Reference evidence includes
+`test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity`
+and `test_round19_source_acquisition_union_is_typed_and_fail_closed`.
+
+Round 19 remains a data-only contract. Fresh current-SHA Strict is pending,
+readiness is unconfirmed, and the production adapter/CLI is absent.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import fnmatch
 import hashlib
 import json
 import re
@@ -407,7 +408,10 @@ class NextPublicationContext:
     run_context: NextRunContext
     run_fingerprint_preimage: dict[str, Any]
     source_failure_ledger: tuple[dict[str, Any], ...]
+    source_failure_ledger_seal: SourceFailureLedger | None
     process_launch_descriptor: dict[str, Any] | None
+    source_failure_ledger_digest: str | None
+    source_failure_ledger_evidence: dict[str, Any] | None
     observation_provenance: dict[str, Any]
 
     def __post_init__(self) -> None:
@@ -424,7 +428,9 @@ class NextPublicationContext:
             "semantic_files",
             "run_fingerprint_preimage",
             "source_failure_ledger",
+            "source_failure_ledger_seal",
             "process_launch_descriptor",
+            "source_failure_ledger_evidence",
             "observation_provenance",
         ):
             object.__setattr__(self, name, copy.deepcopy(getattr(self, name)))
@@ -438,6 +444,31 @@ class NextPublicationContext:
             assert isinstance(failure["isolated"], bool)
             assert isinstance(failure["target_tainted"], bool)
         object.__setattr__(self, "source_failure_ledger", ledger)
+        ledger_digest = self.source_failure_ledger_digest
+        evidence = self.source_failure_ledger_evidence
+        ledger_seal = self.source_failure_ledger_seal
+        if ledger_digest is None:
+            assert evidence is None
+            assert not ledger
+            assert ledger_seal is None
+        else:
+            assert isinstance(ledger_seal, SourceFailureLedger)
+            assert ledger_seal.ledger_digest == ledger_digest
+            assert tuple(ledger_seal.failures) == ledger
+            assert re.fullmatch(r"[0-9a-f]{64}", ledger_digest)
+            assert isinstance(evidence, dict)
+            assert set(evidence) == {
+                "source_seal_id",
+                "source_seal_digest",
+                "source_graph",
+                "failures",
+                "targets",
+                "proof_roots",
+                "ledger_digest",
+            }
+            assert evidence["ledger_digest"] == ledger_digest
+            assert evidence["failures"] == list(ledger)
+        object.__setattr__(self, "source_failure_ledger_evidence", copy.deepcopy(evidence))
         seal = self.source_acquisition_seal
         provenance = self.observation_provenance
         assert set(provenance) == {"kind", "failure_stage", "failure_code", "observed"}
@@ -537,6 +568,7 @@ class NextPublicationContext:
             assert preimage["formats"] == self.run_context["requested_formats"]
             assert preimage["stdout_selector"] == self.run_context["stdout_selector"]
             assert preimage["source_failure_ledger"] == list(self.source_failure_ledger)
+            assert preimage.get("source_failure_ledger_digest") == ledger_digest
             return
         assert self.source_view_descriptor is not None
         assert self.source_view_fingerprint is not None
@@ -564,6 +596,7 @@ class NextPublicationContext:
                 "snapshot_id": seal.snapshot_id,
                 "revision_before": seal.revision_before,
                 "revision_after": seal.revision_after,
+                "source_graph_digest": digest(seal.source_graph),
             }
         )
         ledger = tuple(self.source_failure_ledger)
@@ -588,6 +621,7 @@ class NextPublicationContext:
         assert preimage["adapter_version"] == self.toolchain["adapter_version"]
         assert preimage["protocol"] == self.toolchain["protocol"]
         assert preimage["source_failure_ledger"] == list(ledger)
+        assert preimage.get("source_failure_ledger_digest") == ledger_digest
         validate_process_launch_descriptor(self.process_launch_descriptor)
         assert self.process_launch_descriptor["node_status"] == self.toolchain["node"]["status"]
         assert self.process_launch_descriptor["node_version"] == self.toolchain["node_version"]
@@ -618,6 +652,8 @@ class NextPublicationContext:
             "run_context",
             "run_fingerprint_preimage",
             "source_failure_ledger",
+            "source_failure_ledger_seal",
+            "source_failure_ledger_evidence",
             "process_launch_descriptor",
             "observation_provenance",
         }:
@@ -1050,6 +1086,69 @@ def decision_failure_spec(diagnostic_code: str, stage: str) -> dict[str, Any]:
         "ref_permission": entry["ref_permission"],
         "known_counts": KNOWN_COUNT_KEYS,
     }
+
+
+PROVENANCE_FIELDS = (
+    "request",
+    "limits",
+    "source_plan",
+    "toolchain",
+    "trusted_environment",
+    "compatibility",
+    "process_launch",
+    "budget",
+)
+PROVENANCE_SOURCE_STAGES = frozenset({"source_selection", "source_read", "source_integrity"})
+PROVENANCE_TRUST_STAGES = frozenset({"trust_validation"})
+
+
+def validate_stage_dependent_provenance(value: dict[str, Any]) -> None:
+    """Validate the closed observed-prefix contract for one failure stage."""
+
+    assert set(value) == {"kind", "stage", "failure_code", "observed"}
+    assert value["kind"] in {"request_bound", "request_independent"}
+    observed = value["observed"]
+    assert set(observed) == set(PROVENANCE_FIELDS)
+    for field_name in PROVENANCE_FIELDS:
+        row = observed[field_name]
+        assert set(row) == {"state", "value"}
+        assert row["state"] in {"observed", "unobserved"}
+        if row["state"] == "observed":
+            assert row["value"] is True
+        else:
+            assert row["value"] is None
+    if value["kind"] == "request_bound":
+        assert value["stage"] is None and value["failure_code"] is None
+        assert all(row == {"state": "observed", "value": True} for row in observed.values())
+        return
+    stage = value["stage"]
+    code = value["failure_code"]
+    assert isinstance(stage, str) and isinstance(code, str)
+    decision_failure_spec(code, stage)
+    expected_observed = set()
+    if stage in PROVENANCE_SOURCE_STAGES:
+        expected_observed.update({"limits", "source_plan"})
+    elif stage in PROVENANCE_TRUST_STAGES:
+        expected_observed.update(
+            {
+                "limits",
+                "source_plan",
+                "toolchain",
+                "trusted_environment",
+                "compatibility",
+                "process_launch",
+            }
+        )
+    assert observed["request"] == {"state": "unobserved", "value": None}
+    for field_name in PROVENANCE_FIELDS:
+        if field_name == "budget":
+            continue
+        expected = (
+            {"state": "observed", "value": True}
+            if field_name in expected_observed
+            else {"state": "unobserved", "value": None}
+        )
+        assert observed[field_name] == expected
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1772,11 +1871,15 @@ class InstrumentedSourceReader:
         snapshot_id: str = "snapshot-v1",
         revision: str = "revision-v1",
         revision_after: str | None = None,
+        source_graph: dict[str, Any] | None = None,
+        read_failures: Mapping[str, str] | None = None,
     ) -> None:
         self._files = dict(files)
         self.snapshot_id = snapshot_id
         self.revision_before = revision
         self.revision_after = revision if revision_after is None else revision_after
+        self._source_graph = copy.deepcopy(source_graph)
+        self._read_failures = dict(read_failures or {})
         self.read_counts: dict[str, int] = {}
         self.enumeration_calls = 0
         self.sealed = False
@@ -1806,6 +1909,12 @@ class InstrumentedSourceReader:
         assert path in self._files, path
         self.read_counts[path] = self.read_counts.get(path, 0) + 1
         assert self.read_counts[path] == 1, path
+        if path in self._read_failures:
+            raise SourceAcquisitionError(
+                self._read_failures[path],
+                "source_read",
+                f"trusted snapshot read failed: {path}",
+            )
         return self._files[path]
 
     def seal(self) -> int:
@@ -1813,6 +1922,18 @@ class InstrumentedSourceReader:
         self.sealed = True
         self.seal_calls += 1
         return self.seal_calls
+
+    @property
+    def source_graph(self) -> dict[str, Any] | None:
+        """Return the reader-owned raw graph observation, if supplied."""
+
+        return copy.deepcopy(self._source_graph)
+
+    @property
+    def read_failures(self) -> dict[str, str]:
+        """Return the typed failures observed by this reader."""
+
+        return copy.deepcopy(self._read_failures)
 
 
 class SourceAcquisitionError(AssertionError):
@@ -1837,6 +1958,35 @@ class SourceAcquisitionSeal:
     snapshot_id: str
     revision_before: str
     revision_after: str
+    source_graph: dict[str, Any]
+    captured_files: dict[str, bytes]
+
+    def __post_init__(self) -> None:
+        graph = copy.deepcopy(self.source_graph)
+        assert set(graph) == {"nodes", "edges", "open_edges"}
+        assert self.plan_digest == digest(self.final_plan)
+        assert self.source_view_fingerprint == digest(self.source_view)
+        assert self.seal_id == digest(
+            {
+                "plan_digest": self.plan_digest,
+                "source_view_fingerprint": self.source_view_fingerprint,
+                "seal_operation": self.seal_operation,
+                "snapshot_id": self.snapshot_id,
+                "revision_before": self.revision_before,
+                "revision_after": self.revision_after,
+                "source_graph_digest": digest(graph),
+            }
+        )
+        object.__setattr__(self, "source_graph", graph)
+        captured = {path: bytes(payload) for path, payload in self.captured_files.items()}
+        assert tuple(sorted(captured, key=_path_sort_key)) == tuple(captured)
+        object.__setattr__(self, "captured_files", captured)
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name in {"final_plan", "source_view", "source_graph", "captured_files"}:
+            return copy.deepcopy(value)
+        return value
 
 
 @dataclass(frozen=True)
@@ -1856,15 +2006,116 @@ class SourceDiscoveryIntent:
     hard_exclusions: tuple[str, ...] = SOURCE_PLAN_HARD_EXCLUSIONS
 
 
+def _default_source_graph(
+    files: Mapping[str, bytes], project_roots: tuple[str, ...] = (".",)
+) -> dict[str, Any]:
+    """Create the reader-owned graph used when a fixture has no edge witness."""
+
+    nodes = [
+        {
+            "id": digest({"kind": "source_node", "path": path}),
+            "path": path,
+            "project_root": next(
+                (root for root in sorted(project_roots, key=_path_sort_key) if _under(path, root)),
+                ".",
+            ),
+        }
+        for path in sorted(files, key=_path_sort_key)
+    ]
+    return {
+        "nodes": sorted(nodes, key=canonical_json_bytes),
+        "edges": [],
+        "open_edges": [],
+    }
+
+
+def _strip_jsonc(payload: bytes, path: str) -> str:
+    """Normalize the deliberately small JSONC dialect used by project controls.
+
+    BOM, line/block comments, and trailing commas are accepted only outside
+    quoted strings.  The parser remains strict JSON after this lexical pass;
+    duplicate keys and non-finite numbers are rejected by ``_control_json``.
+    """
+
+    try:
+        text = payload.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", f"invalid UTF-8 control file: {path}"
+        ) from exc
+    output: list[str] = []
+    index = 0
+    in_string = False
+    escaped = False
+    while index < len(text):
+        character = text[index]
+        if in_string:
+            output.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            index += 1
+            continue
+        if character == '"':
+            in_string = True
+            output.append(character)
+            index += 1
+            continue
+        if character == "/" and index + 1 < len(text) and text[index + 1] == "/":
+            index += 2
+            while index < len(text) and text[index] not in "\r\n":
+                index += 1
+            continue
+        if character == "/" and index + 1 < len(text) and text[index + 1] == "*":
+            index += 2
+            end = text.find("*/", index)
+            if end < 0:
+                raise SourceAcquisitionError(
+                    "CSV-NEXT-CONFIG-002", "source_control", f"unterminated comment: {path}"
+                )
+            index = end + 2
+            continue
+        if character == ",":
+            lookahead = index + 1
+            while lookahead < len(text) and text[lookahead].isspace():
+                lookahead += 1
+            if lookahead < len(text) and text[lookahead] in "]}":
+                index += 1
+                continue
+        output.append(character)
+        index += 1
+    if in_string or escaped:
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", f"unterminated string: {path}"
+        )
+    return "".join(output)
+
+
 def _control_json(contents: dict[str, bytes], path: str) -> dict[str, Any]:
     """Decode one frozen control file; malformed control is typed failure."""
 
     payload = contents.get(path)
     if payload is None:
         return {}
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"duplicate control key: {key}")
+            value[key] = item
+        return value
+
     try:
-        value = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        value = json.loads(
+            _strip_jsonc(payload, path),
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=lambda _constant: (_ for _ in ()).throw(ValueError("non-finite")),
+        )
+    except (SourceAcquisitionError, ValueError, json.JSONDecodeError) as exc:
         raise SourceAcquisitionError(
             "CSV-NEXT-CONFIG-002", "source_control", f"malformed control file: {path}"
         ) from exc
@@ -1905,104 +2156,255 @@ def _derive_project_descriptors_from_control_bytes(
     *,
     program_suffixes: tuple[str, ...],
     context_suffixes: tuple[str, ...],
+    inventory_paths: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
-    """Derive project/config/source-root facts from the sealed bytes only."""
+    """Derive config closure and final membership from frozen control bytes.
 
+    The inventory paths are names only; file content is read later, after this
+    function has resolved ``files/include/exclude``.  Internal metadata keys
+    are consumed by ``seal_source_acquisition`` before the public plan is
+    constructed.
+    """
+
+    paths = tuple(inventory_paths or tuple(contents))
+    path_set = set(paths)
     descriptors: list[dict[str, Any]] = []
-    for project_root in sorted(project_roots, key=_path_sort_key):
-        config_candidates = [
+
+    def control_path_for_root(root: str) -> str | None:
+        candidates = [
             path
-            for path in contents
-            if Path(path).name in {"tsconfig.json", "jsconfig.json"} and _under(path, project_root)
+            for path in path_set
+            if path
+            in {
+                "tsconfig.json" if root == "." else f"{root.rstrip('/')}/tsconfig.json",
+                "jsconfig.json" if root == "." else f"{root.rstrip('/')}/jsconfig.json",
+            }
         ]
-        config_path = next(
-            (path for path in sorted(config_candidates) if Path(path).name == "tsconfig.json"),
-            next(iter(sorted(config_candidates)), None),
+        return next(
+            (
+                path
+                for path in sorted(candidates, key=_path_sort_key)
+                if Path(path).name == "tsconfig.json"
+            ),
+            next(iter(sorted(candidates, key=_path_sort_key)), None),
         )
-        # A missing control file is an observed absence.  The conventional
-        # config path is retained only as a deterministic descriptor; it is
-        # never added to resolved_control_paths or read after the seal.
-        if config_path is None:
-            config_path = (
-                "tsconfig.json"
-                if project_root == "."
-                else f"{project_root.rstrip('/')}/tsconfig.json"
+
+    def control_parent_path(path: str, root: str, extends: str) -> str:
+        if extends.startswith("."):
+            base = str(Path(path).parent)
+            candidate = f"{base}/{extends}" if base != "." else extends
+            return _normalise_control_path(candidate, project_root=root)
+        return _normalise_control_path(extends, project_root=root)
+
+    def control_closure(
+        path: str,
+        root: str,
+        visiting: set[str],
+    ) -> tuple[dict[str, Any], tuple[str, ...], tuple[dict[str, Any], ...]]:
+        if path in visiting:
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", f"extends cycle: {path}"
             )
-        control = _control_json(contents, config_path)
-        raw_options = control.get("compilerOptions", {})
+        visiting.add(path)
+        control = _control_json(contents, path)
+        allowed_keys = {"compilerOptions", "include", "exclude", "files", "extends"}
+        if set(control) - allowed_keys:
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", f"unknown control key: {path}"
+            )
+        merged: dict[str, Any] = {}
+        closure: list[str] = []
+        edges: list[dict[str, Any]] = []
+        extends = control.get("extends")
+        if extends is not None and not isinstance(extends, str):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "extends must be one local path"
+            )
+        if isinstance(extends, str):
+            parent = control_parent_path(path, root, extends)
+            if parent not in path_set:
+                raise SourceAcquisitionError(
+                    "CSV-NEXT-CONFIG-002",
+                    "source_control",
+                    f"extends path was not captured: {parent}",
+                )
+            parent_value, parent_closure, parent_edges = control_closure(parent, root, visiting)
+            merged.update(parent_value)
+            closure.extend(parent_closure)
+            edges.extend(parent_edges)
+            edges.append({"project_root": root, "config_path": path, "extends": [parent]})
+            closure.append(parent)
+        parent_options = merged.get("compilerOptions", {})
+        child_options = control.get("compilerOptions", {})
+        if not isinstance(parent_options, dict) or not isinstance(child_options, dict):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "compilerOptions is not an object"
+            )
+        merged["compilerOptions"] = {**parent_options, **child_options}
+        for key in ("include", "exclude", "files"):
+            if key in control:
+                merged[key] = control[key]
+        visiting.remove(path)
+        closure.append(path)
+        return merged, tuple(dict.fromkeys(closure)), tuple(edges)
+
+    inventory_program_paths = [
+        path
+        for path in paths
+        if any(_under(path, root) for root in project_roots)
+        and (path.endswith(program_suffixes) or path.endswith(context_suffixes))
+    ]
+
+    for project_root in sorted(project_roots, key=_path_sort_key):
+        config_path = control_path_for_root(project_root)
+        # A missing control file is still represented deterministically, but
+        # it is not included in the sealed bytes or control closure.
+        descriptor_config_path = config_path or (
+            "tsconfig.json" if project_root == "." else f"{project_root.rstrip('/')}/tsconfig.json"
+        )
+        if config_path is None:
+            effective: dict[str, Any] = {}
+            closure: tuple[str, ...] = ()
+            extends_edges: tuple[dict[str, Any], ...] = ()
+        else:
+            effective, closure, extends_edges = control_closure(config_path, project_root, set())
+
+        raw_options = effective.get("compilerOptions", {})
         if not isinstance(raw_options, dict):
             raise SourceAcquisitionError(
                 "CSV-NEXT-CONFIG-002", "source_control", "compilerOptions is not an object"
             )
-        base_url = raw_options.get("baseUrl")
-        if isinstance(base_url, str):
-            base_url = _normalise_control_path(base_url, project_root=project_root)
-        else:
-            base_url = None
+        for option_name in ("allowJs", "checkJs"):
+            if option_name in raw_options and not isinstance(raw_options[option_name], bool):
+                raise SourceAcquisitionError(
+                    "CSV-NEXT-CONFIG-002", "source_control", f"{option_name} must be boolean"
+                )
+        base_url_value = raw_options.get("baseUrl")
+        if base_url_value is not None and not isinstance(base_url_value, str):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "baseUrl must be a path or null"
+            )
+        base_url = (
+            _normalise_control_path(base_url_value, project_root=project_root)
+            if isinstance(base_url_value, str)
+            else None
+        )
         raw_paths = raw_options.get("paths", {})
-        paths: dict[str, list[str]] = {}
-        if isinstance(raw_paths, dict):
-            for key, values in raw_paths.items():
-                if not isinstance(key, str) or not isinstance(values, list):
-                    raise SourceAcquisitionError(
-                        "CSV-NEXT-CONFIG-002", "source_control", "invalid compiler paths"
-                    )
-                if not all(isinstance(value, str) for value in values):
-                    raise SourceAcquisitionError(
-                        "CSV-NEXT-CONFIG-002", "source_control", "invalid compiler path value"
-                    )
-                paths[key] = [
-                    _normalise_control_path(value, project_root=project_root) for value in values
-                ]
-        compiler_options = {
-            "allow_js": bool(raw_options.get("allowJs", False)),
-            "check_js": bool(raw_options.get("checkJs", False)),
-            "jsx": raw_options.get("jsx", "preserve"),
-            "module": "esnext",
-            "module_resolution": "bundler",
-            "base_url": base_url,
-            "paths": paths,
-        }
-        if compiler_options["jsx"] not in {"preserve", "react", "react-jsx", "react-jsxdev"}:
+        if not isinstance(raw_paths, dict):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "paths must be an object"
+            )
+        path_aliases: dict[str, list[str]] = {}
+        for key, values in raw_paths.items():
+            if (
+                not isinstance(key, str)
+                or not isinstance(values, list)
+                or not all(isinstance(value, str) for value in values)
+            ):
+                raise SourceAcquisitionError(
+                    "CSV-NEXT-CONFIG-002", "source_control", "invalid compiler paths"
+                )
+            path_aliases[key] = [
+                _normalise_control_path(value, project_root=project_root) for value in values
+            ]
+        jsx = raw_options.get("jsx", "preserve")
+        if not isinstance(jsx, str) or jsx not in {
+            "preserve",
+            "react",
+            "react-jsx",
+            "react-jsxdev",
+        }:
             raise SourceAcquisitionError(
                 "CSV-NEXT-CONFIG-002", "source_control", "unsupported jsx compiler option"
             )
-        source_roots_value = control.get("include")
-        source_roots: list[str] = []
-        if source_roots_value is not None and not isinstance(source_roots_value, list):
-            raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "include is not an array"
-            )
-        if isinstance(source_roots_value, list):
-            if not all(isinstance(item, str) for item in source_roots_value):
+        compiler_options = {
+            "allow_js": raw_options.get("allowJs", False),
+            "check_js": raw_options.get("checkJs", False),
+            "jsx": jsx,
+            "module": "esnext",
+            "module_resolution": "bundler",
+            "base_url": base_url,
+            "paths": path_aliases,
+        }
+
+        include = effective.get("include")
+        exclude = effective.get("exclude", [])
+        explicit_files = effective.get("files", [])
+        for name, value in (("include", include), ("exclude", exclude), ("files", explicit_files)):
+            if value is not None and (
+                not isinstance(value, list) or not all(isinstance(item, str) for item in value)
+            ):
                 raise SourceAcquisitionError(
-                    "CSV-NEXT-CONFIG-002", "source_control", "include contains a non-path"
+                    "CSV-NEXT-CONFIG-002", "source_control", f"{name} must be an array of paths"
                 )
+        include_values = list(include or [])
+        exclude_values = list(exclude or [])
+        explicit_values = list(explicit_files or [])
+        source_roots: list[str] = []
+        for pattern in include_values:
+            normalized = _normalise_control_path(pattern, project_root=project_root)
+            static = re.split(r"[*?\[\{]", normalized, maxsplit=1)[0].rstrip("/") or project_root
+            source_roots.append(static)
+        if not source_roots and explicit_values:
             source_roots = [
-                _normalise_control_path(item, project_root=project_root)
-                for item in source_roots_value
+                _normalise_control_path(str(Path(item).parent), project_root=project_root)
+                for item in explicit_values
             ]
         if not source_roots:
-            program_paths = [
-                path
-                for path in contents
-                if _under(path, project_root)
-                and path.endswith((*program_suffixes, *context_suffixes))
+            default_src = "src" if project_root == "." else f"{project_root.rstrip('/')}/src"
+            source_roots = [
+                default_src
+                if any(_under(path, default_src) for path in inventory_program_paths)
+                else project_root
             ]
-            if any(
-                _under(path, "src" if project_root == "." else f"{project_root.rstrip('/')}/src")
-                for path in program_paths
-            ):
-                source_roots = ["src" if project_root == "." else f"{project_root.rstrip('/')}/src"]
-            else:
-                source_roots = [project_root]
         source_roots = sorted(set(source_roots), key=_path_sort_key)
+
+        def matches(pattern: str, candidate: str, *, _project_root: str = project_root) -> bool:
+            normalized_pattern = _normalise_control_path(pattern, project_root=_project_root)
+            relative = (
+                candidate
+                if _project_root == "."
+                else candidate.removeprefix(f"{_project_root.rstrip('/')}/")
+            )
+            relative_pattern = (
+                normalized_pattern
+                if _project_root == "."
+                else normalized_pattern.removeprefix(f"{_project_root.rstrip('/')}/")
+            )
+            return fnmatch.fnmatchcase(relative, relative_pattern) or fnmatch.fnmatchcase(
+                candidate, normalized_pattern
+            )
+
+        membership: set[str] = set()
+        for candidate in paths:
+            if not _under(candidate, project_root):
+                continue
+            if explicit_values:
+                included = candidate in {
+                    _normalise_control_path(item, project_root=project_root)
+                    for item in explicit_values
+                }
+            elif include_values:
+                included = any(matches(item, candidate) for item in include_values)
+            else:
+                included = any(_under(candidate, root) for root in source_roots)
+            excluded = any(matches(item, candidate) for item in exclude_values)
+            if (
+                included
+                and not excluded
+                and (candidate.endswith(program_suffixes) or candidate.endswith(context_suffixes))
+            ):
+                membership.add(candidate)
+        control_paths = tuple(dict.fromkeys(closure))
         descriptors.append(
             {
                 "root": project_root,
                 "source_roots": source_roots,
-                "config_path": config_path,
+                "config_path": descriptor_config_path,
                 "compiler_options": compiler_options,
+                "_resolved_control_paths": control_paths,
+                "_local_extends": extends_edges,
+                "_membership": tuple(sorted(membership, key=_path_sort_key)),
             }
         )
     return descriptors
@@ -2012,6 +2414,8 @@ def seal_source_acquisition(
     intent: SourceDiscoveryIntent | dict[str, Any],
     reader: InstrumentedSourceReader,
     inventory: dict[str, Any] | None = None,
+    *,
+    allow_partial: bool = False,
 ) -> SourceAcquisitionSeal:
     """Derive and atomically seal the final plan and SourceView.
 
@@ -2074,39 +2478,130 @@ def seal_source_acquisition(
     revision_before = reader.revision_before
     enumerated_paths = reader.enumerate_paths(project_roots, hard_exclusions)
     assert enumerated_paths == tuple(sorted(set(enumerated_paths), key=_path_sort_key))
-    # Control candidates are intent only.  The reader-owned enumeration is the
-    # source of truth; a missing candidate is observed absence, never an
-    # instruction to read a caller-supplied path set.
-    all_paths = tuple(
-        dict.fromkeys(
-            (*enumerated_paths, *(path for path in control_candidates if path in enumerated_paths))
+    enumerated_set = set(enumerated_paths)
+    root_control_paths = {
+        path
+        for root in project_roots
+        for name in SOURCE_PLAN_CONTROL_PATHS
+        for path in (name if root == "." else f"{root.rstrip('/')}/{name}",)
+        if path in enumerated_set
+    }
+    assert set(control_candidates) <= root_control_paths
+    # Explicit candidates narrow discovery, but never add arbitrary nested
+    # config paths.  With no explicit candidates every known root candidate is
+    # observed before source membership is resolved.
+    selected_control_paths = tuple(
+        sorted(control_candidates or root_control_paths, key=_path_sort_key)
+    )
+    contents: dict[str, bytes] = {}
+    failed_paths: set[str] = set()
+    control_queue = list(selected_control_paths)
+    while control_queue:
+        path = control_queue.pop(0)
+        if path in contents:
+            continue
+        try:
+            contents[path] = reader.read(path)
+        except SourceAcquisitionError:
+            if not allow_partial:
+                raise
+            failed_paths.add(path)
+        if Path(path).name not in {"tsconfig.json", "jsconfig.json"}:
+            continue
+        control_value = _control_json(contents, path)
+        extends_value = control_value.get("extends")
+        if extends_value is None:
+            continue
+        if not isinstance(extends_value, str):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "extends must be one local path"
+            )
+        project_root = next((root for root in project_roots if _under(path, root)), None)
+        assert project_root is not None
+        extend_path = (
+            _normalise_control_path(
+                f"{Path(path).parent}/{extends_value}", project_root=project_root
+            )
+            if extends_value.startswith(".")
+            else _normalise_control_path(extends_value, project_root=project_root)
+        )
+        if extend_path not in enumerated_set:
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002",
+                "source_control",
+                f"extends path was not captured: {extend_path}",
+            )
+        control_queue.append(extend_path)
+
+    # Derive the membership closure using names from the frozen inventory and
+    # bytes from the control phase.  No program/context file is read until
+    # this closure has been computed.
+    provisional_descriptors = _derive_project_descriptors_from_control_bytes(
+        project_roots,
+        contents,
+        program_suffixes=program_suffixes,
+        context_suffixes=context_suffixes,
+        inventory_paths=enumerated_paths,
+    )
+    final_paths = tuple(
+        sorted(
+            set(contents).union(
+                *(set(project.get("_membership", ())) for project in provisional_descriptors)
+            ),
+            key=_path_sort_key,
         )
     )
-    assert all_paths
-    contents = {path: reader.read(path) for path in all_paths}
+    assert final_paths
+    for path in final_paths:
+        if path not in contents:
+            try:
+                contents[path] = reader.read(path)
+            except SourceAcquisitionError:
+                if not allow_partial:
+                    raise
+                failed_paths.add(path)
     revision_after = reader.revision_after
     if revision_after != revision_before:
         raise SourceAcquisitionError(
-            "CSV-NEXT-SOURCE-002",
-            "source_revision",
+            "CSV-NEXT-SOURCE-003",
+            "source_integrity",
             "trusted source snapshot changed during acquisition",
         )
 
-    # Project descriptors, compiler options, source roots, and config paths
-    # are derived only from the frozen control bytes.  The inventory carries
-    # observations (limits and trusted-profile digest) but never a resolved
-    # project/role/extends plan supplied by the caller.
+    # Re-evaluate the same closure against the now-retained bytes.  This is a
+    # pure derivation pass; the reader is sealed only after all bytes and the
+    # drift check are complete.
     project_descriptors = _derive_project_descriptors_from_control_bytes(
         project_roots,
         contents,
         program_suffixes=program_suffixes,
         context_suffixes=context_suffixes,
+        inventory_paths=enumerated_paths,
     )
     assert project_descriptors
     limits = copy.deepcopy(inventory.get("observed_limits"))
     trusted_environment_digest = inventory.get("observed_trusted_environment_digest")
     assert isinstance(limits, dict)
     assert isinstance(trusted_environment_digest, str)
+    resolved_control_paths = [
+        {"project_root": project["root"], "path": path}
+        for project in project_descriptors
+        for path in project.pop("_resolved_control_paths", ())
+    ]
+    resolved_control_paths.extend(
+        {
+            "project_root": next(root for root in project_roots if _under(path, root)),
+            "path": path,
+        }
+        for path in selected_control_paths
+        if path not in {row["path"] for row in resolved_control_paths}
+    )
+    local_extends = [
+        edge for project in project_descriptors for edge in project.pop("_local_extends", ())
+    ]
+    memberships = {
+        project["root"]: set(project.pop("_membership", ())) for project in project_descriptors
+    }
     config = {
         "projects": project_descriptors,
         "limits": limits,
@@ -2115,78 +2610,19 @@ def seal_source_acquisition(
 
     projects_by_root = {project["root"]: project for project in project_descriptors}
     assert set(projects_by_root) == set(project_roots)
-    resolved_control_paths = [
-        {
-            "project_root": root,
-            "path": path,
-        }
-        for path in control_candidates
-        for root in project_roots
-        if path in contents and _under(path, root)
-    ]
-    local_extends: list[dict[str, Any]] = []
-    config_queue = [
-        path
-        for path in sorted(contents, key=_path_sort_key)
-        if Path(path).name in {"tsconfig.json", "jsconfig.json"}
-    ]
-    visited_configs: set[str] = set()
-    while config_queue:
-        path = config_queue.pop(0)
-        if path in visited_configs:
-            continue
-        visited_configs.add(path)
-        project_root = next((root for root in project_roots if _under(path, root)), None)
-        assert project_root is not None
-        control_value = _control_json(contents, path)
-        extends_value = control_value.get("extends")
-        if extends_value is None:
-            continue
-        if isinstance(extends_value, str):
-            extends_values = [extends_value]
-        elif isinstance(extends_value, list) and all(
-            isinstance(item, str) for item in extends_value
-        ):
-            extends_values = list(extends_value)
-        else:
-            raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "extends must be a path or path list"
-            )
-        resolved_extends = [
-            _normalise_control_path(item, project_root=project_root) for item in extends_values
-        ]
-        for extend_path in resolved_extends:
-            if extend_path not in contents:
-                raise SourceAcquisitionError(
-                    "CSV-NEXT-CONFIG-002",
-                    "source_control",
-                    f"extends path was not captured: {extend_path}",
-                )
-            if Path(extend_path).name in {"tsconfig.json", "jsconfig.json"}:
-                config_queue.append(extend_path)
-        local_extends.append(
-            {
-                "project_root": project_root,
-                "config_path": path,
-                "extends": sorted(set(resolved_extends), key=_path_sort_key),
-            }
-        )
-        resolved_control_paths.extend(
-            {"project_root": project_root, "path": extend_path} for extend_path in resolved_extends
-        )
-    resolved_control_paths = list(
-        {(row["project_root"], row["path"]): row for row in resolved_control_paths}.values()
-    )
+    control_names = {"package.json", "tsconfig.json", "jsconfig.json"}
     file_role_map: list[dict[str, Any]] = []
-    for path in sorted(contents, key=_path_sort_key):
+    for path in final_paths:
         project_root = next((root for root in project_roots if _under(path, root)), None)
         assert project_root is not None
-        basename = Path(path).name
-        if basename in {"package.json", "tsconfig.json", "jsconfig.json"}:
+        if path in contents and (
+            (Path(path).name in control_names and path in root_control_paths)
+            or path in resolved_control_paths
+        ):
             roles = ["control"]
-        elif path.endswith(context_suffixes):
+        elif path in memberships.get(project_root, set()) and path.endswith(context_suffixes):
             roles = ["context"]
-        elif path.endswith(program_suffixes):
+        elif path in memberships.get(project_root, set()) and path.endswith(program_suffixes):
             roles = ["program"]
         else:
             continue
@@ -2219,17 +2655,23 @@ def seal_source_acquisition(
         ],
         key=canonical_json_bytes,
     )
+    graph_files = dict(contents)
+    graph_files.update({path: b"" for path in failed_paths})
+    source_graph = reader.source_graph or _default_source_graph(graph_files, project_roots)
+    graph_digest = digest(source_graph)
     source_view = {
         "schema": "code-structure-viz.source-view/v1",
         "kind": "working-tree",
         "snapshot_id": reader.snapshot_id,
         "revision": revision_before,
         "head_commit": inventory.get("head_commit"),
+        "inventory_paths": sorted(enumerated_paths, key=_path_sort_key),
+        "source_graph_digest": graph_digest,
         "files": view_files,
         "file_count": len(view_files),
     }
     expected_files = inventory.get("file_digests")
-    if expected_files is not None:
+    if expected_files is not None and not failed_paths:
         assert expected_files == view_files
     plan_digest = digest(plan)
     source_view_fingerprint = digest(source_view)
@@ -2242,6 +2684,7 @@ def seal_source_acquisition(
             "snapshot_id": reader.snapshot_id,
             "revision_before": revision_before,
             "revision_after": revision_after,
+            "source_graph_digest": graph_digest,
         }
     )
     return SourceAcquisitionSeal(
@@ -2254,6 +2697,8 @@ def seal_source_acquisition(
         snapshot_id=reader.snapshot_id,
         revision_before=revision_before,
         revision_after=revision_after,
+        source_graph=source_graph,
+        captured_files={path: contents[path] for path in final_paths if path in contents},
     )
 
 
@@ -3890,6 +4335,26 @@ def validate_process_launch_descriptor(value: dict[str, Any]) -> None:
     }
 
 
+def validate_process_launch_observation(value: dict[str, Any]) -> None:
+    """Validate the fixture/production observation union without host access."""
+
+    schema_path = REPO_ROOT / "schemas" / "next-process-launch-observation-v1.schema.json"
+    schema = cast(dict[str, Any], json.loads(schema_path.read_text(encoding="utf-8")))
+    try:
+        Draft202012Validator(schema).validate(value)
+    except ValidationError as exc:
+        raise AssertionError("invalid process launch observation") from exc
+    if value["kind"] == "production":
+        assert value["file_identity_at_hash"] == value["file_identity_at_spawn"]
+        identity = value["file_identity_at_hash"]
+        assert value["node_realpath"] == identity["realpath"]
+        assert value["node_sha256"] == identity["sha256"]
+        assert value["post_spawn_identity_check"]["identity_at_spawn"] == identity
+        expected_primitive = f"{value['host_os']}-posix-spawn-verified-fd"
+        assert value["spawn_primitive"] == expected_primitive
+        assert value["toctou_failure_point"] == "none"
+
+
 def _compatibility_descriptor_snapshot() -> dict[str, Any]:
     """Return the pinned semantic descriptor sealed into each run decision."""
 
@@ -3976,44 +4441,69 @@ def _public_request_snapshot(
     return snapshot
 
 
-def _source_seal_for_validated_request(
-    request: ValidatedAdapterRequest,
-) -> SourceAcquisitionSeal:
-    """Read request files once and derive the source seal from those bytes."""
+_TRUSTED_SOURCE_SEALS: dict[str, SourceAcquisitionSeal] = {}
 
-    files: dict[str, bytes] = {}
-    for record in request["files"]:
-        content = base64.b64decode(record["content_base64"], validate=True)
-        files[record["path"]] = content
-    roots = tuple(project["root"] for project in request["projects"])
-    request_project_descriptors = [
+
+def _validate_request_matches_source_seal(
+    request: ValidatedAdapterRequest, source_seal: SourceAcquisitionSeal
+) -> None:
+    """Bind a validated request to the seal observed before request creation."""
+
+    plan_projects = [
+        {
+            key: copy.deepcopy(project[key])
+            for key in ("root", "source_roots", "config_path", "compiler_options")
+        }
+        for project in source_seal.final_plan["projects"]
+    ]
+    request_projects = [
         {
             key: copy.deepcopy(project[key])
             for key in ("root", "source_roots", "config_path", "compiler_options")
         }
         for project in request["projects"]
     ]
-    candidates = tuple(
-        path
-        for path in SOURCE_PLAN_CONTROL_PATHS
-        if path in files
-        or any(path == f"{root.rstrip('/')}/{path}" for root in roots if root != ".")
-    )
-    # A request can contain only source files.  Never ask the reader to invent
-    # absent control files; the frozen inventory is the observed path set.
-    candidates = tuple(path for path in candidates if path in files)
-    seal = seal_source_acquisition(
-        SourceDiscoveryIntent(project_roots=roots, control_candidates=candidates),
-        InstrumentedSourceReader(files),
-        {
-            "observed_limits": copy.deepcopy(request["limits"]),
-            "observed_trusted_environment_digest": request["trusted_type_environment"]["sha256"],
-        },
-    )
-    # Request-owned project descriptors are a claim that must agree with the
-    # bytes-derived source plan; they are not an alternate source authority.
-    assert seal.final_plan["projects"] == request_project_descriptors
-    return seal
+    assert request_projects == plan_projects
+    captured = source_seal.captured_files
+    request_files = {record["path"]: record for record in request["files"]}
+    assert set(request_files) == set(captured)
+    sealed_rows = {row["path"]: row for row in source_seal.source_view["files"]}
+    assert set(sealed_rows) == set(captured)
+    for path, record in request_files.items():
+        payload = base64.b64decode(record["content_base64"], validate=True)
+        assert payload == captured[path]
+        assert record["size_bytes"] == len(payload)
+        assert record["sha256"] == hashlib.sha256(payload).hexdigest()
+        assert sealed_rows[path]["size_bytes"] == len(payload)
+        assert sealed_rows[path]["sha256"] == record["sha256"]
+
+
+def register_source_acquisition_seal(
+    request: dict[str, Any] | ValidatedAdapterRequest, source_seal: SourceAcquisitionSeal
+) -> None:
+    """Register a trusted pre-request seal for a data-only fixture boundary."""
+
+    validated = validate_adapter_request(request)
+    _validate_request_matches_source_seal(validated, source_seal)
+    _TRUSTED_SOURCE_SEALS[digest(validated.snapshot())] = copy.deepcopy(source_seal)
+
+
+def _trusted_fixture_source_seal(
+    request: ValidatedAdapterRequest,
+    source_seal: SourceAcquisitionSeal | None,
+) -> SourceAcquisitionSeal:
+    """Resolve a pre-registered reference fixture seal, never derive one.
+
+    This helper exists only for the data-only test fixture registry.  The
+    production-shaped context builder below requires the explicit seal that
+    was observed before the request was formed; it never rebuilds a seal from
+    request files or request metadata.
+    """
+
+    resolved = source_seal or _TRUSTED_SOURCE_SEALS.get(digest(request.snapshot()))
+    assert resolved is not None, "a trusted source seal must precede adapter request validation"
+    _validate_request_matches_source_seal(request, resolved)
+    return copy.deepcopy(resolved)
 
 
 def _seal_publication_context(
@@ -4028,7 +4518,7 @@ def _seal_publication_context(
     semantic_projects: list[dict[str, Any]],
     semantic_files: list[dict[str, Any]],
     fingerprint_projects: list[dict[str, Any]],
-    source_failure_ledger: tuple[dict[str, Any], ...],
+    source_failure_ledger: SourceFailureLedger | tuple[dict[str, Any], ...],
     process_launch: dict[str, Any] | None,
     observation_provenance: dict[str, Any],
 ) -> NextPublicationContext:
@@ -4040,7 +4530,38 @@ def _seal_publication_context(
     """
 
     context = canonical_run_context(**run_context)
+    ledger_object = (
+        source_failure_ledger if isinstance(source_failure_ledger, SourceFailureLedger) else None
+    )
+    ledger_rows = tuple(
+        copy.deepcopy(ledger_object.failures)
+        if ledger_object is not None
+        else copy.deepcopy(source_failure_ledger)
+    )
+    ledger_digest = ledger_object.ledger_digest if ledger_object is not None else None
+    ledger_evidence = (
+        {
+            "source_seal_id": ledger_object.source_seal.seal_id,
+            "source_seal_digest": digest(
+                {
+                    "seal_id": ledger_object.source_seal.seal_id,
+                    "plan_digest": ledger_object.source_seal.plan_digest,
+                    "source_view_fingerprint": ledger_object.source_seal.source_view_fingerprint,
+                    "source_graph": ledger_object.source_seal.source_graph,
+                }
+            ),
+            "source_graph": ledger_object.source_graph,
+            "failures": list(ledger_object.failures),
+            "targets": list(ledger_object.targets),
+            "proof_roots": list(ledger_object.proof_roots),
+            "ledger_digest": ledger_object.ledger_digest,
+        }
+        if ledger_object is not None
+        else None
+    )
     config = copy.deepcopy(public_config)
+    config.setdefault("request_independent", source_seal is None)
+    assert config["request_independent"] is (source_seal is None)
     if source_seal is not None:
         config["source_plan"] = copy.deepcopy(source_seal.final_plan)
         config["source_plan_digest"] = source_seal.plan_digest
@@ -4079,10 +4600,12 @@ def _seal_publication_context(
         "adapter_version": resolved_toolchain["adapter_version"] if resolved_toolchain else None,
         "protocol": resolved_toolchain["protocol"] if resolved_toolchain else None,
         "process_launch_descriptor_digest": digest(launch) if launch is not None else None,
-        "source_failure_ledger": copy.deepcopy(list(source_failure_ledger)),
+        "source_failure_ledger": copy.deepcopy(list(ledger_rows)),
         "identifier_unicode_version": ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
         "identifier_unicode_table_digest": ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
     }
+    if ledger_digest is not None:
+        preimage["source_failure_ledger_digest"] = ledger_digest
     if public_request is not None:
         request_snapshot = _public_request_snapshot(
             public_request,
@@ -4110,8 +4633,11 @@ def _seal_publication_context(
         semantic_files=copy.deepcopy(semantic_files),
         run_context=context,
         run_fingerprint_preimage=preimage,
-        source_failure_ledger=source_failure_ledger,
+        source_failure_ledger=ledger_rows,
+        source_failure_ledger_seal=copy.deepcopy(ledger_object),
         process_launch_descriptor=launch,
+        source_failure_ledger_digest=ledger_digest,
+        source_failure_ledger_evidence=ledger_evidence,
         observation_provenance=copy.deepcopy(observation_provenance),
     )
 
@@ -4120,10 +4646,11 @@ def _publication_context_for_validated_request(
     request: ValidatedAdapterRequest,
     run_context: NextRunContext,
     *,
+    source_seal: SourceAcquisitionSeal,
     toolchain: dict[str, Any],
     trusted_environment: dict[str, Any],
     projects_for_fingerprint: list[dict[str, Any]] | None = None,
-    source_failure_ledger: tuple[dict[str, Any], ...],
+    source_failure_ledger: SourceFailureLedger | tuple[dict[str, Any], ...],
     process_launch_descriptor: dict[str, Any],
 ) -> NextPublicationContext:
     """Resolve observations into one context and one source-acquisition seal.
@@ -4133,7 +4660,8 @@ def _publication_context_for_validated_request(
     toolchain version or a global fixture.
     """
 
-    source_seal = _source_seal_for_validated_request(request)
+    assert isinstance(source_seal, SourceAcquisitionSeal)
+    _validate_request_matches_source_seal(request, source_seal)
     project_descriptors = [
         {
             key: copy.deepcopy(project[key])
@@ -4183,7 +4711,7 @@ def _publication_context_for_request_independent_failure(
     decision_context: NextDecisionContext,
     stage: str,
     diagnostic_code: str,
-    source_failure_ledger: tuple[dict[str, Any], ...],
+    source_failure_ledger: SourceFailureLedger | tuple[dict[str, Any], ...],
 ) -> NextPublicationContext:
     """Seal only facts observed before a request-independent failure.
 
@@ -5185,31 +5713,57 @@ def classify_source_failure(ledger: SourceFailureLedger) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class SourceFailureLedger:
-    """Python-owned locality ledger derived from a sealed raw source graph.
+    """Python-owned locality ledger derived only from one source seal.
 
-    The input contains only nodes and directed edges observed by the trusted
-    source seal.  Reachability, target taint, and locality are recomputed here;
-    caller-provided ``reachable_target_keys``/``closure_complete`` booleans are
-    intentionally not part of the contract.  ``seal_digest`` binds the graph
-    to the acquisition seal so a second graph cannot be substituted later.
+    ``from_seal`` is the only construction path.  The graph, project roots,
+    and seal identity are owned by ``SourceAcquisitionSeal``; a caller may
+    submit observations (failures, requested targets, and proof roots) but may
+    not replace the graph or assert a reachability boolean.
     """
 
+    source_seal: SourceAcquisitionSeal
     failures: tuple[dict[str, Any], ...]
-    source_graph: dict[str, Any]
-    project_roots: tuple[str, ...]
     targets: tuple[str, ...]
     proof_roots: tuple[dict[str, Any], ...]
-    seal_id: str
-    seal_digest: str
+    ledger_digest: str = field(init=False)
+
+    @classmethod
+    def from_seal(
+        cls,
+        source_seal: SourceAcquisitionSeal,
+        failures: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+        targets: tuple[str, ...] | list[str],
+        proof_roots: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    ) -> SourceFailureLedger:
+        assert isinstance(source_seal, SourceAcquisitionSeal)
+        return cls(
+            source_seal=source_seal,
+            failures=tuple(failures),
+            targets=tuple(targets),
+            proof_roots=tuple(proof_roots),
+        )
 
     def __post_init__(self) -> None:
+        assert isinstance(self.source_seal, SourceAcquisitionSeal)
         failures = tuple(copy.deepcopy(self.failures))
-        graph = copy.deepcopy(self.source_graph)
-        roots = tuple(self.project_roots)
+        graph = copy.deepcopy(self.source_seal.source_graph)
+        roots = tuple(project["root"] for project in self.source_seal.final_plan["projects"])
         targets = tuple(canonical_target_key(item) for item in self.targets)
         proof_roots = tuple(copy.deepcopy(self.proof_roots))
         assert failures == tuple(sorted(failures, key=canonical_json_bytes))
         assert set(graph) == {"nodes", "edges", "open_edges"}
+        expected_seal_id = digest(
+            {
+                "plan_digest": self.source_seal.plan_digest,
+                "source_view_fingerprint": self.source_seal.source_view_fingerprint,
+                "seal_operation": self.source_seal.seal_operation,
+                "snapshot_id": self.source_seal.snapshot_id,
+                "revision_before": self.source_seal.revision_before,
+                "revision_after": self.source_seal.revision_after,
+                "source_graph_digest": digest(graph),
+            }
+        )
+        assert self.source_seal.seal_id == expected_seal_id
         nodes = tuple(copy.deepcopy(graph["nodes"]))
         edges = tuple(copy.deepcopy(graph["edges"]))
         open_edges = tuple(copy.deepcopy(graph["open_edges"]))
@@ -5290,21 +5844,53 @@ class SourceFailureLedger:
             )
         normalized_tuple = tuple(sorted(normalized, key=canonical_json_bytes))
         object.__setattr__(self, "failures", normalized_tuple)
-        object.__setattr__(self, "source_graph", graph)
-        object.__setattr__(self, "project_roots", roots)
         object.__setattr__(self, "targets", targets)
         object.__setattr__(self, "proof_roots", proof_roots)
-        assert re.fullmatch(r"[0-9a-f]{64}", self.seal_id)
-        expected_seal_digest = digest(
+        source_seal_digest = digest(
             {
-                "seal_id": self.seal_id,
+                "seal_id": self.source_seal.seal_id,
+                "plan_digest": self.source_seal.plan_digest,
+                "source_view_fingerprint": self.source_seal.source_view_fingerprint,
                 "source_graph": graph,
-                "project_roots": list(roots),
+            }
+        )
+        expected_ledger_digest = digest(
+            {
+                "source_seal_digest": source_seal_digest,
+                "source_seal_id": self.source_seal.seal_id,
+                "failures": list(normalized_tuple),
                 "targets": list(targets),
                 "proof_roots": list(proof_roots),
             }
         )
-        assert self.seal_digest == expected_seal_digest
+        object.__setattr__(self, "ledger_digest", expected_ledger_digest)
+
+    @property
+    def source_graph(self) -> dict[str, Any]:
+        return self.source_seal.source_graph
+
+    @property
+    def project_roots(self) -> tuple[str, ...]:
+        return tuple(project["root"] for project in self.source_seal.final_plan["projects"])
+
+    @property
+    def seal_id(self) -> str:
+        return self.source_seal.seal_id
+
+    @property
+    def seal_digest(self) -> str:
+        """Compatibility name for the ledger digest, never caller input."""
+
+        return self.ledger_digest
+
+    @property
+    def safe_file_set(self) -> tuple[str, ...]:
+        failed_paths = {failure["path"] for failure in self.failures}
+        return tuple(
+            row["path"]
+            for row in self.source_seal.source_view["files"]
+            if row["path"] not in failed_paths
+        )
 
     @property
     def safe_subset_proven(self) -> bool:
@@ -5319,6 +5905,7 @@ class SourceFailureLedger:
     def __getattribute__(self, name: str) -> Any:
         value = object.__getattribute__(self, name)
         if name in {
+            "source_seal",
             "failures",
             "source_graph",
             "project_roots",
@@ -5327,6 +5914,147 @@ class SourceFailureLedger:
         }:
             return copy.deepcopy(value)
         return value
+
+
+@dataclass(frozen=True, kw_only=True)
+class CompleteSourceSeal:
+    """Closed acquisition result when every planned file was captured."""
+
+    seal: SourceAcquisitionSeal
+
+    def __post_init__(self) -> None:
+        assert isinstance(self.seal, SourceAcquisitionSeal)
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        return copy.deepcopy(value) if name == "seal" else value
+
+
+@dataclass(frozen=True, kw_only=True)
+class PartialSourceSeal:
+    """Closed acquisition result with a graph-proven safe file subset."""
+
+    seal: SourceAcquisitionSeal
+    ledger: SourceFailureLedger
+    safe_file_set: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        assert isinstance(self.seal, SourceAcquisitionSeal)
+        assert isinstance(self.ledger, SourceFailureLedger)
+        assert self.ledger.source_seal.seal_id == self.seal.seal_id
+        safe_files = tuple(self.safe_file_set)
+        assert safe_files == tuple(sorted(safe_files, key=_path_sort_key))
+        assert len(safe_files) == len(set(safe_files))
+        assert safe_files == self.ledger.safe_file_set
+        assert set(safe_files) == set(self.seal.captured_files)
+        assert self.ledger.safe_subset_proven
+        object.__setattr__(self, "safe_file_set", safe_files)
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        return copy.deepcopy(value) if name in {"seal", "ledger", "safe_file_set"} else value
+
+
+@dataclass(frozen=True, kw_only=True)
+class SourceAcquisitionUnavailable:
+    """Closed result for a source failure whose payload cannot be isolated."""
+
+    diagnostic_code: str
+    stage: str
+
+    def __post_init__(self) -> None:
+        assert self.diagnostic_code == "CSV-NEXT-SOURCE-003"
+        assert self.stage in {"source_control", "source_selection", "source_read"}
+
+
+@dataclass(frozen=True, kw_only=True)
+class SourceIntegrityFatal:
+    """Closed fail-closed result for a snapshot integrity violation."""
+
+    diagnostic_code: str
+    stage: str
+
+    def __post_init__(self) -> None:
+        assert self.diagnostic_code == "CSV-NEXT-SOURCE-003"
+        assert self.stage == "source_integrity"
+
+
+SourceAcquisitionResult = (
+    CompleteSourceSeal | PartialSourceSeal | SourceAcquisitionUnavailable | SourceIntegrityFatal
+)
+
+
+def seal_source_acquisition_result(
+    intent: SourceDiscoveryIntent | dict[str, Any],
+    reader: InstrumentedSourceReader,
+    inventory: dict[str, Any] | None = None,
+    *,
+    targets: tuple[str, ...] | list[str] = (),
+    proof_roots: tuple[dict[str, Any], ...] | list[dict[str, Any]] = (),
+) -> SourceAcquisitionResult:
+    """Return the closed source-acquisition union without aborting on one read.
+
+    The reader performs each read at most once.  A failed program/context read
+    is retained as a graph root, while the successful bytes are sealed and
+    classified by the ledger.  Control, malformed, and revision failures are
+    typed unavailable/fatal results instead of being silently converted into a
+    partial request.
+    """
+
+    try:
+        seal = seal_source_acquisition(intent, reader, inventory, allow_partial=True)
+    except SourceAcquisitionError as failure:
+        if failure.stage == "source_integrity":
+            return SourceIntegrityFatal(diagnostic_code="CSV-NEXT-SOURCE-003", stage=failure.stage)
+        return SourceAcquisitionUnavailable(
+            diagnostic_code="CSV-NEXT-SOURCE-003", stage=failure.stage
+        )
+    failed_paths = tuple(
+        sorted(
+            [path for path in reader.read_failures if reader.read_counts.get(path, 0) == 1],
+            key=_path_sort_key,
+        )
+    )
+    if not failed_paths:
+        return CompleteSourceSeal(seal=seal)
+    failures = tuple({"path": path, "stage": "source_read"} for path in failed_paths)
+    if not proof_roots:
+        return SourceAcquisitionUnavailable(
+            diagnostic_code="CSV-NEXT-SOURCE-003", stage="source_read"
+        )
+    ledger = SourceFailureLedger.from_seal(
+        seal,
+        failures=failures,
+        targets=targets,
+        proof_roots=proof_roots,
+    )
+    if not ledger.safe_subset_proven:
+        return SourceAcquisitionUnavailable(
+            diagnostic_code="CSV-NEXT-SOURCE-003", stage="source_read"
+        )
+    return PartialSourceSeal(
+        seal=seal,
+        ledger=ledger,
+        safe_file_set=ledger.safe_file_set,
+    )
+
+
+def request_from_partial_source_seal(
+    partial: PartialSourceSeal,
+    request: dict[str, Any] | ValidatedAdapterRequest,
+) -> ValidatedAdapterRequest:
+    """Build a safe-subset request and bind it to the same ledger identity."""
+
+    assert isinstance(partial, PartialSourceSeal)
+    validated = validate_adapter_request(request)
+    safe = validated.snapshot()
+    safe_paths = set(partial.safe_file_set)
+    safe["files"] = [row for row in safe["files"] if row["path"] in safe_paths]
+    safe["request_id"] = recompute_request_id(safe)
+    safe_request = validate_adapter_request(safe)
+    _validate_request_matches_source_seal(safe_request, partial.seal)
+    register_source_acquisition_seal(safe_request, partial.seal)
+    return safe_request
 
 
 def validate_source_failure_locality(
@@ -5380,13 +6108,17 @@ def _with_validated_decision(
     pre_budget_outcome: str,
     request: dict[str, Any] | ValidatedAdapterRequest,
     raw_response_bytes: bytes,
+    source_seal: SourceAcquisitionSeal,
     targets: list[str] | tuple[str, ...] = (),
     target_failures: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
     export_failures: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    source_failure_ledger: SourceFailureLedger | None = None,
 ) -> dict[str, Any]:
     """Attach the sole immutable downstream authority to a decision projection."""
 
     validated_request = validate_adapter_request(request)
+    if source_failure_ledger is not None:
+        assert source_failure_ledger.source_seal.seal_id == source_seal.seal_id
 
     gate = {
         key: copy.deepcopy(projection[key])
@@ -5415,10 +6147,11 @@ def _with_validated_decision(
     publication_context = _publication_context_for_validated_request(
         validated_request,
         run_context,
+        source_seal=source_seal,
         toolchain=_toolchain_snapshot(),
         trusted_environment=_trusted_environment_snapshot(),
         projects_for_fingerprint=copy.deepcopy(model["projects"]),
-        source_failure_ledger=(),
+        source_failure_ledger=source_failure_ledger or (),
         process_launch_descriptor=_process_launch_for_toolchain(
             _toolchain_snapshot(),
             node_realpath="/usr/local/bin/node",
@@ -5446,6 +6179,9 @@ def _with_validated_decision(
 def validate_response_envelope(
     response_bytes: bytes,
     request: dict[str, Any] | ValidatedAdapterRequest,
+    *,
+    source_seal: SourceAcquisitionSeal | None = None,
+    source_failure_ledger: SourceFailureLedger | None = None,
 ) -> dict[str, Any]:
     """Validate one adapter response only after bounded raw-byte decoding."""
 
@@ -5453,6 +6189,7 @@ def validate_response_envelope(
     # validation and publication construction sees the sealed private request
     # type.  The public response boundary itself remains typed-only.
     request = validate_adapter_request(request)
+    trusted_source_seal = _trusted_fixture_source_seal(request, source_seal)
     bounded = bounded_decode_json(response_bytes, limits=request["limits"])
     assert bounded["allowed"]
     response = cast(dict[str, Any], bounded["value"])
@@ -5518,8 +6255,10 @@ def validate_response_envelope(
             pre_budget_outcome="payload_unavailable",
             request=request,
             raw_response_bytes=response_bytes,
+            source_seal=trusted_source_seal,
             targets=request["targets"],
             target_failures=target_failure.failures,
+            source_failure_ledger=source_failure_ledger,
         )
     # Collection/reference/proof validation precedes the model-record gate.
     # This makes a response with both a protocol violation and an over-limit
@@ -5546,8 +6285,10 @@ def validate_response_envelope(
             pre_budget_outcome="payload_unavailable",
             request=request,
             raw_response_bytes=response_bytes,
+            source_seal=trusted_source_seal,
             targets=request["targets"],
             target_failures=proof_target_failure.failures,
+            source_failure_ledger=source_failure_ledger,
         )
     _published, _proof_only, wire_records = response_model_record_counts(model, response["proof"])
     if wire_records > request["limits"]["max_model_records"]:
@@ -5564,8 +6305,10 @@ def validate_response_envelope(
             pre_budget_outcome="payload_unavailable",
             request=request,
             raw_response_bytes=response_bytes,
+            source_seal=trusted_source_seal,
             targets=request["targets"],
             export_failures=export_failure["export_failures"],
+            source_failure_ledger=source_failure_ledger,
         )
     pre_budget_outcome = derive_pre_budget_outcome(response["proof"], model)
     decision = entity_budget_gate(
@@ -5583,7 +6326,9 @@ def validate_response_envelope(
         pre_budget_outcome=pre_budget_outcome,
         request=request,
         raw_response_bytes=response_bytes,
+        source_seal=trusted_source_seal,
         targets=request["targets"],
+        source_failure_ledger=source_failure_ledger,
     )
 
 
@@ -5606,6 +6351,7 @@ def recompute_run_fingerprint(
     identifier_unicode_table_digest: str = ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
     process_launch_descriptor_digest: str | None = None,
     source_failure_ledger: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    source_failure_ledger_digest: str | None = None,
 ) -> str:
     preimage = {
         "source_view_fingerprint": source_view_fingerprint,
@@ -5627,6 +6373,8 @@ def recompute_run_fingerprint(
     }
     if process_launch_descriptor_digest is not None:
         preimage["process_launch_descriptor_digest"] = process_launch_descriptor_digest
+    if source_failure_ledger_digest is not None:
+        preimage["source_failure_ledger_digest"] = source_failure_ledger_digest
     return digest(preimage)
 
 
@@ -5930,6 +6678,11 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             decision.publication_context.source_failure_ledger
             if is_next_run_decision(decision)
             else ()
+        ),
+        source_failure_ledger_digest=(
+            decision.publication_context.source_failure_ledger_digest
+            if is_next_run_decision(decision)
+            else None
         ),
     )
 
@@ -6994,6 +7747,31 @@ def _sealed_selected_unavailable_result(
     return canonical_json_bytes(result) + b"\n"
 
 
+def _sealed_payload_unavailable_result(decision: NextRunDecision) -> bytes:
+    """Return the canonical typed result for a transport-level failure.
+
+    A valid selector must never turn a transport failure into an empty
+    stdout stream.  The only selector-specific exception is ``null`` (the
+    run-summary branch), which still carries the explicit selected-unavailable
+    discriminator; all other selectors use the compact generic unavailable
+    branch because no artifact descriptor was published.
+    """
+
+    selector = decision.publication_context.run_context["stdout_selector"]
+    if selector is None:
+        return _sealed_selected_unavailable_result(decision, selector, {"summary": b""}, {})
+    result: dict[str, Any] = {
+        "type": "stdout_result",
+        "schema": "code-structure-viz.stdout-result/v1",
+        "selector": selector,
+        "availability": False,
+        "domain_status": "incomplete",
+        "stable_reason": "domain_payload_unavailable",
+        "artifact": None,
+    }
+    return canonical_json_bytes(result) + b"\n"
+
+
 @dataclass(frozen=True, kw_only=True)
 class PublicationBoundaryDecision:
     """Final immutable publication result for every output surface.
@@ -7170,7 +7948,9 @@ class PublicationBoundaryDecision:
         descriptors = _publication_artifact_descriptors(artifact_bytes)
         object.__setattr__(self, "artifact_descriptors", descriptors)
         sealed_result = b""
-        if expected_outcome == "selected_artifact_unavailable":
+        if expected_outcome == "payload_unavailable":
+            sealed_result = _sealed_payload_unavailable_result(self.semantic_decision)
+        elif expected_outcome == "selected_artifact_unavailable":
             sealed_result = _sealed_selected_unavailable_result(
                 self.semantic_decision,
                 self.selector,
@@ -7212,45 +7992,157 @@ class PublicationBoundaryDecision:
         return value
 
 
+def _publication_rendered_candidates(
+    decision: NextRunDecision,
+) -> tuple[dict[str, Any], dict[str, bytes], dict[str, bytes]]:
+    """Render publication candidates from the semantic decision only.
+
+    The reference renderer is kept in the contract test module alongside the
+    schema-aware domain/manifest helpers.  Importing it lazily avoids a module
+    cycle during test collection while ensuring the finalizer has no caller
+    supplied candidate, status, or payload authority.
+    """
+
+    from tests.contracts.test_next_contracts import (
+        _domain,
+        _run_manifest,
+        _run_summary_value,
+        _semantic_artifacts_from_decision,
+    )
+
+    domain = _domain(decision=decision)
+    artifacts = _semantic_artifacts_from_decision(decision)
+    manifest = _run_manifest(domain)
+    summary = _run_summary_value(manifest["run"]["status"], domain)
+    candidates = {
+        "summary": _canonical_json_line(summary),
+        "manifest": _canonical_json_line(manifest),
+        **{path: bytes(payload) for path, payload in artifacts.items()},
+    }
+    return domain, artifacts, candidates
+
+
+def _publication_failure_domain(
+    decision: NextRunDecision,
+    *,
+    diagnostics: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Produce the single transport-failure projection used to render bytes."""
+
+    from tests.contracts.test_next_contracts import _domain
+
+    domain = _domain(decision=decision)
+    domain["status"] = "incomplete"
+    domain["incomplete_kind"] = "payload_unavailable"
+    domain["payload_available"] = False
+    domain["entity_count"] = None
+    domain["budget"]["actual"] = None
+    domain["budget"]["outcome"] = "payload_unavailable"
+    domain["artifact_paths"] = []
+    if diagnostics is not None:
+        domain["diagnostics"] = copy.deepcopy(diagnostics)
+    else:
+        domain["diagnostics"] = [_public_limit_diagnostic()]
+    return domain
+
+
 def finalize_publication_decision(
     semantic_decision: NextRunDecision,
     *,
-    artifact_bytes: Mapping[str, bytes],
-    stdout_candidates: Mapping[str, bytes],
-    adapter_stdout_chunks: Iterable[bytes] = (),
+    adapter_stdout_chunks: Iterable[bytes],
     adapter_stderr_chunks: Iterable[bytes] = (),
     adapter_stdout_limit: int = LIMIT_DEFAULTS["max_adapter_stdout_capture_bytes"],
     adapter_stderr_limit: int = LIMIT_DEFAULTS["max_adapter_stderr_capture_bytes"],
     public_stderr_limit: int = LIMIT_DEFAULTS["max_stderr_bytes"],
     selected_stdout_limit: int = LIMIT_DEFAULTS["max_selected_stdout_bytes"],
 ) -> PublicationBoundaryDecision:
-    """Seal all capture/publication measurements around one semantic decision."""
+    """Seal all capture/publication measurements around one semantic decision.
+
+    Artifact and stdout candidate bytes are generated after the capture gates
+    from ``semantic_decision``.  They are intentionally not accepted as
+    caller arguments, so a canonical but forged manifest cannot enter the
+    publication seal.
+    """
 
     assert is_next_run_decision(semantic_decision)
-    assert isinstance(artifact_bytes, Mapping)
-    candidates = {key: bytes(value) for key, value in stdout_candidates.items()}
-    assert all(isinstance(key, str) for key in candidates)
     selector = semantic_decision.publication_context.run_context["stdout_selector"]
-    candidate_key = candidate_key_for_selector(selector)
-    assert candidate_key in candidates
-    adapter_stdout = capture_adapter_stdout(adapter_stdout_chunks, limit=adapter_stdout_limit)
+    decoder: Any | None = None
+    if isinstance(semantic_decision, NextValidatedDecision):
+        decoder = lambda payload: response_boundary_decision(  # noqa: E731
+            payload, semantic_decision.request
+        )
+    adapter_stdout = capture_adapter_stdout(
+        adapter_stdout_chunks,
+        limit=adapter_stdout_limit,
+        decoder=decoder,
+    )
+    if isinstance(semantic_decision, NextValidatedDecision) and adapter_stdout["allowed"]:
+        assert adapter_stdout["retained"] == semantic_decision.raw_response_bytes
     adapter_stderr = capture_adapter_stderr(adapter_stderr_chunks, limit=adapter_stderr_limit)
     public_stderr = render_public_diagnostic_stderr(
         decision_public_diagnostics(semantic_decision), limit=public_stderr_limit
     )
-    selected_stdout = copy_selected_stdout(candidates[candidate_key], limit=selected_stdout_limit)
     capture_failed = not adapter_stdout["allowed"] or not adapter_stderr["allowed"]
     stderr_failed = not public_stderr["allowed"]
-    selected_failed = not selected_stdout["allowed"]
     if capture_failed or stderr_failed:
+        failure_domain = _publication_failure_domain(
+            semantic_decision,
+            diagnostics=(
+                public_stderr["manifest_diagnostics"]
+                if stderr_failed
+                else [_public_limit_diagnostic()]
+            ),
+        )
+        from tests.contracts.test_next_contracts import (
+            _run_manifest,
+            _run_summary_value,
+        )
+
+        failure_manifest = _run_manifest(failure_domain)
+        failure_summary = _run_summary_value(failure_manifest["run"]["status"], failure_domain)
+        candidates = {
+            "summary": _canonical_json_line(failure_summary),
+            "manifest": _canonical_json_line(failure_manifest),
+        }
+        if isinstance(semantic_decision, NextValidatedDecision):
+            for format_name in semantic_decision.run_context["requested_formats"]:
+                candidates.setdefault(
+                    "next.snapshot.semantic.json"
+                    if format_name == "semantic-json"
+                    else "next.snapshot.puml",
+                    b"",
+                )
+        artifacts: dict[str, bytes] = {}
+        selected_stdout = copy_selected_stdout(
+            candidates[candidate_key_for_selector(selector)], limit=selected_stdout_limit
+        )
         outcome = "payload_unavailable"
-    elif selected_failed:
-        outcome = "selected_artifact_unavailable"
     else:
-        outcome = "published"
+        _domain, artifacts, candidates = _publication_rendered_candidates(semantic_decision)
+        candidate_key = candidate_key_for_selector(selector)
+        selected_stdout = copy_selected_stdout(
+            candidates[candidate_key], limit=selected_stdout_limit
+        )
+        if selected_stdout["allowed"]:
+            outcome = "published"
+        else:
+            # Measure the successful candidate once.  On breach, persist a
+            # failure manifest and emit a typed unavailable result; do not
+            # copy or re-measure the failure manifest as the selected stream.
+            success_manifest = json.loads(candidates["manifest"].decode("utf-8"))
+            assert isinstance(success_manifest, dict)
+            success_manifest["run"]["status"] = "incomplete"
+            success_manifest["run"]["exit_code"] = 3
+            candidates["manifest"] = canonical_json_bytes(success_manifest) + b"\n"
+            failure_summary = json.loads(candidates["summary"].decode("utf-8"))
+            assert isinstance(failure_summary, dict)
+            failure_summary["run_status"] = "incomplete"
+            failure_summary["exit_code"] = 3
+            candidates["summary"] = canonical_json_bytes(failure_summary) + b"\n"
+            outcome = "selected_artifact_unavailable"
     return PublicationBoundaryDecision(
         semantic_decision=semantic_decision,
-        artifact_bytes=dict(artifact_bytes),
+        artifact_bytes=artifacts,
         sealed_stdout_candidates=candidates,
         adapter_stdout=adapter_stdout,
         adapter_stderr=adapter_stderr,
@@ -7444,11 +8336,18 @@ def _assert_canonical(values: list[Any]) -> None:
 
 def _assert_target_keys(targets: list[str]) -> None:
     assert all(target.startswith(TARGET_SELECTOR_PREFIX) for target in targets)
+    paths = []
     for target in targets:
-        _assert_path(target.removeprefix(TARGET_SELECTOR_PREFIX), allow_root=True)
+        path = target.removeprefix(TARGET_SELECTOR_PREFIX)
+        _assert_path(path, allow_root=True)
+        paths.append(path)
     normalized = [canonical_target_key(target) for target in targets]
     assert normalized == targets
-    _assert_canonical(targets)
+    # Target selectors are path-only rows.  Compare their normalized UTF-8
+    # bytes directly so JSON escaping (for example a quote) cannot change
+    # request order.  Object rows elsewhere retain canonical JSON ordering.
+    assert paths == sorted(paths, key=_path_sort_key)
+    assert len(paths) == len(set(paths))
 
 
 def canonical_target_key(target: str) -> str:
@@ -8117,6 +9016,7 @@ def pre_response_failure_decision(
     path: str | None = None,
     symbol: str | None = None,
     source_failure_ledger: SourceFailureLedger | None = None,
+    source_seal: SourceAcquisitionSeal | None = None,
 ) -> PreResponseFailureDecision:
     """Create the closed authority for a failure before response validation."""
 
@@ -8200,17 +9100,23 @@ def pre_response_failure_decision(
             decision_context=effective_decision_context,
             stage=stage,
             diagnostic_code=diagnostic_code,
-            source_failure_ledger=effective_decision_context.source_failure_ledger,
+            source_failure_ledger=(
+                source_failure_ledger or effective_decision_context.source_failure_ledger
+            ),
         )
     else:
+        trusted_source_seal = _trusted_fixture_source_seal(validated_request, source_seal)
         publication_context = _publication_context_for_validated_request(
             validated_request,
             context,
+            source_seal=trusted_source_seal,
             toolchain=_toolchain_snapshot(
                 node_status="unavailable" if stage in node_stages else "available"
             ),
             trusted_environment=_trusted_environment_snapshot(),
-            source_failure_ledger=effective_decision_context.source_failure_ledger,
+            source_failure_ledger=(
+                source_failure_ledger or effective_decision_context.source_failure_ledger
+            ),
             process_launch_descriptor=_process_launch_for_toolchain(
                 _toolchain_snapshot(
                     node_status="unavailable" if stage in node_stages else "available"
@@ -8284,6 +9190,7 @@ def not_applicable_decision(request: dict[str, Any]) -> NotApplicableDecision:
         publication_context=_publication_context_for_validated_request(
             validated_request,
             context,
+            source_seal=_trusted_fixture_source_seal(validated_request, None),
             toolchain=_toolchain_snapshot(node_status="not_applicable"),
             trusted_environment=_trusted_environment_snapshot(),
             source_failure_ledger=(),

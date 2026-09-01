@@ -127,3 +127,35 @@ payload after finalization. All JSON uses the existing lexicographic
 NFC UTF-8 bytes and object rows use canonical JSON bytes. The faithful iterable
 capture evidence is not an OS process-level test. Fresh current-SHA Strict is
 pending, readiness is unconfirmed, and production implementation is absent.
+
+## Round 19 source and publication boundaries
+
+The public selected stream never accepts a caller-supplied candidate map,
+preselected payload, or independent status. Adapter chunks are observed at
+the child-capture boundary and validated response bytes are retained as an
+opaque identity; summary, root manifest, selected artifact, and typed
+unavailable bytes are derived once from the semantic decision and sealed in
+`PublicationBoundaryDecision`. The projection API receives that final object
+only and returns its sealed bytes. An empty stdout is a usage/no-publication
+case, not an alternate successful candidate.
+
+The selected-copy algorithm is two-stage and non-circular. First measure the
+success candidate once. If it is within `max_selected_stdout_bytes`, retain
+and return those exact bytes. If it is over the limit, dispose of partial
+bytes, create and persist one failure-manifest descriptor and one typed
+unavailable result, and do not measure or copy the failure manifest again as
+the selected stream. The semantic outcome remains unchanged; the publication
+result records the selected-copy failure and exit 3. Candidate byte and digest
+maps are sealed so non-selected-candidate mutation cannot alter a projection.
+
+Round 19 also fixes target ordering: compare the NFC-normalized UTF-8 bytes of
+the path after removing `path:`. JSON escaping does not affect path order.
+Canonical JSON bytes remain the comparator for object rows only. The quote
+inverse target vector is a negative acceptance case.
+
+Executable evidence is
+`test_round19_target_path_order_uses_nfc_utf8_bytes_not_json_escaping`,
+`test_round18_publication_projections_return_sealed_candidate_bytes`, and
+`test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy`.
+Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
+implementation is absent.

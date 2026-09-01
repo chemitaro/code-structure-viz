@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-process-launch-observation-v1",
+  "title": "CodeStructureViz observed Next process identity v1",
+  "description": "A closed fixture/production observation. Fixture observations are never production launch evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {}, "version": {}, "kind": {}, "node_status": {},
+    "argv": {}, "shell": {}, "process_group": {}, "host_os": {},
+    "fixture_id": {}, "identity_token": {}, "spawn_primitive": {},
+    "toctou_failure_point": {}, "node_realpath": {}, "node_sha256": {},
+    "node_version": {}, "file_identity_at_hash": {},
+    "file_identity_at_spawn": {}, "verified_open_handle": {},
+    "post_spawn_identity_check": {}, "fd_lifecycle": {}
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/fixture"},
+    {"$ref": "#/$defs/production"}
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "absolute_path": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
+    "file_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["realpath", "sha256", "version", "device", "inode"],
+      "properties": {
+        "realpath": {"$ref": "#/$defs/absolute_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 0}
+      }
+    },
+    "verified_handle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "number", "cloexec", "retained_through_spawn"],
+      "properties": {
+        "kind": {"const": "fd"},
+        "number": {"type": "integer", "minimum": 0},
+        "cloexec": {"const": true},
+        "retained_through_spawn": {"const": true}
+      }
+    },
+    "identity_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["performed", "result", "identity_at_spawn"],
+      "properties": {
+        "performed": {"const": true},
+        "result": {"const": "equal"},
+        "identity_at_spawn": {"$ref": "#/$defs/file_identity"}
+      }
+    },
+    "fd_lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["opened_before_hash", "retained_through_spawn", "inherited_by_child", "closed_after_spawn_result"],
+      "properties": {
+        "opened_before_hash": {"const": true},
+        "retained_through_spawn": {"const": true},
+        "inherited_by_child": {"const": false},
+        "closed_after_spawn_result": {"const": true}
+      }
+    },
+    "common_process": {
+      "type": "object",
+      "required": ["schema", "version", "kind", "node_status", "argv", "shell", "process_group"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.next-process-launch-observation/v1"},
+        "version": {"const": 1},
+        "kind": {"enum": ["fixture", "production"]},
+        "node_status": {"enum": ["available", "unavailable", "not_applicable"]},
+        "argv": {"type": "array", "minItems": 2, "items": {"type": "string", "minLength": 1}},
+        "shell": {"const": false},
+        "process_group": {"const": {"create": true, "terminate_scope": "group", "wait_after_terminate": true}}
+      }
+    },
+    "fixture": {
+      "allOf": [
+        {"$ref": "#/$defs/common_process"},
+        {
+          "type": "object",
+          "required": ["host_os", "fixture_id", "identity_token", "spawn_primitive", "toctou_failure_point"],
+          "properties": {
+            "kind": {"const": "fixture"},
+            "host_os": {"const": "fixture"},
+            "fixture_id": {"type": "string", "minLength": 1},
+            "identity_token": {"type": "string", "minLength": 1},
+            "spawn_primitive": {"const": "recorded-fixture"},
+            "toctou_failure_point": {"enum": ["not-exercised", "fixture-rejection"]}
+          },
+          "not": {"anyOf": [{"required": ["file_identity_at_hash"]}, {"required": ["verified_open_handle"]}, {"required": ["post_spawn_identity_check"]}]}
+        }
+      ]
+    },
+    "production": {
+      "allOf": [
+        {"$ref": "#/$defs/common_process"},
+        {
+          "type": "object",
+          "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point"],
+          "properties": {
+            "kind": {"const": "production"},
+            "host_os": {"enum": ["darwin", "linux"]},
+            "node_realpath": {"$ref": "#/$defs/absolute_path"},
+            "node_sha256": {"$ref": "#/$defs/sha256"},
+            "node_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+            "file_identity_at_hash": {"$ref": "#/$defs/file_identity"},
+            "file_identity_at_spawn": {"$ref": "#/$defs/file_identity"},
+            "verified_open_handle": {"$ref": "#/$defs/verified_handle"},
+            "spawn_primitive": {"enum": ["darwin-posix-spawn-verified-fd", "linux-posix-spawn-verified-fd"]},
+            "post_spawn_identity_check": {"$ref": "#/$defs/identity_check"},
+            "fd_lifecycle": {"$ref": "#/$defs/fd_lifecycle"},
+            "toctou_failure_point": {"enum": ["none", "open", "hash", "spawn_bind", "post_spawn_check"]}
+          },
+          "not": {"anyOf": [{"required": ["fixture_id"]}, {"required": ["identity_token"]}]}
+        },
+        {
+          "if": {"properties": {"host_os": {"const": "darwin"}}},
+          "then": {"properties": {"spawn_primitive": {"const": "darwin-posix-spawn-verified-fd"}}}
+        },
+        {
+          "if": {"properties": {"host_os": {"const": "linux"}}},
+          "then": {"properties": {"spawn_primitive": {"const": "linux-posix-spawn-verified-fd"}}}
+        },
+        {
+          "if": {"properties": {"node_status": {"const": "available"}}},
+          "then": {
+            "properties": {
+              "file_identity_at_hash": {"$ref": "#/$defs/file_identity"},
+              "file_identity_at_spawn": {"$ref": "#/$defs/file_identity"}
+            }
+          }
+        },
+        {
+          "not": {"properties": {"file_identity_at_hash": {"const": {}}}}
+        }
+      ]
+    }
+  }
+}

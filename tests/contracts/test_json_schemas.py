@@ -51,6 +51,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-config-v1",
         "next-domain-manifest-v1",
         "next-process-launch-v1",
+        "next-process-launch-observation-v1",
         "next-export-graph-raw-v1",
         "next-limits-v1",
         "next-semantic-v1",
@@ -58,6 +59,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-path-v1",
         "next-root-or-path-v1",
         "next-run-context-v1",
+        "next-provenance-v1",
         "next-trusted-type-environment-v1",
     }
     registry = Registry()
@@ -80,6 +82,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-config-v1.schema.json",
         "next-domain-manifest-v1.schema.json",
         "next-process-launch-v1.schema.json",
+        "next-process-launch-observation-v1.schema.json",
         "next-export-graph-raw-v1.schema.json",
         "next-limits-v1.schema.json",
         "next-runtime-manifest-v1.schema.json",
@@ -87,6 +90,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-path-v1.schema.json",
         "next-root-or-path-v1.schema.json",
         "next-run-context-v1.schema.json",
+        "next-provenance-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
         "run-manifest-v1.schema.json",
@@ -556,6 +560,7 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
         },
         "config": {
             "schema": "code-structure-viz.domain-config/next/v1",
+            "request_independent": False,
             "projects": [config_project],
             "targets": [],
             "upstream_depth": 1,
@@ -902,6 +907,130 @@ def test_round18_target_reason_is_required_and_forbidden_for_other_diagnostics()
     }
     with pytest.raises(ValidationError):
         validator.validate(non_target)
+
+
+def test_round19_process_observation_is_fixture_or_supported_os_production() -> None:
+    validator = _validator("next-process-launch-observation-v1.schema.json")
+    fixture = {
+        "schema": "code-structure-viz.next-process-launch-observation/v1",
+        "version": 1,
+        "kind": "fixture",
+        "host_os": "fixture",
+        "node_status": "available",
+        "fixture_id": "reference-process-v1",
+        "identity_token": "fixture-node-identity",
+        "spawn_primitive": "recorded-fixture",
+        "toctou_failure_point": "not-exercised",
+        "argv": ["/usr/local/bin/node", "/.code-structure-viz/next-adapter.mjs"],
+        "shell": False,
+        "process_group": {"create": True, "terminate_scope": "group", "wait_after_terminate": True},
+    }
+    validator.validate(fixture)
+    identity = {
+        "realpath": "/usr/local/bin/node",
+        "sha256": "1" * 64,
+        "version": "22.14.0",
+        "device": 1,
+        "inode": 2,
+    }
+    production = {
+        "schema": "code-structure-viz.next-process-launch-observation/v1",
+        "version": 1,
+        "kind": "production",
+        "host_os": "linux",
+        "node_status": "available",
+        "node_realpath": "/usr/local/bin/node",
+        "node_sha256": "1" * 64,
+        "node_version": "22.14.0",
+        "file_identity_at_hash": identity,
+        "file_identity_at_spawn": identity,
+        "verified_open_handle": {
+            "kind": "fd",
+            "number": 7,
+            "cloexec": True,
+            "retained_through_spawn": True,
+        },
+        "spawn_primitive": "linux-posix-spawn-verified-fd",
+        "post_spawn_identity_check": {
+            "performed": True,
+            "result": "equal",
+            "identity_at_spawn": identity,
+        },
+        "fd_lifecycle": {
+            "opened_before_hash": True,
+            "retained_through_spawn": True,
+            "inherited_by_child": False,
+            "closed_after_spawn_result": True,
+        },
+        "toctou_failure_point": "none",
+        "argv": ["/usr/local/bin/node", "/.code-structure-viz/next-adapter.mjs"],
+        "shell": False,
+        "process_group": {"create": True, "terminate_scope": "group", "wait_after_terminate": True},
+    }
+    validator.validate(production)
+    for mutation in (
+        {**production, "host_os": "windows"},
+        {**production, "spawn_primitive": "recorded-fixture"},
+        {key: value for key, value in production.items() if key != "verified_open_handle"},
+        {**fixture, "kind": "production", "host_os": "linux"},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(mutation)
+
+
+def test_round19_stage_provenance_is_closed_and_preserves_observed_prefix() -> None:
+    validator = _validator("next-provenance-v1.schema.json")
+
+    def row(observed: bool) -> dict[str, object]:
+        return {
+            "state": "observed" if observed else "unobserved",
+            "value": True if observed else None,
+        }
+
+    independent = {
+        "kind": "request_independent",
+        "stage": "source_selection",
+        "failure_code": "CSV-NEXT-SOURCE-003",
+        "observed": {
+            "request": row(False),
+            "limits": row(True),
+            "source_plan": row(True),
+            "toolchain": row(False),
+            "trusted_environment": row(False),
+            "compatibility": row(False),
+            "process_launch": row(False),
+            "budget": row(False),
+        },
+    }
+    validator.validate(independent)
+    validator.validate(
+        {
+            **independent,
+            "stage": "config_validation",
+            "failure_code": "CSV-NEXT-CONFIG-001",
+            "observed": {key: row(False) for key in independent["observed"]},
+        }
+    )
+    bound = {
+        "kind": "request_bound",
+        "stage": None,
+        "failure_code": None,
+        "observed": {key: row(True) for key in independent["observed"]},
+    }
+    validator.validate(bound)
+    independent_observed = cast(dict[str, dict[str, object]], independent["observed"])
+    for mutation in (
+        {**independent, "observed": {**independent_observed, "request": row(True)}},
+        {**independent, "observed": {**independent_observed, "limits": row(False)}},
+        {
+            **bound,
+            "kind": "request_independent",
+            "stage": "source_selection",
+            "failure_code": "CSV-NEXT-SOURCE-003",
+        },
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate(mutation)
 
 
 def test_semantic_schema_accepts_zero_class_vector_and_rejects_shape_mutations() -> None:
