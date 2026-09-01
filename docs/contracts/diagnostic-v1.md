@@ -107,3 +107,24 @@ malformed, closed-schema, and proof violations. A final immutable
 measurements, so stderr is projected from sealed bytes rather than re-rendered
 from a separate status. Fresh current-SHA Strict is pending and production
 implementation is absent.
+
+## Round 18 closed diagnostic provenance
+
+The diagnostic catalog is also the validator for the request-independent
+branch. Its `failure_stage`, `failure_code`, reference permission, known/null
+counts, outcome, and exit are one closed row; a stage/code combination not in
+that row is invalid. `CSV-NEXT-TARGET-001` requires exactly one reason per
+failed target, and only the eight catalog reasons are accepted:
+`missing`, `component_only`, `duplicate`, `out_of_scope`, `non_program`,
+`control_context`, `project_ambiguity`, and `selected_taint`. Other diagnostic
+codes must omit the reason field. Target keys use the shared next path grammar
+and symbols use the closed safe-ID grammar.
+
+After proof-derived unavailable IDs are recomputed against sealed roots and
+taint, the same reason is carried through resolver, proof, decision,
+diagnostic, domain, root manifest, stdout, and exit. The final publication
+decision owns the exact diagnostic JSONL bytes, so a writer cannot substitute a
+new status or measurement. Round18 reference vectors exercise positive and
+negative discriminator/reason cases, schema-valid bytes, and canonical path
+ordering. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
+production implementation is absent.

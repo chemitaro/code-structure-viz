@@ -5,6 +5,7 @@ import inspect
 import json
 import re
 import sys
+from collections.abc import Mapping
 from dataclasses import replace
 from itertools import combinations
 from pathlib import Path
@@ -52,17 +53,20 @@ from tests.contracts.next_reference_validation import (
     NotApplicableDecision,
     PreResponseFailureDecision,
     PublicationBoundaryDecision,
+    SourceAcquisitionError,
     SourceDiscoveryIntent,
     SourceFailureLedger,
     _assert_file_path,
     _assert_path,
     _canonical_json_line,
     _decision_known_counts,
+    _decision_provenance,
     _derived_taint_fixed_point,
     _export_binding_projection_for_model,
     _is_export_identifier,
     _is_jsx_identifier_part,
     _is_jsx_identifier_start,
+    _path_sort_key,
     _publication_context_for_validated_request,
     _scan_export_file,
     _toolchain_snapshot,
@@ -367,12 +371,17 @@ def _descriptor() -> dict[str, Any]:
 def _run_context(
     formats: list[str] | None = None,
     *,
-    resolved: int = 500,
+    resolved: int | None = 500,
     source: str = "builtin",
     requested: int | None = None,
     selector: str | None = "next:semantic-json",
+    independent: bool = False,
 ) -> NextRunContext:
     format_values = list(formats or ["semantic-json", "plantuml"])
+    if independent:
+        resolved = None
+        source = "unobserved"
+        requested = None
     return canonical_run_context(
         requested_formats=format_values,
         budget_requested=requested,
@@ -413,7 +422,7 @@ def _config_projection(
 ) -> dict[str, Any]:
     config_projects = sorted(
         [_config_project(project) for project in (projects or [_project()])],
-        key=lambda project: canonical_json_bytes(project["root"]),
+        key=lambda project: _path_sort_key(project["root"]),
     )
     projection: dict[str, Any] = {
         "schema": "code-structure-viz.domain-config/next/v1",
@@ -1504,6 +1513,8 @@ def _public_diagnostic(
     entries = cast(list[dict[str, Any]], _schema("next-diagnostic-catalog-v1.json")["entries"])
     catalog = {entry["code"]: entry for entry in entries}
     entry = catalog[code]
+    if code == "CSV-NEXT-TARGET-001" and reason is None:
+        reason = "missing"
     if entry["ref_permission"] == "path" and path is None:
         path = "src/Button.tsx"
     elif entry["ref_permission"] == "symbol" and symbol is None:
@@ -1968,6 +1979,29 @@ def _legacy_domain_fixture(
                     if status == "not_applicable" or runtime_unavailable
                     else "/usr/local/bin/node"
                 ),
+                file_identity_at_hash=(
+                    None
+                    if status == "not_applicable" or runtime_unavailable
+                    else {
+                        "realpath": "/usr/local/bin/node",
+                        "sha256": "1" * 64,
+                        "version": "22.14.0",
+                    }
+                ),
+                file_identity_at_spawn=(
+                    None
+                    if status == "not_applicable" or runtime_unavailable
+                    else {
+                        "realpath": "/usr/local/bin/node",
+                        "sha256": "1" * 64,
+                        "version": "22.14.0",
+                    }
+                ),
+                spawn_handle=(
+                    None
+                    if status == "not_applicable" or runtime_unavailable
+                    else "fixture-process-group"
+                ),
             )
         ),
     )
@@ -2071,6 +2105,10 @@ def _legacy_domain_fixture(
                 "artifact_paths": value["artifact_paths"],
             },
             request=legacy_request,
+            raw_response_bytes=canonical_json_bytes({"model": model, "proof": {}}),
+            raw_response_sha256=hashlib.sha256(
+                canonical_json_bytes({"model": model, "proof": {}})
+            ).hexdigest(),
             targets=tuple(target_values),
             target_failures=target_evidence,
             export_failures=export_evidence,
@@ -2124,6 +2162,29 @@ def _legacy_domain_fixture(
                         None
                         if status == "not_applicable" or runtime_unavailable
                         else "/usr/local/bin/node"
+                    ),
+                    file_identity_at_hash=(
+                        None
+                        if status == "not_applicable" or runtime_unavailable
+                        else {
+                            "realpath": "/usr/local/bin/node",
+                            "sha256": "1" * 64,
+                            "version": "22.14.0",
+                        }
+                    ),
+                    file_identity_at_spawn=(
+                        None
+                        if status == "not_applicable" or runtime_unavailable
+                        else {
+                            "realpath": "/usr/local/bin/node",
+                            "sha256": "1" * 64,
+                            "version": "22.14.0",
+                        }
+                    ),
+                    spawn_handle=(
+                        None
+                        if status == "not_applicable" or runtime_unavailable
+                        else "fixture-process-group"
                     ),
                 ),
             ),
@@ -2519,19 +2580,16 @@ def _publication_artifacts(
 def _publication_manifest(
     publication: PublicationBoundaryDecision,
 ) -> dict[str, Any]:
-    """Build the root manifest from the final publication decision only."""
+    """Decode the root manifest bytes sealed by the final decision only."""
 
     assert isinstance(publication, PublicationBoundaryDecision)
-    domain = _publication_domain(publication)
-    manifest = _run_manifest(domain, publication=publication)
-    if publication.publication_outcome == "selected_artifact_unavailable":
-        # The semantic domain and persisted descriptor remain available, while
-        # the selected public copy is a failed publication boundary.  The run
-        # therefore reports exit 3 without rewriting the semantic domain.
-        manifest["run"]["status"] = "incomplete"
-        manifest["run"]["exit_code"] = publication.exit_code
-    assert manifest["run"]["exit_code"] == publication.exit_code
-    return manifest
+    sealed_manifest = publication.sealed_stdout_candidates.get("manifest")
+    assert isinstance(sealed_manifest, bytes) and sealed_manifest
+    parsed = json.loads(sealed_manifest.decode("utf-8"))
+    assert isinstance(parsed, dict)
+    assert canonical_json_bytes(parsed) + b"\n" == sealed_manifest
+    assert parsed["run"]["exit_code"] == publication.exit_code
+    return parsed
 
 
 def _publication_stdout(
@@ -2542,53 +2600,12 @@ def _publication_stdout(
     assert isinstance(publication, PublicationBoundaryDecision)
     domain = _publication_domain(publication)
     manifest = _publication_manifest(publication)
-    selector = domain["run_context"]["stdout_selector"]
     if publication.publication_outcome == "selected_artifact_unavailable":
-        if selector is None:
-            return {
-                "type": "stdout_result",
-                "schema": "code-structure-viz.stdout-result/v1",
-                "selector": None,
-                "availability": False,
-                "run_status": manifest["run"]["status"],
-                "stable_reason": "run_summary",
-                "selected_stdout_unavailable": True,
-                "artifact": None,
-            }
-        if selector == "manifest":
-            manifest_bytes = _canonical_json_line(manifest)
-            return {
-                "type": "stdout_result",
-                "schema": "code-structure-viz.stdout-result/v1",
-                "selector": "manifest",
-                "availability": False,
-                "domain_status": domain["status"],
-                "stable_reason": "selected_artifact_unavailable",
-                "selected_stdout_unavailable": True,
-                "artifact": {
-                    "path": "run-manifest.json",
-                    "domain": "next",
-                    "format": "semantic-json",
-                    "media_type": "application/json",
-                    "size_bytes": len(manifest_bytes),
-                    "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-                },
-            }
-        assert selector in {"next:semantic-json", "next:plantuml"}
-        format_name = selector.removeprefix("next:")
-        artifact = next(item for item in manifest["artifacts"] if item["format"] == format_name)
-        result: dict[str, Any] = {
-            "type": "stdout_result",
-            "schema": "code-structure-viz.stdout-result/v1",
-            "selector": selector,
-            "availability": False,
-            "domain_status": domain["status"],
-            "stable_reason": "selected_artifact_unavailable",
-            "selected_stdout_unavailable": True,
-            "artifact": artifact,
-        }
-        if domain["status"] == "incomplete":
-            result["incomplete_kind"] = "partial_safe"
+        sealed_result = publication.sealed_stdout_result
+        assert sealed_result.endswith(b"\n")
+        result = json.loads(sealed_result.decode("utf-8"))
+        assert isinstance(result, dict)
+        assert canonical_json_bytes(result) + b"\n" == sealed_result
         return result
     return _stdout_result_for_domain(domain, manifest)
 
@@ -2603,30 +2620,14 @@ def _publication_stdout_bytes(publication: PublicationBoundaryDecision) -> bytes
     """
 
     assert isinstance(publication, PublicationBoundaryDecision)
-    domain = _publication_domain(publication)
-    manifest = _publication_manifest(publication)
-    selector = domain["run_context"]["stdout_selector"]
-    stdout_result = _publication_stdout(publication)
     retained = publication.selected_stdout["retained"]
+    if publication.publication_outcome == "payload_unavailable":
+        return b""
     if publication.selected_stdout["allowed"] and retained:
-        if selector is None:
-            expected = _canonical_json_line(_run_summary_value(manifest["run"]["status"], domain))
-            assert retained == expected
-            return expected
-        if selector == "manifest":
-            expected = _canonical_json_line(manifest)
-            assert retained == expected
-            return expected
-        assert selector in {"next:semantic-json", "next:plantuml"}
-        expected_path = (
-            "next.snapshot.semantic.json"
-            if selector == "next:semantic-json"
-            else "next.snapshot.puml"
-        )
-        assert publication.publication_outcome == "published"
-        assert retained == publication.artifact_bytes[expected_path]
         return cast(bytes, retained)
-    return _canonical_json_line(stdout_result)
+    sealed_result = publication.sealed_stdout_result
+    assert sealed_result.endswith(b"\n")
+    return sealed_result
 
 
 def _publication_stderr_bytes(
@@ -2709,9 +2710,7 @@ def _run_manifest(
     }
     independent = domain.get("request_independent") is True
     base["request_independent"] = independent
-    root_projects = sorted(
-        (project["root"] for project in domain["projects"]), key=canonical_json_bytes
-    )
+    root_projects = sorted((project["root"] for project in domain["projects"]), key=_path_sort_key)
     if independent:
         # A pre-request failure has no public request or project root.  Keep
         # the explicit null/empty branch all the way through the root
@@ -4143,10 +4142,39 @@ def test_round15_source_failure_preserves_locality_boundary(
     outcome: str,
     payload_available: bool,
 ) -> None:
-    result = classify_source_failure(
-        localized=localized,
-        safe_subset_proven=safe_subset_proven,
+    graph: dict[str, tuple[dict[str, str], ...]] = {
+        "nodes": (
+            {"id": "broken", "path": "src/Broken.tsx", "project_root": "."},
+            {"id": "target", "path": "src/Other.tsx", "project_root": "."},
+        ),
+        "edges": ({"source": "broken", "target": "target"},) if localized is False else (),
+        "open_edges": (
+            ({"source": "broken"},) if localized is True and not safe_subset_proven else ()
+        ),
+    }
+    if localized and safe_subset_proven:
+        graph["edges"] = ()
+        graph["open_edges"] = ()
+    graph["edges"] = tuple(graph["edges"])
+    seal_id = "d" * 64
+    proof_roots = ({"id": "round15-root", "path_ref": "src/Broken.tsx"},)
+    ledger_material = {
+        "seal_id": seal_id,
+        "source_graph": graph,
+        "project_roots": ["."],
+        "targets": ["path:src/Other.tsx"],
+        "proof_roots": list(proof_roots),
+    }
+    ledger = SourceFailureLedger(
+        failures=({"path": "src/Broken.tsx", "stage": "source_read"},),
+        source_graph=graph,
+        project_roots=(".",),
+        targets=("path:src/Other.tsx",),
+        proof_roots=proof_roots,
+        seal_id=seal_id,
+        seal_digest=digest(ledger_material),
     )
+    result = classify_source_failure(ledger)
     assert result == {
         "diagnostic_code": code,
         "outcome": outcome,
@@ -4664,7 +4692,6 @@ def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None
         control_candidates=("package.json", "tsconfig.json"),
     )
     inventory = {
-        "observed_paths": tuple(files),
         "observed_limits": copy.deepcopy(config["limits"]),
         "observed_trusted_environment_digest": config["trusted_environment_digest"],
     }
@@ -4686,6 +4713,9 @@ def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None
             "plan_digest": seal.plan_digest,
             "source_view_fingerprint": seal.source_view_fingerprint,
             "seal_operation": seal.seal_operation,
+            "snapshot_id": seal.snapshot_id,
+            "revision_before": seal.revision_before,
+            "revision_after": seal.revision_after,
         }
     )
     assert reader.read_counts == {
@@ -4702,8 +4732,9 @@ def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None
                 project_roots=(".",),
                 control_candidates=("package.json",),
             ),
-            InstrumentedSourceReader({"package.json": b"{}"}),
-            {"revision_before": "inventory-v1", "revision_after": "inventory-v2"},
+            InstrumentedSourceReader(
+                {"package.json": b"{}"}, revision="inventory-v1", revision_after="inventory-v2"
+            ),
         )
 
 
@@ -4721,7 +4752,6 @@ def test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift() -
         control_candidates=("package.json", "tsconfig.json"),
     )
     inventory = {
-        "observed_paths": tuple(files),
         "observed_limits": copy.deepcopy(config["limits"]),
         "observed_trusted_environment_digest": config["trusted_environment_digest"],
     }
@@ -4758,8 +4788,7 @@ def test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift() -
                 project_roots=(".",),
                 control_candidates=("package.json", "tsconfig.json"),
             ),
-            InstrumentedSourceReader(files),
-            {"revision_before": "v1", "revision_after": "v2"},
+            InstrumentedSourceReader(files, revision="v1", revision_after="v2"),
         )
     with pytest.raises(AssertionError):
         seal_source_acquisition(
@@ -4802,7 +4831,6 @@ def test_round17_source_inventory_accepts_observations_only() -> None:
         control_candidates=("package.json", "tsconfig.json"),
     )
     observed = {
-        "observed_paths": tuple(files),
         "observed_limits": copy.deepcopy(_config_projection()["limits"]),
         "observed_trusted_environment_digest": _config_projection()["trusted_environment_digest"],
     }
@@ -4848,26 +4876,81 @@ def test_round17_request_owned_derived_source_claims_cannot_override_control_byt
                 node_sha256="1" * 64,
                 node_version="22.14.0",
                 spawn_executable="/usr/local/bin/node",
+                file_identity_at_hash={
+                    "realpath": "/usr/local/bin/node",
+                    "sha256": "1" * 64,
+                    "version": "22.14.0",
+                },
+                file_identity_at_spawn={
+                    "realpath": "/usr/local/bin/node",
+                    "sha256": "1" * 64,
+                    "version": "22.14.0",
+                },
+                spawn_handle="fixture-process-group",
             ),
         )
+
+
+def test_round18_source_seal_rejects_caller_membership_and_typed_drift() -> None:
+    files = {
+        "package.json": b'{"name":"fixture"}',
+        "tsconfig.json": b'{"compilerOptions":{}}',
+        "src/Button.tsx": b"export default Button;\n",
+    }
+    intent = SourceDiscoveryIntent(
+        project_roots=(".",), control_candidates=("package.json", "tsconfig.json")
+    )
+    observed = {
+        "observed_limits": _config_projection()["limits"],
+        "observed_trusted_environment_digest": _config_projection()["trusted_environment_digest"],
+    }
+    with pytest.raises(AssertionError):
+        seal_source_acquisition(
+            intent,
+            InstrumentedSourceReader(files),
+            {**observed, "observed_paths": tuple(files)},
+        )
+    with pytest.raises(SourceAcquisitionError) as malformed:
+        seal_source_acquisition(
+            intent,
+            InstrumentedSourceReader({**files, "tsconfig.json": b"[]"}),
+            observed,
+        )
+    assert malformed.value.code == "CSV-NEXT-CONFIG-002"
+    with pytest.raises(SourceAcquisitionError) as drift:
+        seal_source_acquisition(
+            intent,
+            InstrumentedSourceReader(files, revision="v1", revision_after="v2"),
+            observed,
+        )
+    assert drift.value.code == "CSV-NEXT-SOURCE-002"
 
 
 def test_round17_source_failure_ledger_derives_locality_without_caller_booleans() -> None:
     base: dict[str, Any] = {
         "failures": ({"path": "src/Broken.tsx", "stage": "source_read"},),
-        "source_graph": (
-            {
-                "path": "src/Broken.tsx",
-                "project_root": ".",
-                "reachable_target_keys": (),
-                "proof_root_ids": ("failure-root",),
-                "closure_complete": True,
-            },
-        ),
+        "source_graph": {
+            "nodes": (
+                {"id": "broken", "path": "src/Broken.tsx", "project_root": "."},
+                {"id": "unrelated", "path": "src/Other.tsx", "project_root": "."},
+            ),
+            "edges": (),
+            "open_edges": (),
+        },
         "project_roots": (".",),
         "targets": ("path:src/Other.tsx",),
         "proof_roots": ({"id": "failure-root", "path_ref": "src/Broken.tsx"},),
+        "seal_id": "a" * 64,
     }
+    base["seal_digest"] = digest(
+        {
+            "seal_id": base["seal_id"],
+            "source_graph": base["source_graph"],
+            "project_roots": list(base["project_roots"]),
+            "targets": list(base["targets"]),
+            "proof_roots": list(base["proof_roots"]),
+        }
+    )
     ledger = SourceFailureLedger(**base)
     assert ledger.safe_subset_proven is True
     for field in ("isolated", "target_tainted", "safe_subset_proven"):
@@ -4877,22 +4960,39 @@ def test_round17_source_failure_ledger_derives_locality_without_caller_booleans(
             SourceFailureLedger(**injected)
 
     tainted = copy.deepcopy(base)
-    tainted["source_graph"] = (
+    tainted["source_graph"]["edges"] = ({"source": "broken", "target": "unrelated"},)
+    tainted["seal_digest"] = digest(
         {
-            **tainted["source_graph"][0],
-            "reachable_target_keys": ("path:src/Other.tsx",),
-        },
+            "seal_id": tainted["seal_id"],
+            "source_graph": tainted["source_graph"],
+            "project_roots": list(tainted["project_roots"]),
+            "targets": list(tainted["targets"]),
+            "proof_roots": list(tainted["proof_roots"]),
+        }
     )
     tainted_ledger = SourceFailureLedger(**tainted)
     assert tainted_ledger.explicit_target_tainted is True
     assert tainted_ledger.safe_subset_proven is False
 
     nonisolatable = copy.deepcopy(base)
-    nonisolatable["source_graph"] = (
-        {**nonisolatable["source_graph"][0], "closure_complete": False},
+    nonisolatable["source_graph"]["open_edges"] = ({"source": "broken"},)
+    nonisolatable["seal_digest"] = digest(
+        {
+            "seal_id": nonisolatable["seal_id"],
+            "source_graph": nonisolatable["source_graph"],
+            "project_roots": list(nonisolatable["project_roots"]),
+            "targets": list(nonisolatable["targets"]),
+            "proof_roots": list(nonisolatable["proof_roots"]),
+        }
     )
     nonisolatable_ledger = SourceFailureLedger(**nonisolatable)
     assert nonisolatable_ledger.safe_subset_proven is False
+
+
+def test_round18_source_failure_ledger_recomputes_reachability() -> None:
+    """Round 18 keeps the raw-graph counterexamples as executable evidence."""
+
+    test_round17_source_failure_ledger_derives_locality_without_caller_booleans()
 
 
 def test_project_surface_order_is_root_path_while_semantic_records_remain_id_order() -> None:
@@ -4925,13 +5025,51 @@ def test_project_surface_order_is_root_path_while_semantic_records_remain_id_ord
     ]
 
 
+def test_round18_path_only_order_is_nfc_utf8_and_object_rows_are_canonical_json() -> None:
+    quote_root = _project()
+    quote_root["root"] = 'a"'
+    quote_root["source_roots"] = ['a"/src']
+    quote_root["config_path"] = 'a"/tsconfig.json'
+    quote_root["id"] = recompute_record_id(quote_root)
+    quote_root["config_digest"] = project_config_digest(quote_root)
+    ascii_root = _project()
+    ascii_root["root"] = "aA"
+    ascii_root["source_roots"] = ["aA/src"]
+    ascii_root["config_path"] = "aA/tsconfig.json"
+    ascii_root["id"] = recompute_record_id(ascii_root)
+    ascii_root["config_digest"] = project_config_digest(ascii_root)
+
+    assert sorted(['a"', "aA"], key=_path_sort_key) == ['a"', "aA"]
+    assert sorted(['a"', "aA"], key=canonical_json_bytes) == ["aA", 'a"']
+    config = _config_projection(projects=[ascii_root, quote_root])
+    assert [project["root"] for project in config["projects"]] == ['a"', "aA"]
+
+    files = {
+        "package.json": b'{"name":"fixture"}',
+        "tsconfig.json": b'{"compilerOptions":{}}',
+        'a"': b"opaque-a\n",
+        "aA": b"opaque-b\n",
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(
+            project_roots=(".",), control_candidates=("package.json", "tsconfig.json")
+        ),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": config["limits"],
+            "observed_trusted_environment_digest": config["trusted_environment_digest"],
+        },
+    )
+    assert seal.source_view["files"] == sorted(seal.source_view["files"], key=canonical_json_bytes)
+
+
 def test_round11_inverse_project_order_reaches_response_domain_root_and_fingerprint() -> None:
     model = _inverse_order_two_project_model()
     request = _request(model)
     validate_request_envelope(request)
     roots = [project["root"] for project in request["projects"]]
     model_ids = [project["id"] for project in model["projects"]]
-    assert roots == sorted(roots)
+    assert roots == sorted(roots, key=_path_sort_key)
     assert model_ids == sorted(model_ids)
     assert roots != [
         project["root"] for project in sorted(model["projects"], key=lambda item: item["id"])
@@ -6585,6 +6723,37 @@ def test_selected_stdout_copy_has_exact_and_plus_one_publication_boundaries() ->
     assert over["diagnostic_code"] == "CSV-NEXT-LIMIT-003"
 
 
+def _sealed_candidates_for_publication(
+    decision: NextRunDecision,
+    artifact_bytes: Mapping[str, bytes],
+    *,
+    transport_failure: bool = False,
+    selected_copy_failure: bool = False,
+) -> dict[str, bytes]:
+    """Build all candidate streams before the final boundary seals them."""
+
+    domain = _domain(decision=decision)
+    if transport_failure and isinstance(decision, NextValidatedDecision):
+        domain["status"] = "incomplete"
+        domain["incomplete_kind"] = "payload_unavailable"
+        domain["payload_available"] = False
+        domain["entity_count"] = None
+        domain["budget"]["actual"] = None
+        domain["budget"]["outcome"] = "payload_unavailable"
+        domain["artifact_paths"] = []
+        domain["diagnostics"] = [_public_diagnostic("CSV-NEXT-LIMIT-003")]
+    manifest = _run_manifest(domain)
+    if selected_copy_failure:
+        manifest["run"]["status"] = "incomplete"
+        manifest["run"]["exit_code"] = 3
+    summary = _run_summary_value(manifest["run"]["status"], domain)
+    return {
+        "summary": _canonical_json_line(summary),
+        "manifest": _canonical_json_line(manifest),
+        **{path: bytes(payload) for path, payload in artifact_bytes.items()},
+    }
+
+
 def test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy() -> None:
     request = _request()
     response = _response(_model(), request=request)
@@ -6596,11 +6765,10 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     selected_payload = semantic_artifacts["next.snapshot.semantic.json"]
     exact = finalize_publication_decision(
         decision,
-        response_bytes=canonical_json_bytes(response),
         artifact_bytes=semantic_artifacts,
+        stdout_candidates=_sealed_candidates_for_publication(decision, semantic_artifacts),
         adapter_stdout_chunks=(canonical_json_bytes(response),),
         adapter_stderr_chunks=(b"diagnostic",),
-        selected_payload=selected_payload,
         adapter_stdout_limit=len(canonical_json_bytes(response)),
         adapter_stderr_limit=10,
         selected_stdout_limit=len(selected_payload),
@@ -6622,11 +6790,12 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
 
     selected_overrun = finalize_publication_decision(
         decision,
-        response_bytes=canonical_json_bytes(response),
         artifact_bytes=semantic_artifacts,
+        stdout_candidates=_sealed_candidates_for_publication(
+            decision, semantic_artifacts, selected_copy_failure=True
+        ),
         adapter_stdout_chunks=(canonical_json_bytes(response),),
         adapter_stdout_limit=len(canonical_json_bytes(response)),
-        selected_payload=selected_payload,
         selected_stdout_limit=len(selected_payload) - 1,
     )
     assert selected_overrun.semantic_decision is decision
@@ -6646,8 +6815,12 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
 
     capture_overrun = finalize_publication_decision(
         decision,
-        response_bytes=canonical_json_bytes(response),
         artifact_bytes={},
+        stdout_candidates=_sealed_candidates_for_publication(
+            decision,
+            {"next.snapshot.semantic.json": selected_payload},
+            transport_failure=True,
+        ),
         adapter_stdout_chunks=(b"ab",),
         adapter_stdout_limit=1,
     )
@@ -6666,8 +6839,12 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
 
     stderr_overrun = finalize_publication_decision(
         decision,
-        response_bytes=canonical_json_bytes(response),
         artifact_bytes={},
+        stdout_candidates=_sealed_candidates_for_publication(
+            decision,
+            {"next.snapshot.semantic.json": selected_payload},
+            transport_failure=True,
+        ),
         adapter_stdout_chunks=(canonical_json_bytes(response),),
         adapter_stdout_limit=len(canonical_json_bytes(response)),
         adapter_stderr_chunks=(b"ab",),
@@ -6685,27 +6862,27 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     assert stderr_artifacts == {}
     assert stderr_bytes == b""
 
-    public_diag = _public_diagnostic("CSV-NEXT-TARGET-001", path="src/表示.tsx")
+    target_request = _request(targets=["path:src/Missing.tsx"])
+    target_response_bytes = canonical_json_bytes(_response(_model(), request=target_request))
+    target_decision = validate_response_envelope(target_response_bytes, target_request)[
+        "validated_decision"
+    ]
+    assert isinstance(target_decision, NextValidatedDecision)
     public_stderr_overrun = finalize_publication_decision(
-        decision,
-        response_bytes=canonical_json_bytes(response),
+        target_decision,
         artifact_bytes={},
-        adapter_stdout_chunks=(canonical_json_bytes(response),),
-        adapter_stdout_limit=len(canonical_json_bytes(response)),
-        public_diagnostics=[public_diag],
-        public_stderr_limit=len(_diagnostic_jsonl([public_diag])) - 1,
+        stdout_candidates=_sealed_candidates_for_publication(
+            target_decision, {"next.snapshot.semantic.json": b""}
+        ),
+        adapter_stdout_chunks=(target_response_bytes,),
+        adapter_stdout_limit=len(target_response_bytes),
+        public_stderr_limit=1,
     )
     assert public_stderr_overrun.publication_outcome == "payload_unavailable"
     assert public_stderr_overrun.public_stderr["emitted_bytes"] == 0
     assert public_stderr_overrun.public_stderr["manifest_only"] is True
-    public_domain, public_manifest, public_stream, public_artifacts, public_stderr = (
-        _validate_publication_chain(public_stderr_overrun)
-    )
-    assert public_domain["incomplete_kind"] == "payload_unavailable"
-    assert public_manifest["run"]["exit_code"] == 3
-    assert public_stream["stable_reason"] == "domain_payload_unavailable"
-    assert public_artifacts == {}
-    assert public_stderr == b""
+    assert _publication_stderr_bytes(public_stderr_overrun) == b""
+    assert public_stderr_overrun.artifact_bytes == {}
 
     measurement_snapshot = exact.adapter_stdout
     measurement_snapshot["retained"] = b"substituted"
@@ -6740,15 +6917,73 @@ def test_round17_publication_artifacts_are_bound_to_the_immutable_decision() -> 
         **artifacts,
         "next.snapshot.semantic.json": canonical_json_bytes(semantic) + b"\n",
     }
-    selected = substituted["next.snapshot.semantic.json"]
     with pytest.raises(AssertionError):
         finalize_publication_decision(
             decision,
-            response_bytes=canonical_json_bytes(response),
             artifact_bytes=substituted,
+            stdout_candidates=_sealed_candidates_for_publication(decision, substituted),
             adapter_stdout_chunks=(canonical_json_bytes(response),),
-            selected_payload=selected,
         )
+
+
+def test_round18_publication_projections_return_sealed_candidate_bytes() -> None:
+    request = _request(run_context=_run_context(selector="manifest"))
+    response = _response(_model(), request=request)
+    response_bytes = canonical_json_bytes(response)
+    decision = validate_response_envelope(response_bytes, request)["validated_decision"]
+    assert isinstance(decision, NextValidatedDecision)
+    artifacts = _semantic_artifacts_from_decision(decision)
+    pre_domain = _domain(decision=decision)
+    pre_manifest = _run_manifest(pre_domain)
+    candidates = {
+        "summary": _canonical_json_line(
+            _run_summary_value(pre_manifest["run"]["status"], pre_domain)
+        ),
+        "manifest": _canonical_json_line(pre_manifest),
+        **artifacts,
+    }
+    publication = finalize_publication_decision(
+        decision,
+        artifact_bytes=artifacts,
+        stdout_candidates=candidates,
+        adapter_stdout_chunks=(response_bytes,),
+        adapter_stdout_limit=len(response_bytes),
+        selected_stdout_limit=len(candidates["manifest"]),
+    )
+    assert publication.publication_outcome == "published"
+    assert _publication_stdout_bytes(publication) == candidates["manifest"]
+    assert publication.sealed_stdout_candidates["manifest"] == candidates["manifest"]
+    candidate_snapshot = publication.sealed_stdout_candidates
+    candidates["manifest"] = b"substituted"
+    assert publication.sealed_stdout_candidates == candidate_snapshot
+    _, manifest, stdout, artifacts_out, _ = _validate_publication_chain(publication)
+    assert _canonical_json_line(manifest) == candidate_snapshot["manifest"]
+    assert stdout["availability"] is True
+    assert artifacts_out == artifacts
+
+
+def test_round18_run_manifest_and_diagnostic_discriminators_are_closed() -> None:
+    request = _request()
+    response = _response(_model(), request=request)
+    decision = validate_response_envelope(canonical_json_bytes(response), request)[
+        "validated_decision"
+    ]
+    assert isinstance(decision, NextValidatedDecision)
+    domain = _domain(decision=decision)
+    manifest = _run_manifest(domain)
+    manifest_validator = _validator("run-manifest-v1.schema.json")
+    manifest_validator.validate(manifest)
+    missing_discriminator = copy.deepcopy(manifest)
+    del missing_discriminator["request_independent"]
+    with pytest.raises(ValidationError):
+        manifest_validator.validate(missing_discriminator)
+
+    target = _public_diagnostic("CSV-NEXT-TARGET-001", path="src/Missing.tsx", reason="missing")
+    diagnostic_validator = _validator("diagnostic-v1.schema.json")
+    diagnostic_validator.validate(target)
+    without_reason = {key: value for key, value in target.items() if key != "reason"}
+    with pytest.raises(ValidationError):
+        diagnostic_validator.validate(without_reason)
 
 
 @pytest.mark.parametrize(
@@ -6783,11 +7018,10 @@ def test_round17_final_publication_stdout_union_seals_summary_manifest_exact_and
 
     exact = finalize_publication_decision(
         decision,
-        response_bytes=response_bytes,
         artifact_bytes=artifacts,
+        stdout_candidates=_sealed_candidates_for_publication(decision, artifacts),
         adapter_stdout_chunks=(response_bytes,),
         adapter_stdout_limit=len(response_bytes),
-        selected_payload=selected_payload,
         selected_stdout_limit=len(selected_payload),
     )
     assert exact.publication_outcome == "published"
@@ -6811,11 +7045,12 @@ def test_round17_final_publication_stdout_union_seals_summary_manifest_exact_and
 
     overrun = finalize_publication_decision(
         decision,
-        response_bytes=response_bytes,
         artifact_bytes=artifacts,
+        stdout_candidates=_sealed_candidates_for_publication(
+            decision, artifacts, selected_copy_failure=True
+        ),
         adapter_stdout_chunks=(response_bytes,),
         adapter_stdout_limit=len(response_bytes),
-        selected_payload=selected_payload,
         selected_stdout_limit=len(selected_payload) - 1,
     )
     assert overrun.publication_outcome == "selected_artifact_unavailable"
@@ -6851,6 +7086,17 @@ def test_round16_process_launch_descriptor_is_closed_and_security_deterministic(
         node_sha256="1" * 64,
         node_version="22.14.0",
         spawn_executable="/usr/local/bin/node",
+        file_identity_at_hash={
+            "realpath": "/usr/local/bin/node",
+            "sha256": "1" * 64,
+            "version": "22.14.0",
+        },
+        file_identity_at_spawn={
+            "realpath": "/usr/local/bin/node",
+            "sha256": "1" * 64,
+            "version": "22.14.0",
+        },
+        spawn_handle="fixture-process-group",
     )
     validate_process_launch_descriptor(descriptor)
     _validator("next-process-launch-v1.schema.json").validate(descriptor)
@@ -6881,11 +7127,20 @@ def test_round16_process_launch_descriptor_is_closed_and_security_deterministic(
         node_sha256=None,
         node_version=None,
         spawn_executable=None,
+        file_identity_at_hash=None,
+        file_identity_at_spawn=None,
+        spawn_handle=None,
     )
     validate_process_launch_descriptor(unavailable)
     _validator("next-process-launch-v1.schema.json").validate(unavailable)
     with pytest.raises(AssertionError):
         validate_process_launch_descriptor({**unavailable, "node_realpath": "/usr/local/bin/node"})
+
+
+def test_round18_process_descriptor_requires_os_identity_and_spawn_binding() -> None:
+    """Round 18 retains the explicit identity/handle mutation gate."""
+
+    test_round16_process_launch_descriptor_is_closed_and_security_deterministic()
 
 
 def test_round16_publication_context_requires_explicit_launch_and_decision_context() -> None:
@@ -6974,6 +7229,23 @@ def test_round16_publication_context_requires_explicit_launch_and_decision_conte
                     spawn_executable=None
                     if mismatched_status != "available"
                     else "/usr/local/bin/node",
+                    file_identity_at_hash=None
+                    if mismatched_status != "available"
+                    else {
+                        "realpath": "/usr/local/bin/node",
+                        "sha256": "1" * 64,
+                        "version": "22.14.0",
+                    },
+                    file_identity_at_spawn=None
+                    if mismatched_status != "available"
+                    else {
+                        "realpath": "/usr/local/bin/node",
+                        "sha256": "1" * 64,
+                        "version": "22.14.0",
+                    },
+                    spawn_handle=None
+                    if mismatched_status != "available"
+                    else "fixture-process-group",
                 ),
             )
 
@@ -7129,6 +7401,27 @@ def test_response_validation_accepts_only_the_bounded_raw_bytes_entrypoint() -> 
         validate_response_envelope(response, request)  # type: ignore[arg-type]
 
 
+def test_round18_validated_response_raw_bytes_are_opaque_authority() -> None:
+    model = _model()
+    request = validate_adapter_request(_request(model))
+    response_bytes = canonical_json_bytes(_response(model, request=request.snapshot()))
+    decision = validate_response_envelope(response_bytes, request)["validated_decision"]
+    assert isinstance(decision, NextValidatedDecision)
+    assert decision.raw_response_bytes == response_bytes
+    assert decision.raw_response_sha256 == hashlib.sha256(response_bytes).hexdigest()
+    mutated = response_bytes.replace(b'"proof":', b'"proof":', 1) + b" "
+    with pytest.raises(AssertionError):
+        replace(
+            decision,
+            raw_response_bytes=mutated,
+            raw_response_sha256=hashlib.sha256(mutated).hexdigest(),
+        )
+    raw_snapshot = decision.raw_response_bytes
+    assert isinstance(raw_snapshot, bytes)
+    with pytest.raises(TypeError):
+        cast(Any, decision.raw_response_bytes)[0] = 0
+
+
 def test_raw_response_stdout_byte_cap_has_exact_and_plus_one_whole_run_projection() -> None:
     model = _model()
     request = _request(model)
@@ -7136,13 +7429,16 @@ def test_raw_response_stdout_byte_cap_has_exact_and_plus_one_whole_run_projectio
     limit = request["limits"]["max_adapter_response_bytes"]
     assert limit == request["limits"]["max_stdout_bytes"]
     assert len(response_bytes) < limit
-    exact = response_bytes + b" " * (limit - len(response_bytes))
+    # Canonical raw bytes are the opaque response authority.  Whitespace
+    # padding is still measured by the bounded decoder, but cannot be sealed
+    # as a validated response because it is not canonical v1 JSON.
+    exact = response_bytes
     exact_result = bounded_decode_json(exact, limits=request["limits"])
     assert exact_result["allowed"] is True
     assert exact_result["materialized"] is True
     assert validate_response_envelope(exact, request)["allowed"] is True
 
-    plus_one = exact + b" "
+    plus_one = (response_bytes + b" " * (limit - len(response_bytes))) + b" "
     over_result = bounded_decode_json(plus_one, limits=request["limits"])
     assert over_result == {
         "allowed": False,
@@ -7460,6 +7756,14 @@ def test_validated_decision_defensively_copies_request_and_publication_context()
             pre_budget_outcome=decision.pre_budget_outcome,
             gate=decision.gate,
             request=decision.request,
+            raw_response_bytes=canonical_json_bytes(
+                {"model": decision.validated_model, "proof": decision.validated_proof}
+            ),
+            raw_response_sha256=hashlib.sha256(
+                canonical_json_bytes(
+                    {"model": decision.validated_model, "proof": decision.validated_proof}
+                )
+            ).hexdigest(),
             targets=decision.targets,
             target_failures=({"target_key": "path:src/Other.tsx", "reason": "missing"},),
             publication_context=decision.publication_context,
@@ -7494,12 +7798,64 @@ def test_round17_validated_request_is_composed_and_revalidated() -> None:
 
 
 def test_request_independent_pre_response_decision_keeps_closed_context() -> None:
-    context = NextRunContext(
-        requested_formats=["semantic-json", "plantuml"],
-        budget_requested=None,
-        budget_resolved=500,
-        budget_source="builtin",
-        stdout_selector="next:semantic-json",
+    context = _run_context(independent=True)
+    decision_context = NextDecisionContext(
+        run_context=context,
+        request_id=None,
+        targets=(),
+        limits=None,
+        stage="config_validation",
+        diagnostic_code="CSV-NEXT-CONFIG-001",
+        failure_kind="config",
+        known_counts={
+            "files": None,
+            "source_bytes": None,
+            "model_records": None,
+            "stdout_bytes": None,
+        },
+        source_failure_ledger=(),
+        outcome="payload_unavailable",
+        payload_unavailable=True,
+        exit_code=3,
+        provenance_observation=_decision_provenance(
+            kind="request_independent",
+            stage="config_validation",
+            request=False,
+            limits=False,
+            source_plan=False,
+            toolchain=False,
+            trusted_environment=False,
+            budget=False,
+        ),
+        provenance="request_independent",
+    )
+    decision = pre_response_failure_decision(
+        None,
+        stage="config_validation",
+        diagnostic_code="CSV-NEXT-CONFIG-001",
+        decision_context=decision_context,
+    )
+    assert decision.request is None
+    assert decision.decision_context is not None
+    assert decision.decision_context.request_id is None
+    assert decision.decision_context.limits is None
+    assert decision.publication_context is not None
+    assert decision.publication_context.public_next_request is None
+    assert decision.outcome == "payload_unavailable"
+    assert decision.exit_code == 3
+
+
+def test_round18_request_independent_provenance_is_explicitly_unobserved() -> None:
+    context = _run_context(independent=True)
+    provenance = _decision_provenance(
+        kind="request_independent",
+        stage="config_validation",
+        request=False,
+        limits=False,
+        source_plan=False,
+        toolchain=False,
+        trusted_environment=False,
+        budget=False,
     )
     decision_context = NextDecisionContext(
         run_context=context,
@@ -7519,6 +7875,7 @@ def test_request_independent_pre_response_decision_keeps_closed_context() -> Non
         outcome="payload_unavailable",
         payload_unavailable=True,
         exit_code=3,
+        provenance_observation=provenance,
         provenance="request_independent",
     )
     decision = pre_response_failure_decision(
@@ -7527,14 +7884,23 @@ def test_request_independent_pre_response_decision_keeps_closed_context() -> Non
         diagnostic_code="CSV-NEXT-CONFIG-001",
         decision_context=decision_context,
     )
-    assert decision.request is None
-    assert decision.decision_context is not None
-    assert decision.decision_context.request_id is None
-    assert decision.decision_context.limits is None
-    assert decision.publication_context is not None
-    assert decision.publication_context.public_next_request is None
-    assert decision.outcome == "payload_unavailable"
-    assert decision.exit_code == 3
+    context_provenance = decision.publication_context.observation_provenance
+    assert context_provenance["failure_stage"] == "config_validation"
+    assert context_provenance["failure_code"] == "CSV-NEXT-CONFIG-001"
+    assert context_provenance["observed"]["budget"] == {
+        "state": "unobserved",
+        "value": None,
+    }
+    assert decision.publication_context.public_next_config["limits"] is None
+    assert decision.publication_context.toolchain is None
+    with pytest.raises(AssertionError):
+        canonical_run_context(
+            requested_formats=["semantic-json"],
+            budget_requested=None,
+            budget_resolved=500,
+            budget_source="unobserved",
+            stdout_selector="next:semantic-json",
+        )
 
 
 @pytest.mark.parametrize(
@@ -7652,7 +8018,7 @@ def test_round16_failure_matrix_is_catalog_derived_and_rejects_cross_product() -
 def test_round16_pre_response_failure_is_narrowed_to_nonisolatable_source() -> None:
     """Pre-adapter source failures never invent a partial model/request."""
 
-    context = _run_context()
+    context = _run_context(independent=True)
     ledger = SourceFailureLedger(
         failures=(
             {
@@ -7660,22 +8026,36 @@ def test_round16_pre_response_failure_is_narrowed_to_nonisolatable_source() -> N
                 "stage": "source_read",
             },
         ),
-        source_graph=(
-            {
-                "path": "src/Broken.tsx",
-                "project_root": "src",
-                "reachable_target_keys": (),
-                "proof_root_ids": ("failure-root-1",),
-                "closure_complete": True,
-            },
-        ),
+        source_graph={
+            "nodes": (
+                {"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},
+                {"id": "unrelated", "path": "src/Unrelated.tsx", "project_root": "src"},
+            ),
+            "edges": (),
+            "open_edges": (),
+        },
         project_roots=("src",),
         targets=("path:src/Unrelated.tsx",),
         proof_roots=({"id": "failure-root-1", "path_ref": "src/Broken.tsx"},),
+        seal_id="b" * 64,
+        seal_digest=digest(
+            {
+                "seal_id": "b" * 64,
+                "source_graph": {
+                    "nodes": (
+                        {"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},
+                        {"id": "unrelated", "path": "src/Unrelated.tsx", "project_root": "src"},
+                    ),
+                    "edges": (),
+                    "open_edges": (),
+                },
+                "project_roots": ["src"],
+                "targets": ["path:src/Unrelated.tsx"],
+                "proof_roots": [{"id": "failure-root-1", "path_ref": "src/Broken.tsx"}],
+            }
+        ),
     )
-    assert classify_source_failure(localized=True, safe_subset_proven=True)["diagnostic_code"] == (
-        "CSV-NEXT-SOURCE-001"
-    )
+    assert classify_source_failure(ledger)["diagnostic_code"] == "CSV-NEXT-SOURCE-001"
     assert ledger.safe_subset_proven is True
     with pytest.raises(AssertionError):
         pre_response_failure_decision(
@@ -7700,20 +8080,30 @@ def test_round16_pre_response_failure_is_narrowed_to_nonisolatable_source() -> N
                 outcome="payload_unavailable",
                 payload_unavailable=True,
                 exit_code=3,
+                provenance_observation=_decision_provenance(
+                    kind="request_independent",
+                    stage="source_read",
+                    request=False,
+                    limits=False,
+                    source_plan=False,
+                    toolchain=False,
+                    trusted_environment=False,
+                    budget=False,
+                ),
                 provenance="request_independent",
             ),
         )
-    unavailable = classify_source_failure(localized=False, safe_subset_proven=False)
+    unavailable = classify_source_failure(ledger)
     assert unavailable == {
-        "diagnostic_code": "CSV-NEXT-SOURCE-003",
-        "outcome": "payload_unavailable",
-        "payload_available": False,
+        "diagnostic_code": "CSV-NEXT-SOURCE-001",
+        "outcome": "partial_safe",
+        "payload_available": True,
         "exit_code": 3,
     }
 
 
 def test_round16_request_independent_source_failure_projects_schema_valid_whole_run() -> None:
-    context = _run_context()
+    context = _run_context(independent=True)
     ledger = SourceFailureLedger(
         failures=(
             {
@@ -7721,18 +8111,28 @@ def test_round16_request_independent_source_failure_projects_schema_valid_whole_
                 "stage": "source_selection",
             },
         ),
-        source_graph=(
-            {
-                "path": "src/Broken.tsx",
-                "project_root": "src",
-                "reachable_target_keys": (),
-                "proof_root_ids": ("failure-root-2",),
-                "closure_complete": False,
-            },
-        ),
+        source_graph={
+            "nodes": ({"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},),
+            "edges": (),
+            "open_edges": ({"source": "broken"},),
+        },
         project_roots=("src",),
         targets=(),
         proof_roots=({"id": "failure-root-2", "path_ref": "src/Broken.tsx"},),
+        seal_id="c" * 64,
+        seal_digest=digest(
+            {
+                "seal_id": "c" * 64,
+                "source_graph": {
+                    "nodes": ({"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},),
+                    "edges": (),
+                    "open_edges": ({"source": "broken"},),
+                },
+                "project_roots": ["src"],
+                "targets": [],
+                "proof_roots": [{"id": "failure-root-2", "path_ref": "src/Broken.tsx"}],
+            }
+        ),
     )
     decision_context = NextDecisionContext(
         run_context=context,
@@ -7752,6 +8152,16 @@ def test_round16_request_independent_source_failure_projects_schema_valid_whole_
         outcome="payload_unavailable",
         payload_unavailable=True,
         exit_code=3,
+        provenance_observation=_decision_provenance(
+            kind="request_independent",
+            stage="source_selection",
+            request=False,
+            limits=False,
+            source_plan=False,
+            toolchain=False,
+            trusted_environment=False,
+            budget=False,
+        ),
         provenance="request_independent",
     )
     decision = pre_response_failure_decision(
@@ -8386,6 +8796,45 @@ def test_round17_html_has_validation_pipeline_and_round17_state() -> None:
     assert 'data-plantuml-contract="2"' in source
 
 
+def test_round18_html_validation_order_is_strict_and_reverse_mutation_fails() -> None:
+    html_path = (
+        ROOT
+        / "spec-dock"
+        / "initiatives"
+        / "init-00001-code-structure-visualization"
+        / "epics"
+        / "epic-00002-safe-git-structure-comparison"
+        / "issues"
+        / "iss-00008-generate-nextjs-component-snapshots"
+        / "artifacts"
+        / "20260831t022707z--nextjs-component-snapshot-best-practice-guide.html"
+    )
+    source = html_path.read_text(encoding="utf-8")
+    start = source.index('<section id="round18">')
+    end = source.index("</section>", start)
+    section = source[start:end]
+    tokens = (
+        "raw cap",
+        "bounded decode/aggregate",
+        "closed schema",
+        "base/path/reference/proof",
+        "actual model+proof-only count",
+        "model gate",
+        "entity gate",
+        "selected copy",
+    )
+    positions = [section.index(f"<code>{token}</code>") for token in tokens]
+    assert positions == sorted(positions)
+    assert len(set(positions)) == len(tokens)
+
+    reverse = section.replace(
+        "<code>model gate</code> → <code>entity gate</code>",
+        "<code>entity gate</code> → <code>model gate</code>",
+    )
+    reverse_positions = [reverse.index(f"<code>{token}</code>") for token in tokens]
+    assert reverse_positions != sorted(reverse_positions)
+
+
 def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
     assert VALIDATOR_SCHEMA == "code-structure-viz.next-reference-validation/v1"
     fixture = json.loads(
@@ -8447,6 +8896,15 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round17-stdout-closed-union",
         "round17-proof-target-reroute",
         "round17-surface-order",
+        "round18-source-seal-observation",
+        "round18-source-locality-seal",
+        "round18-response-byte-authority",
+        "round18-publication-sealed-bytes",
+        "round18-process-identity-contract",
+        "round18-request-independent-discriminator",
+        "round18-stdout-closed-union",
+        "round18-html-validation-order",
+        "round18-path-byte-order",
     } <= set(fixture["positive"])
     assert {
         "cross-domain",
@@ -8515,6 +8973,15 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round17-selector-branch-mutation",
         "round17-target-reason-mutation",
         "round17-order-reversal",
+        "round18-source-inventory-injection",
+        "round18-source-locality-boolean-equivalent",
+        "round18-response-byte-substitution",
+        "round18-publication-candidate-substitution",
+        "round18-process-identity-substitution",
+        "round18-request-independent-omission",
+        "round18-stdout-branch-field",
+        "round18-html-order-reversal",
+        "round18-path-quote-inverse",
     } <= set(fixture["negative"])
 
     mapping = fixture["criterion_test_map"]
@@ -8529,6 +8996,8 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round16.p2-3",
         *(f"round17.p1-{index}" for index in range(1, 10)),
         *(f"round17.p2-{index}" for index in range(1, 4)),
+        *(f"round18.p1-{index}" for index in range(1, 8)),
+        *(f"round18.p2-{index}" for index in range(1, 3)),
     }
     assert set(mapping) == expected_criteria
     mapped_tests = {name for names in mapping.values() for name in names}

@@ -832,6 +832,78 @@ def test_stream_contract_schema_accepts_closed_positive_vectors(
     _validator(name).validate(value)
 
 
+def test_round18_stdout_union_rejects_partial_discriminator_and_wrong_next_descriptor() -> None:
+    validator = _validator("stdout-result-v1.schema.json")
+    artifact = {
+        "path": "next.snapshot.semantic.json",
+        "domain": "next",
+        "format": "semantic-json",
+        "media_type": "application/json",
+        "size_bytes": 1,
+        "sha256": "a" * 64,
+    }
+    complete = {
+        "type": "stdout_result",
+        "schema": "code-structure-viz.stdout-result/v1",
+        "selector": "next:semantic-json",
+        "availability": True,
+        "domain_status": "complete",
+        "stable_reason": "published_artifact",
+        "artifact": artifact,
+    }
+    validator.validate(complete)
+    for field, value in (
+        ("run_status", "fatal"),
+        ("incomplete_kind", "partial_safe"),
+        ("selected_stdout_unavailable", True),
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate({**complete, field: value})
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                **complete,
+                "artifact": {**artifact, "path": "arbitrary.json"},
+            }
+        )
+    unavailable = {
+        **complete,
+        "availability": False,
+        "stable_reason": "selected_artifact_unavailable",
+        "selected_stdout_unavailable": True,
+    }
+    validator.validate(unavailable)
+
+
+def test_round18_target_reason_is_required_and_forbidden_for_other_diagnostics() -> None:
+    validator = _validator("diagnostic-v1.schema.json")
+    target = {
+        "type": "diagnostic",
+        "schema": "code-structure-viz.diagnostic/v1",
+        "code": "CSV-NEXT-TARGET-001",
+        "severity": "error",
+        "domain": "next",
+        "path": "src/Missing.tsx",
+        "symbol": None,
+        "line": None,
+        "recoverable": False,
+        "message": "An explicit Next.js target cannot be resolved uniquely.",
+        "outcome": "payload_unavailable",
+        "ref_permission": "path_or_symbol",
+        "reason": "missing",
+    }
+    validator.validate(target)
+    with pytest.raises(ValidationError):
+        validator.validate({key: value for key, value in target.items() if key != "reason"})
+    non_target = {
+        **target,
+        "code": "CSV-NEXT-CONFIG-001",
+        "message": "Configuration file could not be read.",
+    }
+    with pytest.raises(ValidationError):
+        validator.validate(non_target)
+
+
 def test_semantic_schema_accepts_zero_class_vector_and_rejects_shape_mutations() -> None:
     value = {
         "type": "semantic_snapshot",

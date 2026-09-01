@@ -117,6 +117,33 @@
       "then": {"properties": {"code": {"const": "CSV-NEXT-TARGET-001"}}}
     },
     {
+      "if": {"properties": {"code": {"const": "CSV-NEXT-TARGET-001"}}, "required": ["code"]},
+      "then": {"required": ["reason"]}
+    },
+    {
+      "if": {
+        "properties": {
+          "code": {"not": {"const": "CSV-NEXT-TARGET-001"}}
+        },
+        "required": ["code"]
+      },
+      "then": {"not": {"required": ["reason"]}}
+    },
+    {
+      "if": {"properties": {"domain": {"const": "next"}}, "required": ["domain"]},
+      "then": {
+        "properties": {
+          "path": {"oneOf": [{"$ref": "urn:code-structure-viz:schema:next-path-v1"}, {"type": "null"}]},
+          "symbol": {
+            "oneOf": [
+              {"type": "null"},
+              {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"}
+            ]
+          }
+        }
+      }
+    },
+    {
       "oneOf": [
         {
           "properties": {

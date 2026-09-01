@@ -105,3 +105,25 @@ measurement map, and no writer re-renders bytes. Canonical output uses
 lexicographic `sort_keys=True`, NFC, UTF-8, and one LF; submitted order is
 validated before sorting. Fresh current-SHA Strict remains pending, readiness
 is unconfirmed, and production implementation has not started.
+
+## Round 18 exact closed stdout result
+
+The result is a closed union with no partially discriminated branch:
+`selector=null` emits the exact summary, `selector=manifest` emits the exact
+root manifest, `next:semantic-json` and `next:plantuml` emit their exact
+selected artifact, and an unavailable branch emits only its typed status,
+reason, descriptor, and allowed target-failure rows. Each selector has a
+schema-fixed path, format, and media type; forbidden fields are rejected.
+`target_failures` is required only for a target-related Next unavailable result
+and is one canonical sorted row per failed target.
+
+The final boundary receives all candidate bytes before applying the selected
+copy limit. Exact bytes are retained and returned verbatim; limit+1 is
+disposed and returns the schema-valid unavailable branch with no partial
+payload. Summary/manifest status is sealed in a two-stage closed publication
+algorithm, so a caller cannot substitute a measurement, outcome, or selected
+payload after finalization. All JSON uses the existing lexicographic
+`sort_keys=True` encoder with NFC, UTF-8, and one LF; path-only ordering uses
+NFC UTF-8 bytes and object rows use canonical JSON bytes. The faithful iterable
+capture evidence is not an OS process-level test. Fresh current-SHA Strict is
+pending, readiness is unconfirmed, and production implementation is absent.

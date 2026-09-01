@@ -268,3 +268,35 @@ reference vectors exercise the complete schema-valid wire path and faithful
 capture/copy harness; they do not replace it with an arithmetic classifier or
 claim OS process-level coverage. Fresh current-SHA Strict is pending,
 readiness is unconfirmed, and production implementation is absent.
+
+## Round 18 authority and measurement closure
+
+Round 18 keeps the three limits as separate, named boundaries:
+`max_adapter_stdout_capture_bytes` counts child chunks before retention,
+`max_adapter_response_bytes` counts the complete private response before JSON
+decode, and `max_selected_stdout_bytes` counts the public selected stream
+before publication. `max_stdout_bytes` is retained only as a selected-output
+compatibility alias; it is never a response or capture fallback. Each boundary
+accepts the exact limit and rejects limit+1 with no partial bytes.
+
+The order is a closed algorithm, not an advisory list:
+
+```text
+raw capture cap
+  -> bounded decode / aggregate
+  -> closed schema
+  -> base / path / reference / proof
+  -> actual model + proof-only count
+  -> model gate
+  -> entity gate
+  -> selected copy
+```
+
+Measurements are sealed into the immutable final publication boundary before
+any surface is projected. A projection cannot supply a second counter,
+retained buffer, status, or outcome. `CSV-NEXT-LIMIT-003` is used for the
+configured byte/structural processing boundary; malformed, closed-schema, and
+proof failures retain their catalog-defined protocol code. The reference
+capture runner consumes faithful `Iterable[bytes]` chunks and explicitly does
+not claim OS process-level coverage. Fresh current-SHA Strict is pending,
+readiness is unconfirmed, and production implementation is absent.

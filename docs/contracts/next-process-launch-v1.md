@@ -74,3 +74,30 @@ descriptor is bound to the toolchain and fingerprint before any publication
 projection. Capture tests use a faithful iterable harness and explicitly do
 not claim OS process-level coverage; production implementation is absent and
 fresh current-SHA Strict is pending.
+
+## Round 18 observation-to-spawn identity contract
+
+An available descriptor is valid only when it is derived from one launch
+observation and the observation is bound to the actual OS spawn. The contract
+is:
+
+1. On a supported OS, open the resolved executable without following a later
+   replacement, record its absolute real path, file identity, version, and
+   SHA-256, then close only after the observation is sealed.
+2. Spawn the fixed `argv` with the recorded executable identity, fixed cwd and
+   environment, pipe/FD policy, and process-group policy. The observed
+   identity and the executable/handle used by spawn must compare equal.
+3. Re-check the identity at the defined TOCTOU point. Replacement, PATH
+   shadowing, symlink substitution, hostile inherited variables, locale/TZ
+   changes, or extra descriptors fail closed before a publication decision.
+4. If the host cannot provide the required identity/handle guarantee, the
+   descriptor is unavailable and the run cannot claim an available Node
+   observation; it is not completed using a fake default.
+
+The schema/reference tests validate the descriptor shape and mutation rules.
+They do not touch a host executable and do not claim this contract is an OS
+process-level acceptance test; production implementation must add that
+acceptance later. Request-independent provenance uses explicit
+`null`/`unobserved` values for facts not observed before the failure. Fresh
+current-SHA Strict remains pending, readiness is unconfirmed, and production
+implementation is absent.

@@ -545,3 +545,53 @@ current-SHA Strictはpending、readinessは未確認、production implementation
 
 Production implementation remains outside this remediation plan. Strict pass with
 P0/P1=0 is still required before I05-PLAN-002 implementation work.
+
+### Round 18 remediation plan and executable trace
+
+固定点は SHA `885352347d250cc34aef0bd52e1fe27063288c05`、CI
+`33543204992`（7/7 green）、Strict session
+`required-strict-github-connector-verificati-680`（transcript SHA-256
+`400431ed1fb444b3bd2509edf14ce557b8f292b0f011f281e74ffa241db8cec8`）である。
+historical verdictは `P0=0 / P1=7 / P2=1 / fail / implementation_ready=no` として保存し、
+fresh current-SHA Strictはpending、readinessは未確認、production implementationは未着手とする。
+
+1. Source acquisitionを `DiscoveryIntent → frozen control observation → internal derivation →
+   single SourceAcquisitionSeal` に固定する。inventory injection、caller observed paths、malformed
+   control、revision drift、plan/view-only、duplicate/post-seal readをnegative testする。
+2. SourceFailureLedgerをsealed raw graphから再計算し、locality/taintをcaller booleanから切り離す。
+   request-independent provenanceはstageごとの observed/unobserved rowsだけを保持し、未観測のlimits/
+   toolchain/trusted env/source plan/processをsynthetic generationしない。
+3. `ValidatedAdapterRequest`をcomposition/frozen authorityとしてrequest id、canonical bytes/digest、
+   file evidence、targets、run context、limitsをresponse boundaryで再検証する。validated responseの
+   raw bytes/SHAとdecision-owned diagnosticsをopaque authorityとして保持する。
+4. raw cap → bounded decode/aggregate → closed schema → base/path/ref/proof → actual model/proof-only
+   count → model gate → entity gate → selected copyを一つのcatalog orderで実行する。structural resource
+   はLIMIT-003、malformed/schema/proofはPROTOCOL-001とし、schema/ref invalid + model+1のprotocol precedence
+   をgenerated wireで検証する。
+5. `PublicationBoundaryDecision`をfinal publication authorityとし、summary/manifest/artifact/typed
+   unavailableのexact bytes、selector、diagnostic JSONL、capture/stderr/selected-copy measurementsを一度
+   sealする。全projectionから独立 outcome/map/payloadを削り、exact/+1 substitution testを通す。
+6. process launch descriptorはOS identity/hash/versionとactual spawn handle/TOCTOU、fixed argv/env/FD/
+   process groupをrequiredにする。referenceではhost processを実行せず、faithful iterable capture testと
+   production OS acceptance boundaryを明記する。
+7. stdout union、target reason、schema discriminator、shared path grammar/safe-ID、NFC UTF-8 path orderと
+   canonical JSON object-row orderをschemas/docs/fixtureへ同期する。HTML validation orderをstrict indexで
+   検証し、reverse mutationをnegative testする。
+
+| criterion | executable evidence |
+| --- | --- |
+| R18-P1-01 source seal authority | `test_round18_source_seal_rejects_caller_membership_and_typed_drift`; `test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift` |
+| R18-P1-02 source locality authority | `test_round18_source_failure_ledger_recomputes_reachability`; `test_round18_request_independent_provenance_is_explicitly_unobserved` |
+| R18-P1-03 response raw-byte authority | `test_round18_validated_response_raw_bytes_are_opaque_authority` |
+| R18-P1-04 publication raw-byte authority | `test_round18_validated_response_raw_bytes_are_opaque_authority` |
+| R18-P1-06 publication byte authority | `test_round18_publication_projections_return_sealed_candidate_bytes`; `test_round17_publication_artifacts_are_bound_to_the_immutable_decision` |
+| R18-P1-05 process identity | `test_round18_process_descriptor_requires_os_identity_and_spawn_binding`; `test_round16_process_launch_descriptor_is_closed_and_security_deterministic` |
+| R18-P1-07 closed stdout union | `test_round18_stdout_union_rejects_partial_discriminator_and_wrong_next_descriptor`; `test_round17_final_publication_stdout_union_seals_summary_manifest_exact_and_plus_one` |
+| R18-P2-01 HTML order | `test_round18_html_validation_order_is_strict_and_reverse_mutation_fails` |
+| R18 follow-up provenance/order | `test_round18_run_manifest_and_diagnostic_discriminators_are_closed`; `test_round18_path_only_order_is_nfc_utf8_and_object_rows_are_canonical_json` |
+
+Verification must include focused Round18 tests, `uv run pytest tests/contracts -q --tb=short`, full
+`uv run pytest -q`, `uv run mypy src tests`, `uv run ruff check .`, `uv run ruff format --check .`,
+SpecDock validation, pinned HTML PlantUML validation, `git diff --check`, and an empty `src/**` diff.
+No generated `node_modules` may remain. These checks validate the pre-implementation contract only and do
+not constitute a Strict pass or product implementation readiness.

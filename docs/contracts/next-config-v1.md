@@ -263,3 +263,32 @@ use canonical root-path order. Submitted order is validated before sorting.
 The existing lexicographic canonical JSON encoder remains the only byte
 encoder. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
 production implementation is absent.
+
+## Round 18 provenance and closed request-independent context
+
+Every `NextRunDecision` owns one immutable `NextPublicationContext` and one
+stage-discriminated `NextDecisionContext` where a request-independent failure
+is required. The latter is constructed only from observations available at
+that stage: request, limits, source plan, toolchain, trusted environment,
+compatibility, process launch, and budget are represented as explicit
+observed/unobserved rows. An unobserved budget is `null` with source
+`unobserved`; it is never a default resolved value. Omitted/invented rows and
+later fixture reconstruction are invalid.
+
+The private `ValidatedAdapterRequest` is composition-based and immutable. It
+rechecks request ID, canonical request bytes/digest, file base64/size/digest,
+targets, run context, and resolved limits at the response boundary. The
+validated response retains the exact canonical raw bytes and SHA-256 as
+opaque authority; callers cannot inject another response byte string or
+diagnostic JSONL.
+
+The final `PublicationBoundaryDecision` seals exact summary, manifest,
+selected artifact candidates, typed-unavailable bytes, diagnostic JSONL, and
+capture/stderr/selected-copy measurements. Domain, root manifest, stdout,
+stderr, artifact, and exit projections consume only that object and return
+sealed bytes; they do not re-render or accept an independent outcome/map.
+Selector, target-failure reason, path grammar, safe symbol IDs, and
+request-independent fields are all closed schema branches. Path-only order is
+NFC UTF-8 byte order; object rows use canonical JSON bytes. Fresh current-SHA
+Strict is pending, readiness is unconfirmed, and production implementation is
+absent.

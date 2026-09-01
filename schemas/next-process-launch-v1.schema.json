@@ -4,7 +4,7 @@
   "title": "CodeStructureViz Next adapter process launch descriptor v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "version", "node_status", "node_realpath", "node_sha256", "node_version", "spawn_executable", "symlink_policy", "argv", "toctou_policy", "shell", "cwd", "env_allowlist", "denied_env", "stdio", "fd_inheritance", "process_group"],
+  "required": ["schema", "version", "node_status", "node_realpath", "node_sha256", "node_version", "spawn_executable", "host_os", "file_identity_at_hash", "file_identity_at_spawn", "spawn_handle", "spawn_path", "symlink_policy", "argv", "toctou_policy", "shell", "cwd", "env_allowlist", "denied_env", "stdio", "fd_inheritance", "process_group"],
   "properties": {
     "schema": {"const": "code-structure-viz.next-process-launch/v1"},
     "version": {"const": 1},
@@ -13,6 +13,11 @@
     "node_sha256": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{64}$"}, {"type": "null"}]},
     "node_version": {"anyOf": [{"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}, {"type": "null"}]},
     "spawn_executable": {"anyOf": [{"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"}, {"type": "null"}]},
+    "host_os": {"enum": ["posix-fixture", "posix", "windows"]},
+    "file_identity_at_hash": {"anyOf": [{"$ref": "#/$defs/file_identity"}, {"type": "null"}]},
+    "file_identity_at_spawn": {"anyOf": [{"$ref": "#/$defs/file_identity"}, {"type": "null"}]},
+    "spawn_handle": {"anyOf": [{"type": "string", "minLength": 1, "pattern": "^[^\\u0000-\\u001f\\u007f]+$"}, {"type": "null"}]},
+    "spawn_path": {"anyOf": [{"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"}, {"type": "null"}]},
     "symlink_policy": {"const": "resolve_and_verify_realpath"},
     "argv": {"type": "array", "prefixItems": [{"anyOf": [{"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"}, {"const": "<unavailable>"}]}, {"const": "/.code-structure-viz/next-adapter.mjs"}], "minItems": 2, "maxItems": 2},
     "toctou_policy": {"const": "bind_verified_realpath_at_spawn"},
@@ -33,10 +38,26 @@
           "node_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "node_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
           "spawn_executable": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
+          "file_identity_at_hash": {"$ref": "#/$defs/file_identity"},
+          "file_identity_at_spawn": {"$ref": "#/$defs/file_identity"},
+          "spawn_handle": {"type": "string", "minLength": 1},
+          "spawn_path": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
           "argv": {"prefixItems": [{"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"}]}
         }
       },
-      "else": {"properties": {"node_realpath": {"const": null}, "node_sha256": {"const": null}, "node_version": {"const": null}, "spawn_executable": {"const": null}, "argv": {"prefixItems": [{"const": "<unavailable>"}]}}}
+      "else": {"properties": {"node_realpath": {"const": null}, "node_sha256": {"const": null}, "node_version": {"const": null}, "spawn_executable": {"const": null}, "file_identity_at_hash": {"const": null}, "file_identity_at_spawn": {"const": null}, "spawn_handle": {"const": null}, "spawn_path": {"const": null}, "argv": {"prefixItems": [{"const": "<unavailable>"}]}}}
     }
-  ]
+  ],
+  "$defs": {
+    "file_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["realpath", "sha256", "version"],
+      "properties": {
+        "realpath": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+      }
+    }
+  }
 }

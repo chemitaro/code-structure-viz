@@ -29,6 +29,20 @@
         "artifact": {"type": "null"}
       },
       "allOf": [
+        {"not": {"anyOf": [{"required": ["domain_status"]}, {"required": ["incomplete_kind"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
+      ]
+    },
+    {
+      "required": ["run_status", "selected_stdout_unavailable"],
+      "properties": {
+        "selector": {"const": null},
+        "availability": {"const": false},
+        "run_status": {"const": "incomplete"},
+        "stable_reason": {"const": "run_summary"},
+        "selected_stdout_unavailable": {"const": true},
+        "artifact": {"type": "null"}
+      },
+      "allOf": [
         {"not": {"anyOf": [{"required": ["domain_status"]}, {"required": ["incomplete_kind"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
     },
@@ -42,7 +56,7 @@
         "artifact": {"type": "object"}
       },
       "allOf": [
-        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
+        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["incomplete_kind"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
     },
     {
@@ -91,8 +105,7 @@
         "artifact": {"type": "object"}
       },
       "allOf": [
-        {"not": {"required": ["run_status", "incomplete_kind"]}},
-        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["incomplete_kind"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
     },
     {
@@ -106,8 +119,7 @@
         "artifact": {"type": "object"}
       },
       "allOf": [
-        {"not": {"required": ["run_status"]}},
-        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
     },
     {
@@ -120,8 +132,7 @@
         "artifact": {"type": "null"}
       },
       "allOf": [
-        {"not": {"required": ["run_status", "incomplete_kind"]}},
-        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["incomplete_kind"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
     },
     {
@@ -135,7 +146,7 @@
         "target_failures": {"minItems": 1}
       },
       "allOf": [
-        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["incomplete_kind"]}, {"required": ["reason"]}]}}
+        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["incomplete_kind"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}]}}
       ]
     },
     {
@@ -148,8 +159,7 @@
         "artifact": {"type": "null"}
       },
       "allOf": [
-        {"not": {"required": ["run_status", "incomplete_kind"]}},
-        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+        {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["incomplete_kind"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
     },
     {
@@ -162,8 +172,7 @@
         "artifact": {"type": "null"}
       },
       "allOf": [
-        {"not": {"required": ["domain_status", "incomplete_kind"]}},
-        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+        {"not": {"anyOf": [{"required": ["domain_status"]}, {"required": ["incomplete_kind"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
     },
     {
@@ -176,8 +185,7 @@
         "artifact": {"type": "null"}
       },
       "allOf": [
-        {"not": {"required": ["domain_status", "incomplete_kind"]}},
-        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+        {"not": {"anyOf": [{"required": ["domain_status"]}, {"required": ["incomplete_kind"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
     },
     {
@@ -190,9 +198,37 @@
         "artifact": {"type": "null"}
       },
       "allOf": [
-        {"not": {"required": ["domain_status", "incomplete_kind"]}},
-        {"not": {"anyOf": [{"required": ["reason"]}, {"required": ["target_failures"]}]}}
+        {"not": {"anyOf": [{"required": ["domain_status"]}, {"required": ["incomplete_kind"]}, {"required": ["selected_stdout_unavailable"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
+    }
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"selector": {"const": "manifest"}}, "required": ["selector"]},
+      "then": {
+        "allOf": [
+          {
+            "if": {"properties": {"availability": {"const": true}}, "required": ["availability"]},
+            "then": {"properties": {"artifact": {"$ref": "#/$defs/manifest_artifact"}}}
+          },
+          {
+            "if": {"properties": {"availability": {"const": false}}, "required": ["availability"]},
+            "then": {
+              "properties": {
+                "artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/manifest_artifact"}]}
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {"properties": {"selector": {"const": "next:semantic-json"}}, "required": ["selector"]},
+      "then": {"properties": {"artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/next_semantic_artifact"}]}}}
+    },
+    {
+      "if": {"properties": {"selector": {"const": "next:plantuml"}}, "required": ["selector"]},
+      "then": {"properties": {"artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/next_plantuml_artifact"}]}}}
     }
   ],
   "$defs": {
@@ -208,6 +244,24 @@
         "size_bytes": {"type": "integer", "minimum": 0},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
+    },
+    "manifest_artifact": {
+      "allOf": [
+        {"$ref": "#/$defs/artifact"},
+        {"properties": {"path": {"const": "run-manifest.json"}, "domain": {"const": "next"}, "format": {"const": "semantic-json"}, "media_type": {"const": "application/json"}}}
+      ]
+    },
+    "next_semantic_artifact": {
+      "allOf": [
+        {"$ref": "#/$defs/artifact"},
+        {"properties": {"path": {"const": "next.snapshot.semantic.json"}, "domain": {"const": "next"}, "format": {"const": "semantic-json"}, "media_type": {"const": "application/json"}}}
+      ]
+    },
+    "next_plantuml_artifact": {
+      "allOf": [
+        {"$ref": "#/$defs/artifact"},
+        {"properties": {"path": {"const": "next.snapshot.puml"}, "domain": {"const": "next"}, "format": {"const": "plantuml"}, "media_type": {"const": "text/vnd.plantuml; charset=utf-8"}}}
+      ]
     },
     "target_failure": {
       "type": "object",

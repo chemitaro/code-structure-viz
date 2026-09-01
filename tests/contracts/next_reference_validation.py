@@ -66,7 +66,7 @@ ROLE_ORDER = {role: index for index, role in enumerate(ROLES)}
 ROLE_PRECEDENCE = {"control": 3, "context": 2, "program": 1}
 FORMAT_ORDER = ("semantic-json", "plantuml")
 FORMAT_ORDER_INDEX = {format_name: index for index, format_name in enumerate(FORMAT_ORDER)}
-RUN_CONTEXT_BUDGET_SOURCES = ("builtin", "repository", "explicit", "cli")
+RUN_CONTEXT_BUDGET_SOURCES = ("builtin", "repository", "explicit", "cli", "unobserved")
 RUN_CONTEXT_SELECTORS = (None, "manifest", *(f"next:{format_name}" for format_name in FORMAT_ORDER))
 TAINTS = {
     "parse_file",
@@ -158,12 +158,20 @@ LIMIT_DEFAULTS = {
 DEFAULT_MAX_ENTITIES = 500
 
 
+def _path_sort_key(value: str) -> bytes:
+    """Sort path-only rows by their normalized UTF-8 bytes, never JSON escapes."""
+
+    assert isinstance(value, str)
+    normalized = unicodedata.normalize("NFC", value)
+    return normalized.encode("utf-8")
+
+
 class NextRunContext(TypedDict):
     """The one explicit context shared by response and publication projections."""
 
     requested_formats: list[str]
     budget_requested: int | None
-    budget_resolved: int
+    budget_resolved: int | None
     budget_source: str
     stdout_selector: str | None
 
@@ -278,11 +286,53 @@ class NextDecisionContext:
     outcome: str
     payload_unavailable: bool
     exit_code: int
+    provenance_observation: dict[str, Any]
     provenance: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
         assert self.provenance in {"request_bound", "request_independent"}
+        observations = copy.deepcopy(self.provenance_observation)
+        assert set(observations) == {
+            "kind",
+            "stage",
+            "request",
+            "limits",
+            "source_plan",
+            "toolchain",
+            "trusted_environment",
+            "budget",
+        }
+        assert observations["kind"] == self.provenance
+        assert observations["stage"] == self.stage
+        for key in (
+            "request",
+            "limits",
+            "source_plan",
+            "toolchain",
+            "trusted_environment",
+            "budget",
+        ):
+            row = observations[key]
+            assert set(row) == {"state", "value"}
+            assert row["state"] in {"observed", "unobserved"}
+            if row["state"] == "unobserved":
+                assert row["value"] is None
+            else:
+                assert row["value"] is not None
+        if self.provenance == "request_independent":
+            assert observations["request"] == {"state": "unobserved", "value": None}
+            assert observations["limits"] == {"state": "unobserved", "value": None}
+            assert observations["source_plan"] == {"state": "unobserved", "value": None}
+            assert observations["toolchain"] == {"state": "unobserved", "value": None}
+            assert observations["trusted_environment"] == {"state": "unobserved", "value": None}
+        if self.run_context["budget_source"] == "unobserved":
+            assert self.run_context["budget_resolved"] is None
+            assert observations["budget"] == {"state": "unobserved", "value": None}
+        else:
+            assert self.run_context["budget_resolved"] is not None
+            assert observations["budget"] == {"state": "observed", "value": True}
+        object.__setattr__(self, "provenance_observation", observations)
         if self.provenance == "request_bound":
             assert self.request_id is not None
             assert self.limits is not None
@@ -320,7 +370,14 @@ class NextDecisionContext:
 
     def __getattribute__(self, name: str) -> Any:
         value = object.__getattribute__(self, name)
-        if name in {"run_context", "targets", "limits", "known_counts", "source_failure_ledger"}:
+        if name in {
+            "run_context",
+            "targets",
+            "limits",
+            "known_counts",
+            "source_failure_ledger",
+            "provenance_observation",
+        }:
             return copy.deepcopy(value)
         return value
 
@@ -382,21 +439,79 @@ class NextPublicationContext:
             assert isinstance(failure["target_tainted"], bool)
         object.__setattr__(self, "source_failure_ledger", ledger)
         seal = self.source_acquisition_seal
-        assert self.observation_provenance["kind"] in {"request_bound", "request_independent"}
-        if self.observation_provenance["kind"] == "request_bound":
-            assert self.observation_provenance["stages"] == [
-                "request",
-                "source",
-                "toolchain",
-                "trusted_environment",
-                "compatibility",
-                "process_launch",
-            ]
+        provenance = self.observation_provenance
+        assert set(provenance) == {"kind", "failure_stage", "failure_code", "observed"}
+        assert provenance["kind"] in {"request_bound", "request_independent"}
+        assert isinstance(provenance["observed"], dict)
+        observed_fields = {
+            "request",
+            "limits",
+            "source_plan",
+            "toolchain",
+            "trusted_environment",
+            "compatibility",
+            "process_launch",
+            "budget",
+        }
+        assert set(provenance["observed"]) == observed_fields
+        for _field_name, row in provenance["observed"].items():
+            assert set(row) == {"state", "value"}
+            assert row["state"] in {"observed", "unobserved"}
+            if row["state"] == "unobserved":
+                assert row["value"] is None
+            else:
+                assert row["value"] is True
+        if provenance["kind"] == "request_bound":
+            assert provenance["failure_stage"] is None
+            assert provenance["failure_code"] is None
+            assert all(
+                row == {"state": "observed", "value": True}
+                for row in provenance["observed"].values()
+            )
+        else:
+            assert isinstance(provenance["failure_stage"], str)
+            assert isinstance(provenance["failure_code"], str)
+            assert provenance["failure_stage"]
+            assert provenance["failure_code"]
+            assert provenance["observed"]["request"] == {
+                "state": "unobserved",
+                "value": None,
+            }
+            assert provenance["observed"]["limits"] == {
+                "state": "unobserved",
+                "value": None,
+            }
+            assert provenance["observed"]["source_plan"] == {
+                "state": "unobserved",
+                "value": None,
+            }
+            assert provenance["observed"]["toolchain"] == {
+                "state": "unobserved",
+                "value": None,
+            }
+            assert provenance["observed"]["trusted_environment"] == {
+                "state": "unobserved",
+                "value": None,
+            }
+            assert provenance["observed"]["compatibility"] == {
+                "state": "unobserved",
+                "value": None,
+            }
+            assert provenance["observed"]["process_launch"] == {
+                "state": "unobserved",
+                "value": None,
+            }
+            expected_budget = (
+                {"state": "observed", "value": True}
+                if self.run_context["budget_source"] != "unobserved"
+                else {"state": "unobserved", "value": None}
+            )
+            assert provenance["observed"]["budget"] == expected_budget
         if seal is None:
             # The run stopped before a source/config/request observation was
             # available.  Null is the fact; an empty plan, trusted profile,
             # toolchain, or limit record would falsely claim observation.
-            assert self.observation_provenance["kind"] == "request_independent"
+            assert provenance["kind"] == "request_independent"
             assert self.source_view_descriptor is None
             assert self.source_view_fingerprint is None
             assert self.final_source_acquisition_plan is None
@@ -446,6 +561,9 @@ class NextPublicationContext:
                 "plan_digest": self.source_plan_digest,
                 "source_view_fingerprint": self.source_view_fingerprint,
                 "seal_operation": seal.seal_operation,
+                "snapshot_id": seal.snapshot_id,
+                "revision_before": seal.revision_before,
+                "revision_after": seal.revision_after,
             }
         )
         ledger = tuple(self.source_failure_ledger)
@@ -507,6 +625,93 @@ class NextPublicationContext:
         return value
 
 
+def _decision_provenance(
+    *,
+    kind: str,
+    stage: str,
+    request: bool,
+    limits: bool,
+    source_plan: bool,
+    toolchain: bool,
+    trusted_environment: bool,
+    budget: bool = True,
+) -> dict[str, Any]:
+    """Build the closed stage/provenance union used by every decision context."""
+
+    assert kind in {"request_bound", "request_independent"}
+    flags = {
+        "request": request,
+        "limits": limits,
+        "source_plan": source_plan,
+        "toolchain": toolchain,
+        "trusted_environment": trusted_environment,
+        "budget": budget,
+    }
+    return {
+        "kind": kind,
+        "stage": stage,
+        **{
+            name: {
+                "state": "observed" if observed else "unobserved",
+                "value": True if observed else None,
+            }
+            for name, observed in flags.items()
+        },
+    }
+
+
+def _publication_provenance(
+    *,
+    kind: str,
+    failure_stage: str | None = None,
+    failure_code: str | None = None,
+    budget_observed: bool,
+) -> dict[str, Any]:
+    """Build the closed observation union for a publication context."""
+
+    assert kind in {"request_bound", "request_independent"}
+    if kind == "request_bound":
+        assert failure_stage is None and failure_code is None
+        observed = {
+            name: {"state": "observed", "value": True}
+            for name in (
+                "request",
+                "limits",
+                "source_plan",
+                "toolchain",
+                "trusted_environment",
+                "compatibility",
+                "process_launch",
+                "budget",
+            )
+        }
+    else:
+        assert isinstance(failure_stage, str) and failure_stage
+        assert isinstance(failure_code, str) and failure_code
+        observed = {
+            name: {
+                "state": "observed" if name == "budget" and budget_observed else "unobserved",
+                "value": True if name == "budget" and budget_observed else None,
+            }
+            for name in (
+                "request",
+                "limits",
+                "source_plan",
+                "toolchain",
+                "trusted_environment",
+                "compatibility",
+                "process_launch",
+                "budget",
+            )
+        }
+    return {
+        "kind": kind,
+        "failure_stage": failure_stage,
+        "failure_code": failure_code,
+        "observed": observed,
+    }
+
+
 @dataclass(frozen=True, kw_only=True)
 class ValidatedResponseDecision:
     """Immutable trust-boundary decision consumed by every publication surface.
@@ -524,15 +729,35 @@ class ValidatedResponseDecision:
     pre_budget_outcome: str
     gate: dict[str, Any]
     request: ValidatedAdapterRequest
+    raw_response_bytes: bytes
+    raw_response_sha256: str
     targets: tuple[str, ...] = ()
     target_failures: tuple[dict[str, Any], ...] = ()
     export_failures: tuple[dict[str, Any], ...] = ()
     publication_context: NextPublicationContext
+    diagnostic_rows: tuple[dict[str, Any], ...] = field(init=False)
+    public_diagnostics: tuple[dict[str, Any], ...] = field(init=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "validated_model", copy.deepcopy(self.validated_model))
         object.__setattr__(self, "validated_proof", copy.deepcopy(self.validated_proof))
         object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
+        assert isinstance(self.raw_response_bytes, bytes) and self.raw_response_bytes
+        assert re.fullmatch(r"[0-9a-f]{64}", self.raw_response_sha256)
+        assert hashlib.sha256(self.raw_response_bytes).hexdigest() == self.raw_response_sha256
+        try:
+            raw_response = json.loads(self.raw_response_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise AssertionError("sealed response bytes are not JSON") from exc
+        assert isinstance(raw_response, dict)
+        assert canonical_json_bytes(raw_response) == self.raw_response_bytes
+        assert raw_response.get("model") == self.validated_model
+        assert raw_response.get("proof") == self.validated_proof
+        object.__setattr__(
+            self,
+            "diagnostic_rows",
+            tuple(copy.deepcopy(self.validated_model.get("diagnostics", []))),
+        )
         request = copy.deepcopy(self.request)
         assert isinstance(request, ValidatedAdapterRequest)
         assert request.get("schema") == "code-structure-viz.next-adapter-request/v1"
@@ -605,6 +830,7 @@ class ValidatedResponseDecision:
             assert gate.get("diagnostic_code") == "CSV-NEXT-EXPORT-001"
         object.__setattr__(self, "target_failures", target_failures)
         object.__setattr__(self, "export_failures", export_failures)
+        object.__setattr__(self, "public_diagnostics", tuple(decision_public_diagnostics(self)))
         context = self.publication_context
         assert context is not None
         assert context.run_context == self.run_context
@@ -633,6 +859,9 @@ class ValidatedResponseDecision:
             "export_failures",
             "request",
             "publication_context",
+            "raw_response_bytes",
+            "diagnostic_rows",
+            "public_diagnostics",
         }:
             return copy.deepcopy(value)
         return value
@@ -984,6 +1213,101 @@ def is_next_run_decision(value: object) -> TypeGuard[NextRunDecision]:
     return isinstance(
         value, (ValidatedResponseDecision, PreResponseFailureDecision, NotApplicableDecision)
     )
+
+
+def decision_public_diagnostics(decision: NextRunDecision) -> list[dict[str, Any]]:
+    """Return the decision-owned public diagnostics used by every writer.
+
+    No caller-supplied diagnostic list is accepted at the publication
+    boundary.  The rows are derived from the immutable decision's validated
+    failure evidence and the fixed diagnostic catalog.
+    """
+
+    assert is_next_run_decision(decision)
+    if isinstance(decision, (PreResponseFailureDecision, NotApplicableDecision)):
+        return [copy.deepcopy(decision.diagnostic)]
+    if decision.target_failures:
+        entry = _diagnostic_catalog()["CSV-NEXT-TARGET-001"]
+        return [
+            {
+                "type": "diagnostic",
+                "schema": "code-structure-viz.diagnostic/v1",
+                "code": "CSV-NEXT-TARGET-001",
+                "severity": entry["severity"],
+                "domain": "next",
+                "path": failure["target_key"].removeprefix("path:"),
+                "symbol": None,
+                "line": None,
+                "reason": failure["reason"],
+                "recoverable": entry["recoverable"],
+                "message": entry["message"],
+                "outcome": entry["outcome"],
+                "ref_permission": entry["ref_permission"],
+            }
+            for failure in decision.target_failures
+        ]
+    if decision.export_failures:
+        entry = _diagnostic_catalog()["CSV-NEXT-EXPORT-001"]
+        return [
+            {
+                "type": "diagnostic",
+                "schema": "code-structure-viz.diagnostic/v1",
+                "code": "CSV-NEXT-EXPORT-001",
+                "severity": entry["severity"],
+                "domain": "next",
+                "path": None,
+                "symbol": None,
+                "line": None,
+                "recoverable": entry["recoverable"],
+                "message": entry["message"],
+                "outcome": entry["outcome"],
+                "ref_permission": entry["ref_permission"],
+            }
+        ]
+    code = decision.gate.get("diagnostic_code")
+    if isinstance(code, str):
+        entry = _diagnostic_catalog()[code]
+        return [
+            {
+                "type": "diagnostic",
+                "schema": "code-structure-viz.diagnostic/v1",
+                "code": code,
+                "severity": entry["severity"],
+                "domain": "next",
+                "path": None,
+                "symbol": None,
+                "line": None,
+                "recoverable": entry["recoverable"],
+                "message": entry["message"],
+                "outcome": entry["outcome"],
+                "ref_permission": entry["ref_permission"],
+            }
+        ]
+    if decision.gate["outcome"] == "partial_safe":
+        entry = _diagnostic_catalog()["CSV-NEXT-FLOW-001"]
+        return [
+            {
+                "type": "diagnostic",
+                "schema": "code-structure-viz.diagnostic/v1",
+                "code": "CSV-NEXT-FLOW-001",
+                "severity": entry["severity"],
+                "domain": "next",
+                "path": None,
+                "symbol": None,
+                "line": None,
+                "recoverable": entry["recoverable"],
+                "message": entry["message"],
+                "outcome": entry["outcome"],
+                "ref_permission": entry["ref_permission"],
+            }
+        ]
+    return []
+
+
+def _public_diagnostic_jsonl(diagnostics: list[dict[str, Any]]) -> bytes:
+    """Encode decision-owned public diagnostics using canonical JSONL."""
+
+    return b"".join(canonical_json_bytes(item) + b"\n" for item in diagnostics)
 
 
 def _decision_exit_code(decision: NextRunDecision) -> int:
@@ -1439,13 +1763,43 @@ EXPORT_GRAPH_CASES_SCHEMA = "code-structure-viz.next-export-graph-cases/v1"
 
 
 class InstrumentedSourceReader:
-    """Small reference reader that makes accidental post-seal reads visible."""
+    """Trusted snapshot reader used to model one bounded source acquisition."""
 
-    def __init__(self, files: dict[str, bytes]) -> None:
+    def __init__(
+        self,
+        files: dict[str, bytes],
+        *,
+        snapshot_id: str = "snapshot-v1",
+        revision: str = "revision-v1",
+        revision_after: str | None = None,
+    ) -> None:
         self._files = dict(files)
+        self.snapshot_id = snapshot_id
+        self.revision_before = revision
+        self.revision_after = revision if revision_after is None else revision_after
         self.read_counts: dict[str, int] = {}
+        self.enumeration_calls = 0
         self.sealed = False
         self.seal_calls = 0
+
+    def enumerate_paths(
+        self, project_roots: tuple[str, ...], hard_exclusions: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        """Enumerate the trusted snapshot; callers cannot submit this set."""
+
+        assert not self.sealed
+        self.enumeration_calls += 1
+        excluded = tuple(f"{name}/" for name in hard_exclusions)
+        paths = [
+            path
+            for path in self._files
+            if any(_under(path, root) for root in project_roots)
+            and not any(
+                path == name or path.startswith(prefix)
+                for name, prefix in zip(hard_exclusions, excluded, strict=True)
+            )
+        ]
+        return tuple(sorted(paths, key=_path_sort_key))
 
     def read(self, path: str) -> bytes:
         assert not self.sealed, "SourceView is sealed; filesystem reads are forbidden"
@@ -1461,6 +1815,15 @@ class InstrumentedSourceReader:
         return self.seal_calls
 
 
+class SourceAcquisitionError(AssertionError):
+    """Typed fail-closed result for malformed or drifting source snapshots."""
+
+    def __init__(self, code: str, stage: str, message: str) -> None:
+        self.code = code
+        self.stage = stage
+        super().__init__(message)
+
+
 @dataclass(frozen=True)
 class SourceAcquisitionSeal:
     """Atomic final-plan/source-view pair produced by the two-phase reader."""
@@ -1471,6 +1834,9 @@ class SourceAcquisitionSeal:
     source_view_fingerprint: str
     seal_id: str
     seal_operation: int
+    snapshot_id: str
+    revision_before: str
+    revision_after: str
 
 
 @dataclass(frozen=True)
@@ -1491,16 +1857,22 @@ class SourceDiscoveryIntent:
 
 
 def _control_json(contents: dict[str, bytes], path: str) -> dict[str, Any]:
-    """Decode one frozen control file, treating malformed control as absent."""
+    """Decode one frozen control file; malformed control is typed failure."""
 
     payload = contents.get(path)
     if payload is None:
         return {}
     try:
         value = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", f"malformed control file: {path}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", f"control file is not an object: {path}"
+        )
+    return value
 
 
 def _normalise_control_path(value: str, *, project_root: str) -> str:
@@ -1537,7 +1909,7 @@ def _derive_project_descriptors_from_control_bytes(
     """Derive project/config/source-root facts from the sealed bytes only."""
 
     descriptors: list[dict[str, Any]] = []
-    for project_root in sorted(project_roots, key=canonical_json_bytes):
+    for project_root in sorted(project_roots, key=_path_sort_key):
         config_candidates = [
             path
             for path in contents
@@ -1559,7 +1931,9 @@ def _derive_project_descriptors_from_control_bytes(
         control = _control_json(contents, config_path)
         raw_options = control.get("compilerOptions", {})
         if not isinstance(raw_options, dict):
-            raw_options = {}
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "compilerOptions is not an object"
+            )
         base_url = raw_options.get("baseUrl")
         if isinstance(base_url, str):
             base_url = _normalise_control_path(base_url, project_root=project_root)
@@ -1570,11 +1944,15 @@ def _derive_project_descriptors_from_control_bytes(
         if isinstance(raw_paths, dict):
             for key, values in raw_paths.items():
                 if not isinstance(key, str) or not isinstance(values, list):
-                    raise AssertionError("invalid compiler paths")
+                    raise SourceAcquisitionError(
+                        "CSV-NEXT-CONFIG-002", "source_control", "invalid compiler paths"
+                    )
+                if not all(isinstance(value, str) for value in values):
+                    raise SourceAcquisitionError(
+                        "CSV-NEXT-CONFIG-002", "source_control", "invalid compiler path value"
+                    )
                 paths[key] = [
-                    _normalise_control_path(value, project_root=project_root)
-                    for value in values
-                    if isinstance(value, str)
+                    _normalise_control_path(value, project_root=project_root) for value in values
                 ]
         compiler_options = {
             "allow_js": bool(raw_options.get("allowJs", False)),
@@ -1585,14 +1963,24 @@ def _derive_project_descriptors_from_control_bytes(
             "base_url": base_url,
             "paths": paths,
         }
-        assert compiler_options["jsx"] in {"preserve", "react", "react-jsx", "react-jsxdev"}
+        if compiler_options["jsx"] not in {"preserve", "react", "react-jsx", "react-jsxdev"}:
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "unsupported jsx compiler option"
+            )
         source_roots_value = control.get("include")
         source_roots: list[str] = []
+        if source_roots_value is not None and not isinstance(source_roots_value, list):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "include is not an array"
+            )
         if isinstance(source_roots_value, list):
+            if not all(isinstance(item, str) for item in source_roots_value):
+                raise SourceAcquisitionError(
+                    "CSV-NEXT-CONFIG-002", "source_control", "include contains a non-path"
+                )
             source_roots = [
                 _normalise_control_path(item, project_root=project_root)
                 for item in source_roots_value
-                if isinstance(item, str)
             ]
         if not source_roots:
             program_paths = [
@@ -1608,7 +1996,7 @@ def _derive_project_descriptors_from_control_bytes(
                 source_roots = ["src" if project_root == "." else f"{project_root.rstrip('/')}/src"]
             else:
                 source_roots = [project_root]
-        source_roots = sorted(set(source_roots), key=canonical_json_bytes)
+        source_roots = sorted(set(source_roots), key=_path_sort_key)
         descriptors.append(
             {
                 "root": project_root,
@@ -1627,11 +2015,12 @@ def seal_source_acquisition(
 ) -> SourceAcquisitionSeal:
     """Derive and atomically seal the final plan and SourceView.
 
-    ``intent`` contains only discovery intent.  The final plan is derived from
-    its frozen config and the acquired bytes; callers cannot submit an
-    independent plan or view.  ``inventory`` is an optional read-only witness
-    used to prove the final revision, role map, extends closure, and
-    digest/size values match what was actually read.
+    ``intent`` contains only discovery intent.  The trusted reader enumerates
+    the immutable snapshot internally; callers cannot submit ``observed_paths``
+    or an independent plan/view.  ``inventory`` is an optional read-only
+    attestation for values such as limits and file digests.  Revision and file
+    membership always come from the reader's snapshot and are checked again
+    before the single atomic seal.
     """
 
     forbidden = {
@@ -1667,10 +2056,6 @@ def seal_source_acquisition(
         hard_exclusions = tuple(intent.get("hard_exclusions", SOURCE_PLAN_HARD_EXCLUSIONS))
     inventory = copy.deepcopy(inventory or {})
     allowed_inventory_keys = {
-        "observed_paths",
-        "revision_before",
-        "revision_after",
-        "revision",
         "head_commit",
         "file_digests",
         "observed_limits",
@@ -1680,21 +2065,32 @@ def seal_source_acquisition(
     assert project_roots and len(project_roots) == len(set(project_roots))
     assert control_candidates == tuple(dict.fromkeys(control_candidates))
     assert all(isinstance(path, str) for path in (*project_roots, *control_candidates))
+    for path in (*project_roots, *control_candidates):
+        _assert_path(path, allow_root=True)
     assert program_suffixes == SOURCE_PLAN_PROGRAM_SUFFIXES
     assert context_suffixes == SOURCE_PLAN_CONTEXT_SUFFIXES
     assert hard_exclusions == SOURCE_PLAN_HARD_EXCLUSIONS
-    observed_paths = tuple(inventory.get("observed_paths", control_candidates))
-    assert observed_paths == tuple(dict.fromkeys(observed_paths))
-    assert all(isinstance(path, str) for path in observed_paths)
-    # Duplicate entries within either phase would make the read contract
-    # ambiguous.  Control candidates and the observed inventory are read once
-    # through the union below.
-    all_paths = tuple(dict.fromkeys((*control_candidates, *observed_paths)))
+    assert reader.snapshot_id
+    revision_before = reader.revision_before
+    enumerated_paths = reader.enumerate_paths(project_roots, hard_exclusions)
+    assert enumerated_paths == tuple(sorted(set(enumerated_paths), key=_path_sort_key))
+    # Control candidates are intent only.  The reader-owned enumeration is the
+    # source of truth; a missing candidate is observed absence, never an
+    # instruction to read a caller-supplied path set.
+    all_paths = tuple(
+        dict.fromkeys(
+            (*enumerated_paths, *(path for path in control_candidates if path in enumerated_paths))
+        )
+    )
     assert all_paths
     contents = {path: reader.read(path) for path in all_paths}
-    before = inventory.get("revision_before", inventory.get("revision", "inventory-v1"))
-    after = inventory.get("revision_after", before)
-    assert after == before
+    revision_after = reader.revision_after
+    if revision_after != revision_before:
+        raise SourceAcquisitionError(
+            "CSV-NEXT-SOURCE-002",
+            "source_revision",
+            "trusted source snapshot changed during acquisition",
+        )
 
     # Project descriptors, compiler options, source roots, and config paths
     # are derived only from the frozen control bytes.  The inventory carries
@@ -1729,31 +2125,60 @@ def seal_source_acquisition(
         if path in contents and _under(path, root)
     ]
     local_extends: list[dict[str, Any]] = []
-    for path, content in contents.items():
-        if Path(path).name not in {"tsconfig.json", "jsconfig.json"}:
+    config_queue = [
+        path
+        for path in sorted(contents, key=_path_sort_key)
+        if Path(path).name in {"tsconfig.json", "jsconfig.json"}
+    ]
+    visited_configs: set[str] = set()
+    while config_queue:
+        path = config_queue.pop(0)
+        if path in visited_configs:
             continue
-        try:
-            control_value = json.loads(content.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            continue
+        visited_configs.add(path)
+        project_root = next((root for root in project_roots if _under(path, root)), None)
+        assert project_root is not None
+        control_value = _control_json(contents, path)
         extends_value = control_value.get("extends")
         if extends_value is None:
             continue
-        extends_values = [extends_value] if isinstance(extends_value, str) else extends_value
-        assert isinstance(extends_values, list) and all(
-            isinstance(item, str) for item in extends_values
-        )
-        project_root = next((root for root in project_roots if _under(path, root)), None)
-        assert project_root is not None
+        if isinstance(extends_value, str):
+            extends_values = [extends_value]
+        elif isinstance(extends_value, list) and all(
+            isinstance(item, str) for item in extends_value
+        ):
+            extends_values = list(extends_value)
+        else:
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "extends must be a path or path list"
+            )
+        resolved_extends = [
+            _normalise_control_path(item, project_root=project_root) for item in extends_values
+        ]
+        for extend_path in resolved_extends:
+            if extend_path not in contents:
+                raise SourceAcquisitionError(
+                    "CSV-NEXT-CONFIG-002",
+                    "source_control",
+                    f"extends path was not captured: {extend_path}",
+                )
+            if Path(extend_path).name in {"tsconfig.json", "jsconfig.json"}:
+                config_queue.append(extend_path)
         local_extends.append(
             {
                 "project_root": project_root,
                 "config_path": path,
-                "extends": sorted(set(extends_values)),
+                "extends": sorted(set(resolved_extends), key=_path_sort_key),
             }
         )
+        resolved_control_paths.extend(
+            {"project_root": project_root, "path": extend_path} for extend_path in resolved_extends
+        )
+    resolved_control_paths = list(
+        {(row["project_root"], row["path"]): row for row in resolved_control_paths}.values()
+    )
     file_role_map: list[dict[str, Any]] = []
-    for path in sorted(contents):
+    for path in sorted(contents, key=_path_sort_key):
         project_root = next((root for root in project_roots if _under(path, root)), None)
         assert project_root is not None
         basename = Path(path).name
@@ -1780,17 +2205,25 @@ def seal_source_acquisition(
         file_role_map=file_role_map,
     )
 
-    view_files = [
-        {
-            "path": path,
-            "size_bytes": len(contents[path]),
-            "sha256": hashlib.sha256(contents[path]).hexdigest(),
-        }
-        for path in sorted(contents)
-    ]
+    # Source-view entries are object rows, so their wire order is the shared
+    # canonical JSON order.  Only path-only surfaces use normalized UTF-8
+    # bytes directly (project roots/source roots/hard exclusions).
+    view_files = sorted(
+        [
+            {
+                "path": path,
+                "size_bytes": len(contents[path]),
+                "sha256": hashlib.sha256(contents[path]).hexdigest(),
+            }
+            for path in contents
+        ],
+        key=canonical_json_bytes,
+    )
     source_view = {
         "schema": "code-structure-viz.source-view/v1",
         "kind": "working-tree",
+        "snapshot_id": reader.snapshot_id,
+        "revision": revision_before,
         "head_commit": inventory.get("head_commit"),
         "files": view_files,
         "file_count": len(view_files),
@@ -1806,6 +2239,9 @@ def seal_source_acquisition(
             "plan_digest": plan_digest,
             "source_view_fingerprint": source_view_fingerprint,
             "seal_operation": seal_operation,
+            "snapshot_id": reader.snapshot_id,
+            "revision_before": revision_before,
+            "revision_after": revision_after,
         }
     )
     return SourceAcquisitionSeal(
@@ -1815,6 +2251,9 @@ def seal_source_acquisition(
         source_view_fingerprint=source_view_fingerprint,
         seal_id=seal_id,
         seal_operation=seal_operation,
+        snapshot_id=reader.snapshot_id,
+        revision_before=revision_before,
+        revision_after=revision_after,
     )
 
 
@@ -3271,6 +3710,25 @@ def _process_launch_for_toolchain(
         node_sha256=node_sha256,
         node_version=version,
         spawn_executable=spawn_executable,
+        file_identity_at_hash=(
+            {
+                "realpath": node_realpath,
+                "sha256": node_sha256,
+                "version": version,
+            }
+            if status == "available"
+            else None
+        ),
+        file_identity_at_spawn=(
+            {
+                "realpath": node_realpath,
+                "sha256": node_sha256,
+                "version": version,
+            }
+            if status == "available"
+            else None
+        ),
+        spawn_handle="fixture-process-group" if status == "available" else None,
     )
 
 
@@ -3281,6 +3739,9 @@ def process_launch_descriptor(
     node_sha256: str | None,
     node_version: str | None,
     spawn_executable: str | None,
+    file_identity_at_hash: dict[str, Any] | None,
+    file_identity_at_spawn: dict[str, Any] | None,
+    spawn_handle: str | None,
 ) -> dict[str, Any]:
     """Return the closed executable/process-group policy for the adapter.
 
@@ -3296,11 +3757,23 @@ def process_launch_descriptor(
         assert isinstance(node_sha256, str) and re.fullmatch(r"[0-9a-f]{64}", node_sha256)
         assert isinstance(node_version, str) and re.fullmatch(r"\d+\.\d+\.\d+", node_version)
         assert spawn_executable == node_realpath
+        assert file_identity_at_hash is not None
+        assert file_identity_at_spawn is not None
+        assert file_identity_at_hash == file_identity_at_spawn
+        assert file_identity_at_hash == {
+            "realpath": node_realpath,
+            "sha256": node_sha256,
+            "version": node_version,
+        }
+        assert isinstance(spawn_handle, str) and spawn_handle
     else:
         node_realpath = None
         node_sha256 = None
         node_version = None
         spawn_executable = None
+        file_identity_at_hash = None
+        file_identity_at_spawn = None
+        spawn_handle = None
     argv = (
         [spawn_executable, "/.code-structure-viz/next-adapter.mjs"]
         if spawn_executable
@@ -3317,6 +3790,11 @@ def process_launch_descriptor(
         "node_sha256": node_sha256,
         "node_version": node_version,
         "spawn_executable": spawn_executable,
+        "host_os": "posix-fixture",
+        "file_identity_at_hash": file_identity_at_hash,
+        "file_identity_at_spawn": file_identity_at_spawn,
+        "spawn_handle": spawn_handle,
+        "spawn_path": spawn_executable,
         "symlink_policy": "resolve_and_verify_realpath",
         "argv": argv,
         "toctou_policy": "bind_verified_realpath_at_spawn",
@@ -3341,6 +3819,11 @@ def validate_process_launch_descriptor(value: dict[str, Any]) -> None:
         "node_sha256",
         "node_version",
         "spawn_executable",
+        "host_os",
+        "file_identity_at_hash",
+        "file_identity_at_spawn",
+        "spawn_handle",
+        "spawn_path",
         "symlink_policy",
         "argv",
         "toctou_policy",
@@ -3355,6 +3838,7 @@ def validate_process_launch_descriptor(value: dict[str, Any]) -> None:
     assert value["schema"] == "code-structure-viz.next-process-launch/v1"
     assert value["version"] == 1
     assert value["node_status"] in {"available", "unavailable", "not_applicable"}
+    assert value["host_os"] == "posix-fixture"
     if value["node_status"] == "available":
         assert isinstance(value["node_realpath"], str)
         assert Path(value["node_realpath"]).is_absolute()
@@ -3364,12 +3848,24 @@ def validate_process_launch_descriptor(value: dict[str, Any]) -> None:
         assert re.fullmatch(r"\d+\.\d+\.\d+", value["node_version"])
         assert value["spawn_executable"] == value["node_realpath"]
         assert value["argv"][0] == value["spawn_executable"]
+        assert value["spawn_path"] == value["spawn_executable"]
+        assert value["file_identity_at_hash"] == {
+            "realpath": value["node_realpath"],
+            "sha256": value["node_sha256"],
+            "version": value["node_version"],
+        }
+        assert value["file_identity_at_spawn"] == value["file_identity_at_hash"]
+        assert isinstance(value["spawn_handle"], str) and value["spawn_handle"]
     else:
         assert (
             value["node_realpath"] is None
             and value["node_sha256"] is None
             and value["node_version"] is None
             and value["spawn_executable"] is None
+            and value["file_identity_at_hash"] is None
+            and value["file_identity_at_spawn"] is None
+            and value["spawn_handle"] is None
+            and value["spawn_path"] is None
         )
     assert value["symlink_policy"] == "resolve_and_verify_realpath"
     assert value["toctou_policy"] == "bind_verified_realpath_at_spawn"
@@ -3480,44 +3976,6 @@ def _public_request_snapshot(
     return snapshot
 
 
-def _unavailable_source_acquisition_seal(
-    *, limits: dict[str, Any], trusted_environment_digest: str
-) -> SourceAcquisitionSeal:
-    """Seal an explicit unavailable source view without inventing project data."""
-
-    plan = {
-        "schema": "code-structure-viz.source-acquisition-plan/next/v1",
-        "version": SOURCE_PLAN_VERSION,
-        "projects": [],
-        "resolved_control_paths": [],
-        "local_extends": [],
-        "file_role_map": [],
-        "program_suffixes": list(SOURCE_PLAN_PROGRAM_SUFFIXES),
-        "context_suffixes": list(SOURCE_PLAN_CONTEXT_SUFFIXES),
-        "hard_exclusions": sorted(SOURCE_PLAN_HARD_EXCLUSIONS),
-        "limits": copy.deepcopy(limits),
-        "trusted_environment_digest": trusted_environment_digest,
-    }
-    view: dict[str, Any] = {
-        "schema": "code-structure-viz.source-view/v1",
-        "kind": "unavailable",
-        "head_commit": None,
-        "files": [],
-        "file_count": 0,
-    }
-    plan_digest = digest(plan)
-    view_digest = digest(view)
-    seal_operation = 0
-    seal_id = digest(
-        {
-            "plan_digest": plan_digest,
-            "source_view_fingerprint": view_digest,
-            "seal_operation": seal_operation,
-        }
-    )
-    return SourceAcquisitionSeal(plan, view, plan_digest, view_digest, seal_id, seal_operation)
-
-
 def _source_seal_for_validated_request(
     request: ValidatedAdapterRequest,
 ) -> SourceAcquisitionSeal:
@@ -3548,7 +4006,6 @@ def _source_seal_for_validated_request(
         SourceDiscoveryIntent(project_roots=roots, control_candidates=candidates),
         InstrumentedSourceReader(files),
         {
-            "observed_paths": tuple(files),
             "observed_limits": copy.deepcopy(request["limits"]),
             "observed_trusted_environment_digest": request["trusted_type_environment"]["sha256"],
         },
@@ -3716,17 +4173,7 @@ def _publication_context_for_validated_request(
         ),
         source_failure_ledger=source_failure_ledger,
         process_launch=copy.deepcopy(process_launch_descriptor),
-        observation_provenance={
-            "kind": "request_bound",
-            "stages": [
-                "request",
-                "source",
-                "toolchain",
-                "trusted_environment",
-                "compatibility",
-                "process_launch",
-            ],
-        },
+        observation_provenance=_publication_provenance(kind="request_bound", budget_observed=True),
     )
 
 
@@ -3774,18 +4221,12 @@ def _publication_context_for_request_independent_failure(
         fingerprint_projects=[],
         source_failure_ledger=source_failure_ledger,
         process_launch=None,
-        observation_provenance={
-            "kind": "request_independent",
-            "failure_stage": stage,
-            "failure_code": diagnostic_code,
-            "observed": {
-                "run_context": True,
-                "limits": False,
-                "trusted_environment": False,
-                "toolchain": False,
-                "source_plan": False,
-            },
-        },
+        observation_provenance=_publication_provenance(
+            kind="request_independent",
+            failure_stage=stage,
+            failure_code=diagnostic_code,
+            budget_observed=run_context["budget_source"] != "unobserved",
+        ),
     )
 
 
@@ -3812,7 +4253,7 @@ def _source_plan_projects(config_or_request: dict[str, Any]) -> list[dict[str, A
 
     return sorted(
         copy.deepcopy(config_or_request["projects"]),
-        key=lambda project: canonical_json_bytes(unicodedata.normalize("NFC", project["root"])),
+        key=lambda project: _path_sort_key(project["root"]),
     )
 
 
@@ -3878,7 +4319,7 @@ def source_plan_descriptor(
         ),
         "program_suffixes": list(SOURCE_PLAN_PROGRAM_SUFFIXES),
         "context_suffixes": list(SOURCE_PLAN_CONTEXT_SUFFIXES),
-        "hard_exclusions": sorted(SOURCE_PLAN_HARD_EXCLUSIONS),
+        "hard_exclusions": sorted(SOURCE_PLAN_HARD_EXCLUSIONS, key=_path_sort_key),
         "limits": copy.deepcopy(config_or_request["limits"]),
         "trusted_environment_digest": config_or_request["trusted_environment_digest"],
     }
@@ -3906,7 +4347,7 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
     project_roots = {project["root"] for project in descriptor["projects"]}
     for project in descriptor["projects"]:
         _assert_path(project["root"])
-        assert project["source_roots"] == sorted(set(project["source_roots"]))
+        assert project["source_roots"] == sorted(set(project["source_roots"]), key=_path_sort_key)
         for source_root in project["source_roots"]:
             _assert_path(source_root)
             assert _under(source_root, project["root"])
@@ -3931,7 +4372,7 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
         _assert_path(local_extend["project_root"])
         _assert_file_path(local_extend["config_path"])
         assert _under(local_extend["config_path"], local_extend["project_root"])
-        assert local_extend["extends"] == sorted(set(local_extend["extends"]))
+        assert local_extend["extends"] == sorted(set(local_extend["extends"]), key=_path_sort_key)
         for extend in local_extend["extends"]:
             _assert_file_path(extend)
             assert _under(extend, local_extend["project_root"])
@@ -3955,7 +4396,7 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
     assert len(role_keys) == len(set(role_keys))
     assert descriptor["program_suffixes"] == list(SOURCE_PLAN_PROGRAM_SUFFIXES)
     assert descriptor["context_suffixes"] == list(SOURCE_PLAN_CONTEXT_SUFFIXES)
-    assert descriptor["hard_exclusions"] == sorted(SOURCE_PLAN_HARD_EXCLUSIONS)
+    assert descriptor["hard_exclusions"] == sorted(SOURCE_PLAN_HARD_EXCLUSIONS, key=_path_sort_key)
     validate_limits(descriptor["limits"])
     assert re.fullmatch(r"[0-9a-f]{64}", descriptor["trusted_environment_digest"])
 
@@ -4350,7 +4791,7 @@ def _validate_project_correspondence(
         assert model_project == request_project
         assert model_project["root"] == request_project["root"]
     request_roots = [project["root"] for project in request_projects]
-    assert request_roots == sorted(request_roots, key=canonical_json_bytes)
+    assert request_roots == sorted(request_roots, key=_path_sort_key)
     model_ids = [project["id"] for project in model_projects]
     assert model_ids == sorted(model_ids)
 
@@ -4718,16 +5159,16 @@ def derive_pre_budget_outcome(proof: dict[str, Any], model: dict[str, Any]) -> s
     return "complete"
 
 
-def classify_source_failure(*, localized: bool, safe_subset_proven: bool) -> dict[str, Any]:
-    """Close the source failure boundary before semantic projection.
+def classify_source_failure(ledger: SourceFailureLedger) -> dict[str, Any]:
+    """Close the source boundary from the sealed graph, never caller flags.
 
-    `SOURCE-001` is reserved for a proven local omission.  Any source failure
-    that can affect an unbounded dependency or target set is a typed
-    `SOURCE-003` unavailable result; it must not be downgraded to a misleading
-    partial snapshot.
+    ``SourceFailureLedger`` recomputes locality from its raw sealed graph.  A
+    caller cannot select ``SOURCE-001`` by passing a pair of booleans; the
+    only owner of that decision is this graph-derived ledger.
     """
 
-    if localized and safe_subset_proven:
+    assert isinstance(ledger, SourceFailureLedger)
+    if ledger.safe_subset_proven:
         return {
             "diagnostic_code": "CSV-NEXT-SOURCE-001",
             "outcome": "partial_safe",
@@ -4744,74 +5185,101 @@ def classify_source_failure(*, localized: bool, safe_subset_proven: bool) -> dic
 
 @dataclass(frozen=True)
 class SourceFailureLedger:
-    """Python-owned locality ledger derived from sealed graph observations.
+    """Python-owned locality ledger derived from a sealed raw source graph.
 
-    The caller supplies only observations: a failed path/stage, the frozen
-    closure row for that path, project ownership, requested targets, and the
-    proof roots that witness the failure.  ``isolated`` and
-    ``target_tainted`` are derived below; accepting either as caller input
-    would let an adapter manufacture a ``partial_safe`` result.
+    The input contains only nodes and directed edges observed by the trusted
+    source seal.  Reachability, target taint, and locality are recomputed here;
+    caller-provided ``reachable_target_keys``/``closure_complete`` booleans are
+    intentionally not part of the contract.  ``seal_digest`` binds the graph
+    to the acquisition seal so a second graph cannot be substituted later.
     """
 
     failures: tuple[dict[str, Any], ...]
-    source_graph: tuple[dict[str, Any], ...]
+    source_graph: dict[str, Any]
     project_roots: tuple[str, ...]
     targets: tuple[str, ...]
     proof_roots: tuple[dict[str, Any], ...]
+    seal_id: str
+    seal_digest: str
 
     def __post_init__(self) -> None:
         failures = tuple(copy.deepcopy(self.failures))
-        graph = tuple(copy.deepcopy(self.source_graph))
+        graph = copy.deepcopy(self.source_graph)
         roots = tuple(self.project_roots)
         targets = tuple(canonical_target_key(item) for item in self.targets)
         proof_roots = tuple(copy.deepcopy(self.proof_roots))
         assert failures == tuple(sorted(failures, key=canonical_json_bytes))
-        assert graph == tuple(sorted(graph, key=canonical_json_bytes))
-        assert roots == tuple(sorted(roots))
+        assert set(graph) == {"nodes", "edges", "open_edges"}
+        nodes = tuple(copy.deepcopy(graph["nodes"]))
+        edges = tuple(copy.deepcopy(graph["edges"]))
+        open_edges = tuple(copy.deepcopy(graph["open_edges"]))
+        assert nodes == tuple(sorted(nodes, key=canonical_json_bytes))
+        assert edges == tuple(sorted(edges, key=canonical_json_bytes))
+        assert open_edges == tuple(sorted(open_edges, key=canonical_json_bytes))
+        graph = {"nodes": nodes, "edges": edges, "open_edges": open_edges}
+        assert roots == tuple(sorted(roots, key=_path_sort_key))
         assert targets == tuple(sorted(set(targets)))
         assert proof_roots == tuple(sorted(proof_roots, key=canonical_json_bytes))
         assert roots and len(roots) == len(set(roots))
         assert proof_roots
         proof_root_ids = {root.get("id") for root in proof_roots}
         assert all(isinstance(root_id, str) and root_id for root_id in proof_root_ids)
-        graph_by_path: dict[str, dict[str, Any]] = {}
-        for row in graph:
-            assert set(row) == {
-                "path",
-                "project_root",
-                "reachable_target_keys",
-                "proof_root_ids",
-                "closure_complete",
-            }
+        node_by_id: dict[str, dict[str, Any]] = {}
+        node_id_by_path: dict[str, str] = {}
+        for row in nodes:
+            assert set(row) == {"id", "path", "project_root"}
+            assert isinstance(row["id"], str) and row["id"]
             _assert_file_path(row["path"])
             _assert_path(row["project_root"])
             assert row["project_root"] in roots
-            reachable = tuple(canonical_target_key(item) for item in row["reachable_target_keys"])
-            assert reachable == tuple(sorted(set(reachable)))
-            assert all(item in targets for item in reachable)
-            witness_ids = tuple(row["proof_root_ids"])
-            assert witness_ids == tuple(sorted(set(witness_ids)))
-            assert set(witness_ids) <= proof_root_ids
-            assert isinstance(row["closure_complete"], bool)
-            assert row["path"] not in graph_by_path
-            graph_by_path[row["path"]] = row
+            assert row["id"] not in node_by_id
+            assert row["path"] not in node_id_by_path
+            node_by_id[row["id"]] = row
+            node_id_by_path[row["path"]] = row["id"]
+        adjacency: dict[str, tuple[str, ...]] = {node_id: () for node_id in node_by_id}
+        mutable_adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_by_id}
+        for edge in edges:
+            assert set(edge) == {"source", "target"}
+            assert edge["source"] in node_by_id and edge["target"] in node_by_id
+            mutable_adjacency[edge["source"]].append(edge["target"])
+        open_adjacency: dict[str, int] = {node_id: 0 for node_id in node_by_id}
+        for edge in open_edges:
+            assert set(edge) == {"source"}
+            assert edge["source"] in node_by_id
+            open_adjacency[edge["source"]] += 1
+        adjacency = {
+            node_id: tuple(sorted(set(children), key=lambda item: item))
+            for node_id, children in mutable_adjacency.items()
+        }
         normalized: list[dict[str, Any]] = []
         paths: set[str] = set()
         for failure in failures:
-            # Caller booleans are deliberately rejected.  They are outputs of
-            # this class, not an authority supplied by an adapter or runner.
             assert set(failure) == {"path", "stage"}
             _assert_file_path(failure["path"])
             assert isinstance(failure["stage"], str) and failure["stage"]
             assert failure["path"] not in paths
             paths.add(failure["path"])
-            graph_row = graph_by_path.get(failure["path"])
-            assert graph_row is not None
-            target_tainted = (
-                bool(set(graph_row["reachable_target_keys"]) & set(targets))
-                or not graph_row["closure_complete"]
+            start = node_id_by_path.get(failure["path"])
+            assert start is not None
+            reached: set[str] = set()
+            frontier = [start]
+            while frontier:
+                current = frontier.pop()
+                if current in reached:
+                    continue
+                reached.add(current)
+                frontier.extend(adjacency[current])
+            reached_keys = {node_id for node_id in reached}
+            reached_paths = {node_by_id[node_id]["path"] for node_id in reached}
+            target_tainted = any(
+                target in reached_keys
+                or (target.startswith("path:") and target.removeprefix("path:") in reached_paths)
+                for target in targets
             )
-            isolated = bool(graph_row["closure_complete"]) and not target_tainted
+            target_tainted = target_tainted or any(
+                node_id in reached for node_id, count in open_adjacency.items() if count
+            )
+            isolated = not target_tainted
             normalized.append(
                 {
                     "path": failure["path"],
@@ -4826,6 +5294,17 @@ class SourceFailureLedger:
         object.__setattr__(self, "project_roots", roots)
         object.__setattr__(self, "targets", targets)
         object.__setattr__(self, "proof_roots", proof_roots)
+        assert re.fullmatch(r"[0-9a-f]{64}", self.seal_id)
+        expected_seal_digest = digest(
+            {
+                "seal_id": self.seal_id,
+                "source_graph": graph,
+                "project_roots": list(roots),
+                "targets": list(targets),
+                "proof_roots": list(proof_roots),
+            }
+        )
+        assert self.seal_digest == expected_seal_digest
 
     @property
     def safe_subset_proven(self) -> bool:
@@ -4839,7 +5318,13 @@ class SourceFailureLedger:
 
     def __getattribute__(self, name: str) -> Any:
         value = object.__getattribute__(self, name)
-        if name in {"failures", "source_graph", "project_roots", "targets", "proof_roots"}:
+        if name in {
+            "failures",
+            "source_graph",
+            "project_roots",
+            "targets",
+            "proof_roots",
+        }:
             return copy.deepcopy(value)
         return value
 
@@ -4859,10 +5344,7 @@ def validate_source_failure_locality(
     assert failed_paths <= proof_paths or not ledger.failures
     model_paths = {record.get("path") for record in model.get("files", [])}
     assert failed_paths.isdisjoint(model_paths)
-    if ledger.safe_subset_proven:
-        assert not ledger.explicit_target_tainted
-        return classify_source_failure(localized=True, safe_subset_proven=True)
-    return classify_source_failure(localized=False, safe_subset_proven=False)
+    return classify_source_failure(ledger)
 
 
 def _validate_proof_reason_semantics(proof: dict[str, Any], model: dict[str, Any]) -> None:
@@ -4897,6 +5379,7 @@ def _with_validated_decision(
     run_context: NextRunContext,
     pre_budget_outcome: str,
     request: dict[str, Any] | ValidatedAdapterRequest,
+    raw_response_bytes: bytes,
     targets: list[str] | tuple[str, ...] = (),
     target_failures: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
     export_failures: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
@@ -4953,6 +5436,8 @@ def _with_validated_decision(
         target_failures=tuple(target_failures),
         export_failures=tuple(export_failures),
         request=validated_request,
+        raw_response_bytes=raw_response_bytes,
+        raw_response_sha256=hashlib.sha256(raw_response_bytes).hexdigest(),
         publication_context=publication_context,
     )
     return projection
@@ -4971,6 +5456,10 @@ def validate_response_envelope(
     bounded = bounded_decode_json(response_bytes, limits=request["limits"])
     assert bounded["allowed"]
     response = cast(dict[str, Any], bounded["value"])
+    # The exact validated wire is retained as an opaque authority.  Rejecting
+    # non-canonical JSON here prevents a later publication writer from
+    # replacing it with a separately rendered equivalent object.
+    assert canonical_json_bytes(response) == response_bytes
     _validate_closed_response_schema(response)
     model = response["model"]
     target_failure = target_completeness_failure(model, request["targets"])
@@ -5028,6 +5517,7 @@ def validate_response_envelope(
             run_context=run_context,
             pre_budget_outcome="payload_unavailable",
             request=request,
+            raw_response_bytes=response_bytes,
             targets=request["targets"],
             target_failures=target_failure.failures,
         )
@@ -5055,6 +5545,7 @@ def validate_response_envelope(
             run_context=run_context,
             pre_budget_outcome="payload_unavailable",
             request=request,
+            raw_response_bytes=response_bytes,
             targets=request["targets"],
             target_failures=proof_target_failure.failures,
         )
@@ -5072,6 +5563,7 @@ def validate_response_envelope(
             run_context=run_context,
             pre_budget_outcome="payload_unavailable",
             request=request,
+            raw_response_bytes=response_bytes,
             targets=request["targets"],
             export_failures=export_failure["export_failures"],
         )
@@ -5090,6 +5582,7 @@ def validate_response_envelope(
         run_context=run_context,
         pre_budget_outcome=pre_budget_outcome,
         request=request,
+        raw_response_bytes=response_bytes,
         targets=request["targets"],
     )
 
@@ -5305,7 +5798,7 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             assert not _under(other_root, project["root"])
             assert project["id"] != other_id
         roots.append((project["root"], project["id"]))
-        assert project["source_roots"] == sorted(project["source_roots"])
+        assert project["source_roots"] == sorted(project["source_roots"], key=_path_sort_key)
         assert len(project["source_roots"]) == len(set(project["source_roots"]))
         for source_root in project["source_roots"]:
             _assert_path(source_root)
@@ -5328,10 +5821,10 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             }
             for project in value["projects"]
         ],
-        key=lambda project: canonical_json_bytes(project["root"]),
+        key=lambda project: _path_sort_key(project["root"]),
     )
     assert [project["root"] for project in expected_config_projects] == sorted(
-        project["root"] for project in value["projects"]
+        (project["root"] for project in value["projects"]), key=_path_sort_key
     )
     assert value["config"]["projects"] == expected_config_projects
     assert value["request"]["projects"] == expected_config_projects
@@ -5533,6 +6026,7 @@ def entity_budget_gate(
         "plantuml": "next.snapshot.puml",
     }
     resolved = context["budget_resolved"]
+    assert resolved is not None
     allowed = entity_budget_allowed(measured, resolved)
     outcome = original_outcome if allowed else "payload_unavailable"
     return {
@@ -6165,12 +6659,6 @@ def _public_limit_diagnostic() -> dict[str, Any]:
     }
 
 
-def _public_diagnostic_jsonl(diagnostics: list[dict[str, Any]]) -> bytes:
-    """Encode the complete public diagnostic stream before any write occurs."""
-
-    return b"".join(canonical_json_bytes(diagnostic) + b"\n" for diagnostic in diagnostics)
-
-
 def render_public_diagnostic_stderr(
     diagnostics: list[dict[str, Any]],
     *,
@@ -6390,6 +6878,7 @@ def publication_boundary_seal(
     artifact_descriptors: Mapping[str, dict[str, Any]],
     selector: str | None,
     selected_stdout: dict[str, Any],
+    sealed_stdout_result: bytes,
     diagnostic_jsonl: bytes,
     measurement_digest: str,
 ) -> str:
@@ -6408,10 +6897,101 @@ def publication_boundary_seal(
             "artifact_descriptors": copy.deepcopy(dict(artifact_descriptors)),
             "selector": selector,
             "selected_stdout": _canonical_measurement_value(selected_stdout),
+            "sealed_stdout_result": _canonical_measurement_value(sealed_stdout_result),
             "diagnostic_jsonl": _canonical_measurement_value(diagnostic_jsonl),
             "measurement_digest": measurement_digest,
         }
     )
+
+
+def candidate_key_for_selector(selector: str | None) -> str:
+    """Return the sealed stdout candidate key for one closed selector."""
+
+    return {
+        None: "summary",
+        "manifest": "manifest",
+        "next:semantic-json": "next.snapshot.semantic.json",
+        "next:plantuml": "next.snapshot.puml",
+    }[selector]
+
+
+def _publication_domain_status(decision: NextRunDecision) -> str:
+    if isinstance(decision, NextValidatedDecision):
+        outcome = decision.gate["outcome"]
+    else:
+        outcome = decision.outcome
+    return {
+        "complete": "complete",
+        "partial_safe": "incomplete",
+        "payload_unavailable": "incomplete",
+        "not_applicable": "not_applicable",
+    }[outcome]
+
+
+def _sealed_selected_unavailable_result(
+    decision: NextRunDecision,
+    selector: str | None,
+    candidates: Mapping[str, bytes],
+    artifact_descriptors: Mapping[str, Mapping[str, Any]],
+) -> bytes:
+    """Build the typed selected-copy result before the boundary is sealed."""
+
+    if selector is None:
+        result: dict[str, Any] = {
+            "type": "stdout_result",
+            "schema": "code-structure-viz.stdout-result/v1",
+            "selector": None,
+            "availability": False,
+            "run_status": "incomplete",
+            "stable_reason": "run_summary",
+            "selected_stdout_unavailable": True,
+            "artifact": None,
+        }
+    elif selector == "manifest":
+        manifest = candidates["manifest"]
+        result = {
+            "type": "stdout_result",
+            "schema": "code-structure-viz.stdout-result/v1",
+            "selector": "manifest",
+            "availability": False,
+            "domain_status": _publication_domain_status(decision),
+            "stable_reason": "selected_artifact_unavailable",
+            "selected_stdout_unavailable": True,
+            "artifact": {
+                "path": "run-manifest.json",
+                "domain": "next",
+                "format": "semantic-json",
+                "media_type": "application/json",
+                "size_bytes": len(manifest),
+                "sha256": hashlib.sha256(manifest).hexdigest(),
+            },
+        }
+    else:
+        assert selector in {"next:semantic-json", "next:plantuml"}
+        selected_path = (
+            "next.snapshot.semantic.json"
+            if selector == "next:semantic-json"
+            else "next.snapshot.puml"
+        )
+        result = {
+            "type": "stdout_result",
+            "schema": "code-structure-viz.stdout-result/v1",
+            "selector": selector,
+            "availability": False,
+            "domain_status": _publication_domain_status(decision),
+            "stable_reason": "selected_artifact_unavailable",
+            "selected_stdout_unavailable": True,
+            "artifact": dict(artifact_descriptors[selected_path]),
+        }
+    if result.get("domain_status") == "incomplete":
+        outcome = (
+            decision.gate["outcome"]
+            if isinstance(decision, NextValidatedDecision)
+            else decision.outcome
+        )
+        if outcome == "partial_safe":
+            result["incomplete_kind"] = "partial_safe"
+    return canonical_json_bytes(result) + b"\n"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -6426,9 +7006,8 @@ class PublicationBoundaryDecision:
     """
 
     semantic_decision: NextRunDecision
-    response_bytes: bytes
     artifact_bytes: dict[str, bytes]
-    diagnostic_jsonl: bytes
+    sealed_stdout_candidates: dict[str, bytes]
     adapter_stdout: dict[str, Any]
     adapter_stderr: dict[str, Any]
     public_stderr: dict[str, Any]
@@ -6436,25 +7015,42 @@ class PublicationBoundaryDecision:
     measurement_digest: str
     publication_outcome: str
     exit_code: int
+    response_bytes: bytes = field(init=False)
+    diagnostic_jsonl: bytes = field(init=False)
     validated_request_id: str | None = field(init=False)
     response_sha256: str | None = field(init=False)
     response_model_digest: str | None = field(init=False)
     artifact_descriptors: dict[str, dict[str, Any]] = field(init=False)
     selector: str | None = field(init=False)
+    sealed_stdout_result: bytes = field(init=False)
     publication_seal: str = field(init=False)
 
     def __post_init__(self) -> None:
         assert is_next_run_decision(self.semantic_decision)
-        assert isinstance(self.response_bytes, bytes)
-        assert isinstance(self.diagnostic_jsonl, bytes)
-        assert self.diagnostic_jsonl == self.public_stderr["payload"]
+        sealed_response = (
+            self.semantic_decision.raw_response_bytes
+            if isinstance(self.semantic_decision, ValidatedResponseDecision)
+            and self.adapter_stdout["allowed"]
+            else b""
+        )
+        object.__setattr__(self, "response_bytes", bytes(sealed_response))
+        object.__setattr__(self, "diagnostic_jsonl", bytes(self.public_stderr["payload"]))
+        expected_diagnostics = decision_public_diagnostics(self.semantic_decision)
+        if self.public_stderr["allowed"]:
+            assert self.diagnostic_jsonl == _public_diagnostic_jsonl(expected_diagnostics)
         artifact_bytes = dict(self.artifact_bytes)
+        stdout_candidates = dict(self.sealed_stdout_candidates)
         assert all(
             isinstance(path, str) and isinstance(payload, bytes)
             for path, payload in artifact_bytes.items()
         )
+        assert all(
+            isinstance(path, str) and isinstance(payload, bytes)
+            for path, payload in stdout_candidates.items()
+        )
         object.__setattr__(self, "response_bytes", bytes(self.response_bytes))
         object.__setattr__(self, "artifact_bytes", copy.deepcopy(artifact_bytes))
+        object.__setattr__(self, "sealed_stdout_candidates", copy.deepcopy(stdout_candidates))
         object.__setattr__(self, "diagnostic_jsonl", bytes(self.diagnostic_jsonl))
         for name in ("adapter_stdout", "adapter_stderr", "public_stderr", "selected_stdout"):
             object.__setattr__(self, name, copy.deepcopy(getattr(self, name)))
@@ -6525,6 +7121,19 @@ class PublicationBoundaryDecision:
             object.__setattr__(self, "validated_request_id", None)
             object.__setattr__(self, "response_sha256", None)
             object.__setattr__(self, "response_model_digest", None)
+        assert {"summary", "manifest"} <= set(stdout_candidates)
+        for candidate_name in ("summary", "manifest"):
+            candidate = stdout_candidates[candidate_name]
+            parsed_candidate = json.loads(candidate.decode("utf-8"))
+            assert isinstance(parsed_candidate, dict)
+            assert canonical_json_bytes(parsed_candidate) + b"\n" == candidate
+        if (
+            isinstance(self.semantic_decision, NextValidatedDecision)
+            and expected_outcome != "payload_unavailable"
+        ):
+            expected_paths = set(self.semantic_decision.gate["artifact_paths"])
+            assert expected_paths <= set(stdout_candidates)
+            assert all(stdout_candidates[path] == artifact_bytes[path] for path in expected_paths)
         _validate_artifacts_against_decision(
             self.semantic_decision,
             artifact_bytes,
@@ -6536,7 +7145,8 @@ class PublicationBoundaryDecision:
                 if self_selector == "next:semantic-json"
                 else "next.snapshot.puml"
             )
-            if self.selected_stdout["allowed"]:
+            if self.selected_stdout["allowed"] and expected_outcome != "payload_unavailable":
+                assert selected_path in stdout_candidates
                 assert self.selected_stdout["retained"] == artifact_bytes.get(selected_path, b"")
             elif expected_outcome == "selected_artifact_unavailable":
                 assert selected_path in artifact_bytes
@@ -6551,8 +7161,23 @@ class PublicationBoundaryDecision:
                 assert self.selected_stdout["allowed"]
                 if expected_outcome == "published":
                     assert self.selected_stdout["retained"]
+        assert candidate_key_for_selector(self_selector) in stdout_candidates
+        if self.selected_stdout["allowed"]:
+            assert (
+                self.selected_stdout["retained"]
+                == stdout_candidates[candidate_key_for_selector(self_selector)]
+            )
         descriptors = _publication_artifact_descriptors(artifact_bytes)
         object.__setattr__(self, "artifact_descriptors", descriptors)
+        sealed_result = b""
+        if expected_outcome == "selected_artifact_unavailable":
+            sealed_result = _sealed_selected_unavailable_result(
+                self.semantic_decision,
+                self.selector,
+                stdout_candidates,
+                descriptors,
+            )
+        object.__setattr__(self, "sealed_stdout_result", sealed_result)
         expected_seal = publication_boundary_seal(
             semantic_decision=self.semantic_decision,
             response_bytes=self.response_bytes,
@@ -6563,6 +7188,7 @@ class PublicationBoundaryDecision:
             artifact_descriptors=descriptors,
             selector=self.selector,
             selected_stdout=self.selected_stdout,
+            sealed_stdout_result=sealed_result,
             diagnostic_jsonl=self.diagnostic_jsonl,
             measurement_digest=self.measurement_digest,
         )
@@ -6579,6 +7205,8 @@ class PublicationBoundaryDecision:
             "public_stderr",
             "selected_stdout",
             "artifact_descriptors",
+            "sealed_stdout_candidates",
+            "sealed_stdout_result",
         }:
             return copy.deepcopy(value)
         return value
@@ -6587,12 +7215,10 @@ class PublicationBoundaryDecision:
 def finalize_publication_decision(
     semantic_decision: NextRunDecision,
     *,
-    response_bytes: bytes,
     artifact_bytes: Mapping[str, bytes],
+    stdout_candidates: Mapping[str, bytes],
     adapter_stdout_chunks: Iterable[bytes] = (),
     adapter_stderr_chunks: Iterable[bytes] = (),
-    public_diagnostics: list[dict[str, Any]] | None = None,
-    selected_payload: bytes = b"",
     adapter_stdout_limit: int = LIMIT_DEFAULTS["max_adapter_stdout_capture_bytes"],
     adapter_stderr_limit: int = LIMIT_DEFAULTS["max_adapter_stderr_capture_bytes"],
     public_stderr_limit: int = LIMIT_DEFAULTS["max_stderr_bytes"],
@@ -6601,14 +7227,18 @@ def finalize_publication_decision(
     """Seal all capture/publication measurements around one semantic decision."""
 
     assert is_next_run_decision(semantic_decision)
-    assert isinstance(response_bytes, bytes)
     assert isinstance(artifact_bytes, Mapping)
+    candidates = {key: bytes(value) for key, value in stdout_candidates.items()}
+    assert all(isinstance(key, str) for key in candidates)
+    selector = semantic_decision.publication_context.run_context["stdout_selector"]
+    candidate_key = candidate_key_for_selector(selector)
+    assert candidate_key in candidates
     adapter_stdout = capture_adapter_stdout(adapter_stdout_chunks, limit=adapter_stdout_limit)
     adapter_stderr = capture_adapter_stderr(adapter_stderr_chunks, limit=adapter_stderr_limit)
     public_stderr = render_public_diagnostic_stderr(
-        public_diagnostics or [], limit=public_stderr_limit
+        decision_public_diagnostics(semantic_decision), limit=public_stderr_limit
     )
-    selected_stdout = copy_selected_stdout(selected_payload, limit=selected_stdout_limit)
+    selected_stdout = copy_selected_stdout(candidates[candidate_key], limit=selected_stdout_limit)
     capture_failed = not adapter_stdout["allowed"] or not adapter_stderr["allowed"]
     stderr_failed = not public_stderr["allowed"]
     selected_failed = not selected_stdout["allowed"]
@@ -6620,9 +7250,8 @@ def finalize_publication_decision(
         outcome = "published"
     return PublicationBoundaryDecision(
         semantic_decision=semantic_decision,
-        response_bytes=response_bytes if adapter_stdout["allowed"] else b"",
         artifact_bytes=dict(artifact_bytes),
-        diagnostic_jsonl=public_stderr["payload"],
+        sealed_stdout_candidates=candidates,
         adapter_stdout=adapter_stdout,
         adapter_stderr=adapter_stderr,
         public_stderr=public_stderr,
@@ -6983,7 +7612,7 @@ def canonical_run_context(
     *,
     requested_formats: list[str] | tuple[str, ...],
     budget_requested: int | None,
-    budget_resolved: int,
+    budget_resolved: int | None,
     budget_source: str,
     stdout_selector: str | None,
 ) -> NextRunContext:
@@ -6992,14 +7621,19 @@ def canonical_run_context(
     formats = list(requested_formats)
     _assert_formats(formats)
     assert budget_requested is None or 1 <= budget_requested <= 100000
-    assert 1 <= budget_resolved <= 100000
     assert budget_source in RUN_CONTEXT_BUDGET_SOURCES
     assert stdout_selector in RUN_CONTEXT_SELECTORS
     if stdout_selector is not None and stdout_selector != "manifest":
         assert stdout_selector.removeprefix("next:") in formats
+    if budget_resolved is None:
+        assert budget_requested is None
+        assert budget_source == "unobserved"
+    else:
+        assert 1 <= budget_resolved <= 100000
+        assert budget_source != "unobserved"
     if budget_source == "builtin":
         assert budget_requested is None
-    else:
+    elif budget_source != "unobserved":
         assert budget_requested is not None
     return {
         "requested_formats": formats,
@@ -7457,6 +8091,15 @@ def decision_context_for_request(
         outcome="payload_unavailable",
         payload_unavailable=True,
         exit_code=3,
+        provenance_observation=_decision_provenance(
+            kind="request_bound",
+            stage=stage,
+            request=True,
+            limits=True,
+            source_plan=False,
+            toolchain=False,
+            trusted_environment=False,
+        ),
         provenance="request_bound",
     )
 
@@ -7607,6 +8250,15 @@ def not_applicable_decision(request: dict[str, Any]) -> NotApplicableDecision:
         outcome="not_applicable",
         payload_unavailable=False,
         exit_code=0,
+        provenance_observation=_decision_provenance(
+            kind="request_bound",
+            stage="applicability",
+            request=True,
+            limits=True,
+            source_plan=False,
+            toolchain=False,
+            trusted_environment=False,
+        ),
         provenance="request_bound",
     )
     entry = _diagnostic_catalog()["CSV-NEXT-APPLICABILITY-001"]
@@ -8391,7 +9043,7 @@ def validate_model(
         roots.append((project["root"], project["id"]))
         assert project["file_ids"] == sorted(project["file_ids"])
         assert all(_id_kind(file_id) == "file" for file_id in project["file_ids"])
-        assert project["source_roots"] == sorted(project["source_roots"])
+        assert project["source_roots"] == sorted(project["source_roots"], key=_path_sort_key)
         assert len(project["source_roots"]) == len(set(project["source_roots"]))
         for source_root in project["source_roots"]:
             _assert_path(source_root)
@@ -8682,7 +9334,7 @@ def validate_request_files(request: dict[str, Any]) -> None:
     assert len(project_ids) == len(set(project_ids))
     assert all(_id_kind(project_id) == "project" for project_id in project_ids)
     roots = [(project["root"], project["id"]) for project in request["projects"]]
-    assert roots == sorted(roots, key=lambda item: canonical_json_bytes(item[0]))
+    assert roots == sorted(roots, key=lambda item: _path_sort_key(item[0]))
     for index, (root, project_id) in enumerate(roots):
         assert request["projects"][index]["kind"] == "project"
         assert request["projects"][index]["config_digest"] == project_config_digest(
@@ -10132,9 +10784,7 @@ def validate_run_manifest(
     assert manifest["schema"] == "code-structure-viz.run-manifest/v1"
     assert manifest["contracts"]["plantuml"] == "code-structure-viz.plantuml/next/v1"
     assert manifest["adapters"] == [{"domain": "next", "name": "next-typescript", "version": "1"}]
-    root_projects = sorted(
-        (project["root"] for project in domain["projects"]), key=canonical_json_bytes
-    )
+    root_projects = sorted((project["root"] for project in domain["projects"]), key=_path_sort_key)
     assert manifest["command"] == {
         "name": "snapshot",
         "domain": "next",

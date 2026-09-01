@@ -656,3 +656,52 @@ production implementationは未着手のままとする。
 
 Round 17のcriterion-to-test対応、三試行のprovenance、検証結果、fresh Strict pendingは
 新規 `artifacts/20260902t000000z-disc-strict-spec-review-round-17.md` に保存する。
+
+### Round 18 authority and publication remediation
+
+Round 18は、content reviewで確認された `P0=0 / P1=7 / P2=1 / fail /
+implementation_ready=no` を、production実装前の機械検証可能な要件として閉じる。
+レビュー固定点は SHA `885352347d250cc34aef0bd52e1fe27063288c05`、CI
+`33543204992`（7/7 green）、Strict session
+`required-strict-github-connector-verificati-680`（transcript SHA-256
+`400431ed1fb444b3bd2509edf14ce557b8f292b0f011f281e74ffa241db8cec8`）である。
+このhistorical verdictは上書きせず、fresh current-SHA Strictはpending、readinessは
+未確認、production implementationは未着手とする。
+
+1. `SourceDiscoveryIntent`はproject roots、control candidates、固定discovery rulesだけを
+   受ける。`SourceAcquisitionSeal`のinventoryは観測値だけとし、trusted enumeratorが凍結した
+   control bytesとsnapshot/revisionに拘束してconfig、compiler options、source roots、local
+   extends、final paths、effective roles、plan/view descriptorをseal内部で導出する。callerの
+   observed_paths、final paths、derived descriptors、plan-only/view-only再構成、malformed control、
+   revision drift、seal後readはfail-closedとする。
+2. source failureのlocalityはsealed raw graphから導出する。`SourceFailureLedger`はnodes/edges/
+   failure roots/project roots/targets/proof rootsとseal identityだけを保持し、reachable targets、
+   closure complete、safe subset、target taintをcaller booleanで受けない。`SOURCE-001`は独立に
+   proofされたlocal partial-safeだけ、隔離不能は`SOURCE-003`/payload_unavailableだけとする。
+3. 全`NextRunDecision` variantは一つのimmutable `NextPublicationContext`を必須保持し、request-
+   independent branchはstage-discriminated provenanceで未観測のrequest/limits/source plan/
+   toolchain/trusted environment/process/compatibility/budgetを`unobserved`＋nullで表す。fixtureや
+   defaultから合成しない。private requestはcomposition-based `ValidatedAdapterRequest`として
+   canonical bytes/id/digest、files、targets、run context、limitsをresponse boundaryで再検証する。
+4. validated responseはcanonical raw bytesとSHA-256をopaque authorityとしてdecisionに保持し、
+   finalizerが独立response bytesやpublic diagnosticsを注入できない。validation順序はraw cap →
+   bounded decode/aggregate → closed schema → base/path/reference/proof → actual model+proof-only
+   count → model gate → entity gate → selected copyで固定する。
+5. `PublicationBoundaryDecision`はvalidated request id、response/model digest、summary/root manifest/
+   selected artifact/typed unavailableのexact bytes、diagnostic JSONL、capture/stderr/selected-copy
+   measurementsとsealを一度だけ所有する。domain/root/manifest/stdout/stderr/artifact/exit projectionは
+   final objectだけを入力とし、rerender、fallback、独立status/measurement/selected payload引数を
+   持たない。selector null/manifest/domainのexact/+1とschema-valid unavailableを検証する。
+6. process launch descriptorはversioned OS identity contractとし、対応OSでverified absolute Node
+   realpath、file identity/hash/version、actual spawn identity/handle、TOCTOU、argv/cwd/env/FD/process
+   groupをbindする。PATH shadow、symlink replacement、hostile env、locale/TZ、extra FD、descriptor
+   omission/substitutionはfail-closedとする。reference iterable harnessはOS process-level testと
+   主張せず、後続production acceptanceで実体検証する。
+7. target unavailableは`CSV-NEXT-TARGET-001`とし、8 reasonの一target一行をproof後にsealed roots/
+   taintから再解決する。diagnostic/proof/decision/domain/root/stdoutでreasonを一致させ、他codeには
+   reasonを許さない。stdout selector branchはclosed union（summary/manifest/semantic artifact/
+   typed unavailable）で、canonical lexicographic JSON（NFC、UTF-8、LF）だけを使う。
+
+path-only orderはNFC UTF-8 bytes、object rowsはcanonical JSON bytesとし、validatorはsubmitted order
+をsort前に検査する。Round18の各要件にはcaller authority substitution、exact/+1、schema branch、
+reason equality、逆順path、HTML validation-orderのpositive/negative testを対応付ける。

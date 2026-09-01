@@ -944,6 +944,20 @@ stop
       </div>
     </section>
 
+    <section id="round18">
+      <h2>Round 18: provenance と sealed bytes を閉じる</h2>
+      <p>Round 18は、Round 17のStrict content reviewで残った「callerが観測結果を装える」「最終公開時に別のbytesを再生成できる」「schemaのdiscriminatorを省略できる」という経路を、後続実装前の契約として閉じます。ここでもproduction implementationは未着手です。fresh current-SHA Strictはpending、readinessは未確認です。</p>
+      <p id="round18-validation-order"><strong>検証順序:</strong> <code>raw cap</code> → <code>bounded decode/aggregate</code> → <code>closed schema</code> → <code>base/path/reference/proof</code> → <code>actual model+proof-only count</code> → <code>model gate</code> → <code>entity gate</code> → <code>selected copy</code>。各段階は前段のimmutable観測を入力とし、malformed/closed-schema/proof violationは<code>PROTOCOL-001</code>、byte/structural resource overrunは<code>LIMIT-003</code>へ固定します。</p>
+      <div class="grid">
+        <article class="card"><h3>seal内導出</h3><p><code>SourceDiscoveryIntent</code>はroots、control candidates、固定discover ruleだけを持ちます。trusted enumeratorがsnapshot/revisionに拘束されたbytesを列挙・単一読取し、config、local extends closure、final paths、role map、SourceView、FinalSourceAcquisitionPlanを同じ<code>SourceAcquisitionSeal</code>から導出します。callerのobserved_paths、reachable target、closure complete、derived planは入力にできません。</p></article>
+        <article class="card"><h3>観測の有無</h3><p><code>NextDecisionContext</code>と<code>NextPublicationContext</code>はfailure stageと各観測値をclosed unionで持ちます。request-independent branchでは未観測のrequest、limits、source plan、toolchain、trust、compatibility、launchを<code>null/unobserved</code>とし、budget解決前の<code>NextRunContext</code>も<code>budget_resolved=null</code>、<code>budget_source=unobserved</code>で表します。</p></article>
+        <article class="card"><h3>最終公開の因果</h3><p><code>ValidatedResponseDecision</code>のcanonical raw response bytes/SHA、validated request、model digest、diagnosticsを唯一のresponse authorityにします。<code>PublicationBoundaryDecision</code>はcapture、public stderr、selected copy、artifact bytes、selector候補bytes、measurement、sealを保持し、projectionはsealed valueを返すだけで別のresponse/diagnostic/status/payloadを受け取りません。</p></article>
+        <article class="card"><h3>OS identityとschema</h3><p>process descriptorは対応OS、hash時/spawn時のfile identity、実spawn handle/path、固定argv/env/FD/process groupを記録します。reference contractはhost実体を検査しないためOS process-level acceptanceを完了済みとは主張しません。run-manifestの<code>request_independent</code>はNextで必須の<code>true/false</code>、TARGET diagnosticの<code>reason</code>も必須です。</p></article>
+        <article class="card"><h3>順序とreason</h3><p>path-onlyのroot/source-rootはNFC-normalized UTF-8 bytes、object rowsはcanonical JSON bytesで並べます。8つのtarget failure reasonはresolver→proof→decision→diagnostic→domain→root manifest→stdoutまで同じ一件を保持し、selector非対象やgeneric unavailableへ漏らしません。</p></article>
+      </div>
+      <div class="callout"><strong>Round 18の履歴:</strong> reviewed SHA <code>885352347d250cc34aef0bd52e1fe27063288c05</code>、CI <code>33543204992</code>（7/7 success）、Strict session <code>required-strict-github-connector-verificati-680</code>（transcript SHA-256 <code>400431ed1fb444b3bd2509edf14ce557b8f292b0f011f281e74ffa241db8cec8</code>）のhistorical verdictは <code>P0=0 / P1=7 / P2=1 / fail</code>、<code>implementation_ready=no</code>です。これは上書きせずRound 18 artifactへ保存し、fresh current-SHA Strict pending、readiness unconfirmed、production implementation absentを維持します。</div>
+    </section>
+
     <section>
       <h2>実装開始前の readiness gate</h2>
       <p>この提案を「実装可能」と呼ぶ条件は、文章が揃うことではありません。machine-checkable な request/response、public semantic、run manifest、stdout、diagnostic、PlantUML の closed contractを実体化し、exact bytes と reference validator で相互投影を検証し、既存 Python/SQLAlchemy の全テストと Next の data-only contract vectors を clean checkout で通すことです。Round 6〜11の指摘とRound 12の8件を含む修復をローカル契約へ反映し、修復後の GitHub 同一SHAを対象に fresh ChatGPT Use Strict を実行して P0=0かつP1=0を確認する必要があります。Round 12のfail記録をpassへ書き換えたり、ローカルテストの成功だけでreadinessを確定したりしません。</p>

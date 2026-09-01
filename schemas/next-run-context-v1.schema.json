@@ -20,8 +20,13 @@
         {"type": "null"}
       ]
     },
-    "budget_resolved": {"type": "integer", "minimum": 1, "maximum": 100000},
-    "budget_source": {"enum": ["builtin", "repository", "explicit", "cli"]},
+    "budget_resolved": {
+      "oneOf": [
+        {"type": "integer", "minimum": 1, "maximum": 100000},
+        {"type": "null"}
+      ]
+    },
+    "budget_source": {"enum": ["builtin", "repository", "explicit", "cli", "unobserved"]},
     "stdout_selector": {"enum": [null, "manifest", "next:semantic-json", "next:plantuml"]}
   }
 }

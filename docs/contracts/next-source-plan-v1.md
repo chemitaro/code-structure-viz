@@ -141,3 +141,30 @@ reconstruction, role or closure substitution, duplicate reads, post-drift
 reads, and request-derived mutations. This remains a data-only
 pre-implementation contract; fresh current-SHA Strict is pending and product
 implementation is absent.
+
+## Round 18 sealed source and locality authority
+
+`SourceDiscoveryIntent` remains limited to project roots, control candidates,
+and fixed discovery rules. `SourceAcquisitionSeal` owns the trusted enumerated
+paths: the enumerator reads the frozen control closure and final source bytes,
+checks the snapshot/revision before and after the read, derives config,
+extends, final paths, effective roles, and plan/view digests internally, and
+performs one atomic seal. Caller-provided `observed_paths`, final paths,
+derived descriptors, or a second plan/view seal are not authority.
+
+Source failure locality is likewise seal-owned. The immutable
+`SourceFailureLedger` stores raw graph nodes/edges, failure roots, project
+roots, targets, and proof roots. Reachability, closure completeness, safe
+subset, and target taint are recomputed from those facts and bound to the
+source seal ID/digest; boolean-equivalent caller claims are rejected. A
+localized proven subset uses `CSV-NEXT-SOURCE-001`/`partial_safe`, while a
+non-isolatable failure uses `CSV-NEXT-SOURCE-003`/`payload_unavailable`.
+
+If acquisition fails before a request exists, the decision carries only
+observed facts. Its stage-discriminated provenance marks each later fact as
+`{state: "unobserved", value: null}`; no fixture/default supplies a project,
+request, limits, toolchain, trusted environment, process descriptor, or source
+plan. The reference tests cover malformed controls, revision drift, duplicate
+reads, caller-derived mutations, ledger substitution, and the local/global
+failure split. This is a data-only contract: fresh current-SHA Strict is
+pending, readiness is unconfirmed, and production implementation is absent.

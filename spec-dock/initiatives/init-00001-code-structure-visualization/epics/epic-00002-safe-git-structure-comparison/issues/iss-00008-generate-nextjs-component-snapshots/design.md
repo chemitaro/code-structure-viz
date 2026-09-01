@@ -1444,3 +1444,54 @@ typed unavailableのclosed unionであり、canonical sorted-key JSON/NFC/UTF-8/
 Round 17のfindings→remediation→executable evidenceと検証結果は新規Round17 artifactへ
 保存する。これはdata-only設計の完了であり、production implementationの開始やStrict pass
 の代替ではない。
+
+## Round 18 closed authority design
+
+Round18の設計では、callerが観測結果やpublication結果を再注入できないように、入力から出力まで
+のauthority graphを次の一方向に固定する。
+
+```plantuml
+@startuml
+skinparam monochrome true
+rectangle "DiscoveryIntent\nroots + controls + rules" as intent
+rectangle "Frozen controls + trusted observations\nsnapshot/revision" as frozen
+rectangle "SourceAcquisitionSeal\nderived plan/view/roles" as source
+rectangle "ValidatedAdapterRequest\nimmutable canonical authority" as request
+rectangle "NextRunDecision\npublication + stage provenance" as decision
+rectangle "PublicationBoundaryDecision\nexact bytes + measurements" as publication
+rectangle "domain / root / summary / manifest / artifact / stderr / exit" as surfaces
+intent --> frozen --> source --> request --> decision --> publication --> surfaces
+note right of frozen
+Malformed control or revision drift
+fails closed. Unobserved facts stay null.
+end note
+@enduml
+```
+
+`SourceDiscoveryIntent`はresolved valueを含まず、trusted enumeratorがfrozen control bytesから
+derived config/compiler/source-root/local-extends/final-path/role mapを作り、planとSourceViewを一つの
+sealで固定する。SourceFailureLedgerは同じsealed graphからBFS/reachabilityとtaintを再計算するため、
+`reachable_target_keys`や`closure_complete`のようなboolean-equivalent caller authorityを持たない。
+
+requestが存在しないfailureでは、stageと観測 provenanceだけを保持するdiscriminated contextを使い、
+未観測limits/trusted env/toolchain/source plan/processをsynthetic defaultで埋めない。validated requestは
+composition/frozen objectで、response boundaryがcanonical request bytesと全nested digestを再検証する。
+validated responseのcanonical raw bytes/SHAとdecision-owned diagnosticsが唯一のresponse authorityである。
+
+publicationは、semantic decisionとmeasurementを別々にprojectionへ渡す二段階のclosed algorithmとする。
+まずcandidate summary/manifest/artifact bytesをcanonical bytesとして検証し、capture、public stderr、
+selected copyの結果を含む`PublicationBoundaryDecision`をsealする。その後の全surfaceはdecisionに
+sealedされたbytesを返すだけで、再render・fallback・独立payload/status/counterを許さない。selector null、
+manifest、semantic artifact、typed unavailableはschemaのclosed unionであり、exactは全量、+1はzero
+partial bytesである。target failureはproof後のsealed roots/taintから再解決し、8 reasonを全surfaceで一致させる。
+
+limitsはcapture、private response、selected outputの3点を分離し、validation順序をraw cap → decode/
+aggregate → schema → base/path/reference/proof → actual counts → model gate → entity gate → selected copy
+に固定する。path-only orderはNFC UTF-8 bytes、object rowはcanonical JSON bytesとし、sort前のsubmitted order
+を検査する。process descriptorはobserved OS identityとactual spawn handleをbindするが、reference test
+はhost processを実行せず、OS process-level acceptanceを後続実装の条件として明記する。
+
+Round18はdata-only remediationである。対象SHA `885352347d250cc34aef0bd52e1fe27063288c05`、CI
+`33543204992`、historical Strict `P0=0/P1=7/P2=1/fail/implementation_ready=no`、fresh Strict pending、
+readiness unconfirmed、production absentをartifactへ保存し、Strict passまでI05-PLAN-002のproduction
+実装を開始しない。

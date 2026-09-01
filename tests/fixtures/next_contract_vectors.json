@@ -112,7 +112,16 @@
     "round17-publication-boundary-seal",
     "round17-stdout-closed-union",
     "round17-proof-target-reroute",
-    "round17-surface-order"
+    "round17-surface-order",
+    "round18-source-seal-observation",
+    "round18-source-locality-seal",
+    "round18-response-byte-authority",
+    "round18-publication-sealed-bytes",
+    "round18-process-identity-contract",
+    "round18-request-independent-discriminator",
+    "round18-stdout-closed-union",
+    "round18-html-validation-order",
+    "round18-path-byte-order"
   ],
   "negative": [
     "cross-domain",
@@ -208,7 +217,16 @@
     "round17-publication-artifact-substitution",
     "round17-selector-branch-mutation",
     "round17-target-reason-mutation",
-    "round17-order-reversal"
+    "round17-order-reversal",
+    "round18-source-inventory-injection",
+    "round18-source-locality-boolean-equivalent",
+    "round18-response-byte-substitution",
+    "round18-publication-candidate-substitution",
+    "round18-process-identity-substitution",
+    "round18-request-independent-omission",
+    "round18-stdout-branch-field",
+    "round18-html-order-reversal",
+    "round18-path-quote-inverse"
   ],
   "criterion_test_map": {
     "round14.p1-1": ["test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exit"],
@@ -303,6 +321,34 @@
       "test_next_diagnostic_catalog_is_the_public_and_manifest_authority",
       "test_actual_json_aggregate_boundary_precedes_schema_validation"
     ],
-    "round17.p2-3": ["test_round17_html_has_validation_pipeline_and_round17_state"]
+    "round17.p2-3": ["test_round17_html_has_validation_pipeline_and_round17_state"],
+    "round18.p1-1": [
+      "test_round18_source_seal_rejects_caller_membership_and_typed_drift"
+    ],
+    "round18.p1-2": [
+      "test_round18_source_failure_ledger_recomputes_reachability",
+      "test_round18_request_independent_provenance_is_explicitly_unobserved"
+    ],
+    "round18.p1-3": [
+      "test_round18_validated_response_raw_bytes_are_opaque_authority"
+    ],
+    "round18.p1-4": [
+      "test_round18_publication_projections_return_sealed_candidate_bytes"
+    ],
+    "round18.p1-5": [
+      "test_round18_process_descriptor_requires_os_identity_and_spawn_binding"
+    ],
+    "round18.p1-6": [
+      "test_round18_run_manifest_and_diagnostic_discriminators_are_closed"
+    ],
+    "round18.p1-7": [
+      "test_round18_publication_projections_return_sealed_candidate_bytes"
+    ],
+    "round18.p2-1": [
+      "test_round18_html_validation_order_is_strict_and_reverse_mutation_fails"
+    ],
+    "round18.p2-2": [
+      "test_round18_path_only_order_is_nfc_utf8_and_object_rows_are_canonical_json"
+    ]
   }
 }

@@ -375,6 +375,7 @@
         }
       },
       "then": {
+        "required": ["request_independent"],
         "properties": {
           "contracts": {
             "properties": {
@@ -412,11 +413,13 @@
             }
           }
         },
+        "required": ["command", "request_independent"],
         "not": {"properties": {"request_independent": {"const": true}}}
       },
       "then": {
-        "required": ["source", "next_request", "next_config"],
+        "required": ["request_independent", "source", "next_request", "next_config"],
         "properties": {
+          "request_independent": {"const": false},
           "run": {"required": ["run_context"]},
           "request": {
             "required": ["projects", "targets", "formats"],
