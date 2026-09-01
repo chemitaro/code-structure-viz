@@ -12,10 +12,10 @@
     "upstream_depth": {"type": ["integer", "null"], "minimum": 0, "maximum": 64},
     "downstream_depth": {"type": ["integer", "null"], "minimum": 0, "maximum": 64},
     "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},
-    "limits": {"$ref": "#/$defs/limits"},
-    "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "source_plan": {"$ref": "urn:code-structure-viz:schema:next-source-plan-v1"},
-    "source_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "limits": {"oneOf": [{"$ref": "#/$defs/limits"}, {"type": "null"}]},
+    "trusted_environment_digest": {"oneOf": [{"type": "string", "pattern": "^[0-9a-f]{64}$"}, {"type": "null"}]},
+    "source_plan": {"oneOf": [{"$ref": "urn:code-structure-viz:schema:next-source-plan-v1"}, {"type": "null"}]},
+    "source_plan_digest": {"oneOf": [{"type": "string", "pattern": "^[0-9a-f]{64}$"}, {"type": "null"}]},
     "domain_config_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "request_independent": {"type": "boolean"},
     "failure_stage": {"type": "string", "minLength": 1},
@@ -27,7 +27,11 @@
         "request_independent": {"const": false},
         "projects": {"minItems": 1},
         "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
-        "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64}
+        "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
+        "limits": {"$ref": "#/$defs/limits"},
+        "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_plan": {"$ref": "urn:code-structure-viz:schema:next-source-plan-v1"},
+        "source_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       },
       "not": {"required": ["failure_stage", "failure_code"]}
     },
@@ -37,7 +41,11 @@
         "request_independent": {"const": true},
         "projects": {"const": []},
         "upstream_depth": {"const": null},
-        "downstream_depth": {"const": null}
+        "downstream_depth": {"const": null},
+        "limits": {"const": null},
+        "trusted_environment_digest": {"const": null},
+        "source_plan": {"const": null},
+        "source_plan_digest": {"const": null}
       }
     },
     {
@@ -45,7 +53,11 @@
       "properties": {
         "projects": {"minItems": 1},
         "upstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
-        "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64}
+        "downstream_depth": {"type": "integer", "minimum": 0, "maximum": 64},
+        "limits": {"$ref": "#/$defs/limits"},
+        "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_plan": {"$ref": "urn:code-structure-viz:schema:next-source-plan-v1"},
+        "source_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     }
   ],

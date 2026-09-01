@@ -209,8 +209,8 @@ explicit nulls, a closed failure stage/code, and `payload_unavailable`/exit 3;
 it does not synthesize public project/request/config fields.
 
 The final publication decision seals child capture, private response, public
-stderr, and selected artifact-copy results. This keeps the semantic outcome
-stable when a selected copy is unavailable. The process launch descriptor is a
+stderr, and selected summary/manifest/artifact stream-copy results. This keeps
+the semantic outcome stable when a selected copy is unavailable. The process launch descriptor is a
 separate versioned provenance value covering verified Node realpath, fixed
 argv/environment/FDs, and process-group behavior.
 
@@ -228,3 +228,38 @@ capture measurement, stderr status, or selected-copy status. Child capture or
 public stderr failure produces the typed unavailable/no-artifact branch; a
 selected-copy failure preserves the semantic decision and persisted artifact
 descriptor while the root publication result reports exit 3.
+
+## Round 17 closed provenance and request authority
+
+The request-independent branch is discriminated by observed stage and
+provenance. It contains no invented request, project, config, limits,
+toolchain, trusted environment, source plan, or process descriptor; values not
+observed before the failure are explicit `null`/`unobserved`. A
+`NextDecisionContext` is frozen, keyword-only, and complete for that stage.
+All other fields are owned by a single immutable `NextPublicationContext`.
+
+`ValidatedAdapterRequest` is a composed frozen authority, not a `dict`
+subclass. Before response validation it rechecks schema, request ID, canonical
+request bytes and digest, file base64/size/digest, targets, run context, and
+resolved limits. The response boundary accepts this type only, so a mutable
+mapping or an independently rebuilt request cannot bypass the trust boundary.
+
+The publication result is a closed union: selector `null` yields the run
+summary, `manifest` yields the exact root manifest, `next:semantic-json` or
+`next:plantuml` yields the selected artifact, and the typed unavailable branch
+contains no partial bytes. All three selected streams use the common
+`max_selected_stdout_bytes` boundary; exact bytes are retained, while limit+1
+is unavailable. The manifest unavailable branch keeps its `run-manifest.json`
+descriptor, and the domain branch keeps its persisted artifact descriptor.
+`target_failures` is present only for a Next target-related unavailable result,
+with one sorted row per failed target.
+Proof-derived unavailable IDs are resolved again against the sealed roots and
+taint before this branch is selected; the reason propagates unchanged through
+proof, decision, diagnostic, domain, root manifest, stdout, and exit.
+
+Surface ordering is intentional: semantic projects and model records use
+canonical ID order, while request/config/source-plan/root project descriptors
+use canonical root-path order. Submitted order is validated before sorting.
+The existing lexicographic canonical JSON encoder remains the only byte
+encoder. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
+production implementation is absent.

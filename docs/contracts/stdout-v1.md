@@ -13,7 +13,8 @@ diagnostic は必ず stderr だけに出す。current parser が Next を reject
 production implementation 前の明示された境界である。
 
 selector省略時、stdoutは `code-structure-viz.run-summary/v1` のcanonical JSON一行。
-利用可能なselectorは公開fileとexactly同じbytesだけをstdoutへ複製する。
+利用可能なselectorは、selectorなしならsummary、`manifest`ならroot manifest、
+domain selectorなら公開fileを、選択されたstreamのexact bytesとしてstdoutへ複製する。
 利用不能なselectorは `code-structure-viz.stdout-result/v1` 一行を返す。
 
 diagnosticは `code-structure-viz.diagnostic/v1` のcanonical JSON Linesだけをstderrへ
@@ -34,9 +35,9 @@ fatal、interruptのbranchはこの配列も旧単一`reason`も持たない。
 stdoutの全JSONは既存の一つのcanonical encoderを使う。object keyは
 lexicographic `sort_keys=True`、文字列はNFC、encodingはUTF-8、行末は
 LF一つであり、target failure専用の手書きfield order encoderは存在しない。
-available artifact bytesのselected copyには
+summary、manifest、available artifact bytesの各selected streamには
 `max_selected_stdout_bytes`を適用し、exactは全量を返す。+1はpartial bytesを
-公開せず、selected artifactだけをunavailableとする。これはvalidated semantic
+公開せず、選択されたstreamだけをtyped unavailableとする。これはvalidated semantic
 decisionのstatusを別の値へ書き換えない。
 
 adapter stdout captureとresponse decodeはpublic stdoutとは別境界である。
@@ -75,3 +76,32 @@ lexicographic encoder (`sort_keys=True`, NFC, UTF-8, LF). No manual field-order
 encoder is allowed. Fresh Round 16 Strict remains pending; the historical
 review was `P0=0 / P1=16 / P2=3 / fail` at SHA
 `732477c72c7e05d3f15818ba8a3f75a4c97dc5a9`.
+
+## Round 17 closed stdout union
+
+The final stdout result is a closed union: selector `null` returns the exact
+run summary; `manifest` returns the exact root manifest; a selected
+`next:semantic-json` or `next:plantuml` returns that exact artifact; and a
+typed unavailable branch returns schema-valid status/reason with no partial
+bytes. The same `max_selected_stdout_bytes` copy gate measures all three
+successful stream kinds. At exact size the retained bytes are emitted; at
+limit+1 they are discarded and the typed branch is emitted instead. The
+null branch keeps `run_status` and no artifact; a selected-copy failure may
+make that run incomplete while the semantic domain remains complete. The manifest branch keeps the
+persisted `run-manifest.json` descriptor; the domain branch keeps its
+persisted artifact descriptor. `target_failures` is legal only on a Next
+target-related unavailable branch, with exactly one stable reason row per
+target from the eight closed reasons. Selector branch mutations, duplicate
+reasons, missing reasons, and non-target failures are rejected.
+
+All of these branches are projections of one immutable
+`PublicationBoundaryDecision`, which seals response bytes, validated request
+ID, model digest, exact artifact/selector/diagnostic bytes, and capture,
+stderr, and selected-copy measurements. The final boundary receives the
+canonical summary/manifest/selected-artifact stream bytes before the copy
+gate; its projection returns only the retained sealed bytes or the canonical
+typed-unavailable line. No projection accepts an independent outcome or
+measurement map, and no writer re-renders bytes. Canonical output uses
+lexicographic `sort_keys=True`, NFC, UTF-8, and one LF; submitted order is
+validated before sorting. Fresh current-SHA Strict remains pending, readiness
+is unconfirmed, and production implementation has not started.

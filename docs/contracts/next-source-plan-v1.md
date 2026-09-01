@@ -104,3 +104,40 @@ measurements that were actually observed. It must not invent a project,
 request, config, or source plan from a default fixture. This is a
 pre-implementation contract; fresh current-SHA Strict is pending and product
 implementation is absent.
+
+## Round 17 observation-only inventory
+
+Round 17 closes the acquisition trust boundary further. `SourceDiscoveryIntent`
+is limited to project roots, control candidates, and fixed discovery rules.
+`inventory` may report observations (revision/head, bytes actually read,
+observed file digests/sizes, and independently observed environment/limit
+attestations), but it may not supply project descriptors, compiler options,
+source roots, config or `extends` closure, final paths, role maps, plan digests,
+or source-view fingerprints. `seal_source_acquisition` derives those values
+from the frozen control bytes and the observed inventory, then seals the plan
+and view together. A request-owned copy of a derived value is checked against
+that seal and cannot override it.
+
+An early failure uses explicit provenance: a request-independent context keeps
+only measurements made before the failure and uses `null`/`unobserved` for
+limits, toolchain, trusted environment, process launch, compatibility, or
+source-plan fields that were not yet observable. No fixture, default project,
+or synthetic plan is allowed. The same sealed source graph also derives the
+immutable `SourceFailureLedger`; locality, safe-subset proof, and target taint
+are graph consequences, never caller booleans.
+
+The normative acquisition sequence is therefore:
+
+```text
+SourceDiscoveryIntent
+  -> frozen control observations
+  -> derived config/extends/paths/roles
+  -> final source read and drift check
+  -> one atomic SourceAcquisitionSeal(plan + SourceView)
+```
+
+The reference tests reject injected inventory fields, plan-only/view-only
+reconstruction, role or closure substitution, duplicate reads, post-drift
+reads, and request-derived mutations. This remains a data-only
+pre-implementation contract; fresh current-SHA Strict is pending and product
+implementation is absent.

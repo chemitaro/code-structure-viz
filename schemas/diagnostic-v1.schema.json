@@ -510,7 +510,7 @@
         {
           "properties": {
             "code": {"const": "CSV-NEXT-LIMIT-003"},
-            "message": {"const": "A configured byte limit was exceeded at a bounded publication boundary."}
+            "message": {"const": "A configured byte or structural resource limit was exceeded at a bounded processing boundary."}
           }
         },
         {

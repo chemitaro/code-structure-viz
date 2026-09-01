@@ -303,11 +303,14 @@ code-structure-viz diff --repo PATH --output-dir PATH [--domain DOMAIN] [--from 
 
 CLI parser は `--stdout` を optional single-value option として一度だけ受理し、closed grammar `manifest | DOMAIN:FORMAT` を `StdoutSelector` valueへ正規化する。domain/format の resolved selection が確定した直後、source acquisition より前に selector compatibility を検証する。boolean、path、alias、略記、大小文字違い、値省略、重複、未選択 domain、未要求 format は `UsageError` とし、source acquisition と publication の前に exit 2、stdout 空、Artifact 0件で終了する。`OutputTransaction` は開始しない。
 
-通常 publication 後、既存 CLI/application boundary 内の stdout emitter は次のいずれか一つだけを行う。新しい command または独立 architecture layer は追加しない。
+通常 publication 後、既存 CLI/application boundary 内の stdout emitter は次のいずれか一つだけを行う。新しい command または独立 architecture layer は追加しない。summary、manifest、domain Artifactのselected stream bytesは、同じ`max_selected_stdout_bytes` copy boundaryで測定する。
 
-1. selector なしなら `run-summary/v1` を canonical JSON 1行として出す。
-2. selected Artifact が利用可能なら、公開 file を binary read して exact bytes を複製する。
-3. selected Artifact が利用不能なら、closed `NextRunDecision` の projection から `stdout-result/v1` 1行を構築する。
+1. selector なしなら、final decisionからseal済みの`run-summary/v1` canonical JSON 1行を出す。
+2. `manifest`なら、final decisionからseal済みのroot manifest exact bytesを出す。
+3. selected Artifact が利用可能なら、seal済みの公開 file exact bytesを複製する。
+4. selected streamが利用不能なら、closed `NextRunDecision`/publication decisionのprojectionから
+   `stdout-result/v1` 1行を構築する。limit+1ではpartial bytesを出さず、manifest selectorは
+   `run-manifest.json` descriptor、domain selectorはpersisted Artifact descriptorを保持する。
 
 stdout emitter は diagnostic renderer と分離し、diagnostic は stderr だけへ出す。exact-byte copy に summary、BOM、改行補正を加えない。`stdout-result/v1` は status と stable reason だけを参照し、source content、absolute path、secret を受け取る field を持たない。handled SIGINT は cleanup 完了後に `run_status: interrupted` を返せる場合だけ exit 130 の result line を出す。process を強制終了された場合の出力は契約外である。
 
@@ -660,7 +663,9 @@ JSON decoderはUTF-8、duplicate key拒否、integer-only safe counts、maximum 
 | spawn failure | payload unavailable `CSV-NEXT-NODE-002` |
 | timeout / process group termination | payload unavailable `CSV-NEXT-NODE-003` |
 | `v8_old_space_mib` process failure | payload unavailable `CSV-NEXT-LIMIT-004` |
-| stdout cap / public diagnostic cap超過 | process terminateまたはpayload unavailable `CSV-NEXT-LIMIT-003`。raw/partial bytes非公開 |
+| adapter stdout capture cap超過 | process group terminate、raw/partial bytes disposal、payload unavailable `CSV-NEXT-LIMIT-003`。adapter text非公開 |
+| private adapter response cap超過 | decode/materialization前にpayload unavailable `CSV-NEXT-LIMIT-003`。raw/partial bytes非公開 |
+| public selected stdout cap超過 | selected copyを行わずpayload unavailable `CSV-NEXT-LIMIT-003`。semantic resultはfinal publication decisionで保持 |
 | adapter stderr capture cap超過 | process group terminate、raw/partial capture disposal、payload unavailable `CSV-NEXT-LIMIT-003`。adapter text非公開 |
 | non-zero exit（valid JSON有無を問わない） | responseを捨てpayload unavailable `CSV-NEXT-NODE-004` |
 | zero exit + stdout noise/malformed/duplicate key | payload unavailable `CSV-NEXT-PROTOCOL-001` |
@@ -980,8 +985,9 @@ closed payload variants:
 | JSON string bytes | 8 MiB | request/response reject |
 | array items | each array 100,000 / aggregate 100,000 / collection 20,000 | request/response reject |
 | model records | 10,000 | payload unavailable |
-| stdout | 16 MiB | terminate/payload unavailable |
-| adapter stdout capture | 16 MiB UTF-8, incremental | process-group terminate/payload unavailable |
+| adapter stdout capture (`max_adapter_stdout_capture_bytes`) | 16 MiB UTF-8, incremental | process-group terminate/payload unavailable |
+| private adapter response (`max_adapter_response_bytes`) | 16 MiB UTF-8, complete bytes before decode | payload unavailable |
+| public selected stdout (`max_selected_stdout_bytes`; `max_stdout_bytes` compatibility alias) | 16 MiB UTF-8, before selected copy | payload unavailable |
 | public diagnostic stderr | 64 KiB UTF-8 | payload unavailable |
 | adapter stderr capture | 64 KiB UTF-8, incremental | process-group terminate/payload unavailable |
 | timeout | 60 s | terminate/payload unavailable |
@@ -989,7 +995,7 @@ closed payload variants:
 
 v1は総RSS上限を約束しない。finite memoryはencoded/decoded bytes、decoder、collections/model、V8 old-spaceを上記で制限する意味である。OS-level RSS isolationは将来の別contract。
 
-diagnostic mappingはfile bytes/encoded stdin=`LIMIT-001`、file count/decoded total=`LIMIT-002`、JSON/string/array/stdout/public diagnostic stderr/adapter stderr capture/adapter stdout capture=`LIMIT-003`、V8 old-space=`LIMIT-004`、model records/entity budget=`LIMIT-005`。timeoutは`NODE-003`。adapter stdout/stderr captureはpublic diagnostic emissionとは別のincremental process-group trust boundaryであり、超過時はraw/partial bytesを破棄する。stdout decoderはcapture成功後に一度だけ呼び、partial bytesからmodelやdiagnosticを作らない。
+diagnostic mappingはfile bytes/encoded stdin=`LIMIT-001`、file count/decoded total=`LIMIT-002`、JSON/string/array、adapter stdout capture、private adapter response、public selected stdout、public diagnostic stderr、adapter stderr capture=`LIMIT-003`、V8 old-space=`LIMIT-004`、model records/entity budget=`LIMIT-005`。timeoutは`NODE-003`。adapter stdout/stderr captureはpublic diagnostic emissionとは別のincremental process-group trust boundaryであり、超過時はraw/partial bytesを破棄する。stdout decoderはcapture成功後に一度だけ呼び、partial bytesからmodelやdiagnosticを作らない。
 
 ### Complete PropsTypeIR and JavaScript extraction
 
@@ -1124,7 +1130,7 @@ diagnostic catalog v1（messageはこのfixed text、variable dataはsafe struct
 | CSV-NEXT-IDENTITY-001 | error / no | Canonical Next.js semantic identities collide. |
 | CSV-NEXT-LIMIT-001 | error / no | A source transport limit was exceeded. |
 | CSV-NEXT-LIMIT-002 | error / no | The source file count or decoded source total exceeded its configured limit. |
-| CSV-NEXT-LIMIT-003 | error / no | Adapter output exceeded a configured byte limit. |
+| CSV-NEXT-LIMIT-003 | error / no | A configured byte or structural resource limit was exceeded at a bounded processing boundary. |
 | CSV-NEXT-LIMIT-004 | error / no | The adapter exceeded its V8 old-space limit. |
 | CSV-NEXT-LIMIT-005 | error / no | The semantic model or entity count exceeded its configured limit. |
 | CSV-NEXT-NODE-001 | error / no | A supported Node.js runtime is unavailable. |
@@ -1376,3 +1382,65 @@ validator・schema・fixtureで入力からpublicationまでのauthorityを閉�
 fail）へのdata-only remediationである。fresh current-SHA Strictはpending、
 readinessは未確認、production implementationは未着手であり、Strict pass後に
 初めてI05-PLAN-002以降を開始する。
+
+## Round 17 authority graph
+
+Round 17は、Round 17 Strict content reviewの固定点 SHA
+`032c8d7e2f7786fb443fd2a49566c5a6ad9815d5`、CI `33514033888`（7/7
+green）を基準に、参照実装とschemaでauthorityの因果鎖を閉じる。Strict
+content reviewの履歴判定は `P0=0 / P1=9 / P2=3 / fail /
+implementation_ready=no` であり、transcript
+`required-strict-github-connector-verificati-667` のSHA-256は
+`6689d7384bcd1a7a7d1238dbcd61224ef0cf774176a83bd6bbb003b843ef0703` である。
+fresh current-SHA Strictはpending、readinessは未確認、production implementationは
+未着手とする。
+
+```plantuml
+@startuml
+skinparam monochrome true
+rectangle "SourceDiscoveryIntent\nroots + control candidates + fixed rules" as intent
+rectangle "Frozen control bytes + observed inventory" as observed
+rectangle "Derived config / extends / paths / roles" as derived
+rectangle "SourceAcquisitionSeal\nplan + SourceView + one seal" as seal
+rectangle "ValidatedAdapterRequest\ncomposition + canonical recheck" as request
+rectangle "NextRunDecision\nNextPublicationContext + failure context" as decision
+rectangle "PublicationBoundaryDecision\nbytes + descriptors + measurements" as publication
+rectangle "domain / root / stdout / stderr / artifact / exit" as surfaces
+intent --> observed
+observed --> derived
+derived --> seal
+seal --> request
+request --> decision
+decision --> publication
+publication --> surfaces
+note right of observed
+Only observations enter inventory.
+Unobserved pre-response facts are null.
+end note
+@enduml
+```
+
+取得側はintentからsealed graphを一度構築し、inventoryの観測値とfrozen
+control bytesを照合してplan/view/roleを導出する。source localityは同じgraphと
+failure/proof rootsから `SourceFailureLedger` を導出し、caller booleanを信用しない。
+request-independent failureでは未観測のlimits、toolchain、trust、process、compatibility
+を合成せず、stageとclosed diagnosticを保持する。
+
+response側はraw cap、bounded decode/aggregate、closed schema、base/path/reference/proof、
+actual model+proof-only count、model gate、entity gate、selected copyの順で進む。
+`LIMIT-003`はconfigured byte/structural resource、`PROTOCOL-001`はmalformed/schema/proof
+violationに限定する。proof後のunavailable targetはsealed roots/taintで再解決し、8理由を
+一target一行で全surfaceへ伝える。semantic project/modelはID order、request/config/
+source-plan/rootはroot-path orderで、submitted orderをsort前に検証する。
+
+最後に、child response、validated request id、model digest、exact artifact map、selector、
+diagnostic JSONL、capture/stderr/selected-copy measurementを一つの
+`PublicationBoundaryDecision`へsealする。summary、manifest、selected artifactのselected
+stream bytesもcopy boundary前にこのdecisionへ結び付け、全projectionはそれだけを受け、
+再renderや独立status/mapを許さない。exactはretained sealed bytesを返し、limit+1はpartial
+bytesを破棄してtyped unavailableへ進む。stdoutはsummary、manifest、selected artifact、
+typed unavailableのclosed unionであり、canonical sorted-key JSON/NFC/UTF-8/LFを共有する。
+
+Round 17のfindings→remediation→executable evidenceと検証結果は新規Round17 artifactへ
+保存する。これはdata-only設計の完了であり、production implementationの開始やStrict pass
+の代替ではない。

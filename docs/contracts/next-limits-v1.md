@@ -23,9 +23,9 @@ accepted; the first byte above the limit terminates the adapter process group,
 discards raw and partial bytes, calls no decoder, and produces a manifest-only
 `CSV-NEXT-LIMIT-003` / `payload_unavailable` result with exit 3. This capture
 bound is distinct from both the private complete-response
-`max_adapter_response_bytes` bound and the public selected-artifact
+`max_adapter_response_bytes` bound and the public selected-stream
 `max_selected_stdout_bytes` bound. `max_stdout_bytes` remains a v1 compatibility
-alias for the selected-artifact value.
+alias for the selected-stream value.
 The response limit vector also uses ID-only proof evidence: a published model
 record is counted once in `discovered_records`; proof-only records may carry a
 payload only when they are not present in the published model. Thus the model
@@ -66,7 +66,7 @@ total-RSS promise.
 | `max_model_records` | 10,000 | all discovered model records | model assembly, before publication | N/A | `payload_unavailable` |
 | `max_stdout_bytes` | 16,777,216 | compatibility alias for selected stdout bytes | canonical output encode, before write | UTF-8 | `payload_unavailable` |
 | `max_adapter_response_bytes` | 16,777,216 | complete UTF-8 bytes of private adapter response | after child capture, before decode | UTF-8 | `payload_unavailable` |
-| `max_selected_stdout_bytes` | 16,777,216 | UTF-8 bytes of public selected artifact copy | canonical output encode, before copy/write | UTF-8 | `payload_unavailable` |
+| `max_selected_stdout_bytes` | 16,777,216 | UTF-8 bytes of public selected summary/manifest/artifact copy | canonical output encode, before copy/write | UTF-8 | `payload_unavailable` |
 | `max_stderr_bytes` | 65,536 | UTF-8 bytes per stderr payload | diagnostic encode, before write | UTF-8 | `payload_unavailable` |
 | `max_adapter_stderr_capture_bytes` | 65,536 | UTF-8 bytes captured from adapter stderr | incremental process-group capture before append | UTF-8 | `payload_unavailable` |
 | `max_adapter_stdout_capture_bytes` | 16,777,216 | UTF-8 bytes captured from adapter stdout | incremental process-group capture before append/decode | UTF-8 | `payload_unavailable` |
@@ -130,9 +130,10 @@ disposed. The public unavailable result is manifest-only and cannot contain
 the discarded response or a partial semantic model. A successful bounded
 capture then enters the one raw-response path, where
 `max_adapter_response_bytes` is checked on the complete bytes before decoding.
-After semantic/PlantUML rendering, `max_selected_stdout_bytes` applies to the
-public selected-artifact copy. A copy breach is an explicit
-`selected_artifact_unavailable` publication result; it must not rewrite the
+After summary/manifest or semantic/PlantUML rendering, `max_selected_stdout_bytes` applies to the
+public selected-stream copy. A copy breach is an explicit
+`selected_artifact_unavailable` publication result (or its summary/manifest
+typed-unavailable branch); it must not rewrite the
 validated semantic domain outcome.
 
 The public renderer applies the same all-or-none rule to diagnostics: it encodes
@@ -170,7 +171,7 @@ cannot bypass a limit by mutating a summary count.
 
 The three byte limits are intentionally named by boundary: child capture is
 `max_adapter_stdout_capture_bytes`, the complete private response is
-`max_adapter_response_bytes`, and the public selected-artifact copy is
+`max_adapter_response_bytes`, and the public selected-stream copy is
 `max_selected_stdout_bytes`. They may share the v1 value (16 MiB), but they
 are not interchangeable measurements. Capture measures each `Iterable[bytes]`
 chunk before retaining it; response measures complete bytes before decode;
@@ -235,3 +236,35 @@ passing a second status/map to one of those projection functions. The launch
 descriptor used for the capture boundary is also an explicit required field
 of the decision's `NextPublicationContext`; it is fingerprinted and is never
 reconstructed from a host default.
+
+## Round 17 measurement pipeline
+
+The executable pipeline is one closed order:
+
+```text
+raw cap
+  -> bounded decode/aggregate
+  -> closed schema
+  -> base/path/reference/proof
+  -> actual model + proof-only count
+  -> model gate
+  -> entity gate
+  -> selected copy
+```
+
+`max_adapter_stdout_capture_bytes`, `max_adapter_response_bytes`, and
+`max_selected_stdout_bytes` remain distinct measurement points. A configured
+byte or structural boundary uses `CSV-NEXT-LIMIT-003`; malformed bytes,
+closed-schema violations, and proof violations use
+`CSV-NEXT-PROTOCOL-001`. The raw cap is checked before decode, aggregate items
+before materialization, and model plus proof-only counts only after the
+schema/reference/proof checks. Exact values are accepted and +1 values are
+disposed without partial decoder or publication input. `max_stdout_bytes` is
+only the selected-output compatibility alias.
+
+The final measurement record is sealed into `PublicationBoundaryDecision`
+before any domain, manifest, stdout, stderr, artifact, or exit projection. The
+reference vectors exercise the complete schema-valid wire path and faithful
+capture/copy harness; they do not replace it with an arithmetic classifier or
+claim OS process-level coverage. Fresh current-SHA Strict is pending,
+readiness is unconfirmed, and production implementation is absent.

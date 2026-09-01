@@ -513,3 +513,31 @@ Round 16 review of SHA `732477c72c7e05d3f15818ba8a3f75a4c97dc5a9` (CI
 `33494926439`, 7/7 green) historically returned `P0=0 / P1=16 / P2=3 / fail`.
 Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 17 decision, target, and ordering closure
+
+All semantic and publication fields are reached from the closed decision
+union. The immutable `SourceFailureLedger` derives isolated/safe-subset and
+target-tainted status from the sealed source graph, project ownership, target
+set, failure roots, and proof roots. It does not accept caller-supplied
+locality booleans. If proof introduces an unavailable target ID, resolution is
+re-run against the sealed graph; `selected_taint` therefore reaches the same
+typed target-unavailable branch as an initial resolver failure.
+
+The eight target reasons are `missing`, `component_only`, `duplicate`,
+`out_of_scope`, `non_program`, `control_context`, `project_ambiguity`, and
+`selected_taint`. Each failed target has exactly one reason, rows are unique
+and canonical-sorted, and the array is forbidden on available,
+not-applicable, generic-unavailable, fatal, and interrupt branches. The
+selector branch itself is a closed union of summary, manifest, semantic
+artifact, PlantUML artifact, and typed unavailable output.
+
+The complete validation contract is `raw cap -> bounded decode/aggregate ->
+closed schema -> base/path/reference/proof -> actual model + proof-only count
+-> model gate -> entity gate -> selected copy`. `LIMIT-003` owns configured
+byte/structural resource boundaries; `PROTOCOL-001` owns malformed,
+closed-schema, and proof violations. Semantic projects are ID ordered and
+request/config/source-plan/root paths are root ordered; validators inspect
+submitted order before canonical sorting. The full projection still uses
+lexicographic sorted-key JSON, NFC, UTF-8, and LF. Fresh current-SHA Strict is
+pending, readiness is unconfirmed, and production implementation is absent.

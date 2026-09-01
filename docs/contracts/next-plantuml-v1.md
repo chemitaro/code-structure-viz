@@ -194,3 +194,22 @@ stdio, FD inheritance, and process-group termination. Reference capture tests
 use a faithful iterable harness and do not claim OS process-level coverage.
 Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
 production implementation has not started.
+
+## Round 17 renderer boundary
+
+PlantUML is a projection, not a second source of truth. It is rendered only
+after the same `PublicationBoundaryDecision` has sealed the response,
+validated request identity, model digest, artifact bytes, selector, diagnostic
+bytes, and measurements. The renderer cannot rebuild source roles, target
+reasons, config, or limits from a fixture, and a substituted PlantUML byte map
+is rejected against the decision-owned model and digest.
+
+The corresponding validation path is shown as one sequence in the human
+guide: raw cap, bounded decode/aggregate, closed schema, base/path/reference/
+proof, actual model/proof-only count, model gate, entity gate, then selected
+copy. The role authority remains `BoundaryRolePropagation/v1`: client entry
+seeds are not derived roles, server traversal stops before a client entry, and
+dual role requires two distinct positive closures. Target-unavailable
+PlantUML uses the same one-reason-per-target closed enum and canonical JSON
+ordering as semantic JSON. Fresh current-SHA Strict is pending and production
+implementation is absent.

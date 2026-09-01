@@ -52,7 +52,10 @@
         "domains": {
           "minItems": 1,
           "maxItems": 1,
-          "prefixItems": [{"$ref": "#/$defs/domain_incomplete"}]
+          "prefixItems": [{"oneOf": [
+            {"$ref": "#/$defs/domain_incomplete"},
+            {"$ref": "#/$defs/next_complete_domain"}
+          ]}]
         },
         "manifest": {"const": "run-manifest.json"}
       }

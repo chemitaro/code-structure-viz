@@ -56,6 +56,7 @@ from tests.contracts.next_reference_validation import (
     SourceFailureLedger,
     _assert_file_path,
     _assert_path,
+    _canonical_json_line,
     _decision_known_counts,
     _derived_taint_fixed_point,
     _export_binding_projection_for_model,
@@ -64,6 +65,7 @@ from tests.contracts.next_reference_validation import (
     _is_jsx_identifier_start,
     _publication_context_for_validated_request,
     _scan_export_file,
+    _toolchain_snapshot,
     assert_encoded_stdin_boundary,
     assert_limit_boundary,
     bounded_decode_json,
@@ -124,6 +126,7 @@ from tests.contracts.next_reference_validation import (
     seal_source_acquisition,
     source_plan_descriptor,
     target_completeness_failure,
+    target_failure_from_proof,
     validate_adapter_request,
     validate_compatibility_descriptor,
     validate_domain_manifest,
@@ -1147,7 +1150,7 @@ def _semantic(
         # Project/config surfaces are root-path ordered; semantic records
         # inside entities/members/relations/facts retain kind-prefixed ID
         # order.  The inverse-order fixture makes this distinction observable.
-        "projects": sorted(model["projects"], key=lambda item: canonical_json_bytes(item["root"])),
+        "projects": sorted(model["projects"], key=lambda item: item["id"]),
         "files": model["files"],
         "entities": [*model["modules"], *model["components"]],
         "members": model["members"],
@@ -1915,6 +1918,9 @@ def _legacy_domain_fixture(
     if validated_decision is not None:
         sealed = validated_decision.publication_context
         assert sealed is not None
+        assert sealed.source_view_descriptor is not None
+        assert sealed.final_source_acquisition_plan is not None
+        assert sealed.public_next_request is not None
         value["source"]["fingerprint"] = sealed.source_view_fingerprint
         value["source"]["file_count"] = sealed.source_view_descriptor["file_count"]
         value["config"]["source_plan"] = copy.deepcopy(sealed.final_source_acquisition_plan)
@@ -1945,7 +1951,23 @@ def _legacy_domain_fixture(
                     else "unavailable"
                     if runtime_unavailable
                     else "available"
-                )
+                ),
+                node_realpath=(
+                    None
+                    if status == "not_applicable" or runtime_unavailable
+                    else "/usr/local/bin/node"
+                ),
+                node_sha256=(
+                    None if status == "not_applicable" or runtime_unavailable else "1" * 64
+                ),
+                node_version=(
+                    None if status == "not_applicable" or runtime_unavailable else "22.14.0"
+                ),
+                spawn_executable=(
+                    None
+                    if status == "not_applicable" or runtime_unavailable
+                    else "/usr/local/bin/node"
+                ),
             )
         ),
     )
@@ -2079,6 +2101,31 @@ def _legacy_domain_fixture(
                 trusted_environment=_trusted_environment(),
                 projects_for_fingerprint=copy.deepcopy(model["projects"]),
                 source_failure_ledger=(),
+                process_launch_descriptor=process_launch_descriptor(
+                    node_status=(
+                        "not_applicable"
+                        if status == "not_applicable"
+                        else "unavailable"
+                        if runtime_unavailable
+                        else "available"
+                    ),
+                    node_realpath=(
+                        None
+                        if status == "not_applicable" or runtime_unavailable
+                        else "/usr/local/bin/node"
+                    ),
+                    node_sha256=(
+                        None if status == "not_applicable" or runtime_unavailable else "1" * 64
+                    ),
+                    node_version=(
+                        None if status == "not_applicable" or runtime_unavailable else "22.14.0"
+                    ),
+                    spawn_executable=(
+                        None
+                        if status == "not_applicable" or runtime_unavailable
+                        else "/usr/local/bin/node"
+                    ),
+                ),
             ),
         )
     return _DomainProjection(
@@ -2179,9 +2226,20 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
     model = _decision_model_shell(decision)
     public_config = publication_context.public_next_config
     config = copy.deepcopy(public_config)
-    config["source_plan"] = copy.deepcopy(publication_context.final_source_acquisition_plan)
-    config["source_plan_digest"] = publication_context.source_plan_digest
-    config["trusted_environment_digest"] = publication_context.trusted_environment["sha256"]
+    independent = publication_context.observation_provenance["kind"] == "request_independent"
+    if independent:
+        assert publication_context.source_acquisition_seal is None
+        assert config["limits"] is None
+        assert config["source_plan"] is None
+        assert config["source_plan_digest"] is None
+        assert config["trusted_environment_digest"] is None
+    else:
+        assert publication_context.final_source_acquisition_plan is not None
+        assert publication_context.source_plan_digest is not None
+        assert publication_context.trusted_environment is not None
+        config["source_plan"] = copy.deepcopy(publication_context.final_source_acquisition_plan)
+        config["source_plan_digest"] = publication_context.source_plan_digest
+        config["trusted_environment_digest"] = publication_context.trusted_environment["sha256"]
     config["domain_config_digest"] = public_config["domain_config_digest"]
     limits = copy.deepcopy(config["limits"])
     targets = list(config["targets"])
@@ -2192,13 +2250,24 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
     # of inventing project/config input that was never available.
     request = copy.deepcopy(publication_context.public_next_request)
     source_view = publication_context.source_view_descriptor
-    source = {
-        "schema": source_view["schema"],
-        "kind": source_view["kind"],
-        "head_commit": source_view["head_commit"],
-        "fingerprint": publication_context.source_view_fingerprint,
-        "file_count": source_view["file_count"],
-    }
+    if independent:
+        assert source_view is None
+        source = {
+            "schema": "code-structure-viz.source-view/v1",
+            "kind": "unavailable",
+            "head_commit": None,
+            "fingerprint": None,
+            "file_count": 0,
+        }
+    else:
+        assert source_view is not None
+        source = {
+            "schema": "code-structure-viz.source-view/v1",
+            "kind": source_view["kind"],
+            "head_commit": source_view["head_commit"],
+            "fingerprint": publication_context.source_view_fingerprint,
+            "file_count": source_view["file_count"],
+        }
     toolchain = copy.deepcopy(publication_context.toolchain)
     trusted_environment = copy.deepcopy(publication_context.trusted_environment)
     if isinstance(decision, NextValidatedDecision):
@@ -2246,6 +2315,10 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
     counts["discovered"] = counts["published"]
     counts["internal_entities"] = len(model["modules"]) + len(model["components"])
     compatibility_descriptor = copy.deepcopy(publication_context.compatibility_descriptor)
+    if independent:
+        assert compatibility_descriptor is None
+        assert toolchain is None
+        assert trusted_environment is None
     value: dict[str, Any] = {
         "domain": "next",
         "status": status,
@@ -2260,14 +2333,22 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
         "budget": {
             "name": "max_entities",
             "requested": context["budget_requested"],
-            "resolved": context["budget_resolved"],
+            "resolved": context["budget_resolved"] if limits is not None else None,
             "actual": actual,
-            "source": context["budget_source"],
+            "source": context["budget_source"] if limits is not None else "unobserved",
             "outcome": outcome,
         },
-        "semantic_compatibility_id": compatibility_descriptor["compatibility_id"],
+        "semantic_compatibility_id": (
+            compatibility_descriptor["compatibility_id"]
+            if compatibility_descriptor is not None
+            else None
+        ),
         "compatibility_descriptor": compatibility_descriptor,
-        "identity_versions": copy.deepcopy(compatibility_descriptor["identity_versions"]),
+        "identity_versions": (
+            copy.deepcopy(compatibility_descriptor["identity_versions"])
+            if compatibility_descriptor is not None
+            else None
+        ),
         "source_plan_digest": publication_context.source_plan_digest,
         "domain_config_digest": config["domain_config_digest"],
         "run_fingerprint": "0" * 64,
@@ -2291,26 +2372,31 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
     assert preimage["domain_config_digest"] == value["domain_config_digest"]
     assert preimage["projects"] == value["projects"]
     value["run_fingerprint"] = digest(preimage)
-    assert value["run_fingerprint"] == recompute_run_fingerprint(
-        source_view_fingerprint=source["fingerprint"],
-        source_plan_digest=value["source_plan_digest"],
-        domain_config_digest=value["domain_config_digest"],
-        projects=value["projects"],
-        targets=value["targets"],
-        formats=value["formats"],
-        stdout_selector=context["stdout_selector"],
-        limits=value["limits"],
-        node_version=toolchain["node_version"],
-        typescript_version=toolchain["typescript_version"],
-        adapter_version=toolchain["adapter_version"],
-        protocol=toolchain["protocol"],
-        trusted_environment_digest=trusted_environment["sha256"],
-        process_launch_descriptor_digest=digest(publication_context.process_launch_descriptor),
-        source_failure_ledger=publication_context.source_failure_ledger,
-    )
+    if not independent:
+        assert toolchain is not None
+        assert trusted_environment is not None
+        assert publication_context.process_launch_descriptor is not None
+        assert isinstance(source["fingerprint"], str)
+        assert value["run_fingerprint"] == recompute_run_fingerprint(
+            source_view_fingerprint=source["fingerprint"],
+            source_plan_digest=value["source_plan_digest"],
+            domain_config_digest=value["domain_config_digest"],
+            projects=value["projects"],
+            targets=value["targets"],
+            formats=value["formats"],
+            stdout_selector=context["stdout_selector"],
+            limits=value["limits"],
+            node_version=toolchain["node_version"],
+            typescript_version=toolchain["typescript_version"],
+            adapter_version=toolchain["adapter_version"],
+            protocol=toolchain["protocol"],
+            trusted_environment_digest=trusted_environment["sha256"],
+            process_launch_descriptor_digest=digest(publication_context.process_launch_descriptor),
+            source_failure_ledger=publication_context.source_failure_ledger,
+        )
     if value["request"] is not None:
         value["request"]["run_fingerprint"] = value["run_fingerprint"]
-    value["request_independent"] = publication_context.public_next_request is None
+    value["request_independent"] = independent
     return _DomainProjection(
         value,
         validated_model=model,
@@ -2348,6 +2434,8 @@ def _semantic_artifacts_from_decision(
     status = "partial_safe" if outcome == "partial_safe" else "complete"
     model = decision.validated_model
     source_view = context.source_view_descriptor
+    assert source_view is not None
+    assert context.compatibility_descriptor is not None
     semantic = {
         "type": "semantic_snapshot",
         "schema": "code-structure-viz.semantic/v1",
@@ -2366,10 +2454,7 @@ def _semantic_artifacts_from_decision(
         },
         "request": copy.deepcopy(context.public_next_request),
         "coverage": copy.deepcopy(model["coverage"]),
-        "projects": sorted(
-            copy.deepcopy(model["projects"]),
-            key=lambda item: canonical_json_bytes(item["root"]),
-        ),
+        "projects": sorted(copy.deepcopy(model["projects"]), key=lambda item: item["id"]),
         "files": copy.deepcopy(model["files"]),
         "entities": [*model["modules"], *model["components"]],
         "members": copy.deepcopy(model["members"]),
@@ -2428,10 +2513,7 @@ def _publication_artifacts(
     """Return persisted artifact bytes using only the sealed boundary."""
 
     assert isinstance(publication, PublicationBoundaryDecision)
-    domain = _publication_domain(publication)
-    if not domain["artifact_paths"]:
-        return {}
-    return _published_bytes(domain)
+    return publication.artifact_bytes
 
 
 def _publication_manifest(
@@ -2441,7 +2523,7 @@ def _publication_manifest(
 
     assert isinstance(publication, PublicationBoundaryDecision)
     domain = _publication_domain(publication)
-    manifest = _run_manifest(domain)
+    manifest = _run_manifest(domain, publication=publication)
     if publication.publication_outcome == "selected_artifact_unavailable":
         # The semantic domain and persisted descriptor remain available, while
         # the selected public copy is a failed publication boundary.  The run
@@ -2462,6 +2544,37 @@ def _publication_stdout(
     manifest = _publication_manifest(publication)
     selector = domain["run_context"]["stdout_selector"]
     if publication.publication_outcome == "selected_artifact_unavailable":
+        if selector is None:
+            return {
+                "type": "stdout_result",
+                "schema": "code-structure-viz.stdout-result/v1",
+                "selector": None,
+                "availability": False,
+                "run_status": manifest["run"]["status"],
+                "stable_reason": "run_summary",
+                "selected_stdout_unavailable": True,
+                "artifact": None,
+            }
+        if selector == "manifest":
+            manifest_bytes = _canonical_json_line(manifest)
+            return {
+                "type": "stdout_result",
+                "schema": "code-structure-viz.stdout-result/v1",
+                "selector": "manifest",
+                "availability": False,
+                "domain_status": domain["status"],
+                "stable_reason": "selected_artifact_unavailable",
+                "selected_stdout_unavailable": True,
+                "artifact": {
+                    "path": "run-manifest.json",
+                    "domain": "next",
+                    "format": "semantic-json",
+                    "media_type": "application/json",
+                    "size_bytes": len(manifest_bytes),
+                    "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+                },
+            }
+        assert selector in {"next:semantic-json", "next:plantuml"}
         format_name = selector.removeprefix("next:")
         artifact = next(item for item in manifest["artifacts"] if item["format"] == format_name)
         result: dict[str, Any] = {
@@ -2478,6 +2591,42 @@ def _publication_stdout(
             result["incomplete_kind"] = "partial_safe"
         return result
     return _stdout_result_for_domain(domain, manifest)
+
+
+def _publication_stdout_bytes(publication: PublicationBoundaryDecision) -> bytes:
+    """Return the exact stdout bytes sealed by the final decision.
+
+    The metadata object is useful for machine inspection, but it is not the
+    selected stream itself.  For successful summary/manifest/artifact
+    branches, the retained selected-copy bytes are the authority.  A failed
+    selected copy emits only the canonical typed-unavailable line.
+    """
+
+    assert isinstance(publication, PublicationBoundaryDecision)
+    domain = _publication_domain(publication)
+    manifest = _publication_manifest(publication)
+    selector = domain["run_context"]["stdout_selector"]
+    stdout_result = _publication_stdout(publication)
+    retained = publication.selected_stdout["retained"]
+    if publication.selected_stdout["allowed"] and retained:
+        if selector is None:
+            expected = _canonical_json_line(_run_summary_value(manifest["run"]["status"], domain))
+            assert retained == expected
+            return expected
+        if selector == "manifest":
+            expected = _canonical_json_line(manifest)
+            assert retained == expected
+            return expected
+        assert selector in {"next:semantic-json", "next:plantuml"}
+        expected_path = (
+            "next.snapshot.semantic.json"
+            if selector == "next:semantic-json"
+            else "next.snapshot.puml"
+        )
+        assert publication.publication_outcome == "published"
+        assert retained == publication.artifact_bytes[expected_path]
+        return cast(bytes, retained)
+    return _canonical_json_line(stdout_result)
 
 
 def _publication_stderr_bytes(
@@ -2505,11 +2654,25 @@ def _validate_publication_chain(
     domain = _publication_domain(publication)
     manifest = _publication_manifest(publication)
     stdout = _publication_stdout(publication)
+    stdout_bytes = _publication_stdout_bytes(publication)
     artifacts = _publication_artifacts(publication)
     stderr = _publication_stderr_bytes(publication)
     _validator("next-domain-manifest-v1.schema.json").validate(domain)
     _validator("run-manifest-v1.schema.json").validate(manifest)
     _validator("stdout-result-v1.schema.json").validate(stdout)
+    selector = domain["run_context"]["stdout_selector"]
+    if selector is None:
+        summary = _run_summary_value(manifest["run"]["status"], domain)
+        _validator("run-summary-v1.schema.json").validate(summary)
+        if publication.selected_stdout["allowed"] and publication.selected_stdout["retained"]:
+            assert stdout_bytes == _canonical_json_line(summary)
+    elif selector == "manifest":
+        manifest_bytes = _canonical_json_line(manifest)
+        if stdout["availability"]:
+            assert stdout_bytes == manifest_bytes
+            assert publication.selected_stdout["retained"] == manifest_bytes
+        else:
+            assert stdout_bytes == _canonical_json_line(stdout)
     validate_domain_manifest(domain)
     validate_run_manifest(manifest, domain, artifacts)
     validate_published_projection(domain, artifacts)
@@ -2522,7 +2685,11 @@ def _validate_publication_chain(
     return domain, manifest, stdout, artifacts, stderr
 
 
-def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
+def _run_manifest(
+    domain: dict[str, Any],
+    *,
+    publication: PublicationBoundaryDecision | None = None,
+) -> dict[str, Any]:
     base = cast(
         dict[str, Any],
         json.loads(
@@ -2574,13 +2741,15 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
                 "projects": root_projects,
                 "targets": domain["targets"],
                 "formats": domain["formats"],
-                "trusted_environment_digest": domain["trusted_environment"]["sha256"],
+                "trusted_environment_digest": (
+                    None if independent else domain["trusted_environment"]["sha256"]
+                ),
             },
             "traversal": {
                 "upstream_depth": None if independent else domain["request"]["upstream_depth"],
                 "downstream_depth": None if independent else domain["request"]["downstream_depth"],
             },
-            "limits": copy.deepcopy(domain["limits"]),
+            "limits": None if independent else copy.deepcopy(domain["limits"]),
         },
         "value_sources": {
             "next_projects": "builtin",
@@ -2588,8 +2757,8 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
             "formats": "builtin",
             "upstream_depth": "builtin",
             "downstream_depth": "builtin",
-            "limits": domain["budget"]["source"],
-            "trusted_environment": "builtin",
+            "limits": "unobserved" if independent else domain["budget"]["source"],
+            "trusted_environment": "unobserved" if independent else "builtin",
         },
     }
     base["config"]["sha256"] = digest(
@@ -2602,6 +2771,9 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
         "run_context": copy.deepcopy(domain["run_context"]),
     }
     base["domains"] = [domain]
+    sealed_artifacts = (
+        publication.artifact_bytes if publication is not None else _published_bytes(domain)
+    )
     base["artifacts"] = []
     for path in domain["artifact_paths"]:
         fmt = "semantic-json" if path.endswith(".json") else "plantuml"
@@ -2614,8 +2786,8 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
                 "domain": "next",
                 "format": fmt,
                 "media_type": media_type,
-                "size_bytes": len(_published_bytes(domain)[path]),
-                "sha256": hashlib.sha256(_published_bytes(domain)[path]).hexdigest(),
+                "size_bytes": len(sealed_artifacts[path]),
+                "sha256": hashlib.sha256(sealed_artifacts[path]).hexdigest(),
             }
         )
     base["diagnostics"] = copy.deepcopy(domain["diagnostics"])
@@ -2655,7 +2827,35 @@ def _stdout_result_for_domain(
 ) -> dict[str, Any]:
     if selector is _SELECTOR_UNSET:
         selector = domain["run_context"]["stdout_selector"]
+    if selector is None:
+        return {
+            "type": "stdout_result",
+            "schema": "code-structure-viz.stdout-result/v1",
+            "selector": None,
+            "availability": False,
+            "run_status": domain["status"],
+            "stable_reason": "run_summary",
+            "artifact": None,
+        }
     assert isinstance(selector, str)
+    if selector == "manifest":
+        manifest_bytes = canonical_json_bytes(manifest) + b"\n"
+        return {
+            "type": "stdout_result",
+            "schema": "code-structure-viz.stdout-result/v1",
+            "selector": "manifest",
+            "availability": True,
+            "domain_status": domain["status"],
+            "stable_reason": "run_manifest",
+            "artifact": {
+                "path": "run-manifest.json",
+                "domain": "next",
+                "format": "semantic-json",
+                "media_type": "application/json",
+                "size_bytes": len(manifest_bytes),
+                "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+            },
+        }
     if domain["payload_available"]:
         format_name = selector.removeprefix("next:")
         artifact = next(item for item in manifest["artifacts"] if item["format"] == format_name)
@@ -4465,9 +4665,8 @@ def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None
     )
     inventory = {
         "observed_paths": tuple(files),
-        "project_descriptors": copy.deepcopy(config["projects"]),
-        "limits": copy.deepcopy(config["limits"]),
-        "trusted_environment_digest": config["trusted_environment_digest"],
+        "observed_limits": copy.deepcopy(config["limits"]),
+        "observed_trusted_environment_digest": config["trusted_environment_digest"],
     }
     reader = InstrumentedSourceReader(files)
     seal = seal_source_acquisition(intent, reader, inventory)
@@ -4523,9 +4722,8 @@ def test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift() -
     )
     inventory = {
         "observed_paths": tuple(files),
-        "project_descriptors": copy.deepcopy(config["projects"]),
-        "limits": copy.deepcopy(config["limits"]),
-        "trusted_environment_digest": config["trusted_environment_digest"],
+        "observed_limits": copy.deepcopy(config["limits"]),
+        "observed_trusted_environment_digest": config["trusted_environment_digest"],
     }
     reader = InstrumentedSourceReader(files)
     seal = seal_source_acquisition(intent, reader, inventory)
@@ -4589,6 +4787,112 @@ def test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift() -
             InstrumentedSourceReader(files),
             inventory,
         )
+
+
+def test_round17_source_inventory_accepts_observations_only() -> None:
+    """Resolved plan fields cannot be injected through the inventory."""
+
+    files = {
+        "package.json": b'{"name":"fixture"}',
+        "tsconfig.json": b'{"compilerOptions":{}}',
+        "src/Button.tsx": b"export default Button;\n",
+    }
+    intent = SourceDiscoveryIntent(
+        project_roots=(".",),
+        control_candidates=("package.json", "tsconfig.json"),
+    )
+    observed = {
+        "observed_paths": tuple(files),
+        "observed_limits": copy.deepcopy(_config_projection()["limits"]),
+        "observed_trusted_environment_digest": _config_projection()["trusted_environment_digest"],
+    }
+    for key, value in (
+        ("project_descriptors", [_config_project()]),
+        ("compiler_options", {"module": "commonjs"}),
+        ("source_roots", ["other/src"]),
+        ("config", {"projects": []}),
+        ("local_extends", []),
+        ("final_paths", ["src/Other.tsx"]),
+        ("file_role_map", []),
+        ("resolved_control_paths", []),
+        ("plan_digest", "0" * 64),
+        ("source_view_fingerprint", "0" * 64),
+    ):
+        injected = {**observed, key: value}
+        with pytest.raises(AssertionError):
+            seal_source_acquisition(intent, InstrumentedSourceReader(files), injected)
+
+
+def test_round17_request_owned_derived_source_claims_cannot_override_control_bytes() -> None:
+    request = _request()
+    request["projects"][0]["compiler_options"]["module"] = "commonjs"
+    request["projects"][0]["config_digest"] = project_config_digest(request["projects"][0])
+    request["request_id"] = recompute_request_id(request)
+    sealed = validate_adapter_request(request)
+    with pytest.raises(AssertionError):
+        _publication_context_for_validated_request(
+            sealed,
+            _run_context(),
+            toolchain={
+                "node": {"status": "available", "version": "22.14.0", "failure_kind": None},
+                "node_version": "22.14.0",
+                "typescript_version": "5.9.2",
+                "adapter_version": "1.0.0",
+                "protocol": "code-structure-viz.next-adapter/v1",
+            },
+            trusted_environment=_trusted_environment(),
+            source_failure_ledger=(),
+            process_launch_descriptor=process_launch_descriptor(
+                node_status="available",
+                node_realpath="/usr/local/bin/node",
+                node_sha256="1" * 64,
+                node_version="22.14.0",
+                spawn_executable="/usr/local/bin/node",
+            ),
+        )
+
+
+def test_round17_source_failure_ledger_derives_locality_without_caller_booleans() -> None:
+    base: dict[str, Any] = {
+        "failures": ({"path": "src/Broken.tsx", "stage": "source_read"},),
+        "source_graph": (
+            {
+                "path": "src/Broken.tsx",
+                "project_root": ".",
+                "reachable_target_keys": (),
+                "proof_root_ids": ("failure-root",),
+                "closure_complete": True,
+            },
+        ),
+        "project_roots": (".",),
+        "targets": ("path:src/Other.tsx",),
+        "proof_roots": ({"id": "failure-root", "path_ref": "src/Broken.tsx"},),
+    }
+    ledger = SourceFailureLedger(**base)
+    assert ledger.safe_subset_proven is True
+    for field in ("isolated", "target_tainted", "safe_subset_proven"):
+        injected = copy.deepcopy(base)
+        injected["failures"] = ({"path": "src/Broken.tsx", "stage": "source_read", field: True},)
+        with pytest.raises(AssertionError):
+            SourceFailureLedger(**injected)
+
+    tainted = copy.deepcopy(base)
+    tainted["source_graph"] = (
+        {
+            **tainted["source_graph"][0],
+            "reachable_target_keys": ("path:src/Other.tsx",),
+        },
+    )
+    tainted_ledger = SourceFailureLedger(**tainted)
+    assert tainted_ledger.explicit_target_tainted is True
+    assert tainted_ledger.safe_subset_proven is False
+
+    nonisolatable = copy.deepcopy(base)
+    nonisolatable["source_graph"] = (
+        {**nonisolatable["source_graph"][0], "closure_complete": False},
+    )
+    nonisolatable_ledger = SourceFailureLedger(**nonisolatable)
+    assert nonisolatable_ledger.safe_subset_proven is False
 
 
 def test_project_surface_order_is_root_path_while_semantic_records_remain_id_order() -> None:
@@ -5128,7 +5432,7 @@ def test_schema_valid_model_record_limit_is_reachable_on_generated_wire() -> Non
     assert exact_bounded["allowed"] is True
     assert exact_bounded["materialized"] is True
     assert exact_bounded["total_array_items"] < exact_request["limits"]["max_total_array_items"]
-    assert len(exact_bytes) < exact_request["limits"]["max_stdout_bytes"]
+    assert len(exact_bytes) < exact_request["limits"]["max_adapter_response_bytes"]
     assert validate_response_envelope(exact_bytes, exact_request)["allowed"] is True
     exact_decision = response_boundary_decision(
         exact_bytes, validate_adapter_request(exact_request)
@@ -5143,7 +5447,7 @@ def test_schema_valid_model_record_limit_is_reachable_on_generated_wire() -> Non
     over_bounded = bounded_decode_json(over_bytes, limits=over_request["limits"])
     assert over_bounded["allowed"] is True
     assert over_bounded["total_array_items"] < over_request["limits"]["max_total_array_items"]
-    assert len(over_bytes) < over_request["limits"]["max_stdout_bytes"]
+    assert len(over_bytes) < over_request["limits"]["max_adapter_response_bytes"]
     with pytest.raises(AssertionError):
         validate_response_envelope(over_bytes, over_request)
     over_decision = response_boundary_decision(over_bytes, validate_adapter_request(over_request))
@@ -6292,17 +6596,19 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     selected_payload = semantic_artifacts["next.snapshot.semantic.json"]
     exact = finalize_publication_decision(
         decision,
-        adapter_stdout_chunks=(b"ok",),
+        response_bytes=canonical_json_bytes(response),
+        artifact_bytes=semantic_artifacts,
+        adapter_stdout_chunks=(canonical_json_bytes(response),),
         adapter_stderr_chunks=(b"diagnostic",),
         selected_payload=selected_payload,
-        adapter_stdout_limit=2,
+        adapter_stdout_limit=len(canonical_json_bytes(response)),
         adapter_stderr_limit=10,
         selected_stdout_limit=len(selected_payload),
     )
     assert exact.semantic_decision is decision
     assert exact.publication_outcome == "published"
     assert exact.exit_code == 0
-    assert exact.adapter_stdout["retained_bytes"] == 2
+    assert exact.adapter_stdout["retained_bytes"] == len(canonical_json_bytes(response))
     assert exact.adapter_stderr["captured_bytes"] == 10
     assert exact.selected_stdout["retained"] == selected_payload
     exact_domain, exact_manifest, exact_stream, exact_artifacts, exact_stderr = (
@@ -6316,6 +6622,10 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
 
     selected_overrun = finalize_publication_decision(
         decision,
+        response_bytes=canonical_json_bytes(response),
+        artifact_bytes=semantic_artifacts,
+        adapter_stdout_chunks=(canonical_json_bytes(response),),
+        adapter_stdout_limit=len(canonical_json_bytes(response)),
         selected_payload=selected_payload,
         selected_stdout_limit=len(selected_payload) - 1,
     )
@@ -6336,6 +6646,8 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
 
     capture_overrun = finalize_publication_decision(
         decision,
+        response_bytes=canonical_json_bytes(response),
+        artifact_bytes={},
         adapter_stdout_chunks=(b"ab",),
         adapter_stdout_limit=1,
     )
@@ -6354,6 +6666,10 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
 
     stderr_overrun = finalize_publication_decision(
         decision,
+        response_bytes=canonical_json_bytes(response),
+        artifact_bytes={},
+        adapter_stdout_chunks=(canonical_json_bytes(response),),
+        adapter_stdout_limit=len(canonical_json_bytes(response)),
         adapter_stderr_chunks=(b"ab",),
         adapter_stderr_limit=1,
     )
@@ -6372,6 +6688,10 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     public_diag = _public_diagnostic("CSV-NEXT-TARGET-001", path="src/表示.tsx")
     public_stderr_overrun = finalize_publication_decision(
         decision,
+        response_bytes=canonical_json_bytes(response),
+        artifact_bytes={},
+        adapter_stdout_chunks=(canonical_json_bytes(response),),
+        adapter_stdout_limit=len(canonical_json_bytes(response)),
         public_diagnostics=[public_diag],
         public_stderr_limit=len(_diagnostic_jsonl([public_diag])) - 1,
     )
@@ -6389,7 +6709,7 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
 
     measurement_snapshot = exact.adapter_stdout
     measurement_snapshot["retained"] = b"substituted"
-    assert exact.adapter_stdout["retained"] == b"ok"
+    assert exact.adapter_stdout["retained"] == canonical_json_bytes(response)
     substituted_measurement = exact.adapter_stdout
     substituted_measurement["captured_bytes"] = 1
     substituted_measurement["retained_bytes"] = 1
@@ -6406,8 +6726,132 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
         replace(exact, publication_outcome="payload_unavailable")
 
 
+def test_round17_publication_artifacts_are_bound_to_the_immutable_decision() -> None:
+    request = _request()
+    response = _response(_model(), request=request)
+    decision = validate_response_envelope(canonical_json_bytes(response), request)[
+        "validated_decision"
+    ]
+    assert isinstance(decision, NextValidatedDecision)
+    artifacts = _semantic_artifacts_from_decision(decision)
+    semantic = json.loads(artifacts["next.snapshot.semantic.json"].decode("utf-8"))
+    semantic["source"]["fingerprint"] = "0" * 64
+    substituted = {
+        **artifacts,
+        "next.snapshot.semantic.json": canonical_json_bytes(semantic) + b"\n",
+    }
+    selected = substituted["next.snapshot.semantic.json"]
+    with pytest.raises(AssertionError):
+        finalize_publication_decision(
+            decision,
+            response_bytes=canonical_json_bytes(response),
+            artifact_bytes=substituted,
+            adapter_stdout_chunks=(canonical_json_bytes(response),),
+            selected_payload=selected,
+        )
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [None, "manifest", "next:semantic-json", "next:plantuml"],
+)
+def test_round17_final_publication_stdout_union_seals_summary_manifest_exact_and_plus_one(
+    selector: str | None,
+) -> None:
+    """Exercise non-domain stdout branches through the final decision object."""
+
+    request = _request(run_context=_run_context(selector=selector))
+    response = _response(_model(), request=request)
+    response_bytes = canonical_json_bytes(response)
+    decision = validate_response_envelope(response_bytes, request)["validated_decision"]
+    assert isinstance(decision, NextValidatedDecision)
+    artifacts = _semantic_artifacts_from_decision(decision)
+    prepublication_domain = _domain(decision=decision)
+    prepublication_manifest = _run_manifest(prepublication_domain)
+    if selector is None:
+        selected_payload = _canonical_json_line(
+            _run_summary_value(prepublication_manifest["run"]["status"], prepublication_domain)
+        )
+    elif selector == "manifest":
+        selected_payload = _canonical_json_line(prepublication_manifest)
+    else:
+        selected_payload = artifacts[
+            "next.snapshot.semantic.json"
+            if selector == "next:semantic-json"
+            else "next.snapshot.puml"
+        ]
+
+    exact = finalize_publication_decision(
+        decision,
+        response_bytes=response_bytes,
+        artifact_bytes=artifacts,
+        adapter_stdout_chunks=(response_bytes,),
+        adapter_stdout_limit=len(response_bytes),
+        selected_payload=selected_payload,
+        selected_stdout_limit=len(selected_payload),
+    )
+    assert exact.publication_outcome == "published"
+    exact_domain, exact_manifest, exact_stdout, _, _ = _validate_publication_chain(exact)
+    assert exact_domain["status"] == "complete"
+    assert exact_manifest["run"]["exit_code"] == 0
+    assert _publication_stdout_bytes(exact) == selected_payload
+    assert exact.selected_stdout["retained"] == selected_payload
+    if selector is None:
+        assert exact_stdout["selector"] is None
+        assert exact_stdout["stable_reason"] == "run_summary"
+        assert exact_stdout["availability"] is False
+    elif selector == "manifest":
+        assert exact_stdout["selector"] == "manifest"
+        assert exact_stdout["stable_reason"] == "run_manifest"
+        assert exact_stdout["availability"] is True
+    else:
+        assert exact_stdout["selector"] == selector
+        assert exact_stdout["stable_reason"] == "published_artifact"
+        assert exact_stdout["availability"] is True
+
+    overrun = finalize_publication_decision(
+        decision,
+        response_bytes=response_bytes,
+        artifact_bytes=artifacts,
+        adapter_stdout_chunks=(response_bytes,),
+        adapter_stdout_limit=len(response_bytes),
+        selected_payload=selected_payload,
+        selected_stdout_limit=len(selected_payload) - 1,
+    )
+    assert overrun.publication_outcome == "selected_artifact_unavailable"
+    assert overrun.exit_code == 3
+    assert overrun.selected_stdout["retained"] == b""
+    over_domain, over_manifest, over_stdout, _, _ = _validate_publication_chain(overrun)
+    assert over_domain["status"] == "complete"
+    assert over_manifest["run"]["status"] == "incomplete"
+    assert over_manifest["run"]["exit_code"] == 3
+    assert over_stdout["availability"] is False
+    assert over_stdout["selected_stdout_unavailable"] is True
+    assert _publication_stdout_bytes(overrun) == _canonical_json_line(over_stdout)
+    if selector is None:
+        assert over_stdout["run_status"] == "incomplete"
+        assert over_stdout["artifact"] is None
+    elif selector == "manifest":
+        assert over_stdout["domain_status"] == "complete"
+        assert over_stdout["stable_reason"] == "selected_artifact_unavailable"
+        assert over_stdout["artifact"]["path"] == "run-manifest.json"
+    else:
+        assert over_stdout["domain_status"] == "complete"
+        assert over_stdout["stable_reason"] == "selected_artifact_unavailable"
+        assert over_stdout["artifact"]["path"] in {
+            "next.snapshot.semantic.json",
+            "next.snapshot.puml",
+        }
+
+
 def test_round16_process_launch_descriptor_is_closed_and_security_deterministic() -> None:
-    descriptor = process_launch_descriptor()
+    descriptor = process_launch_descriptor(
+        node_status="available",
+        node_realpath="/usr/local/bin/node",
+        node_sha256="1" * 64,
+        node_version="22.14.0",
+        spawn_executable="/usr/local/bin/node",
+    )
     validate_process_launch_descriptor(descriptor)
     _validator("next-process-launch-v1.schema.json").validate(descriptor)
     assert descriptor["node_realpath"].startswith("/")
@@ -6431,7 +6875,13 @@ def test_round16_process_launch_descriptor_is_closed_and_security_deterministic(
             validate_process_launch_descriptor(mutated)
         with pytest.raises(ValidationError):
             _validator("next-process-launch-v1.schema.json").validate(mutated)
-    unavailable = process_launch_descriptor(node_status="unavailable")
+    unavailable = process_launch_descriptor(
+        node_status="unavailable",
+        node_realpath=None,
+        node_sha256=None,
+        node_version=None,
+        spawn_executable=None,
+    )
     validate_process_launch_descriptor(unavailable)
     _validator("next-process-launch-v1.schema.json").validate(unavailable)
     with pytest.raises(AssertionError):
@@ -6488,9 +6938,20 @@ def test_round16_publication_context_requires_explicit_launch_and_decision_conte
     with pytest.raises(TypeError):
         NextPublicationContext(**constructor_values)
 
+    with pytest.raises(TypeError):
+        _publication_context_for_validated_request(
+            validated.request,
+            validated.run_context,
+            toolchain=_toolchain_snapshot(),
+            trusted_environment=_trusted_environment(),
+            source_failure_ledger=(),
+        )  # type: ignore[call-arg]
+
     for decision in decisions:
         publication_context = decision.publication_context
         assert publication_context is not None
+        assert publication_context.process_launch_descriptor is not None
+        assert publication_context.toolchain is not None
         assert (
             publication_context.process_launch_descriptor["node_status"]
             == publication_context.toolchain["node"]["status"]
@@ -6503,7 +6964,17 @@ def test_round16_publication_context_requires_explicit_launch_and_decision_conte
         with pytest.raises(AssertionError):
             replace(
                 publication_context,
-                process_launch_descriptor=process_launch_descriptor(node_status=mismatched_status),
+                process_launch_descriptor=process_launch_descriptor(
+                    node_status=mismatched_status,
+                    node_realpath=None
+                    if mismatched_status != "available"
+                    else "/usr/local/bin/node",
+                    node_sha256=None if mismatched_status != "available" else "1" * 64,
+                    node_version=None if mismatched_status != "available" else "22.14.0",
+                    spawn_executable=None
+                    if mismatched_status != "available"
+                    else "/usr/local/bin/node",
+                ),
             )
 
     with pytest.raises(AssertionError):
@@ -6939,11 +7410,10 @@ def test_all_decision_variants_project_without_legacy_fixture_authority(
         assert domain["toolchain"] == context.toolchain
         assert domain["trusted_environment"] == context.trusted_environment
         assert domain["compatibility_descriptor"] == context.compatibility_descriptor
-        assert (
-            domain["semantic_compatibility_id"]
-            == context.compatibility_descriptor["compatibility_id"]
-        )
-        assert domain["identity_versions"] == context.compatibility_descriptor["identity_versions"]
+        assert context.compatibility_descriptor is not None
+        compatibility_descriptor = context.compatibility_descriptor
+        assert domain["semantic_compatibility_id"] == compatibility_descriptor["compatibility_id"]
+        assert domain["identity_versions"] == compatibility_descriptor["identity_versions"]
         assert domain["run_fingerprint"] == digest(context.run_fingerprint_preimage)
         validate_domain_manifest(domain)
 
@@ -6972,6 +7442,7 @@ def test_validated_decision_defensively_copies_request_and_publication_context()
     assert decision.request == request_snapshot
     assert decision.publication_context == context_snapshot
     assert mutated_context is not None
+    assert mutated_context.compatibility_descriptor is not None
     mutated_context.public_next_config["limits"]["max_entities"] = 1
     mutated_context.compatibility_descriptor["algorithm_versions"]["props"] = 99
     assert decision.publication_context == context_snapshot
@@ -6979,7 +7450,7 @@ def test_validated_decision_defensively_copies_request_and_publication_context()
     request_limits["max_entities"] = 1
     assert decision.request["limits"]["max_entities"] == request_snapshot["limits"]["max_entities"]
     with pytest.raises(TypeError):
-        decision.request["request_id"] = "0" * 64
+        cast(Any, decision.request)["request_id"] = "0" * 64
 
     with pytest.raises(AssertionError):
         NextValidatedDecision(
@@ -6993,6 +7464,33 @@ def test_validated_decision_defensively_copies_request_and_publication_context()
             target_failures=({"target_key": "path:src/Other.tsx", "reason": "missing"},),
             publication_context=decision.publication_context,
         )
+
+
+def test_round17_validated_request_is_composed_and_revalidated() -> None:
+    request = _request()
+    sealed = validate_adapter_request(request)
+    assert not isinstance(sealed, dict)
+    assert sealed.canonical_bytes == canonical_json_bytes(request)
+    assert sealed.canonical_sha256 == hashlib.sha256(sealed.canonical_bytes).hexdigest()
+
+    request["limits"]["max_entities"] = 1
+    request["files"][0]["content_base64"] = base64.b64encode(b"mutated\n").decode("ascii")
+    assert sealed["limits"]["max_entities"] == _next_limits()["max_entities"]
+    assert sealed["files"][0]["content_base64"] != request["files"][0]["content_base64"]
+    snapshot = sealed.snapshot()
+    snapshot["projects"][0]["root"] = "substituted"
+    assert sealed["projects"][0]["root"] == "."
+
+    with pytest.raises(TypeError):
+        cast(Any, sealed)["request_id"] = "0" * 64
+    with pytest.raises(TypeError):
+        dict.__setitem__(cast(Any, sealed), "request_id", "0" * 64)
+    assert validate_adapter_request(sealed) is sealed
+
+    tampered = validate_adapter_request(_request())
+    object.__setattr__(tampered, "canonical_sha256", "f" * 64)
+    with pytest.raises(AssertionError):
+        validate_adapter_request(tampered)
 
 
 def test_request_independent_pre_response_decision_keeps_closed_context() -> None:
@@ -7010,12 +7508,18 @@ def test_request_independent_pre_response_decision_keeps_closed_context() -> Non
         limits=None,
         stage="config_validation",
         diagnostic_code="CSV-NEXT-CONFIG-001",
+        failure_kind="config",
         known_counts={
             "files": None,
             "source_bytes": None,
             "model_records": None,
             "stdout_bytes": None,
         },
+        source_failure_ledger=(),
+        outcome="payload_unavailable",
+        payload_unavailable=True,
+        exit_code=3,
+        provenance="request_independent",
     )
     decision = pre_response_failure_decision(
         None,
@@ -7154,11 +7658,20 @@ def test_round16_pre_response_failure_is_narrowed_to_nonisolatable_source() -> N
             {
                 "path": "src/Broken.tsx",
                 "stage": "source_read",
-                "isolated": True,
-                "target_tainted": False,
             },
         ),
-        safe_subset_proven=True,
+        source_graph=(
+            {
+                "path": "src/Broken.tsx",
+                "project_root": "src",
+                "reachable_target_keys": (),
+                "proof_root_ids": ("failure-root-1",),
+                "closure_complete": True,
+            },
+        ),
+        project_roots=("src",),
+        targets=("path:src/Unrelated.tsx",),
+        proof_roots=({"id": "failure-root-1", "path_ref": "src/Broken.tsx"},),
     )
     assert classify_source_failure(localized=True, safe_subset_proven=True)["diagnostic_code"] == (
         "CSV-NEXT-SOURCE-001"
@@ -7171,14 +7684,23 @@ def test_round16_pre_response_failure_is_narrowed_to_nonisolatable_source() -> N
             diagnostic_code="CSV-NEXT-SOURCE-001",
             decision_context=NextDecisionContext(
                 run_context=context,
+                request_id=None,
+                targets=(),
+                limits=None,
                 stage="source_read",
                 diagnostic_code="CSV-NEXT-SOURCE-001",
+                failure_kind="source",
                 known_counts={
                     "files": None,
                     "source_bytes": None,
                     "model_records": None,
                     "stdout_bytes": None,
                 },
+                source_failure_ledger=(),
+                outcome="payload_unavailable",
+                payload_unavailable=True,
+                exit_code=3,
+                provenance="request_independent",
             ),
         )
     unavailable = classify_source_failure(localized=False, safe_subset_proven=False)
@@ -7197,11 +7719,20 @@ def test_round16_request_independent_source_failure_projects_schema_valid_whole_
             {
                 "path": "src/Broken.tsx",
                 "stage": "source_selection",
-                "isolated": False,
-                "target_tainted": False,
             },
         ),
-        safe_subset_proven=False,
+        source_graph=(
+            {
+                "path": "src/Broken.tsx",
+                "project_root": "src",
+                "reachable_target_keys": (),
+                "proof_root_ids": ("failure-root-2",),
+                "closure_complete": False,
+            },
+        ),
+        project_roots=("src",),
+        targets=(),
+        proof_roots=({"id": "failure-root-2", "path_ref": "src/Broken.tsx"},),
     )
     decision_context = NextDecisionContext(
         run_context=context,
@@ -7210,6 +7741,7 @@ def test_round16_request_independent_source_failure_projects_schema_valid_whole_
         limits=None,
         stage="source_selection",
         diagnostic_code="CSV-NEXT-SOURCE-003",
+        failure_kind="source",
         known_counts={
             "files": None,
             "source_bytes": None,
@@ -7217,6 +7749,10 @@ def test_round16_request_independent_source_failure_projects_schema_valid_whole_
             "stdout_bytes": None,
         },
         source_failure_ledger=ledger.failures,
+        outcome="payload_unavailable",
+        payload_unavailable=True,
+        exit_code=3,
+        provenance="request_independent",
     )
     decision = pre_response_failure_decision(
         None,
@@ -7262,7 +7798,7 @@ def test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exi
         request,
         stage=stage,
         diagnostic_code=diagnostic_code,
-        stdout_bytes=(request["limits"]["max_stdout_bytes"] + 1)
+        stdout_bytes=(request["limits"]["max_adapter_response_bytes"] + 1)
         if diagnostic_code == "CSV-NEXT-LIMIT-003"
         else None,
         decision_context=decision_context_for_request(
@@ -7271,7 +7807,7 @@ def test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exi
             diagnostic_code=diagnostic_code,
             known_counts=_decision_known_counts(
                 request,
-                stdout_bytes=(request["limits"]["max_stdout_bytes"] + 1)
+                stdout_bytes=(request["limits"]["max_adapter_response_bytes"] + 1)
                 if diagnostic_code == "CSV-NEXT-LIMIT-003"
                 else None,
             ),
@@ -7481,6 +8017,45 @@ def test_round16_target_resolution_exposes_all_closed_failure_reasons() -> None:
         ["path:src/Button.tsx"], base, unavailable_record_ids={_id("component", "5")}
     )
     assert selected_taint[0]["reason"] == "selected_taint"
+
+
+def test_round17_proof_derived_target_failure_is_typed_and_sorted() -> None:
+    proof = {
+        "target_resolutions": [
+            {
+                "target_key": "path:src/Other.tsx",
+                "status": "failed",
+                "record_ids": [],
+                "reason": "selected_taint",
+            },
+            {
+                "target_key": "path:src/Button.tsx",
+                "status": "failed",
+                "record_ids": [],
+                "reason": "component_only",
+            },
+        ]
+    }
+    proof["target_resolutions"].sort(key=canonical_json_bytes)
+    failure = target_failure_from_proof(proof)
+    assert failure is not None
+    assert failure.failures == [
+        {"target_key": "path:src/Button.tsx", "reason": "component_only"},
+        {"target_key": "path:src/Other.tsx", "reason": "selected_taint"},
+    ]
+    with pytest.raises(AssertionError):
+        target_failure_from_proof(
+            {
+                "target_resolutions": [
+                    {
+                        "target_key": "path:src/Button.tsx",
+                        "status": "failed",
+                        "record_ids": [],
+                        "reason": "not_a_target_reason",
+                    }
+                ]
+            }
+        )
 
 
 def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests() -> None:
@@ -7772,6 +8347,45 @@ def test_round16_html_has_no_fixed_limit_inventory() -> None:
     assert 'data-plantuml-contract="2"' in source
 
 
+def test_round17_html_has_validation_pipeline_and_round17_state() -> None:
+    html_path = (
+        ROOT
+        / "spec-dock"
+        / "initiatives"
+        / "init-00001-code-structure-visualization"
+        / "epics"
+        / "epic-00002-safe-git-structure-comparison"
+        / "issues"
+        / "iss-00008-generate-nextjs-component-snapshots"
+        / "artifacts"
+        / "20260831t022707z--nextjs-component-snapshot-best-practice-guide.html"
+    )
+    source = html_path.read_text(encoding="utf-8")
+    assert "Round 17" in source
+    for token in (
+        "SourceDiscoveryIntent",
+        "SourceFailureLedger",
+        "request-independent",
+        "process_launch_descriptor",
+        "PublicationBoundaryDecision",
+        "raw cap",
+        "bounded decode/aggregate",
+        "closed schema",
+        "base/path/reference/proof",
+        "actual model+proof-only count",
+        "model gate",
+        "entity gate",
+        "selected copy",
+        "LIMIT-003",
+        "PROTOCOL-001",
+        "selected_taint",
+        "sort_keys=True",
+    ):
+        assert token in source
+    assert "stdout 16 MiB" not in source
+    assert 'data-plantuml-contract="2"' in source
+
+
 def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
     assert VALIDATOR_SCHEMA == "code-structure-viz.next-reference-validation/v1"
     fixture = json.loads(
@@ -7824,6 +8438,15 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round11-export-failure-projection",
         "round11-raw-response-trust-boundary",
         "round11-stderr-end-to-end",
+        "round17-request-authority",
+        "round17-source-inventory-observation",
+        "round17-request-independent-null-provenance",
+        "round17-source-locality-derived",
+        "round17-process-launch-explicit",
+        "round17-publication-boundary-seal",
+        "round17-stdout-closed-union",
+        "round17-proof-target-reroute",
+        "round17-surface-order",
     } <= set(fixture["positive"])
     assert {
         "cross-domain",
@@ -7884,6 +8507,14 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round11-raw-response-duplicate-key",
         "round11-raw-response-limit-mutation",
         "round11-stderr-limit-plus-one-end-to-end",
+        "round17-source-inventory-injection",
+        "round17-request-derived-mutation",
+        "round17-source-locality-boolean",
+        "round17-process-launch-substitution",
+        "round17-publication-artifact-substitution",
+        "round17-selector-branch-mutation",
+        "round17-target-reason-mutation",
+        "round17-order-reversal",
     } <= set(fixture["negative"])
 
     mapping = fixture["criterion_test_map"]
@@ -7896,6 +8527,8 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round16.p2-1",
         "round16.p2-2",
         "round16.p2-3",
+        *(f"round17.p1-{index}" for index in range(1, 10)),
+        *(f"round17.p2-{index}" for index in range(1, 4)),
     }
     assert set(mapping) == expected_criteria
     mapped_tests = {name for names in mapping.values() for name in names}

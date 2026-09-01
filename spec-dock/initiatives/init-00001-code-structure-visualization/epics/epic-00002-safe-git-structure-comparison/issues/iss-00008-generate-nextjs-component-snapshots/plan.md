@@ -502,3 +502,46 @@ fresh current-SHA Strictはpending、readinessは未確認、production implemen
 | P2-1 HTML drift resistance | `test_round16_html_has_no_fixed_limit_inventory` |
 | P2-2 vector index bijection | `test_contract_fixture_index_materializes_plan_008_vectors` |
 | P2-3 limit message/catalog | `test_next_diagnostic_catalog_is_the_public_and_manifest_authority` |
+
+### Round 17 remediation plan and executable trace
+
+固定点は SHA `032c8d7e2f7786fb443fd2a49566c5a6ad9815d5`、CI
+`33514033888`（7/7 green）。Strict content reviewのhistorical verdictは
+`P0=0 / P1=9 / P2=3 / fail / implementation_ready=no`であり、fresh
+current-SHA Strictはpending、readinessは未確認、production implementationは未着手とする。
+
+1. Intent/inventoryを観測専用にし、frozen control bytesからplan/view/config/extends/
+   paths/rolesをsingle-sealで導出する。request-owned derived mutationとplan/view-only
+   injectionを拒否する。
+2. request-independent failureをstage-discriminated null provenanceへ固定し、
+   `ValidatedAdapterRequest`をcomposition/frozen authorityとしてcanonical requestを再検証する。
+3. SourceFailureLedgerをsealed graphから導出し、proof-derived target IDを再解決する。
+   target unavailableはclosed eight reasonsの一target一rowとする。
+4. observed process descriptorをactual spawnへbindし、PublicationBoundaryDecisionへ
+   response/request/model/artifact/selector/diagnostic/measurementをsealする。summary、manifest、
+   selected artifactのselected-stream exact bytesも同じcopy boundaryで測定し、全surfaceは
+   final objectだけを投影入力とする。exactは全bytes、limit+1はpartial bytesなしのtyped
+   unavailableへ進み、manifest/domain descriptorを規則に従って保持する。
+5. raw cap → bounded decode/aggregate → closed schema → base/path/reference/proof →
+   actual model+proof-only count → model gate → entity gate → selected copyを固定する。
+   semanticはID order、config/source-plan/rootはroot-path order、submitted orderはsort前検査する。
+6. R/D/P、schemas、catalog、fixture index、HTMLをRound 17状態へ同期し、focused/contracts/full
+   pytest、mypy、ruff、SpecDock、PlantUML、diff cleanlinessを実行する。
+
+| criterion | executable evidence |
+| --- | --- |
+| round17.p1-1 inventory and source authority | `test_round17_source_inventory_accepts_observations_only`; `test_round17_request_owned_derived_source_claims_cannot_override_control_bytes`; `test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift` |
+| round17.p1-2 request-independent provenance | `test_request_independent_pre_response_decision_keeps_closed_context`; `test_round16_request_independent_source_failure_projects_schema_valid_whole_run` |
+| round17.p1-3 composed request | `test_round17_validated_request_is_composed_and_revalidated`; `test_response_validation_accepts_only_the_bounded_raw_bytes_entrypoint` |
+| round17.p1-4 graph-derived locality | `test_round17_source_failure_ledger_derives_locality_without_caller_booleans`; `test_round15_source_failure_preserves_locality_boundary` |
+| round17.p1-5 observed launch identity | `test_round16_process_launch_descriptor_is_closed_and_security_deterministic`; `test_round16_publication_context_requires_explicit_launch_and_decision_context` |
+| round17.p1-6 final publication authority | `test_round17_publication_artifacts_are_bound_to_the_immutable_decision`; `test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy` |
+| round17.p1-7 stdout union | `test_round17_final_publication_stdout_union_seals_summary_manifest_exact_and_plus_one`; `test_next_stdout_matrix_usage_is_empty_and_manifest_free`; `test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy` |
+| round17.p1-8 proof target reroute | `test_round17_proof_derived_target_failure_is_typed_and_sorted`; `test_round16_target_resolution_exposes_all_closed_failure_reasons` |
+| round17.p1-9 surface ordering | `test_round11_inverse_project_request_order`; `test_project_surface_order_is_root_path_while_semantic_records_remain_id_order` |
+| round17.p2-1 closed decision context | `test_round16_failure_matrix_is_catalog_derived_and_rejects_cross_product`; `test_round16_publication_context_requires_explicit_launch_and_decision_context` |
+| round17.p2-2 LIMIT-003 authority | `test_next_diagnostic_catalog_is_the_public_and_manifest_authority`; `test_actual_json_aggregate_boundary_precedes_schema_validation` |
+| round17.p2-3 HTML pipeline | `test_round17_html_has_validation_pipeline_and_round17_state` |
+
+Production implementation remains outside this remediation plan. Strict pass with
+P0/P1=0 is still required before I05-PLAN-002 implementation work.

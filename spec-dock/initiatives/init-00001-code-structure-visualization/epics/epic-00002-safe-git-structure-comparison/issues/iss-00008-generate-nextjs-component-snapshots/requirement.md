@@ -385,11 +385,11 @@ snapshot の一部 file parse/read/type-resolution failure は、失敗 file を
 
 boolean flag、path、alias、略記、大小文字違い、値省略は受理しない。`--stdout` の重複、文法不正、resolved selected domains に含まれない domain、resolved requested formats に含まれない format は、source acquisition と publication の前に usage error として確定する。結果は exit 2、stdout 空、safe diagnostic は stderr、semantic JSON・PlantUML・final run manifest を含む Artifact は0件である。
 
-`--stdout` を省略した場合、stdout は `code-structure-viz.run-summary/v1` の決定的な UTF-8 JSON 1行だけとする。summary は schema、run status、exit code、domain status、final manifest の relative path または null を持ち、source body、literal、secret、absolute path を持たない。diagnostic は stdout に混在させず stderr へ出す。
+`--stdout` を省略した場合、stdout は `code-structure-viz.run-summary/v1` の決定的な UTF-8 JSON 1行だけとする。summary は schema、run status、exit code、domain status、final manifest の relative path または null を持ち、source body、literal、secret、absolute path を持たない。diagnostic は stdout に混在させず stderr へ出す。summaryのbytesも`max_selected_stdout_bytes`のselected-stream copy boundaryで測定する。
 
 有効な selector の対象 Artifact が公開可能な場合、stdout は output directory に公開した対象 file と正確に同じ bytes だけを出す。前後に summary、label、diagnostic を付けない。`--output-dir` は引き続き必須であり、stdout は永続 Artifact の代替ではなく複製である。
 
-有効な selector の対象が `not_applicable`、`payload_unavailable`、run fatal、または handled interrupt により利用不能な場合、stdout は次の `code-structure-viz.stdout-result/v1` JSONをcanonical encoderで決定的な1行にする。object keyは既存のlexicographic `sort_keys=True`、文字列はNFC、encodingはUTF-8、行末はLF一つとし、専用の手書きfield orderは持たない。`availability` は false、`artifact` は null である。domain selector で domain outcome が確定している場合だけ `domain_status`、run-level outcome では `run_status` を使う。`manifest` selector も final manifest が存在しない場合は同じ規則を使う。既存の exit 0/1/3/130 を変更しない。
+有効な selector の対象が `not_applicable`、`payload_unavailable`、run fatal、handled interrupt、またはselected-stream copyのlimit+1により利用不能な場合、stdout は `code-structure-viz.stdout-result/v1` JSONをcanonical encoderで決定的な1行にする。object keyは既存のlexicographic `sort_keys=True`、文字列はNFC、encodingはUTF-8、行末はLF一つとし、専用の手書きfield orderは持たない。`availability` は false とし、null selectorは`run_status`と`artifact: null`、domain selectorは`domain_status`と規則上許されるartifact descriptor、manifest selectorのselected-copy failureは`run-manifest.json` descriptorを保持する。domain selector で domain outcome が確定している場合だけ `domain_status`、run-level outcome では `run_status` を使う。既存の exit 0/1/3/130 を変更しない。
 
 ```json
 {"type":"stdout_result","schema":"code-structure-viz.stdout-result/v1","selector":"next:semantic-json","availability":false,"domain_status":"not_applicable","stable_reason":"domain_not_applicable","artifact":null}
@@ -397,9 +397,10 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 
 | case | stdout | stderr | exit | publication |
 | --- | --- | --- | --- | --- |
-| selector なし、complete/not_applicable/incomplete/fatal/interrupt | `run-summary/v1` JSON 1行 | diagnostic のみ | 0/1/3/130 | outcome contract に従う |
+| selector なし、complete/not_applicable/incomplete/fatal/interrupt | `run-summary/v1` JSON 1行 | diagnostic のみ | 0/1/3/130 | selected-stream exact、limit+1はtyped unavailable |
 | available `DOMAIN:FORMAT` | 対象 Artifact の exact bytes | diagnostic のみ | 0 または `partial_safe` の3 | output-dir へ通常公開 |
 | available `manifest` | final run manifest の exact bytes | diagnostic のみ | 0 または3 | output-dir へ通常公開 |
+| summary/manifest/domain selected stream limit+1 | `stdout-result/v1` unavailable 1行 | diagnostic のみ | 3 | partial bytesなし、保存済みdescriptorは規則に従い保持 |
 | domain not_applicable | `stdout_result/v1` 1行、`domain_status: not_applicable`、`stable_reason: domain_not_applicable` | diagnostic のみ | 0 | domain payload なし、manifest は通常規則 |
 | domain payload_unavailable | `stdout_result/v1` 1行、`domain_status: incomplete`、`stable_reason: domain_payload_unavailable` | diagnostic のみ | 3 | affected payloadなし、single-domain safe manifest |
 | run fatal または final manifest 不在 | `stdout_result/v1` 1行、`run_status: fatal`、reason は `run_fatal` または `final_manifest_unavailable` | diagnostic のみ | 1 | final manifestを含めrun-level Artifactなし |
@@ -608,3 +609,50 @@ Round 16で実装前に閉じる要件は次のとおりである。
 
 これらの要件は後続実装の完了宣言ではない。local契約がgreenでも、fresh current-SHA StrictのP0=0/P1=0と
 `review_status: pass`が確認されるまでreadinessは未確認のままとする。
+
+### Round 17 authority and provenance remediation
+
+Round 17は、Round 17 Strict content reviewで確認された `P0=0 / P1=9 /
+P2=3 / fail` を、後続実装前の契約として閉じる。対象固定点は SHA
+`032c8d7e2f7786fb443fd2a49566c5a6ad9815d5`、CI `33514033888`（7/7
+green）であり、Strict recovery transcript は
+`required-strict-github-connector-verificati-667`、SHA-256
+`6689d7384bcd1a7a7d1238dbcd61224ef0cf774176a83bd6bbb003b843ef0703` とする。
+この履歴判定を上書きせず、fresh current-SHA Strictは pending、readinessは未確認、
+production implementationは未着手のままとする。
+
+1. `SourceDiscoveryIntent` は project roots、control candidates、固定 discovery rules
+   だけを受ける。inventoryは観測値だけを報告し、config/compiler options/source roots/
+   local extends/final paths/role map/digest/fingerprintを注入できない。seal内で凍結control
+   bytesから導出し、request-owned derived valueとの不一致を拒否する。
+2. response前にrequestを作れない場合は、観測済みの値だけを持つstage-discriminated
+   request-independent contextを使い、未観測 limits/toolchain/trust/source plan/process/
+   compatibilityは明示的null/absentとする。fixture/defaultによる合成を許さない。
+3. private requestは`ValidatedAdapterRequest`というcomposition-based immutable authority
+   とし、schema/id/files/base64/size/digest/canonical bytes/limitsをtrust boundaryで再検証する。
+4. source localityはsealed graph、project ownership、targets、failure/proof rootsから
+   `SourceFailureLedger`を導出する。isolated/safe subset/target taintをcaller booleanで
+   受けず、proof-derived unavailable IDは再解決して全surfaceへ伝播する。
+5. process launchはobserved Node realpath/digest/versionとactual spawn executableを
+   fixed argv/env/FD/process-group/TOCTOU descriptorへbindする。default/PATH/fake descriptor
+   やdescriptor substitutionを拒否する。
+6. `PublicationBoundaryDecision`はactual response bytes、validated request id、model
+   digest、全artifact exact bytes/descriptors、selector、diagnostic JSONL、全measurementを
+   一度sealする。domain/root/manifest/stdout/stderr/artifact/exitはこのfinal objectだけを
+   投影入力とし、再renderや独立status/mapを認めない。
+7. stdoutはsummary、manifest、selected semantic/PlantUML artifact、typed unavailableの
+   closed unionとし、selector null/manifest/domainを同一`PublicationBoundaryDecision`から
+   exact bytesで投影する。三つのselected streamは共通`max_selected_stdout_bytes`で測定し、
+   exactは全bytes、limit+1はpartial bytesなしのschema-valid unavailableへ進む。null branchは
+   run_statusのみ、manifest branchは`run-manifest.json` descriptor、domain branchは保存済み
+   artifact descriptorを保持する。target_failuresはtarget unavailableだけで一target一reasonとする。
+8. response validationは raw cap → bounded decode/aggregate → closed schema →
+   base/path/reference/proof → actual model+proof-only count → model gate → entity gate →
+   selected copy の順である。semantic projects/modelはID順、request/config/source-plan/rootは
+   root-path順で、validatorはsort前のsubmitted orderを検査する。
+9. Human HTMLはこのpipeline、null provenance、source ledger、launch/publication seal、
+   target reroute、orderingを既存8図とpinned PlantUML contractへ反映し、固定個数のlimit
+   inventoryを断定しない。
+
+Round 17のcriterion-to-test対応、三試行のprovenance、検証結果、fresh Strict pendingは
+新規 `artifacts/20260902t000000z-disc-strict-spec-review-round-17.md` に保存する。

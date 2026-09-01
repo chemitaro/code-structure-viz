@@ -747,7 +747,7 @@
             {"type": "null"}
           ]
         },
-        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "fingerprint": {"oneOf": [{"type": "string", "pattern": "^[0-9a-f]{64}$"}, {"type": "null"}]},
         "file_count": {"type": "integer", "minimum": 0}
       }
     },
@@ -1030,7 +1030,7 @@
             "projects": {"const": []},
             "targets": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"}},
             "formats": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["semantic-json", "plantuml"]}},
-            "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            "trusted_environment_digest": {"oneOf": [{"type": "string", "pattern": "^[0-9a-f]{64}$"}, {"type": "null"}]}
           }
         },
         "traversal": {
@@ -1039,7 +1039,7 @@
           "required": ["upstream_depth", "downstream_depth"],
           "properties": {"upstream_depth": {"const": null}, "downstream_depth": {"const": null}}
         },
-        "limits": {"$ref": "urn:code-structure-viz:schema:next-limits-v1"},
+        "limits": {"oneOf": [{"$ref": "urn:code-structure-viz:schema:next-limits-v1"}, {"type": "null"}]},
         "comparison": {"$ref": "#/$defs/resolved_comparison"}
       }
     },
@@ -1073,8 +1073,8 @@
         "formats": {"enum": ["builtin", "repository", "explicit", "cli"]},
         "upstream_depth": {"enum": ["builtin", "repository", "explicit", "cli"]},
         "downstream_depth": {"enum": ["builtin", "repository", "explicit", "cli"]},
-        "limits": {"enum": ["builtin", "repository", "explicit", "cli"]},
-        "trusted_environment": {"enum": ["builtin", "repository", "explicit", "cli"]}
+        "limits": {"enum": ["builtin", "repository", "explicit", "cli", "unobserved"]},
+        "trusted_environment": {"enum": ["builtin", "repository", "explicit", "cli", "unobserved"]}
       }
     },
     "config": {

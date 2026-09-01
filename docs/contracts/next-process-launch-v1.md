@@ -55,3 +55,22 @@ Round 16 content review は対象 SHA
 `732477c72c7e05d3f15818ba8a3f75a4c97dc5a9`、CI `33494926439`（7/7 green）に対し、
 `P0=0 / P1=16 / P2=3 / fail`、`implementation_ready=no` だった。fresh current-SHA
 Strict は pending、readiness は未確認、production implementation は未着手である。
+
+## Round 17 observation-to-spawn binding
+
+The descriptor must be assembled from a launch observation made at the trust
+boundary. The observation records the verified Node realpath, its digest and
+version, and the exact executable passed to spawn; it also records the fixed
+argv/cwd, allowlisted environment and denied variables, stdio/FD policy,
+process-group scope, and the TOCTOU check. The actual spawn identity must
+equal the observed identity. PATH lookup, a default executable name, a
+caller-provided digest, symlink replacement, hostile locale/TZ or extra FD
+cannot be used to complete the descriptor.
+
+Request-independent decisions still carry an explicit descriptor field, with
+`null`/`unobserved` values where the stage prevented observation. They do not
+receive a synthetic launch descriptor from a fixture or host defaults. The
+descriptor is bound to the toolchain and fingerprint before any publication
+projection. Capture tests use a faithful iterable harness and explicitly do
+not claim OS process-level coverage; production implementation is absent and
+fresh current-SHA Strict is pending.

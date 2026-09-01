@@ -108,3 +108,27 @@ domain while still making the root publication result incomplete with exit 3.
 The reference harness proves incremental capture semantics but does not claim
 OS process-level coverage. Fresh current-SHA Strict is pending and production
 implementation remains absent.
+
+## Round 17 observed launch and publication provenance
+
+The process-launch descriptor is an observed boundary value, not a default
+runtime object. For an available Node run it binds the verified absolute
+realpath, executable digest, version, and the actual executable passed to
+spawn; for an unavailable or not-applicable run it records explicit absence as
+required by the closed schema. Toolchain status and descriptor status must
+agree, and the descriptor is included in the compatibility/run-fingerprint
+preimage. A fixture value is acceptable only as a named reference-test
+observation; it is not a production fallback and cannot be substituted after
+sealing.
+
+`PublicationBoundaryDecision` then seals the actual validated response bytes,
+validated request identity, model digest, exact artifact byte map and
+descriptors, selector bytes, diagnostic JSONL, and all capture/copy
+measurements. Domain, root manifest, stdout, stderr, artifact, and exit
+projections consume that final object only; they do not re-render or accept a
+second measurement/outcome map. A capture or public-stderr breach produces a
+typed unavailable result with no partial bytes. A selected-copy breach keeps
+the persisted artifact descriptor and semantic result but records the
+publication failure and exit 3. The faithful reference harness is not an OS
+process-level test. Fresh current-SHA Strict is pending and production
+implementation remains absent.

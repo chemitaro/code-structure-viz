@@ -85,3 +85,25 @@ schema-valid request-independent manifest-only `payload_unavailable` branch.
 Intentional unsupported behavior is complete with
 `CSV-NEXT-UNSUPPORTED-001`. The eight target reasons remain target-scoped and
 are emitted only by the Next target-unavailable stdout branch.
+
+## Round 17 provenance and closed routing
+
+The diagnostic matrix is discriminated by decision failure kind and observed
+stage. A request-independent failure records only values observed before that
+stage and uses explicit null/absence for the rest; a later projection cannot
+invent request, project, config, toolchain, trusted environment, or source
+plan fields. `SourceFailureLedger` distinguishes proven local safe subset
+(`CSV-NEXT-SOURCE-001`/`partial_safe`) from non-isolatable source failure
+(`CSV-NEXT-SOURCE-003`/`payload_unavailable`) by sealed graph evidence, not a
+caller boolean. Proof-derived target taint is resolved again and retains one
+of the eight target reasons through every surface.
+
+The catalog's precedence is raw cap, bounded decode/aggregate, closed schema,
+base/path/reference/proof, actual model/proof-only count, model gate, entity
+gate, and selected copy. `CSV-NEXT-LIMIT-003` is the one configured
+byte/structural resource message; `CSV-NEXT-PROTOCOL-001` is reserved for
+malformed, closed-schema, and proof violations. A final immutable
+`PublicationBoundaryDecision` owns the diagnostic JSONL bytes and all
+measurements, so stderr is projected from sealed bytes rather than re-rendered
+from a separate status. Fresh current-SHA Strict is pending and production
+implementation is absent.
