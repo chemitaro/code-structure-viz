@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
@@ -127,6 +128,55 @@ class NextRunContext(TypedDict):
     budget_resolved: int
     budget_source: str
     stdout_selector: str | None
+
+
+@dataclass(frozen=True)
+class NextValidatedDecision:
+    """Immutable trust-boundary decision consumed by every publication surface.
+
+    The response validator is the only constructor.  Downstream projections
+    receive this object instead of accepting a second model/context/budget
+    supplied by a caller.  The dictionaries are defensive copies at
+    construction; ``frozen`` prevents replacing the decision's authoritative
+    inputs after validation.
+    """
+
+    validated_model: dict[str, Any]
+    validated_proof: dict[str, Any]
+    run_context: NextRunContext
+    pre_budget_outcome: str
+    gate: dict[str, Any]
+    targets: tuple[str, ...] = ()
+    target_failures: tuple[dict[str, Any], ...] = ()
+    export_failures: tuple[dict[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "validated_model", copy.deepcopy(self.validated_model))
+        object.__setattr__(self, "validated_proof", copy.deepcopy(self.validated_proof))
+        object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
+        object.__setattr__(self, "gate", copy.deepcopy(self.gate))
+        normalized_targets = tuple(canonical_target_key(target) for target in self.targets)
+        assert list(normalized_targets) == sorted(normalized_targets)
+        assert len(normalized_targets) == len(set(normalized_targets))
+        object.__setattr__(self, "targets", normalized_targets)
+        object.__setattr__(self, "target_failures", tuple(copy.deepcopy(self.target_failures)))
+        object.__setattr__(self, "export_failures", tuple(copy.deepcopy(self.export_failures)))
+
+    def __getattribute__(self, name: str) -> Any:
+        """Return defensive snapshots so nested containers cannot be mutated."""
+
+        value = object.__getattribute__(self, name)
+        if name in {
+            "validated_model",
+            "validated_proof",
+            "run_context",
+            "gate",
+            "targets",
+            "target_failures",
+            "export_failures",
+        }:
+            return copy.deepcopy(value)
+        return value
 
 
 # Every limit has an explicit measurement contract.  The production adapter
@@ -493,6 +543,26 @@ SOURCE_PLAN_CONTEXT_SUFFIXES = (".d.ts",)
 SOURCE_PLAN_HARD_EXCLUSIONS = (".git", "node_modules", ".next", "out", "dist", "build", "coverage")
 SOURCE_PLAN_CONTROL_PATHS = ("package.json", "tsconfig.json", "jsconfig.json")
 SOURCE_PLAN_VERSION = "1"
+# ECMAScript IdentifierName is pinned to the Unicode data set used by the
+# Issue #8 v1 grammar.  Python's Unicode database is used for the broad
+# ID_Start/ID_Continue categories, while the ECMAScript Other_ID additions
+# are checked in explicitly.  Keeping the version in compatibility and run
+# fingerprint preimages prevents a host Python upgrade from silently
+# changing the census.
+# Python 3.12's checked-in Unicode database is 15.0.0.  The reference
+# contract rejects a host with another database instead of silently changing
+# the export census; the ECMAScript-specific Other_ID additions remain
+# explicit below.
+ECMASCRIPT_IDENTIFIER_UNICODE_VERSION = "ecma-unicode-15.0"
+ECMASCRIPT_IDENTIFIER_UNICODE_DATA_VERSION = "15.0.0"
+ECMASCRIPT_OTHER_ID_START = frozenset("\u1885\u1886\u2118\u212e\u309b\u309c")
+ECMASCRIPT_OTHER_ID_CONTINUE = frozenset(
+    "\u00b7\u0387\u1369\u136a\u136b\u136c\u136d\u136e\u136f\u1370\u1371\u19da"
+)
+ECMASCRIPT_ID_START_CATEGORIES = frozenset({"Lu", "Ll", "Lt", "Lm", "Lo", "Nl"})
+ECMASCRIPT_ID_CONTINUE_CATEGORIES = frozenset(
+    {*ECMASCRIPT_ID_START_CATEGORIES, "Mn", "Mc", "Nd", "Pc"}
+)
 SOURCE_PLAN_FILE_ROLE_MAP: tuple[dict[str, Any], ...] = (
     {
         "project_root": ".",
@@ -643,7 +713,12 @@ def _jsx_tag_name(text: str, start: int) -> tuple[str, int] | None:
 def _is_jsx_identifier_start(character: str) -> bool:
     """Recognize an ECMAScript IdentifierStart character."""
 
-    return character in "$_" or character.isidentifier()
+    assert unicodedata.unidata_version == ECMASCRIPT_IDENTIFIER_UNICODE_DATA_VERSION
+    return len(character) == 1 and (
+        character in "$_"
+        or character in ECMASCRIPT_OTHER_ID_START
+        or unicodedata.category(character) in ECMASCRIPT_ID_START_CATEGORIES
+    )
 
 
 def _is_jsx_identifier_part(character: str) -> bool:
@@ -656,10 +731,12 @@ def _is_jsx_identifier_part(character: str) -> bool:
     the join controls.
     """
 
-    return (
+    assert unicodedata.unidata_version == ECMASCRIPT_IDENTIFIER_UNICODE_DATA_VERSION
+    return len(character) == 1 and (
         _is_jsx_identifier_start(character)
+        or character in ECMASCRIPT_OTHER_ID_CONTINUE
         or character in "\u200c\u200d"
-        or unicodedata.category(character) in {"Mc", "Mn", "Nd", "Pc"}
+        or unicodedata.category(character) in ECMASCRIPT_ID_CONTINUE_CATEGORIES
     )
 
 
@@ -762,12 +839,10 @@ def _jsx_expression_end(text: str, start: int) -> int | None:
         if character.isspace():
             cursor += 1
             continue
-        if character.isidentifier() or character in "$_":
+        if _is_jsx_identifier_start(character):
             word_start = cursor
             cursor += 1
-            while cursor < len(text) and (
-                text[cursor].isidentifier() or text[cursor].isdecimal() or text[cursor] in "$_"
-            ):
+            while cursor < len(text) and _is_jsx_identifier_part(text[cursor]):
                 cursor += 1
             previous_word = text[word_start:cursor]
             previous_character = "identifier"
@@ -988,14 +1063,23 @@ def load_export_graph_raw_fixture() -> dict[str, Any]:
             else:
                 assert item["target_declaration_key"] is None
     edges = cast(list[dict[str, Any]], payload["edges"])
-    edge_keys: list[tuple[str, str, str, str]] = []
+    edge_keys: list[tuple[str, str, str, str, str, int | None, int | None]] = []
     for edge in edges:
-        assert set(edge) == {
+        assert set(edge) <= {
             "owner_file_path",
             "source_specifier",
             "imported_name",
             "exported_name",
+            "syntax_identity",
+            "byte_start",
+            "byte_end",
         }
+        assert {
+            "owner_file_path",
+            "source_specifier",
+            "imported_name",
+            "exported_name",
+        } <= set(edge)
         assert edge["owner_file_path"] in set(module_paths)
         assert edge["source_specifier"].startswith(".")
         assert edge["imported_name"] == "*" or _is_export_identifier(
@@ -1005,12 +1089,27 @@ def load_export_graph_raw_fixture() -> dict[str, Any]:
             edge["exported_name"], allow_default=True
         )
         assert (edge["imported_name"] == "*") is (edge["exported_name"] == "*")
+        syntax_identity = edge.get("syntax_identity", "")
+        if syntax_identity:
+            assert isinstance(syntax_identity, str)
+            assert unicodedata.normalize("NFC", syntax_identity) == syntax_identity
+            assert not any(
+                ord(character) < 0x20 or ord(character) == 0x7F for character in syntax_identity
+            )
+            assert isinstance(edge.get("byte_start"), int)
+            assert isinstance(edge.get("byte_end"), int)
+            assert 0 <= edge["byte_start"] < edge["byte_end"]
+        else:
+            assert "byte_start" not in edge and "byte_end" not in edge
         edge_keys.append(
             (
                 edge["owner_file_path"],
                 edge["source_specifier"],
                 edge["imported_name"],
                 edge["exported_name"],
+                syntax_identity,
+                edge.get("byte_start"),
+                edge.get("byte_end"),
             )
         )
     assert edge_keys == sorted(edge_keys)
@@ -1055,12 +1154,21 @@ def load_export_graph_cases() -> tuple[dict[str, Any], ...]:
         edges = cast(list[dict[str, Any]], case["edges"])
         edge_keys = []
         for edge in edges:
-            assert set(edge) == {
+            assert set(edge) <= {
                 "owner_file_path",
                 "source_specifier",
                 "imported_name",
                 "exported_name",
+                "syntax_identity",
+                "byte_start",
+                "byte_end",
             }
+            assert {
+                "owner_file_path",
+                "source_specifier",
+                "imported_name",
+                "exported_name",
+            } <= set(edge)
             assert edge["owner_file_path"] in module_path_set
             assert edge["source_specifier"].startswith(".")
             imported_name = edge["imported_name"]
@@ -1068,8 +1176,22 @@ def load_export_graph_cases() -> tuple[dict[str, Any], ...]:
             exported_name = edge["exported_name"]
             assert exported_name == "*" or _is_export_identifier(exported_name, allow_default=True)
             assert (imported_name == "*") is (exported_name == "*")
+            syntax_identity = edge.get("syntax_identity", "")
+            if syntax_identity:
+                assert unicodedata.normalize("NFC", syntax_identity) == syntax_identity
+                assert isinstance(edge.get("byte_start"), int)
+                assert isinstance(edge.get("byte_end"), int)
+                assert 0 <= edge["byte_start"] < edge["byte_end"]
+            else:
+                assert "byte_start" not in edge and "byte_end" not in edge
             edge_keys.append(
-                (edge["owner_file_path"], edge["source_specifier"], imported_name, exported_name)
+                (
+                    edge["owner_file_path"],
+                    edge["source_specifier"],
+                    imported_name,
+                    exported_name,
+                    syntax_identity,
+                )
             )
         assert edge_keys == sorted(edge_keys)
         assert len(edge_keys) == len(set(edge_keys))
@@ -1086,8 +1208,8 @@ def _is_export_identifier(
     if not value or unicodedata.normalize("NFC", value) != value:
         return False
     first = value[0]
-    return (first in "$_" or first.isidentifier()) and all(
-        char in "$_\u200c\u200d" or char.isidentifier() or char.isdecimal() for char in value[1:]
+    return _is_jsx_identifier_start(first) and all(
+        _is_jsx_identifier_part(char) for char in value[1:]
     )
 
 
@@ -1195,11 +1317,11 @@ def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]
                 }
             )
             continue
-        if character in "$_" or character.isidentifier():
+        if _is_jsx_identifier_start(character):
             index += 1
             while index < length:
                 current = text[index]
-                if current in "$_\u200c\u200d" or current.isidentifier() or current.isdecimal():
+                if _is_jsx_identifier_part(current):
                     index += 1
                 else:
                     break
@@ -2135,6 +2257,164 @@ def _validate_response_base(
     )
 
 
+def _validate_target_exception_proof_base(
+    proof: dict[str, Any],
+    model: dict[str, Any],
+    request_targets: list[str],
+    failure: NextTargetCompletenessFailure,
+) -> None:
+    """Validate the complete proof base before typed target routing.
+
+    A selected File→Module cardinality failure is the only model exception.
+    The proof still has to be a complete, independently joined witness: every
+    model record is present exactly once (apart from the one permitted
+    byte-identical duplicate), all roots/edges and taint dispositions close,
+    and export observations/witnesses agree with the same reduced model.  This
+    makes an unrelated dangling reference unable to hide behind the typed
+    ``CSV-NEXT-TARGET-001`` outcome.
+    """
+
+    duplicate_keys = _target_duplicate_module_exceptions(model, request_targets, failure)
+    base_model = _deduplicated_model_for_base_validation(model, duplicate_keys)
+    expected_by_collection = {
+        collection: {record["id"]: record for record in base_model[collection]}
+        for collection in COLLECTIONS
+    }
+    discovered: dict[str, dict[str, dict[str, Any]]] = {
+        collection: {} for collection in COLLECTIONS
+    }
+    discovered_ids: set[str] = set()
+    discovered_order: list[tuple[str, str]] = []
+    for item in proof["discovered_records"]:
+        collection = item["collection"]
+        record = item["record"]
+        record_id = record["id"]
+        assert collection in COLLECTIONS
+        assert record_id not in discovered_ids
+        assert record_id not in discovered[collection]
+        assert _id_kind(record_id) == collection.removesuffix("s")
+        assert recompute_record_id(record) == record_id
+        assert all(taint in TAINTS for taint in item["taints"])
+        assert item["taints"] == sorted(item["taints"], key=TAINT_ORDER_INDEX.__getitem__)
+        assert record_id in expected_by_collection[collection]
+        assert record == expected_by_collection[collection][record_id]
+        discovered[collection][record_id] = item
+        discovered_ids.add(record_id)
+        discovered_order.append((collection, record_id))
+    assert all(
+        set(discovered[collection]) == set(expected_by_collection[collection])
+        for collection in COLLECTIONS
+    )
+    expected_order = [
+        (collection, record["id"])
+        for collection in COLLECTIONS
+        for record in base_model[collection]
+    ]
+    assert discovered_order == expected_order
+
+    failure_ids = {root["id"] for root in proof["failure_roots"]}
+    assert len(failure_ids) == len(proof["failure_roots"])
+    for root in proof["failure_roots"]:
+        assert root["record_ids"] == sorted(set(root["record_ids"]))
+        assert set(root["record_ids"]) <= discovered_ids
+        assert root["collection"] in COLLECTIONS
+        assert root["kind"] in TAINTS
+        if root["path_ref"] is not None:
+            _assert_file_path(root["path_ref"])
+    all_sources = discovered_ids | failure_ids
+    assert proof["causal_edges"] == derive_required_causal_edges(proof, discovered)
+    for edge in proof["causal_edges"]:
+        assert edge["source_id"] in all_sources
+        assert edge["record_id"] in discovered_ids
+
+    published = {collection: set(expected_by_collection[collection]) for collection in COLLECTIONS}
+    excluded: dict[str, set[str]] = {collection: set() for collection in COLLECTIONS}
+    failed: dict[str, set[str]] = {collection: set() for collection in COLLECTIONS}
+    for item in proof["excluded"]:
+        collection = item["collection"]
+        record_id = item["record_id"]
+        assert record_id in discovered[collection]
+        assert record_id not in published[collection]
+        assert record_id not in excluded[collection]
+        excluded[collection].add(record_id)
+    for item in proof["failed"]:
+        collection = item["collection"]
+        record_id = item["record_id"]
+        assert record_id in discovered[collection]
+        assert record_id not in published[collection]
+        assert record_id not in failed[collection]
+        failed[collection].add(record_id)
+    for collection in COLLECTIONS:
+        assert excluded[collection].isdisjoint(failed[collection])
+        assert set(discovered[collection]) == (
+            published[collection] | excluded[collection] | failed[collection]
+        )
+    tainted_ids = {
+        record_id
+        for records in discovered.values()
+        for record_id, item in records.items()
+        if item["taints"]
+    }
+    assert _derived_taint_fixed_point(proof, discovered) == tainted_ids
+    assert not tainted_ids.intersection(set().union(*published.values()))
+
+    for observation in proof["export_observations"]:
+        assert observation["owner_module_id"] in discovered_ids
+        assert observation["owner_module_id"].startswith("next:module:")
+        if observation["resolved_source_module_id"] is not None:
+            assert observation["resolved_source_module_id"] in discovered_ids
+        if observation["component_id"] is not None:
+            assert observation["component_id"] in discovered_ids
+    for witness in proof["export_reexport_witness"]:
+        assert witness["owner_module_id"] in discovered_ids
+        if witness["resolved_source_module_id"] is not None:
+            assert witness["resolved_source_module_id"] in discovered_ids
+        if witness["target_declaration_id"] is not None:
+            assert witness["target_declaration_id"] in discovered_ids
+    validate_export_observations(proof["export_observations"], base_model)
+    assert proof["export_resolution_witness"] == expected_export_resolution_witness(base_model)
+    assert proof["export_reexport_witness"] == expected_export_reexport_witness(base_model)
+
+    effective_targets = list(request_targets) or [
+        f"path:{file_record['path']}"
+        for file_record in model["files"]
+        if _is_program_file(file_record)
+    ]
+    failed_by_key = {item["target_key"]: item["reason"] for item in failure.failures}
+    expected_target_rows: list[dict[str, Any]] = []
+    for target in effective_targets:
+        target_key = canonical_target_key(target)
+        if target_key in failed_by_key:
+            expected_target_rows.append(
+                {
+                    "target_key": target_key,
+                    "status": "failed",
+                    "record_ids": [],
+                    "reason": failed_by_key[target_key],
+                }
+            )
+        else:
+            rows = resolve_target_resolutions([target], base_model)
+            assert len(rows) == 1
+            expected_target_rows.append(rows[0])
+    expected_target_rows.sort(key=canonical_json_bytes)
+    assert proof["target_resolutions"] == expected_target_rows
+    expected_target_coverage = [
+        {
+            "target_key": row["target_key"],
+            "status": "complete" if row["status"] == "resolved" else "failed",
+            "record_ids": row["record_ids"],
+            **(
+                {"reason": row["reason"]}
+                if row.get("reason") in {"missing", "component_only", "duplicate"}
+                else {}
+            ),
+        }
+        for row in expected_target_rows
+    ]
+    assert model["coverage"]["target_completeness"] == expected_target_coverage
+
+
 def _validate_project_correspondence(
     request_projects: list[dict[str, Any]], model_projects: list[dict[str, Any]]
 ) -> None:
@@ -2453,6 +2733,51 @@ def derive_pre_budget_outcome(proof: dict[str, Any], model: dict[str, Any]) -> s
     return "complete"
 
 
+def _with_validated_decision(
+    projection: dict[str, Any],
+    *,
+    model: dict[str, Any],
+    proof: dict[str, Any],
+    run_context: NextRunContext,
+    pre_budget_outcome: str,
+    targets: list[str] | tuple[str, ...] = (),
+    target_failures: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    export_failures: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+) -> dict[str, Any]:
+    """Attach the sole immutable downstream authority to a decision projection."""
+
+    gate = {
+        key: copy.deepcopy(projection[key])
+        for key in (
+            "actual",
+            "resolved",
+            "allowed",
+            "payload_available",
+            "original_outcome",
+            "outcome",
+            "diagnostic_code",
+            "run_context",
+            "requested_formats",
+            "budget_requested",
+            "budget_source",
+            "stdout_selector",
+            "artifact_paths",
+        )
+        if key in projection
+    }
+    projection["validated_decision"] = NextValidatedDecision(
+        validated_model=model,
+        validated_proof=proof,
+        run_context=run_context,
+        pre_budget_outcome=pre_budget_outcome,
+        gate=gate,
+        targets=tuple(targets),
+        target_failures=tuple(target_failures),
+        export_failures=tuple(export_failures),
+    )
+    return projection
+
+
 def validate_response_envelope(
     response_bytes: bytes,
     request: dict[str, Any],
@@ -2507,9 +2832,20 @@ def validate_response_envelope(
     ]
     assert model["files"] == request_files
     if target_failure is not None:
+        _validate_target_exception_proof_base(
+            response["proof"], model, request["targets"], target_failure
+        )
         decision = target_failure_decision(target_failure, run_context)
         decision["validated_model"] = copy.deepcopy(model)
-        return decision
+        return _with_validated_decision(
+            decision,
+            model=model,
+            proof=response["proof"],
+            run_context=run_context,
+            pre_budget_outcome="payload_unavailable",
+            targets=request["targets"],
+            target_failures=target_failure.failures,
+        )
     actual_entities = validate_model(
         model,
         max_model_records=request["limits"]["max_model_records"],
@@ -2519,7 +2855,15 @@ def validate_response_envelope(
     if export_failure is not None:
         export_failure["validated_model"] = copy.deepcopy(model)
         export_failure["validated_proof"] = copy.deepcopy(response["proof"])
-        return export_failure
+        return _with_validated_decision(
+            export_failure,
+            model=model,
+            proof=response["proof"],
+            run_context=run_context,
+            pre_budget_outcome="payload_unavailable",
+            targets=request["targets"],
+            export_failures=export_failure["export_failures"],
+        )
     pre_budget_outcome = derive_pre_budget_outcome(response["proof"], model)
     decision = entity_budget_gate(
         actual_entities,
@@ -2528,7 +2872,14 @@ def validate_response_envelope(
     )
     decision["validated_model"] = copy.deepcopy(model)
     decision["validated_proof"] = copy.deepcopy(response["proof"])
-    return decision
+    return _with_validated_decision(
+        decision,
+        model=model,
+        proof=response["proof"],
+        run_context=run_context,
+        pre_budget_outcome=pre_budget_outcome,
+        targets=request["targets"],
+    )
 
 
 def recompute_run_fingerprint(
@@ -2546,6 +2897,7 @@ def recompute_run_fingerprint(
     adapter_version: str,
     protocol: str,
     trusted_environment_digest: str,
+    identifier_unicode_version: str = ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
 ) -> str:
     return digest(
         {
@@ -2562,19 +2914,27 @@ def recompute_run_fingerprint(
             "adapter_version": adapter_version,
             "protocol": protocol,
             "trusted_environment_digest": trusted_environment_digest,
+            "identifier_unicode_version": identifier_unicode_version,
         }
     )
 
 
 def recompute_publication_projection_digest(domain: dict[str, Any]) -> str:
-    """Bind published bytes to the validated domain projection inputs."""
+    """Hash the complete validated publication input, not a count proxy."""
 
+    decision = getattr(domain, "validated_decision", None)
+    model = decision.validated_model if isinstance(decision, NextValidatedDecision) else None
     return digest(
         {
-            "projects": domain["projects"],
+            "model": model
+            if isinstance(model, dict)
+            else {
+                "projects": domain["projects"],
+                "coverage": domain["coverage"],
+            },
             "targets": domain["targets"],
             "formats": domain["formats"],
-            "coverage": domain["coverage"],
+            "run_context": domain["run_context"],
             "run_fingerprint": domain["run_fingerprint"],
         }
     )
@@ -2583,20 +2943,32 @@ def recompute_publication_projection_digest(domain: dict[str, Any]) -> str:
 def validate_published_projection(
     domain: dict[str, Any], published_bytes: dict[str, bytes]
 ) -> None:
-    """Require each placeholder golden to carry the same projection digest."""
+    """Validate actual semantic/PlantUML bytes from the accepted model."""
 
-    projection_digest = recompute_publication_projection_digest(domain)
+    decision = getattr(domain, "validated_decision", None)
+    assert isinstance(decision, NextValidatedDecision), "publication has no validated decision"
+    model = decision.validated_model
+    expected_entities = [*model["modules"], *model["components"]]
     for path, payload in published_bytes.items():
         if path.endswith(".json"):
             value = json.loads(payload.decode("utf-8"))
-            assert value == {
-                "domain": "next",
-                "projection_digest": projection_digest,
-                "schema": "code-structure-viz.semantic/v1",
-            }
+            validate_semantic_snapshot(value)
+            assert value["projects"] == sorted(
+                model["projects"], key=lambda item: canonical_json_bytes(item["root"])
+            )
+            assert value["files"] == model["files"]
+            assert value["entities"] == expected_entities
+            assert value["members"] == model["members"]
+            assert value["relations"] == model["relations"]
+            assert value["facts"] == model["facts"]
+            assert value["coverage"] == model["coverage"]
+            assert value["request"] == domain["request"]
+            assert value["source"] == domain["source"]
         else:
-            assert payload == (
-                f"@startuml\nnote top: projection={projection_digest}\n@enduml\n".encode()
+            validate_plantuml_contract(
+                payload,
+                model,
+                status="partial_safe" if domain["status"] == "incomplete" else "complete",
             )
 
 
@@ -2716,6 +3088,16 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
     target_rows = {item["target_key"]: item for item in target_completeness}
     assert set(target_rows) == set(value["targets"])
     assert all(item["record_ids"] == sorted(item["record_ids"]) for item in target_completeness)
+    for item in target_completeness:
+        if item["status"] == "failed":
+            # Typed program File→Module failures carry the closed reason
+            # vocabulary.  A direct context/control-file rejection (for
+            # example `.d.ts`) is a separate target-classification failure
+            # and intentionally has no typed cardinality reason.
+            reason = item.get("reason")
+            assert reason is None or reason in {"missing", "component_only", "duplicate"}
+        else:
+            assert "reason" not in item
     failed_targets = [item for item in target_completeness if item["status"] == "failed"]
     assert all(not item["record_ids"] for item in failed_targets)
     if failed_targets:
@@ -2797,6 +3179,15 @@ def validate_compatibility_descriptor(descriptor: dict[str, Any]) -> None:
         "relation": 1,
         "fact": 1,
         "props_ir": 1,
+    }
+    assert descriptor["algorithm_versions"] == {
+        "recognition": 1,
+        "export": 1,
+        "props": 1,
+        "relation": 1,
+        "fact": 1,
+        "boundary": 1,
+        "identifier_unicode": ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
     }
     assert descriptor["compatibility_id"] == recompute_compatibility_id(descriptor)
 
@@ -3234,6 +3625,22 @@ def bounded_decode_json(
     assert isinstance(response, bytes)
     payload = response
     resolved_limits = {**LIMIT_DEFAULTS, **(limits or {})}
+    # This is the sole raw-response entry point.  Measure the complete byte
+    # stream before UTF-8 decoding, parser construction, or object
+    # materialization so whitespace-only padding cannot evade max_stdout_bytes.
+    if len(payload) > resolved_limits["max_stdout_bytes"]:
+        return {
+            "allowed": False,
+            "bytes": len(payload),
+            "total_array_items": 0,
+            "array_count": 0,
+            "max_array_items": 0,
+            "max_nesting": 0,
+            "max_string_bytes": 0,
+            "failed_at_byte": resolved_limits["max_stdout_bytes"],
+            "reason": "max_stdout_bytes",
+            "materialized": False,
+        }
     for name in (
         "max_json_nesting",
         "max_json_string_bytes",
@@ -3962,6 +4369,9 @@ def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
         assert entry is not None
         for field in ("severity", "recoverable", "outcome", "ref_permission"):
             assert diagnostic[field] == entry[field]
+        if "reason" in diagnostic:
+            assert diagnostic["code"] == "CSV-NEXT-TARGET-001"
+            assert diagnostic["reason"] in {"missing", "component_only", "duplicate"}
         assert diagnostic["count"] >= 1
         permission = entry["ref_permission"]
         path_ref = diagnostic["path_ref"]
@@ -3987,6 +4397,7 @@ def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
                 diagnostic["path_ref"],
                 diagnostic["symbol_ref"],
                 diagnostic["outcome"],
+                diagnostic.get("reason"),
             )
         )
     assert len(aggregate_keys) == len(set(aggregate_keys))
@@ -4006,6 +4417,9 @@ def _validate_public_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
         assert diagnostic["message"] == entry["message"]
         for field in ("severity", "recoverable", "outcome", "ref_permission"):
             assert diagnostic[field] == entry[field]
+        if "reason" in diagnostic:
+            assert diagnostic["code"] == "CSV-NEXT-TARGET-001"
+            assert diagnostic["reason"] in {"missing", "component_only", "duplicate"}
         permission = entry["ref_permission"]
         path = diagnostic["path"]
         symbol = diagnostic["symbol"]
@@ -4025,7 +4439,13 @@ def _validate_public_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
             if symbol is not None:
                 _id_kind(symbol)
         aggregate_keys.append(
-            (diagnostic["code"], diagnostic["path"], diagnostic["symbol"], diagnostic["outcome"])
+            (
+                diagnostic["code"],
+                diagnostic["path"],
+                diagnostic["symbol"],
+                diagnostic["outcome"],
+                diagnostic.get("reason"),
+            )
         )
     assert len(aggregate_keys) == len(set(aggregate_keys))
 
@@ -4052,7 +4472,7 @@ def validate_semantic_snapshot(value: dict[str, Any]) -> None:
     entities = value["entities"]
     model = {
         "schema": "code-structure-viz.next-model/v1",
-        "projects": value["projects"],
+        "projects": sorted(value["projects"], key=lambda item: item["id"]),
         "files": value["files"],
         "modules": [item for item in entities if item["kind"] == "module"],
         "components": [item for item in entities if item["kind"] == "component"],
@@ -5199,6 +5619,9 @@ def recompute_export_graph_case(case: dict[str, Any]) -> dict[str, Any]:
                 "resolution": result["resolution"],
                 "diagnostic": result["reason"],
             }
+            for field in ("syntax_identity", "byte_start", "byte_end"):
+                if field in edge:
+                    witness[field] = edge[field]
             witnesses.append(witness)
     return {
         "exports": [
@@ -5220,23 +5643,103 @@ def recompute_export_graph_case(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _reexport_graph_index() -> dict[tuple[str, str, str, str | None], list[dict[str, Any]]]:
+def _reexport_join_key(row: dict[str, Any]) -> tuple[str, str, str, str, str, int, int]:
+    """Return the physical identity shared by syntax rows and raw graph edges."""
+
+    return (
+        row["owner_file_path"],
+        row["source_specifier"],
+        row["imported_name"],
+        row.get("original_exported_name", row["exported_name"]),
+        row["syntax_identity"],
+        row["byte_start"],
+        row["byte_end"],
+    )
+
+
+def join_reexport_observations_to_edges(
+    syntax_rows: list[dict[str, Any]],
+    raw_edges: list[dict[str, Any]],
+    *,
+    owner_paths: set[str] | None = None,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Perform a bijective physical join of source observations and raw edges.
+
+    ``(owner, specifier, imported, exported, syntax identity, byte span)`` is
+    intentionally stronger than a semantic name lookup.  It distinguishes
+    ``Foo as A`` from ``Foo as B`` and also distinguishes repeated ``Foo as A``
+    statements.  Every selected syntax row and every selected raw edge is
+    consumed exactly once; an empty-star edge is still joined even though it
+    later expands to zero witness rows.
+    """
+
+    selected_syntax = [
+        row
+        for row in syntax_rows
+        if row.get("reexport") and (owner_paths is None or row["owner_file_path"] in owner_paths)
+    ]
+    selected_edges = [
+        edge for edge in raw_edges if owner_paths is None or edge["owner_file_path"] in owner_paths
+    ]
+    syntax_by_key: dict[tuple[str, str, str, str, str, int, int], dict[str, Any]] = {}
+    for row in selected_syntax:
+        key = _reexport_join_key(row)
+        assert key not in syntax_by_key
+        syntax_by_key[key] = row
+    edges_by_key: dict[tuple[str, str, str, str, str, int, int], dict[str, Any]] = {}
+    for edge in selected_edges:
+        key = _reexport_join_key(edge)
+        assert key not in edges_by_key
+        edges_by_key[key] = edge
+    assert set(syntax_by_key) == set(edges_by_key)
+    return [
+        (syntax_by_key[key], edges_by_key[key])
+        for key in sorted(syntax_by_key, key=canonical_json_bytes)
+    ]
+
+
+def _reexport_graph_index() -> dict[tuple[str, str, str, str, str, int, int], list[dict[str, Any]]]:
     """Derive the main fixture graph from raw declarations and edges."""
 
     raw = load_export_graph_raw_fixture()
     result = recompute_export_graph_case(raw)
-    index: dict[tuple[str, str, str, str | None], list[dict[str, Any]]] = {}
+    index: dict[tuple[str, str, str, str, str, int, int], list[dict[str, Any]]] = {}
     for witness in result["witnesses"]:
-        key = (
-            witness["owner_file_path"],
-            witness["source_specifier"],
-            witness["imported_name"],
-            witness["exported_name"],
-        )
+        key = _reexport_join_key(witness)
         index.setdefault(key, []).append(witness)
     for witnesses in index.values():
         witnesses.sort(key=canonical_json_bytes)
     return index
+
+
+def _terminal_export_source_path(
+    graph_witness: dict[str, Any], graph_result: dict[str, Any]
+) -> str | None:
+    """Follow one graph export to its physical declaration module.
+
+    ``resolved_source_file_path`` identifies the immediate module named by
+    the edge.  An alias chain can continue through that module, so component
+    identity and the public witness must use the terminal ``source_file_path``
+    from the independently recomputed export table.
+    """
+
+    immediate_path = cast(str | None, graph_witness["resolved_source_file_path"])
+    if immediate_path is None:
+        return None
+    lookup_name = cast(
+        str | None,
+        (
+            graph_witness["expanded_exported_name"]
+            if graph_witness["imported_name"] == "*"
+            else graph_witness["imported_name"]
+        ),
+    )
+    if lookup_name is None:
+        return immediate_path
+    for export in graph_result["exports"]:
+        if export["module_file_path"] == immediate_path and export["exported_name"] == lookup_name:
+            return cast(str, export["source_file_path"])
+    return immediate_path
 
 
 def _export_syntax_rows_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
@@ -5297,6 +5800,17 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
     for components in components_by_module.values():
         components.sort(key=canonical_json_bytes)
     graph = _reexport_graph_index()
+    graph_result = recompute_export_graph_case(load_export_graph_raw_fixture())
+    syntax_rows = _export_syntax_rows_for_model(model)
+    module_paths = set(modules_by_path)
+    raw_edges = load_export_graph_raw_fixture()["edges"]
+    raw_owner_paths = {edge["owner_file_path"] for edge in raw_edges} & module_paths
+    joined_reexports = join_reexport_observations_to_edges(
+        syntax_rows,
+        raw_edges,
+        owner_paths=raw_owner_paths,
+    )
+    edge_by_syntax_key = {_reexport_join_key(syntax): edge for syntax, edge in joined_reexports}
 
     observations: list[dict[str, Any]] = []
     for syntax in _export_syntax_rows_for_model(model):
@@ -5308,23 +5822,27 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
         candidates = components_by_module.get(module["id"], [])
         graph_witnesses: list[dict[str, Any]] | None
         if syntax["reexport"]:
-            base_key = (
-                syntax["owner_file_path"],
-                syntax["source_specifier"],
-                syntax["imported_name"],
-            )
-            graph_witnesses = [
-                witness
-                for key, witnesses in graph.items()
-                if key[:3] == base_key and (syntax["star"] or key[3] == syntax["exported_name"])
-                for witness in witnesses
-            ]
-            if not syntax["star"]:
+            edge = edge_by_syntax_key.get(_reexport_join_key(syntax))
+            if edge is None:
+                # A rebased/independent project can contain the same fixture
+                # bytes under a different physical owner path.  It remains a
+                # valid source observation, but no frozen raw graph edge owns
+                # that path and therefore no graph witness may be borrowed.
+                graph_witnesses = []
+            else:
+                graph_key = _reexport_join_key(edge)
+                graph_witnesses = [
+                    witness
+                    for key, witnesses in graph.items()
+                    if key == graph_key
+                    for witness in witnesses
+                ]
+            if not syntax["star"] and edge is not None:
                 assert len(graph_witnesses) == 1
         else:
             graph_witnesses = None
         source_path = (
-            graph_witnesses[0]["resolved_source_file_path"]
+            _terminal_export_source_path(graph_witnesses[0], graph_result)
             if graph_witnesses
             else _resolve_export_source_path(syntax["owner_file_path"], syntax["source_specifier"])
             if syntax["source_specifier"] is not None
@@ -5430,32 +5948,27 @@ def expected_export_reexport_witness(model: dict[str, Any]) -> list[dict[str, An
         (component["module_id"], component["declaration_key"]): component["id"]
         for component in model["components"]
     }
-    syntax_by_edge: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
-    for syntax_row in _export_syntax_rows_for_model(model):
-        if syntax_row["reexport"]:
-            syntax_by_edge.setdefault(
-                (
-                    syntax_row["owner_file_path"],
-                    syntax_row["source_specifier"],
-                    syntax_row["imported_name"],
-                ),
-                syntax_row,
-            )
-    raw_result = recompute_export_graph_case(load_export_graph_raw_fixture())
+    raw_fixture = load_export_graph_raw_fixture()
+    raw_result = recompute_export_graph_case(raw_fixture)
+    raw_owner_paths = {edge["owner_file_path"] for edge in raw_fixture["edges"]} & set(
+        module_by_path
+    )
+    joined_reexports = join_reexport_observations_to_edges(
+        _export_syntax_rows_for_model(model),
+        raw_fixture["edges"],
+        owner_paths=raw_owner_paths,
+    )
+    syntax_by_edge = {_reexport_join_key(syntax): syntax for syntax, _edge in joined_reexports}
     witnesses: list[dict[str, Any]] = []
     for graph_witness in raw_result["witnesses"]:
         owner_module = module_by_path.get(graph_witness["owner_file_path"])
         if owner_module is None:
             continue
-        matched_syntax = syntax_by_edge.get(
-            (
-                graph_witness["owner_file_path"],
-                graph_witness["source_specifier"],
-                graph_witness["imported_name"],
-            )
-        )
+        syntax_key = _reexport_join_key(graph_witness)
+        matched_syntax = syntax_by_edge.get(syntax_key)
         assert matched_syntax is not None
-        source_module = module_by_path.get(graph_witness["resolved_source_file_path"])
+        terminal_source_path = _terminal_export_source_path(graph_witness, raw_result)
+        source_module = module_by_path.get(terminal_source_path)
         target_component_id = (
             components_by_module_decl.get(
                 (source_module["id"], graph_witness["target_declaration_key"])
@@ -5469,6 +5982,9 @@ def expected_export_reexport_witness(model: dict[str, Any]) -> list[dict[str, An
             {
                 "owner_module_id": owner_module["id"],
                 "owner_file_path": graph_witness["owner_file_path"],
+                "byte_start": matched_syntax["byte_start"],
+                "byte_end": matched_syntax["byte_end"],
+                "token_identity": matched_syntax["token_identity"],
                 "syntax_identity": matched_syntax["syntax_identity"],
                 "source_specifier": graph_witness["source_specifier"],
                 "imported_name": graph_witness["imported_name"],
@@ -6209,6 +6725,15 @@ def validate_run_status_vector(
             "domain_not_applicable",
             "domain_payload_unavailable",
         }
+        target_diagnostics = [
+            diagnostic
+            for diagnostic in manifest_diagnostics
+            if diagnostic["code"] == "CSV-NEXT-TARGET-001"
+        ]
+        if target_diagnostics and "reason" in target_diagnostics[0]:
+            assert stdout_result.get("reason") == target_diagnostics[0]["reason"]
+        else:
+            assert "reason" not in stdout_result
         assert stdout_bytes == canonical_json_bytes(stdout_result) + b"\n"
     else:
         assert expected_path in published_bytes

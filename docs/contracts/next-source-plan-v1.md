@@ -8,6 +8,14 @@ path, shared path helper, and typed target outcomes are also reflected. Fresh
 exact-SHA Strict review is pending, readiness is unconfirmed, and the production
 adapter/CLI has not been started. The Round 12 fail result is not a pass.
 
+Round 13 review state: Strict reviewed SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`
+with CI run `33446911714` (7/7 success) and returned `review_status: fail`,
+P0=0, P1=9, P2=1. The data-only contract now uses the shared root-or-path
+schema on every source-root surface, accepting `.` only as the explicit root
+sentinel and keeping unsafe non-root forms rejected. This is a local
+remediation record, not a pass: fresh exact-SHA Strict is pending, readiness is
+unconfirmed, and the production adapter/CLI has not started.
+
 `schemas/next-source-plan-v1.schema.json` defines the complete
 `code-structure-viz.source-acquisition-plan/next/v1` descriptor. It is carried
 inside the canonical Next config and snapshot request and is hashed as a

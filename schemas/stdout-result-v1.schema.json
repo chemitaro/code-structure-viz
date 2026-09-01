@@ -13,6 +13,7 @@
     "domain_status": {"enum": ["complete", "not_applicable", "incomplete"]},
     "incomplete_kind": {"const": "partial_safe"},
     "run_status": {"enum": ["fatal", "interrupted"]},
+    "reason": {"enum": ["missing", "component_only", "duplicate"]},
     "stable_reason": {"enum": ["published_artifact", "domain_not_applicable", "domain_payload_unavailable", "run_fatal", "final_manifest_unavailable", "run_interrupted"]},
     "artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifact"}]}
   },

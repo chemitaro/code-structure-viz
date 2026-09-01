@@ -57,7 +57,13 @@
     "round11-reexport-double-alias",
     "round11-export-failure-projection",
     "round11-raw-response-trust-boundary",
-    "round11-stderr-end-to-end"
+    "round11-stderr-end-to-end",
+    "round13-publication-byte-closure",
+    "round13-validated-decision-authority",
+    "round13-reexport-syntax-bijection",
+    "round13-identifier-unicode-table",
+    "round13-root-or-path-shared",
+    "round13-raw-stdout-byte-gate"
   ],
   "negative": [
     "cross-domain",
@@ -137,6 +143,14 @@
     "round11-reexport-failure-as-resolved",
     "round11-raw-response-duplicate-key",
     "round11-raw-response-limit-mutation",
-    "round11-stderr-limit-plus-one-end-to-end"
+    "round11-stderr-limit-plus-one-end-to-end",
+    "round13-publication-byte-mutation",
+    "round13-decision-coherent-substitution",
+    "round13-target-proof-compound-mutation",
+    "round13-reexport-syntax-substitution",
+    "round13-identifier-other-id-continue",
+    "round13-root-or-path-mutation",
+    "round13-raw-stdout-16mib-plus-one",
+    "round13-target-reason-projection"
   ]
 }

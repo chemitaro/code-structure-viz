@@ -7,6 +7,15 @@ external relation target grammar and the same model/publication projection are
 covered locally, but fresh exact-SHA Strict is pending, readiness is
 unconfirmed, and production implementation has not started.
 
+Round 13 review state: Strict reviewed SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`
+with CI run `33446911714` (7/7 success) and returned `review_status: fail`,
+P0=0, P1=9, P2=1. The data-only renderer contract binds PlantUML bytes to the
+full validated semantic model and root artifact digest; graph vectors include
+double alias, default-excluding star, and separate cycle/conflict unavailable
+outcomes. Fresh exact-SHA Strict is pending, readiness is unconfirmed, and
+production implementation has not started; this local record does not claim
+pass.
+
 Status: pre-implementation normative contract for Issue #8. The renderer in
 `tests/contracts/next_reference_validation.py`, this document, the independent
 parser in the same module, and the exact goldens are one contract. A change to

@@ -28,10 +28,14 @@ from tests.contracts.next_reference_validation import (
     TRUSTED_PROFILE_SHADOWING_WITNESS,
     VALIDATOR_SCHEMA,
     NextRunContext,
+    NextValidatedDecision,
     _assert_file_path,
     _assert_path,
     _derived_taint_fixed_point,
     _export_binding_projection_for_model,
+    _is_export_identifier,
+    _is_jsx_identifier_part,
+    _is_jsx_identifier_start,
     _scan_export_file,
     assert_encoded_stdin_boundary,
     assert_limit_boundary,
@@ -53,6 +57,7 @@ from tests.contracts.next_reference_validation import (
     export_failure_decision,
     export_reexport_failure_rows,
     internal_entity_count,
+    join_reexport_observations_to_edges,
     load_export_census_fixture,
     load_export_graph_cases,
     load_export_graph_fixture,
@@ -717,6 +722,112 @@ def _model_with_positive_reexports() -> dict[str, Any]:
     return model
 
 
+def _model_with_graph_failure_cases(
+    *, include_cycle: bool = True, include_conflict: bool = True
+) -> dict[str, Any]:
+    """Build a schema-valid model with positive and selected failure graphs."""
+
+    model = _model()
+    project_id = model["projects"][0]["id"]
+    census = {item["path"]: item["content"] for item in load_export_census_fixture()}
+    graph_paths = [
+        "src/GraphAliasBarrel.ts",
+        "src/GraphAliasButton.tsx",
+        "src/GraphAliasIndex.ts",
+        "src/GraphDefaultIndex.ts",
+        "src/GraphDefaultSource.ts",
+        "src/GraphEmpty.ts",
+        "src/GraphEmptyIndex.ts",
+        "src/GraphOne.ts",
+        "src/GraphTwo.ts",
+    ]
+    if include_conflict:
+        graph_paths.extend(
+            (
+                "src/GraphConflictIndex.ts",
+                "src/GraphSameIndex.ts",
+                "src/GraphSameSource.ts",
+            )
+        )
+    if include_cycle:
+        graph_paths.extend(
+            (
+                "src/GraphCycleA.ts",
+                "src/GraphCycleB.ts",
+                "src/GraphStarCycleA.ts",
+                "src/GraphStarCycleB.ts",
+            )
+        )
+    for path in graph_paths:
+        content = census[path]
+        file_record: dict[str, Any] = {
+            "kind": "file",
+            "id": "",
+            "path": path,
+            "project_id": project_id,
+            "roles": ["program"],
+            "effective_role": "program",
+            "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        file_record["id"] = recompute_record_id(file_record)
+        model["files"].append(file_record)
+        module: dict[str, Any] = {
+            "kind": "module",
+            "id": "",
+            "project_id": project_id,
+            "path": path,
+            "router_context": "none",
+            "client_entry": False,
+            "derived_roles": [],
+        }
+        module["id"] = recompute_record_id(module)
+        model["modules"].append(module)
+
+    component_specs = [
+        ("src/GraphAliasButton.tsx", "Button"),
+        ("src/GraphOne.ts", "Shared"),
+        ("src/GraphTwo.ts", "Shared"),
+    ]
+    if include_conflict:
+        component_specs.append(("src/GraphSameSource.ts", "Foo"))
+    for path, declaration_key in component_specs:
+        module = next(item for item in model["modules"] if item["path"] == path)
+        component: dict[str, Any] = {
+            "kind": "component",
+            "id": "",
+            "module_id": module["id"],
+            "declaration_key": declaration_key,
+            "recognition_evidence": ["trusted_callable"],
+            "props_state": "no_props",
+        }
+        component["id"] = recompute_record_id(component)
+        model["components"].append(component)
+
+    for module in model["modules"]:
+        if any(fact["owner_id"] == module["id"] for fact in model["facts"]):
+            continue
+        fact: dict[str, Any] = {
+            "kind": "router_context",
+            "id": "",
+            "owner_id": module["id"],
+            "value": "none",
+        }
+        fact["id"] = recompute_record_id(fact)
+        model["facts"].append(fact)
+
+    project = model["projects"][0]
+    project["file_ids"] = sorted(file["id"] for file in model["files"])
+    project["config_digest"] = project_config_digest(project)
+    model["members"] = [member for member in model["members"] if member["kind"] != "export_binding"]
+    model["members"].extend(copy.deepcopy(_export_binding_projection_for_model(model)))
+    for collection in COLLECTIONS:
+        model[collection].sort(key=lambda record: record["id"])
+    _refresh_model_counts(model)
+    model["coverage"].update(expected_export_coverage_counts(model))
+    return model
+
+
 def _refresh_model_counts(model: dict[str, Any]) -> None:
     """Keep a deliberately mutated model structurally count-consistent."""
 
@@ -891,9 +1002,35 @@ def _empty_model() -> dict[str, Any]:
     return model
 
 
-def _semantic(model: dict[str, Any], status: str = "complete") -> dict[str, Any]:
+def _semantic(
+    model: dict[str, Any],
+    status: str = "complete",
+    *,
+    domain: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     descriptor = _descriptor()
     trusted_environment_digest = _trusted_environment()["sha256"]
+    if domain is None:
+        semantic_diagnostics: list[dict[str, Any]] = []
+    else:
+        # Domain diagnostics are the public diagnostic wire shape.  The
+        # semantic projection has its own closed, aggregated shape, so the
+        # renderer must project fields explicitly instead of copying a
+        # differently-shaped dict into the published bytes.
+        semantic_diagnostics = [
+            {
+                "code": diagnostic["code"],
+                "severity": diagnostic["severity"],
+                "recoverable": diagnostic["recoverable"],
+                "count": 1,
+                "path_ref": diagnostic["path"],
+                "symbol_ref": diagnostic["symbol"],
+                "outcome": diagnostic["outcome"],
+                "ref_permission": diagnostic["ref_permission"],
+                **({"reason": diagnostic["reason"]} if "reason" in diagnostic else {}),
+            }
+            for diagnostic in domain["diagnostics"]
+        ]
     value = {
         "type": "semantic_snapshot",
         "schema": "code-structure-viz.semantic/v1",
@@ -903,24 +1040,31 @@ def _semantic(model: dict[str, Any], status: str = "complete") -> dict[str, Any]
         "semantic_compatibility_id": descriptor["compatibility_id"],
         "compatibility_descriptor": descriptor,
         "identity_versions": descriptor["identity_versions"],
-        "source": {
-            "schema": "code-structure-viz.source-view/v1",
-            "kind": "working-tree",
-            "head_commit": None,
-            "fingerprint": "b" * 64,
-            "file_count": len(model["files"]),
-        },
-        "request": _snapshot_request(),
+        "source": copy.deepcopy(
+            domain["source"]
+            if domain is not None
+            else {
+                "schema": "code-structure-viz.source-view/v1",
+                "kind": "working-tree",
+                "head_commit": None,
+                "fingerprint": "b" * 64,
+                "file_count": len(model["files"]),
+            }
+        ),
+        "request": copy.deepcopy(domain["request"] if domain is not None else _snapshot_request()),
         "coverage": copy.deepcopy(model["coverage"]),
-        "projects": model["projects"],
+        # Project/config surfaces are root-path ordered; semantic records
+        # inside entities/members/relations/facts retain kind-prefixed ID
+        # order.  The inverse-order fixture makes this distinction observable.
+        "projects": sorted(model["projects"], key=lambda item: canonical_json_bytes(item["root"])),
         "files": model["files"],
         "entities": [*model["modules"], *model["components"]],
         "members": model["members"],
         "relations": model["relations"],
         "facts": model["facts"],
-        "diagnostics": [],
+        "diagnostics": semantic_diagnostics,
     }
-    if status == "incomplete":
+    if status == "incomplete" and domain is None:
         value["incomplete_kind"] = "partial_safe"
         value["diagnostics"] = [
             {
@@ -934,6 +1078,15 @@ def _semantic(model: dict[str, Any], status: str = "complete") -> dict[str, Any]
                 "ref_permission": "symbol",
             }
         ]
+    if domain is not None:
+        # The domain's validated decision owns the context and fingerprint;
+        # publication must echo it byte-for-byte rather than infer a selector
+        # from the first requested format.
+        value["request"]["run_fingerprint"] = domain["run_fingerprint"]
+        value["status"] = status
+        if status == "incomplete" and domain.get("incomplete_kind") == "partial_safe":
+            value["incomplete_kind"] = "partial_safe"
+        return value
     value["request"]["run_fingerprint"] = recompute_run_fingerprint(
         source_view_fingerprint=value["source"]["fingerprint"],
         source_plan_digest=value["request"]["source_plan_digest"],
@@ -1020,8 +1173,17 @@ def _request(
 
 def _complete_proof(model: dict[str, Any]) -> dict[str, Any]:
     records = []
+    seen_ids: set[str] = set()
     for collection in COLLECTIONS:
         for record in model[collection]:
+            # A typed duplicate-target response is allowed to carry the
+            # duplicated Module in its model, but the proof authority remains
+            # a set of discovered records.  Keep one exact row here; the
+            # response validator checks that the omitted row is the narrowly
+            # permitted byte-identical duplicate.
+            if record["id"] in seen_ids:
+                continue
+            seen_ids.add(record["id"])
             records.append({"collection": collection, "record": record, "taints": []})
     return {
         "discovered_records": records,
@@ -1034,6 +1196,87 @@ def _complete_proof(model: dict[str, Any]) -> dict[str, Any]:
         "excluded": [],
         "failed": [],
     }
+
+
+def _target_proof_model(model: dict[str, Any], failure: Any, targets: list[str]) -> dict[str, Any]:
+    """Remove only selected, byte-identical duplicate Modules for proof derivation."""
+
+    candidate = copy.deepcopy(model)
+    failed_reasons = {item["target_key"]: item["reason"] for item in failure.failures}
+    selected_targets = list(targets) or [
+        f"path:{record['path']}"
+        for record in model["files"]
+        if "program" in record["roles"] and not record["path"].endswith(".d.ts")
+    ]
+    duplicate_keys: set[tuple[str, str]] = set()
+    for target in selected_targets:
+        if failed_reasons.get(canonical_target_key(target)) != "duplicate":
+            continue
+        requested_path = canonical_target_key(target).removeprefix("path:")
+        matching_files = [
+            record
+            for record in model["files"]
+            if record["path"] == requested_path
+            or requested_path == "."
+            or record["path"].startswith(requested_path.rstrip("/") + "/")
+        ]
+        for file_record in matching_files:
+            if "program" not in file_record["roles"]:
+                continue
+            key = (file_record["project_id"], file_record["path"])
+            rows = [
+                module
+                for module in model["modules"]
+                if (module["project_id"], module["path"]) == key
+            ]
+            if len(rows) > 1 and len({canonical_json_bytes(row) for row in rows}) == 1:
+                duplicate_keys.add(key)
+    seen_keys: set[tuple[str, str]] = set()
+    retained_modules: list[dict[str, Any]] = []
+    for module in candidate["modules"]:
+        key = (module["project_id"], module["path"])
+        if key in duplicate_keys and key in seen_keys:
+            continue
+        retained_modules.append(module)
+        seen_keys.add(key)
+    candidate["modules"] = retained_modules
+    counts = candidate["coverage"]["counts"]
+    for collection in COLLECTIONS:
+        counts[collection] = len(candidate[collection])
+    counts["published"] = sum(len(candidate[collection]) for collection in COLLECTIONS)
+    counts["discovered"] = counts["published"]
+    counts["internal_entities"] = len(candidate["modules"]) + len(candidate["components"])
+    return candidate
+
+
+def _target_proof_resolutions(
+    model: dict[str, Any], failure: Any, targets: list[str]
+) -> list[dict[str, Any]]:
+    """Build complete target rows, retaining a reason only for typed failures."""
+
+    failed_by_key = {item["target_key"]: item["reason"] for item in failure.failures}
+    effective_targets = list(targets) or [
+        f"path:{record['path']}"
+        for record in model["files"]
+        if "program" in record["roles"] and not record["path"].endswith(".d.ts")
+    ]
+    rows: list[dict[str, Any]] = []
+    for target in effective_targets:
+        target_key = canonical_target_key(target)
+        if target_key in failed_by_key:
+            rows.append(
+                {
+                    "target_key": target_key,
+                    "status": "failed",
+                    "record_ids": [],
+                    "reason": failed_by_key[target_key],
+                }
+            )
+            continue
+        resolved = resolve_target_resolutions([target], model)
+        assert len(resolved) == 1
+        rows.append(resolved[0])
+    return sorted(rows, key=canonical_json_bytes)
 
 
 def _discovered_index(proof: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
@@ -1084,23 +1327,26 @@ def _response(
         assert context == request_context
     response_proof = proof
     if response_proof is None:
-        # A typed target failure is projected before model/proof validation.  Do
-        # not try to derive a complete proof from deliberately malformed model
-        # arrays (for example, a duplicate Module); the response schema still
-        # receives the required closed proof envelope, while the reference
-        # validator exercises the pre-model failure path.
-        if target_completeness_failure(model, request_value["targets"]) is not None:
-            response_proof = {
-                "discovered_records": [],
-                "failure_roots": [],
-                "causal_edges": [],
-                "target_resolutions": [],
-                "export_observations": [],
-                "export_resolution_witness": [],
-                "export_reexport_witness": [],
-                "excluded": [],
-                "failed": [],
-            }
+        target_failure = target_completeness_failure(model, request_value["targets"])
+        if target_failure is not None:
+            target_rows = _target_proof_resolutions(model, target_failure, request_value["targets"])
+            model["coverage"]["target_completeness"] = [
+                {
+                    "target_key": row["target_key"],
+                    "status": "complete" if row["status"] == "resolved" else "failed",
+                    "record_ids": row["record_ids"],
+                    **(
+                        {"reason": row["reason"]}
+                        if row.get("reason") in {"missing", "component_only", "duplicate"}
+                        else {}
+                    ),
+                }
+                for row in target_rows
+            ]
+            assert target_failure is not None
+            proof_model = _target_proof_model(model, target_failure, request_value["targets"])
+            response_proof = _complete_proof(proof_model)
+            response_proof["target_resolutions"] = target_rows
         else:
             response_proof = _complete_proof(model)
     return {
@@ -1140,7 +1386,11 @@ def _trusted_environment() -> dict[str, Any]:
 
 
 def _public_diagnostic(
-    code: str, *, path: str | None = None, symbol: str | None = None
+    code: str,
+    *,
+    path: str | None = None,
+    symbol: str | None = None,
+    reason: str | None = None,
 ) -> dict[str, Any]:
     entries = cast(list[dict[str, Any]], _schema("next-diagnostic-catalog-v1.json")["entries"])
     catalog = {entry["code"]: entry for entry in entries}
@@ -1151,7 +1401,7 @@ def _public_diagnostic(
         symbol = _id("component", "5")
     elif entry["ref_permission"] == "path_or_symbol" and path is None and symbol is None:
         path = "src/Button.tsx"
-    return {
+    value = {
         "type": "diagnostic",
         "schema": "code-structure-viz.diagnostic/v1",
         "code": code,
@@ -1165,34 +1415,185 @@ def _public_diagnostic(
         "outcome": entry["outcome"],
         "ref_permission": entry["ref_permission"],
     }
+    if reason is not None:
+        assert code == "CSV-NEXT-TARGET-001"
+        assert reason in {"missing", "component_only", "duplicate"}
+        value["reason"] = reason
+    return value
+
+
+class _DomainProjection(dict[str, Any]):
+    """Serializable domain mapping with a private validated-model sidecar.
+
+    The sidecar is intentionally not a wire field: the run-manifest schema
+    remains a compact domain descriptor, while the reference publication
+    renderer can still prove that semantic and PlantUML bytes came from the
+    exact model accepted at the response boundary.  ``deepcopy`` retains the
+    sidecar for mutation tests.
+    """
+
+    def __init__(
+        self,
+        value: dict[str, Any],
+        *,
+        validated_model: dict[str, Any],
+        validated_decision: NextValidatedDecision | None,
+    ) -> None:
+        super().__init__(value)
+        self.validated_model = copy.deepcopy(validated_model)
+        self.validated_decision = validated_decision
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "_DomainProjection":
+        result = type(self).__new__(type(self))
+        memo[id(self)] = result
+        dict.__init__(result, copy.deepcopy(dict(self), memo))
+        result.validated_model = copy.deepcopy(self.validated_model, memo)
+        result.validated_decision = copy.deepcopy(self.validated_decision, memo)
+        return result
+
+
+def _target_reason_for_domain(domain: dict[str, Any], target_key: str | None = None) -> str | None:
+    """Read the typed target reason from the immutable decision evidence."""
+
+    decision = getattr(domain, "validated_decision", None)
+    if not isinstance(decision, NextValidatedDecision):
+        return None
+    failures = decision.target_failures
+    if target_key is None:
+        if len(failures) != 1:
+            return None
+        reason = failures[0].get("reason")
+    else:
+        reason = next(
+            (
+                failure.get("reason")
+                for failure in failures
+                if failure.get("target_key") == target_key
+            ),
+            None,
+        )
+    return reason if reason in {"missing", "component_only", "duplicate"} else None
+
+
+_UNSET = object()
 
 
 def _domain(
-    status: str = "complete",
+    status: str | object = _UNSET,
     *,
     overrun: bool = False,
     runtime_unavailable: bool = False,
     export_failure: bool = False,
     targets: list[str] | None = None,
-    formats: list[str] | None = None,
-    max_entities: int = 500,
+    formats: list[str] | object = _UNSET,
+    max_entities: int | object = _UNSET,
     model: dict[str, Any] | None = None,
-    budget_source: str = "builtin",
-    budget_requested: int | None = None,
-    stdout_selector: str | None = "next:semantic-json",
+    budget_source: str | object = _UNSET,
+    budget_requested: int | object | None = _UNSET,
+    stdout_selector: str | object | None = _UNSET,
     response_decision: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> _DomainProjection:
+    status_supplied = status is not _UNSET
+    targets_supplied = targets is not None
+    formats_supplied = formats is not _UNSET
+    max_entities_supplied = max_entities is not _UNSET
+    budget_source_supplied = budget_source is not _UNSET
+    budget_requested_supplied = budget_requested is not _UNSET
+    stdout_selector_supplied = stdout_selector is not _UNSET
+    status_arg = status
+    formats_arg = formats
+    max_entities_arg = max_entities
+    budget_source_arg = budget_source
+    budget_requested_arg = budget_requested
+    stdout_selector_arg = stdout_selector
+    if status_arg is _UNSET:
+        status_arg = "complete"
+    if formats_arg is _UNSET:
+        formats_arg = None
+    if max_entities_arg is _UNSET:
+        max_entities_arg = 500
+    if budget_source_arg is _UNSET:
+        budget_source_arg = "builtin"
+    if budget_requested_arg is _UNSET:
+        budget_requested_arg = None
+    if stdout_selector_arg is _UNSET:
+        stdout_selector_arg = "next:semantic-json"
+    if formats is _UNSET:
+        formats = cast(list[str] | None, formats_arg)
+    if max_entities is _UNSET:
+        max_entities = cast(int, max_entities_arg)
+    if budget_source is _UNSET:
+        budget_source = cast(str, budget_source_arg)
+    if budget_requested is _UNSET:
+        budget_requested = cast(int | None, budget_requested_arg)
+    if stdout_selector is _UNSET:
+        stdout_selector = cast(str | None, stdout_selector_arg)
+    assert isinstance(status_arg, str)
+    assert formats_arg is None or isinstance(formats_arg, list)
+    assert isinstance(max_entities_arg, int)
+    assert isinstance(budget_source_arg, str)
+    assert budget_requested_arg is None or isinstance(budget_requested_arg, int)
+    assert stdout_selector_arg is None or isinstance(stdout_selector_arg, str)
+    validated_decision: NextValidatedDecision | None = None
     if response_decision is not None:
-        validated_model = response_decision.get("validated_model")
-        assert isinstance(validated_model, dict)
-        if model is None:
+        candidate = response_decision.get("validated_decision")
+        if isinstance(candidate, NextValidatedDecision):
+            # Once the raw response has produced a validated decision, every
+            # downstream projection must consume that object as its sole
+            # authority.  Re-supplying an equal-looking value is still a
+            # second authority and is therefore rejected rather than merely
+            # compared for equality.
+            assert not status_supplied
+            assert not targets_supplied
+            assert not formats_supplied
+            assert not max_entities_supplied
+            assert not budget_source_supplied
+            assert not budget_requested_supplied
+            assert not stdout_selector_supplied
+            assert not overrun
+            assert not runtime_unavailable
+            assert not export_failure
+            assert model is None
+            validated_decision = candidate
+            validated_model = candidate.validated_model
             model = copy.deepcopy(validated_model)
+            context = candidate.run_context
+            max_entities = context["budget_resolved"]
+            budget_requested = context["budget_requested"]
+            budget_source = context["budget_source"]
+            stdout_selector = context["stdout_selector"]
+            formats = list(context["requested_formats"])
         else:
-            assert model == validated_model
+            raise AssertionError("downstream publication requires NextValidatedDecision")
     model = model or _model()
+    if response_decision is not None and validated_decision is None:
+        assert model is not None
+    if validated_decision is not None:
+        # The pre-budget outcome and gate result are authoritative.  A caller
+        # cannot upgrade a partial or unavailable response by choosing a new
+        # status while building a publication projection.
+        gate_outcome = validated_decision.gate["outcome"]
+        if (
+            validated_decision.target_failures
+            or validated_decision.export_failures
+            or gate_outcome in {"partial_safe", "payload_unavailable"}
+        ):
+            status_arg = "incomplete"
+        else:
+            status_arg = "complete"
+        export_failure = bool(validated_decision.export_failures)
+    status = status_arg
+    formats = cast(list[str] | None, formats)
+    max_entities = cast(int, max_entities)
+    budget_source = cast(str, budget_source)
+    budget_requested = cast(int | None, budget_requested)
+    stdout_selector = cast(str | None, stdout_selector)
     descriptor = _descriptor()
     environment = _trusted_environment()
-    target_values = list(targets or [])
+    if validated_decision is not None:
+        target_values = list(validated_decision.targets)
+    else:
+        target_values = list(targets or [])
     format_values = list(formats or ["semantic-json", "plantuml"])
     limits = _next_limits(max_entities=max_entities)
     run_context = _run_context(
@@ -1216,7 +1617,11 @@ def _domain(
         "plantuml": "next.snapshot.puml",
     }
     selected_artifacts = [artifact_for_format[format_name] for format_name in format_values]
-    target_resolutions = resolve_target_resolutions(target_values, model)
+    target_resolutions = (
+        copy.deepcopy(validated_decision.validated_proof["target_resolutions"])
+        if validated_decision is not None and validated_decision.target_failures
+        else resolve_target_resolutions(target_values, model)
+    )
     target_failed = any(item["status"] == "failed" for item in target_resolutions)
     entity_count: int | None
     payload_available: bool
@@ -1229,6 +1634,31 @@ def _domain(
     if target_failed:
         assert status != "not_applicable"
         failed_target = next(item for item in target_resolutions if item["status"] == "failed")
+        failed_reason = (
+            next(
+                (
+                    item.get("reason")
+                    for item in validated_decision.target_failures
+                    if item.get("target_key") == failed_target["target_key"]
+                ),
+                None,
+            )
+            if validated_decision is not None
+            else None
+        )
+        if failed_reason is None and validated_decision is None:
+            fallback_failure = target_completeness_failure(model, target_values)
+            if fallback_failure is not None:
+                failed_reason = next(
+                    (
+                        item["reason"]
+                        for item in fallback_failure.failures
+                        if item["target_key"] == failed_target["target_key"]
+                    ),
+                    None,
+                )
+        if validated_decision is not None:
+            assert failed_reason is not None
         status = "incomplete"
         entity_count = None
         payload_available = False
@@ -1238,6 +1668,11 @@ def _domain(
             _public_diagnostic(
                 "CSV-NEXT-TARGET-001",
                 path=failed_target["target_key"].removeprefix("path:"),
+                reason=(
+                    failed_reason
+                    if failed_reason in {"missing", "component_only", "duplicate"}
+                    else None
+                ),
             )
         ]
         actual = None
@@ -1390,15 +1825,92 @@ def _domain(
         if actual is not None
         else len(model["modules"]) + len(model["components"])
     )
-    value["coverage"]["target_completeness"] = [
+    fallback_target_failure = (
+        target_completeness_failure(model, target_values) if validated_decision is None else None
+    )
+    target_reason_by_key = {
+        item["target_key"]: item["reason"]
+        for item in (fallback_target_failure.failures if fallback_target_failure else [])
+    }
+    target_reason_by_key.update(
         {
+            item["target_key"]: item["reason"]
+            for item in (
+                validated_decision.target_failures if validated_decision is not None else ()
+            )
+        }
+    )
+    value["coverage"]["target_completeness"] = []
+    for item in target_resolutions:
+        row = {
             "target_key": item["target_key"],
             "status": "complete" if item["status"] == "resolved" else "failed",
             "record_ids": item["record_ids"],
         }
-        for item in target_resolutions
-    ]
-    return value
+        if row["status"] == "failed" and item["target_key"] in target_reason_by_key:
+            reason = target_reason_by_key[item["target_key"]]
+            # Only the typed program File→Module reasons are public evidence.
+            # Other target-classification failures (context/control file,
+            # project ambiguity, and a missing descendant program file) keep
+            # the failure row reason-free while the diagnostic identifies the
+            # rejected path.
+            if reason in {"missing", "component_only", "duplicate"}:
+                row["reason"] = reason
+        value["coverage"]["target_completeness"].append(row)
+    if validated_decision is None:
+        pre_budget_outcome = (
+            "payload_unavailable"
+            if target_failed or export_failure or budget_overrun
+            else "partial_safe"
+            if status == "incomplete"
+            else "not_applicable"
+            if status == "not_applicable"
+            else "complete"
+        )
+        target_evidence = tuple(
+            {
+                "target_key": row["target_key"],
+                **(
+                    {"reason": row["reason"]}
+                    if row.get("reason") in {"missing", "component_only", "duplicate"}
+                    else {}
+                ),
+            }
+            for row in value["coverage"]["target_completeness"]
+            if row["status"] == "failed"
+        )
+        export_evidence = ({"diagnostic": "CSV-NEXT-EXPORT-001"},) if export_failure else ()
+        validated_decision = NextValidatedDecision(
+            validated_model=model,
+            validated_proof={},
+            run_context=run_context,
+            pre_budget_outcome=pre_budget_outcome,
+            gate={
+                "actual": value["budget"]["actual"],
+                "resolved": value["budget"]["resolved"],
+                "allowed": value["payload_available"],
+                "payload_available": value["payload_available"],
+                "original_outcome": pre_budget_outcome,
+                "outcome": value["budget"]["outcome"],
+                "diagnostic_code": value["diagnostics"][0]["code"]
+                if value["diagnostics"]
+                else None,
+                "run_context": run_context,
+                "requested_formats": value["formats"],
+                "budget_requested": value["budget"]["requested"],
+                "budget_source": value["budget"]["source"],
+                "stdout_selector": run_context["stdout_selector"],
+                "artifact_paths": value["artifact_paths"],
+            },
+            targets=tuple(target_values),
+            target_failures=target_evidence,
+            export_failures=export_evidence,
+        )
+    return _DomainProjection(
+        value,
+        validated_model=model,
+        validated_decision=validated_decision,
+    )
 
 
 def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
@@ -1487,20 +1999,21 @@ def _run_manifest(domain: dict[str, Any]) -> dict[str, Any]:
 
 
 def _published_bytes(domain: dict[str, Any]) -> dict[str, bytes]:
-    projection_digest = recompute_publication_projection_digest(domain)
+    decision = getattr(domain, "validated_decision", None)
+    assert isinstance(decision, NextValidatedDecision), "publication requires validated decision"
+    validated_model = decision.validated_model
+    semantic = _semantic(
+        validated_model,
+        status="incomplete" if domain["status"] == "incomplete" else "complete",
+        domain=domain,
+    )
+    semantic_bytes = canonical_json_bytes(semantic) + b"\n"
+    plantuml_bytes = render_plantuml(
+        validated_model,
+        status="partial_safe" if domain["status"] == "incomplete" else "complete",
+    )
     return {
-        path: (
-            canonical_json_bytes(
-                {
-                    "schema": "code-structure-viz.semantic/v1",
-                    "domain": "next",
-                    "projection_digest": projection_digest,
-                }
-            )
-            + b"\n"
-            if path.endswith(".json")
-            else f"@startuml\nnote top: projection={projection_digest}\n@enduml\n".encode()
-        )
+        path: semantic_bytes if path.endswith(".json") else plantuml_bytes
         for path in domain["artifact_paths"]
     }
 
@@ -1543,6 +2056,11 @@ def _stdout_result_for_domain(
             else "domain_payload_unavailable"
         ),
         "artifact": None,
+        **(
+            {"reason": _target_reason_for_domain(domain)}
+            if _target_reason_for_domain(domain) is not None
+            else {}
+        ),
     }
 
 
@@ -2075,7 +2593,7 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
     assert {
         key: value
         for key, value in decision.items()
-        if key not in {"validated_model", "validated_proof"}
+        if key not in {"validated_model", "validated_proof", "validated_decision"}
     } == {
         "actual": 4,
         "resolved": 500,
@@ -2591,6 +3109,9 @@ def test_export_scanner_closes_unicode_paired_member_and_namespace_jsx_tags() ->
         "export const FakeCombining = 1;"
         "<aְ.Panel>export type AlsoFakeCombining = 1;</aְ.Panel>"
         "</ns:Tagְ></aְ.Panel>;\n"
+        "const otherIdContinue = <Foo·Bar><Foo·Bar>"
+        "export const FakeMiddleDot = 1;"
+        "</Foo·Bar></Foo·Bar>;\n"
         "export const 実在 = 1;\n"
     ).encode()
     rows = _scan_export_file("src/unicode-jsx.tsx", source)
@@ -2600,6 +3121,45 @@ def test_export_scanner_closes_unicode_paired_member_and_namespace_jsx_tags() ->
     assert source[rows[0]["byte_start"] : rows[0]["byte_end"]].startswith(
         "export const 実在".encode()
     )
+    other_id = _scan_export_file("src/other-id.ts", "export const Foo·Bar = 1;\n".encode())
+    assert [row["exported_name"] for row in other_id] == ["Foo·Bar"]
+
+
+def test_round13_ecmascript_identifier_tables_are_pinned_and_complete() -> None:
+    assert _is_jsx_identifier_start("\u1885")
+    assert _is_jsx_identifier_start("\u212e")
+    assert not _is_jsx_identifier_start("\u00b7")
+    for character in "\u00b7\u0387\u1369\u136a\u136b\u136c\u136d\u136e\u136f\u1370\u1371\u19da":
+        assert _is_jsx_identifier_part(character)
+    assert not _is_jsx_identifier_part("\u0375")
+    assert _is_export_identifier("Foo\u00b7Bar")
+    assert not _is_export_identifier("\u00b7Foo")
+
+    descriptor = _descriptor()
+    assert descriptor["algorithm_versions"]["identifier_unicode"] == "ecma-unicode-15.0"
+    wrong_descriptor = copy.deepcopy(descriptor)
+    wrong_descriptor["algorithm_versions"]["identifier_unicode"] = "ecma-unicode-14.0"
+    with pytest.raises(AssertionError):
+        validate_compatibility_descriptor(wrong_descriptor)
+
+    domain = _domain()
+    fingerprint = recompute_run_fingerprint(
+        source_view_fingerprint=domain["source"]["fingerprint"],
+        source_plan_digest=domain["source_plan_digest"],
+        domain_config_digest=domain["domain_config_digest"],
+        projects=domain["projects"],
+        targets=domain["targets"],
+        formats=domain["formats"],
+        stdout_selector=domain["run_context"]["stdout_selector"],
+        limits=domain["limits"],
+        node_version=domain["toolchain"]["node_version"],
+        typescript_version=domain["toolchain"]["typescript_version"],
+        adapter_version=domain["toolchain"]["adapter_version"],
+        protocol=domain["toolchain"]["protocol"],
+        trusted_environment_digest=domain["trusted_environment"]["sha256"],
+        identifier_unicode_version="ecma-unicode-14.0",
+    )
+    assert fingerprint != domain["run_fingerprint"]
 
 
 def test_export_scanner_type_alias_span_includes_generic_object_terminator() -> None:
@@ -2620,6 +3180,7 @@ def test_reexport_graph_recomputes_alias_star_cycle_and_conflict_witnesses() -> 
         "double-alias",
         "empty-star",
         "hidden-key",
+        "same-specifier-aliases",
         "star",
         "star-cycle",
     }
@@ -2689,6 +3250,39 @@ def test_reexport_graph_recomputes_alias_star_cycle_and_conflict_witnesses() -> 
     assert all(row["diagnostic"] == "conflict" for row in conflict["witnesses"])
     assert all(row["original_exported_name"] == "*" for row in conflict["witnesses"])
 
+    same_shape = recompute_export_graph_case(cases["same-specifier-aliases"])
+    same_shape_witnesses = same_shape["witnesses"]
+    assert len(same_shape_witnesses) == 3
+    assert {row["syntax_identity"] for row in same_shape_witnesses} == {
+        "export:src/index.ts:8:18:reexport:A",
+        "export:src/index.ts:42:52:reexport:A:second",
+        "export:src/index.ts:25:35:reexport:B",
+    }
+    assert sorted(row["exported_name"] for row in same_shape_witnesses) == ["A", "A", "B"]
+    diagnostics_by_name = {
+        row["syntax_identity"]: row["diagnostic"] for row in same_shape_witnesses
+    }
+    assert diagnostics_by_name["export:src/index.ts:8:18:reexport:A"] == "conflict"
+    assert diagnostics_by_name["export:src/index.ts:42:52:reexport:A:second"] == "conflict"
+    assert diagnostics_by_name["export:src/index.ts:25:35:reexport:B"] is None
+    assert (
+        len(
+            {
+                (
+                    row["owner_file_path"],
+                    row["source_specifier"],
+                    row["imported_name"],
+                    row["original_exported_name"],
+                    row["syntax_identity"],
+                    row["byte_start"],
+                    row["byte_end"],
+                )
+                for row in same_shape_witnesses
+            }
+        )
+        == 3
+    )
+
     # A submitted witness cannot replace the independent result with a
     # component resolution, nor can it drop one of the two star edges.
     mutated = copy.deepcopy(conflict["witnesses"])
@@ -2706,7 +3300,16 @@ def test_main_reexport_witness_comes_from_raw_declarations_and_edges() -> None:
         }
     )
     assert all(
-        set(edge) == {"owner_file_path", "source_specifier", "imported_name", "exported_name"}
+        set(edge)
+        == {
+            "owner_file_path",
+            "source_specifier",
+            "imported_name",
+            "exported_name",
+            "syntax_identity",
+            "byte_start",
+            "byte_end",
+        }
         for edge in raw["edges"]
     )
     result = recompute_export_graph_case(raw)
@@ -2722,15 +3325,19 @@ def test_main_reexport_witness_comes_from_raw_declarations_and_edges() -> None:
     ]
     model = _model()
     expected = expected_export_reexport_witness(model)
+    star_row = next(
+        row
+        for row in scan_export_syntax_census()
+        if row["owner_file_path"] == "src/Button.tsx" and row["star"]
+    )
     assert expected == [
         {
             "owner_module_id": _id("module", "3"),
             "owner_file_path": "src/Button.tsx",
-            "syntax_identity": next(
-                row
-                for row in scan_export_syntax_census()
-                if row["owner_file_path"] == "src/Button.tsx" and row["star"]
-            )["syntax_identity"],
+            "byte_start": star_row["byte_start"],
+            "byte_end": star_row["byte_end"],
+            "token_identity": star_row["token_identity"],
+            "syntax_identity": star_row["syntax_identity"],
             "source_specifier": "./Other",
             "imported_name": "*",
             "original_exported_name": "*",
@@ -2745,6 +3352,42 @@ def test_main_reexport_witness_comes_from_raw_declarations_and_edges() -> None:
     mutated = copy.deepcopy(raw)
     mutated["edges"] = mutated["edges"][1:]
     assert recompute_export_graph_case(mutated) != result
+
+
+def test_round13_reexport_join_is_bijective_for_aliases_and_repeated_forms() -> None:
+    source = (
+        b'export { Foo as A, Foo as B } from "./source";\nexport { Foo as A } from "./source";\n'
+    )
+    syntax_rows = _scan_export_file("src/index.ts", source)
+    reexports = [row for row in syntax_rows if row["reexport"]]
+    assert [row["exported_name"] for row in reexports] == ["A", "B", "A"]
+    raw_edges = [
+        {
+            key: row[key]
+            for key in (
+                "owner_file_path",
+                "source_specifier",
+                "imported_name",
+                "exported_name",
+                "syntax_identity",
+                "byte_start",
+                "byte_end",
+            )
+        }
+        for row in reexports
+    ]
+    joined = join_reexport_observations_to_edges(reexports, raw_edges)
+    assert len(joined) == 3
+    assert [syntax["exported_name"] for syntax, _edge in joined] == ["A", "A", "B"]
+    assert len({syntax["syntax_identity"] for syntax, _edge in joined}) == 3
+
+    substituted = copy.deepcopy(raw_edges)
+    substituted[0]["exported_name"], substituted[1]["exported_name"] = (
+        substituted[1]["exported_name"],
+        substituted[0]["exported_name"],
+    )
+    with pytest.raises(AssertionError):
+        join_reexport_observations_to_edges(reexports, substituted)
 
 
 def test_round12_positive_reexport_witness_reaches_response_domain_and_root() -> None:
@@ -2801,6 +3444,84 @@ def test_reexport_witness_schema_preserves_original_name_and_failure_reason() ->
     cycle = next(case for case in load_export_graph_cases() if case["name"] == "cycle")
     cycle_result = recompute_export_graph_case(cycle)
     assert {witness["diagnostic"] for witness in cycle_result["witnesses"]} == {"cycle"}
+
+
+@pytest.mark.parametrize(
+    ("graph_name", "diagnostic", "include_cycle", "include_conflict"),
+    [
+        ("cycle", "cycle", True, False),
+        ("conflict", "conflict", False, True),
+    ],
+)
+def test_reexport_failure_graph_is_schema_valid_and_projects_whole_run(
+    graph_name: str, diagnostic: str, include_cycle: bool, include_conflict: bool
+) -> None:
+    model = _model_with_graph_failure_cases(
+        include_cycle=include_cycle,
+        include_conflict=include_conflict,
+    )
+    request = _request(model)
+    response = _response(model, request=request)
+    _validator("next-adapter-response-v1.schema.json").validate(response)
+    witnesses = response["proof"]["export_reexport_witness"]
+    final_button = next(
+        row
+        for row in witnesses
+        if row["owner_file_path"] == "src/GraphAliasIndex.ts"
+        and row["exported_name"] == "FinalButton"
+    )
+    assert final_button["resolution"] == "component"
+    assert final_button["target_declaration_id"] is not None
+    assert any(
+        row["owner_file_path"] == "src/GraphDefaultIndex.ts" and row["exported_name"] == "Visible"
+        for row in witnesses
+    )
+    assert not any(row["owner_file_path"] == "src/GraphEmptyIndex.ts" for row in witnesses)
+    if include_conflict:
+        same_rows = [row for row in witnesses if row["owner_file_path"] == "src/GraphSameIndex.ts"]
+        assert [
+            row["exported_name"] for row in sorted(same_rows, key=lambda item: item["byte_start"])
+        ] == ["A", "B", "A"]
+        assert {row["diagnostic"] for row in same_rows if row["exported_name"] == "A"} == {
+            "conflict"
+        }
+    result = recompute_export_graph_case(
+        next(case for case in load_export_graph_cases() if case["name"] == graph_name)
+    )
+    assert result["cycles"] or result["conflicts"]
+    assert any(row["diagnostic"] == diagnostic for row in result["witnesses"])
+    decision = validate_response_envelope(canonical_json_bytes(response), request)
+    assert decision["allowed"] is False
+    assert decision["diagnostic_code"] == "CSV-NEXT-EXPORT-001"
+    assert decision["payload_available"] is False
+    assert decision["export_failures"]
+    domain = _domain(response_decision=decision)
+    assert domain["status"] == "incomplete"
+    assert domain["incomplete_kind"] == "payload_unavailable"
+    assert domain["artifact_paths"] == []
+    assert domain["diagnostics"][0]["code"] == "CSV-NEXT-EXPORT-001"
+    validate_domain_manifest(domain)
+    manifest = _run_manifest(domain)
+    validate_run_manifest(manifest, domain, {})
+    summary = _run_summary_value("incomplete", domain)
+    for selector in ("next:semantic-json", "next:plantuml"):
+        stream = _stdout_result_for_domain(domain, manifest, selector)
+        assert stream["availability"] is False
+        validate_run_status_vector(
+            manifest,
+            summary,
+            stream,
+            {},
+            canonical_json_bytes(stream) + b"\n",
+            manifest["diagnostics"],
+            stderr_bytes=_diagnostic_jsonl(manifest["diagnostics"]),
+        )
+
+    mutated = copy.deepcopy(response)
+    witness = mutated["proof"]["export_reexport_witness"][0]
+    witness["exported_name"] = "Substituted"
+    with pytest.raises(AssertionError):
+        validate_response_envelope(canonical_json_bytes(mutated), request)
 
 
 def test_reexport_witness_requires_owner_join_and_component_target() -> None:
@@ -2975,10 +3696,6 @@ def test_round11_inverse_project_order_reaches_response_domain_root_and_fingerpr
 
     domain = _domain(
         response_decision=decision,
-        formats=context["requested_formats"],
-        budget_source=context["budget_source"],
-        budget_requested=context["budget_requested"],
-        stdout_selector=context["stdout_selector"],
     )
     validate_domain_manifest(domain)
     manifest = _run_manifest(domain)
@@ -3017,10 +3734,10 @@ def test_round11_inverse_project_order_reaches_response_domain_root_and_fingerpr
         validate_run_manifest(bad_manifest, domain, _published_bytes(domain))
 
     for field in ("next_request", "next_config"):
-        bad_projection = copy.deepcopy(manifest)
-        bad_projection[field]["projects"].reverse()
+        bad_manifest_projection = copy.deepcopy(manifest)
+        bad_manifest_projection[field]["projects"].reverse()
         with pytest.raises(AssertionError):
-            validate_run_manifest(bad_projection, domain, _published_bytes(domain))
+            validate_run_manifest(bad_manifest_projection, domain, _published_bytes(domain))
 
     bad_resolved = copy.deepcopy(manifest)
     bad_resolved["config"]["resolved"]["next"]["projects"].reverse()
@@ -3946,11 +4663,6 @@ def test_round12_run_context_selector_is_exactly_echoed_across_request_response_
 
     domain = _domain(
         response_decision=decision,
-        formats=context["requested_formats"],
-        max_entities=context["budget_resolved"],
-        budget_source=context["budget_source"],
-        budget_requested=context["budget_requested"],
-        stdout_selector=selector,
     )
     validate_domain_manifest(domain)
     manifest = _run_manifest(domain)
@@ -4059,18 +4771,41 @@ def test_round11_target_completeness_is_typed_and_projects_to_unavailable_run(
         "component_only": "component_only",
     }[mutation]
     assert decision["target_failures"][0]["reason"] == expected_reason
+    response_target = next(
+        item
+        for item in response["model"]["coverage"]["target_completeness"]
+        if item["target_key"] == target
+    )
+    assert response_target["reason"] == expected_reason
+    proof_target = next(
+        item for item in response["proof"]["target_resolutions"] if item["target_key"] == target
+    )
+    assert proof_target["reason"] == expected_reason
 
-    domain = _domain("incomplete", model=model, targets=[target])
+    domain = _domain(response_decision=decision)
     assert domain["incomplete_kind"] == "payload_unavailable"
     assert domain["payload_available"] is False
     assert domain["artifact_paths"] == []
     assert domain["diagnostics"][0]["code"] == "CSV-NEXT-TARGET-001"
+    assert domain["diagnostics"][0]["reason"] == expected_reason
+    domain_target = next(
+        item for item in domain["coverage"]["target_completeness"] if item["target_key"] == target
+    )
+    assert domain_target["reason"] == expected_reason
     validate_domain_manifest(domain)
     manifest = _run_manifest(domain)
     validate_run_manifest(manifest, domain, {})
+    manifest_target = next(
+        item
+        for item in manifest["domains"][0]["coverage"]["target_completeness"]
+        if item["target_key"] == target
+    )
+    assert manifest_target["reason"] == expected_reason
+    assert manifest["diagnostics"][0]["reason"] == expected_reason
     stream = _stdout_result_for_domain(domain, manifest, "next:semantic-json")
     _validator("stdout-result-v1.schema.json").validate(stream)
     assert stream["availability"] is False
+    assert stream["reason"] == expected_reason
     summary = _run_summary_value("incomplete", domain)
     validate_run_status_vector(
         manifest,
@@ -4140,6 +4875,77 @@ def test_response_base_rejects_invalid_cross_reference_before_duplicate_target_f
     assert failure.failures == [{"target_key": "path:src/Card.tsx", "reason": "duplicate"}]
     with pytest.raises(AssertionError):
         validate_response_envelope(canonical_json_bytes(response), request)
+
+
+@pytest.mark.parametrize("target_mutation", ["missing", "component_only", "duplicate"])
+@pytest.mark.parametrize("proof_mutation", ["causal_edge", "export_owner", "extra_target"])
+def test_target_failure_validates_complete_proof_before_typed_routing(
+    target_mutation: str, proof_mutation: str
+) -> None:
+    """Compound proof corruption cannot be relabelled as a target failure."""
+
+    model = _model()
+    card_module = next(module for module in model["modules"] if module["path"] == "src/Card.tsx")
+    if target_mutation == "missing":
+        model["modules"].remove(card_module)
+        model["components"] = [
+            component
+            for component in model["components"]
+            if component["module_id"] != card_module["id"]
+        ]
+    elif target_mutation == "component_only":
+        model["modules"].remove(card_module)
+    else:
+        model["modules"].append(copy.deepcopy(card_module))
+    if target_mutation in {"missing", "component_only"}:
+        card_component_id = _id("component", "6")
+        model["members"] = [
+            member
+            for member in model["members"]
+            if member.get("local_component_id") != card_component_id
+        ]
+        model["relations"] = [
+            relation
+            for relation in model["relations"]
+            if relation.get("source_id") not in {card_module["id"], card_component_id}
+            and relation.get("target", {}).get("module_id") != card_module["id"]
+            and relation.get("target", {}).get("component_id") != card_component_id
+            and relation.get("target_component_id") != card_component_id
+        ]
+        model["facts"] = [
+            fact for fact in model["facts"] if fact.get("owner_id") != card_module["id"]
+        ]
+    _refresh_model_counts(model)
+    request = _request(model, targets=["path:src/Card.tsx"])
+    response = _response(model, request=request, run_context=_run_context())
+    _validator("next-adapter-response-v1.schema.json").validate(response)
+
+    mutated = copy.deepcopy(response)
+    proof = mutated["proof"]
+    if proof_mutation == "causal_edge":
+        records = proof["discovered_records"]
+        proof["causal_edges"].append(
+            {
+                "source_id": records[0]["record"]["id"],
+                "record_id": records[1]["record"]["id"],
+                "rule": "identity_dependency",
+            }
+        )
+    elif proof_mutation == "export_owner":
+        reexport = proof["export_reexport_witness"][0]
+        reexport["owner_module_id"] = "next:module:" + "d" * 64
+    else:
+        proof["target_resolutions"].append(
+            {
+                "target_key": "path:src/types.d.ts",
+                "status": "failed",
+                "record_ids": [],
+                "reason": "missing",
+            }
+        )
+    _validator("next-adapter-response-v1.schema.json").validate(mutated)
+    with pytest.raises(AssertionError):
+        validate_response_envelope(canonical_json_bytes(mutated), request)
 
 
 def test_array_and_adapter_stderr_limits_have_independent_incremental_boundaries() -> None:
@@ -4317,6 +5123,63 @@ def test_response_validation_accepts_only_the_bounded_raw_bytes_entrypoint() -> 
         validate_response_envelope(response, request)  # type: ignore[arg-type]
 
 
+def test_raw_response_stdout_byte_cap_has_exact_and_plus_one_whole_run_projection() -> None:
+    model = _model()
+    request = _request(model)
+    response_bytes = canonical_json_bytes(_response(model, request=request))
+    limit = request["limits"]["max_stdout_bytes"]
+    assert len(response_bytes) < limit
+    exact = response_bytes + b" " * (limit - len(response_bytes))
+    exact_result = bounded_decode_json(exact, limits=request["limits"])
+    assert exact_result["allowed"] is True
+    assert exact_result["materialized"] is True
+    assert validate_response_envelope(exact, request)["allowed"] is True
+
+    plus_one = exact + b" "
+    over_result = bounded_decode_json(plus_one, limits=request["limits"])
+    assert over_result == {
+        "allowed": False,
+        "bytes": limit + 1,
+        "total_array_items": 0,
+        "array_count": 0,
+        "max_array_items": 0,
+        "max_nesting": 0,
+        "max_string_bytes": 0,
+        "failed_at_byte": limit,
+        "reason": "max_stdout_bytes",
+        "materialized": False,
+    }
+    with pytest.raises(AssertionError):
+        validate_response_envelope(plus_one, request)
+
+    # A raw response cap has no trusted model to publish.  The stable limit
+    # diagnostic is the only manifest projection, and all selectors become
+    # unavailable with exit 3; no artifact bytes are retained.
+    unavailable = _domain("incomplete")
+    unavailable["incomplete_kind"] = "payload_unavailable"
+    unavailable["payload_available"] = False
+    unavailable["entity_count"] = None
+    unavailable["artifact_paths"] = []
+    unavailable["budget"]["actual"] = None
+    unavailable["budget"]["outcome"] = "payload_unavailable"
+    unavailable["diagnostics"] = [_public_diagnostic("CSV-NEXT-LIMIT-003")]
+    manifest = _run_manifest(unavailable)
+    validate_domain_manifest(unavailable)
+    validate_run_manifest(manifest, unavailable, {})
+    summary = _run_summary_value("incomplete", unavailable)
+    stream = _stdout_result_for_domain(unavailable, manifest, "next:semantic-json")
+    validate_run_status_vector(
+        manifest,
+        summary,
+        stream,
+        {},
+        canonical_json_bytes(stream) + b"\n",
+        manifest["diagnostics"],
+        stderr_bytes=_diagnostic_jsonl(manifest["diagnostics"]),
+    )
+    assert manifest["run"]["exit_code"] == 3
+
+
 def test_raw_response_mutations_all_cross_the_same_bounded_entrypoint() -> None:
     model = _model()
     request = _request(model)
@@ -4384,6 +5247,109 @@ def test_whole_run_validator_rejects_projection_and_artifact_mutations() -> None
     wrong_diagnostic["diagnostics"] = [_public_diagnostic("CSV-NEXT-FLOW-001")]
     with pytest.raises(AssertionError):
         validate_run_manifest(wrong_diagnostic, domain, published)
+
+
+def test_publication_bytes_are_exact_model_payloads_and_digest_roots() -> None:
+    domain = _domain(model=_inverse_order_two_project_model())
+    manifest = _run_manifest(domain)
+    published = _published_bytes(domain)
+    validate_run_manifest(manifest, domain, published)
+    decision = domain.validated_decision
+    assert decision is not None
+    assert recompute_publication_projection_digest(domain) == digest(
+        {
+            "model": decision.validated_model,
+            "targets": domain["targets"],
+            "formats": domain["formats"],
+            "run_context": domain["run_context"],
+            "run_fingerprint": domain["run_fingerprint"],
+        }
+    )
+
+    semantic = json.loads(published["next.snapshot.semantic.json"].decode("utf-8"))
+    semantic_validator = _validator("semantic-v1.schema.json")
+    semantic_validator.validate(semantic)
+
+    # Every public collection participates in the exact-byte root.  A
+    # schema-valid order mutation and a schema-valid payload mutation for
+    # each collection must both invalidate the artifact descriptor.
+    for collection in ("projects", "files", "entities", "members", "relations", "facts"):
+        ordered = copy.deepcopy(semantic)
+        assert len(ordered[collection]) >= 2
+        ordered[collection].reverse()
+        semantic_validator.validate(ordered)
+        ordered_bytes = canonical_json_bytes(ordered) + b"\n"
+        ordered_published = dict(published)
+        ordered_published["next.snapshot.semantic.json"] = ordered_bytes
+        with pytest.raises(AssertionError):
+            validate_run_manifest(manifest, domain, ordered_published)
+
+        payload = copy.deepcopy(semantic)
+        first = payload[collection][0]
+        assert isinstance(first.get("id"), str)
+        prefix, _separator, _old_digest = first["id"].rpartition(":")
+        first["id"] = prefix + ":" + "f" * 64
+        semantic_validator.validate(payload)
+        payload_bytes = canonical_json_bytes(payload) + b"\n"
+        payload_published = dict(published)
+        payload_published["next.snapshot.semantic.json"] = payload_bytes
+        with pytest.raises(AssertionError):
+            validate_run_manifest(manifest, domain, payload_published)
+
+    semantic["entities"].pop()
+    omitted_entity = canonical_json_bytes(semantic) + b"\n"
+    mutated = dict(published)
+    mutated["next.snapshot.semantic.json"] = omitted_entity
+    with pytest.raises(AssertionError):
+        validate_run_manifest(manifest, domain, mutated)
+
+    substituted = json.loads(published["next.snapshot.semantic.json"].decode("utf-8"))
+    substituted["members"][0] = copy.deepcopy(substituted["members"][1])
+    substituted["members"][0]["id"] = substituted["members"][1]["id"]
+    substituted_bytes = canonical_json_bytes(substituted) + b"\n"
+    mutated["next.snapshot.semantic.json"] = substituted_bytes
+    with pytest.raises(AssertionError):
+        validate_run_manifest(manifest, domain, mutated)
+
+    plantuml = published["next.snapshot.puml"]
+    assert b"M:apps/a/src/Button.tsx" in plantuml
+    mutated["next.snapshot.puml"] = plantuml.replace(
+        b"M:apps/a/src/Button.tsx", b"M:apps/a/src/Changed.tsx", 1
+    )
+    with pytest.raises(AssertionError):
+        validate_run_manifest(manifest, domain, mutated)
+
+    wrong_root = copy.deepcopy(manifest)
+    wrong_root["artifacts"][0]["sha256"] = hashlib.sha256(omitted_entity).hexdigest()
+    with pytest.raises(AssertionError):
+        validate_run_manifest(wrong_root, domain, published)
+
+
+def test_validated_decision_is_the_only_publication_authority() -> None:
+    context = _run_context(["plantuml"], selector="next:plantuml")
+    request = _request(run_context=context)
+    response = _response(_model(), request=request, run_context=context)
+    decision_projection = validate_response_envelope(canonical_json_bytes(response), request)
+    decision = decision_projection["validated_decision"]
+    assert isinstance(decision, NextValidatedDecision)
+    assert decision.targets == ()
+    original_model = decision.validated_model
+    original_model["modules"].clear()
+    assert decision.validated_model == decision_projection["validated_model"]
+
+    domain = _domain(response_decision=decision_projection)
+    assert domain["run_context"] == context
+    with pytest.raises(AssertionError):
+        _domain(response_decision=decision_projection, formats=["semantic-json"])
+    with pytest.raises(AssertionError):
+        _domain(response_decision=decision_projection, budget_source="explicit")
+    with pytest.raises(AssertionError):
+        _domain(response_decision=decision_projection, stdout_selector="next:semantic-json")
+    with pytest.raises(AssertionError):
+        _domain(response_decision=decision_projection, status="incomplete")
+
+    published = _published_bytes(domain)
+    validate_published_projection(domain, published)
 
 
 @pytest.mark.parametrize(
@@ -4711,7 +5677,7 @@ def test_compatibility_descriptor_known_answer_is_content_independent() -> None:
     descriptor = _descriptor()
     validate_compatibility_descriptor(descriptor)
     assert descriptor["compatibility_id"] == (
-        "28fa8dfaef26afad655f7bc915308b87e4bd026c5720834c2d3a5b6e48ef06c5"
+        "7389d391abe3a17eac9e0731cbc63fe96a778831d0636d6329ddbcbd6e5741cf"
     )
     assert descriptor["compatibility_id"] == recompute_compatibility_id(descriptor)
     changed_content = copy.deepcopy(descriptor)

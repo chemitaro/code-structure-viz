@@ -195,6 +195,29 @@ Round 12の修復は実装前の契約だけを更新し、fresh exact-SHA Stric
   である。`duplicate`は選択対象の同一行だけに限る狭い例外としてtyped failureへ進め、三分類すべてを
   response→diagnostic→domain→root manifest→stdout unavailable→exit 3へ投影する。
 
+### Round 13 review state and remediation design
+
+Round 13 Strict は対象SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`、CI run `33446911714`
+（7/7 success）で `review_status: fail`、P0=0、P1=9、P2=1だった。詳細は
+`artifacts/20260901t040000z-disc-strict-spec-review-round-13.md` に保持する。data-only設計の
+修復後もfresh exact-SHA Strictは未実行・未通過、readinessは未確定、production implementationは
+未着手であり、履歴のfailをpassへ変更しない。
+
+- **Authority:** raw responseはbounded decode→closed schema→proof-base→typed targetの順に検証し、
+  一つのimmutable `NextValidatedDecision`（model/proof/request context/pre-budget/gate）だけを後段へ渡す。
+- **Publication:** semantic六collectionとPlantUMLは同じvalidated modelからrenderし、canonical bytes、
+  artifact hashes、root descriptorを再計算する。schema-validな順序・payload変異をrootで拒否する。
+- **Failure/graph:** `missing`・`component_only`・`duplicate`を全projectionへ保持し、double alias、
+  empty/multi starとdefault exclusion、cycle/conflictを独立whole-run vectorで`CSV-NEXT-EXPORT-001`
+  または`CSV-NEXT-TARGET-001`、unavailable stdout、exit 3へ写像する。
+- **Re-export/lexing:** owner/file、source/imported/original/exported name、syntax identity、byte spanを
+  含むbijective joinを要求する。IdentifierName表はUnicode 15.0.0へ固定し、Other_ID setsとU+00B7を
+  含め、そのversionをcompatibility/run-fingerprintへ入れる。
+- **Shared boundaries:** root-or-path schemaを全path surfaceへ適用し、root `.`を文脈限定で受理する。
+  raw responseの`max_stdout_bytes`はdecode前に検査し、16 MiB+1はmaterializationもpartial writeも行わない。
+- **Evidence hygiene:** Round 13の対象SHA/CI/fail countsとP1-1..P1-9/P2-1をartifactへ記録し、HTMLの
+  重複項目を除く。local gate successをStrict pass、readiness、またはproduct implementationの開始と解釈しない。
+
 ## 責務・Interface
 
 ### planned component responsibilities

@@ -255,6 +255,39 @@ production adapter/CLI実装は未着手のままとする。
    typed failureへ進む前に選択対象の同一行に限って許可する狭い例外とし、三分類すべてをresponse→diagnostic→
    domain→root manifest→stdout unavailable→exit 3へ完全に投影する。
 
+### Round 13 review state and remediation contract
+
+ChatGPT Use Strict Round 13 は対象SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`、CI run
+`33446911714`（7/7 success）に対して `review_status: fail`、P0=0、P1=9、P2=1を返した。
+詳細は `artifacts/20260901t040000z-disc-strict-spec-review-round-13.md` に保存し、履歴のfailを
+passへ書き換えない。以下はdata-only契約・schema・fixture・reference validator・説明資料へ
+反映する受入条件である。fresh exact-SHA Strictは未実行・未通過、readinessは未確定、production
+Next adapter/CLI実装は未着手のままとする。
+
+1. semantic六collectionとPlantUMLは一つのimmutable validated modelから生成し、schema-validな
+   order/payload mutationでも実bytes、Artifact SHA-256、root descriptorが不一致として拒否される。
+2. response検証済みの `NextValidatedDecision`（model、proof、request-owned context、pre-budget
+   outcome、gate decision）だけをdomain/root/stdoutの入力とし、後段のstatus・target・format・budget・
+   selector再構成や独立model指定を許さない。
+3. target failureの `missing`・`component_only`・`duplicate` をresponse coverage、diagnostic、
+   domain/root coverage、manifest、unavailable stdoutまで同じdecisionから保持する。file/directoryの
+   六ケースを固定し、typed `CSV-NEXT-TARGET-001` とexit 3へ投影する。
+4. typed target routingの前にproof-baseを検証し、collection shape/order、ID/ref、causal edge、
+   export-owner join、target completenessを完全一致させる。複合mutationはschema-validでも拒否する。
+5. double alias、empty/multi star（default除外）、cycle、conflictをschema-valid request/responseから
+   domain、root manifest、diagnostic、stdout unavailable、exit 3まで実行し、cycleとconflictは別の
+   `CSV-NEXT-EXPORT-001` whole-run vectorとする。
+6. re-export observation/raw-edge joinはowner、source/imported/original/exported name、syntax identity、
+   exact byte spanをキーとして全件を一対一で消費し、`Foo as A`・`Foo as B`・反復形を区別する。
+7. ECMAScript IdentifierNameのID_Start/ID_Continue/Other_ID_Start/Other_ID_Continue表を固定し、
+   Unicode 15.0.0（U+00B7を含む）とprofile versionをcompatibilityおよびrun-fingerprint preimageへ含める。
+8. shared root-or-path schemaを全source-root/path surfaceへ適用し、root文脈の`.`を受理する一方、
+   非root unsafe pathを拒否する。
+9. raw response全bytesの `max_stdout_bytes` をdecode/materialize前に測定し、16 MiBは受理、16 MiB+1は
+   partial writeなしのunavailable/manifest-only/exit 3へ通す。
+10. 人間向けHTMLの重複Round 11 Pass C itemを一つだけ残す。上記のlocal修復・テスト成功はfresh
+    Strict passやIssue完了を意味しない。
+
 ### semantic contract
 
 - entityはphysical-path `ModuleEntity`とdeclaration-anchored `ComponentEntity`。named declarationまたは`@anonymous-default`でComponentを識別し、range/export/route/wrapper/propsをidentityに含めない。

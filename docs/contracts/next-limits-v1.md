@@ -8,6 +8,14 @@ computed counts, budget, coverage, publication, and fingerprint across every
 surface. Fresh exact-SHA Strict is pending, readiness is unconfirmed, and
 production implementation has not started; the fail result is not a pass.
 
+Round 13 review state: Strict reviewed SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`
+with CI run `33446911714` (7/7 success) and returned `review_status: fail`,
+P0=0, P1=9, P2=1. The data-only remediation checks the complete raw response
+byte length against `max_stdout_bytes` before UTF-8 decoding or materialization;
+the exact limit is accepted and limit+1 follows the unavailable/exit-3 path.
+The historical fail is preserved. Fresh exact-SHA Strict is pending, readiness
+is unconfirmed, and production implementation has not started.
+
 `schemas/next-limits-v1.schema.json` is the single resolved limits record for
 the Next snapshot boundary. The same record is copied byte-for-byte into the
 adapter request, resolved config, request fingerprint descriptor, response,

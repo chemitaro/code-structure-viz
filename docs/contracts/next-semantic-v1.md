@@ -19,6 +19,16 @@ Fresh exact-SHA Strict is
 pending, so readiness is unconfirmed and the production adapter/CLI remains
 unimplemented. This local remediation does not change the recorded fail result.
 
+Round 13 review state: Strict reviewed SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`
+with CI run `33446911714` (7/7 success) and returned `review_status: fail`,
+P0=0, P1=9, P2=1. The local data-only response now covers exact six-collection
+semantic/PlantUML publication from one immutable validated decision, proof-first
+typed target routing, reason propagation, complete alias/star/cycle/conflict
+vectors, bijective re-export joins, the pinned ECMAScript IdentifierName table,
+shared root-or-path validation, and the pre-decode raw stdout byte cap. The
+historical fail is preserved; fresh exact-SHA Strict is pending, readiness is
+unconfirmed, and the production adapter/CLI is absent.
+
 The machine-readable authority is:
 
 - `schemas/next-semantic-v1.schema.json`

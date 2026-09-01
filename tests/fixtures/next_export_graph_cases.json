@@ -157,6 +157,54 @@
       ]
     },
     {
+      "name": "same-specifier-aliases",
+      "modules": [
+        {
+          "path": "src/index.ts",
+          "exports": []
+        },
+        {
+          "path": "src/source.ts",
+          "exports": [
+            {
+              "name": "Foo",
+              "resolution": "component",
+              "target_declaration_key": "Foo"
+            }
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./source",
+          "imported_name": "Foo",
+          "exported_name": "A",
+          "syntax_identity": "export:src/index.ts:42:52:reexport:A:second",
+          "byte_start": 42,
+          "byte_end": 52
+        },
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./source",
+          "imported_name": "Foo",
+          "exported_name": "A",
+          "syntax_identity": "export:src/index.ts:8:18:reexport:A",
+          "byte_start": 8,
+          "byte_end": 18
+        },
+        {
+          "owner_file_path": "src/index.ts",
+          "source_specifier": "./source",
+          "imported_name": "Foo",
+          "exported_name": "B",
+          "syntax_identity": "export:src/index.ts:25:35:reexport:B",
+          "byte_start": 25,
+          "byte_end": 35
+        }
+      ]
+    },
+    {
       "name": "star",
       "modules": [
         {"path": "src/index.ts", "exports": []},

@@ -106,10 +106,15 @@
     "line": {"type": ["integer", "null"], "minimum": 1},
     "recoverable": {"type": "boolean"},
     "message": {"type": "string", "minLength": 1},
+    "reason": {"enum": ["missing", "component_only", "duplicate"]},
     "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
     "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
   },
   "allOf": [
+    {
+      "if": {"required": ["reason"]},
+      "then": {"properties": {"code": {"const": "CSV-NEXT-TARGET-001"}}}
+    },
     {
       "oneOf": [
         {

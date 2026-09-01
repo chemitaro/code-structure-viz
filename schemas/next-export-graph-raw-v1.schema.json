@@ -67,7 +67,10 @@
         "owner_file_path": {"$ref": "#/$defs/path"},
         "source_specifier": {"type": "string", "minLength": 2, "maxLength": 4096, "pattern": "^\\."},
         "imported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"const": "*"}]},
-        "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"const": "*"}]}
+        "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"const": "*"}]},
+        "syntax_identity": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "byte_start": {"type": "integer", "minimum": 0},
+        "byte_end": {"type": "integer", "minimum": 1}
       },
       "allOf": [
         {
@@ -77,6 +80,18 @@
         {
           "if": {"properties": {"imported_name": {"not": {"const": "*"}}}},
           "then": {"properties": {"exported_name": {"not": {"const": "*"}}}}
+        },
+        {
+          "if": {"required": ["syntax_identity"]},
+          "then": {"required": ["byte_start", "byte_end"]}
+        },
+        {
+          "if": {"required": ["byte_start"]},
+          "then": {"required": ["syntax_identity", "byte_end"]}
+        },
+        {
+          "if": {"required": ["byte_end"]},
+          "then": {"required": ["syntax_identity", "byte_start"]}
         }
       ]
     }

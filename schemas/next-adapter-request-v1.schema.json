@@ -20,7 +20,7 @@
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "path": {"$ref": "urn:code-structure-viz:schema:next-path-v1"},
-    "root_path": {"anyOf": [{"const": "."}, {"$ref": "urn:code-structure-viz:schema:next-path-v1"}]},
+    "root_path": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"},
     "trusted": {
       "type": "object", "additionalProperties": false,
       "required": ["schema", "environment_version", "semantic_profile_id", "sha256"],
@@ -49,7 +49,7 @@
         "kind": {"const": "project"},
         "id": {"type": "string", "pattern": "^next:project:[0-9a-f]{64}$"},
         "root": {"$ref": "#/$defs/root_path"},
-        "source_roots": {"type": "array", "items": {"$ref": "#/$defs/path"}},
+        "source_roots": {"type": "array", "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
         "config_path": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
         "config_digest": {"$ref": "#/$defs/digest"},
         "compiler_options": {"$ref": "#/$defs/compiler_options"},

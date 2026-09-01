@@ -16,6 +16,15 @@ Fresh exact-SHA Strict is pending, readiness is unconfirmed, and production
 implementation has not started. The Round 12 fail result is not rewritten as a
 pass.
 
+Round 13 review state: Strict reviewed SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`
+with CI run `33446911714` (7/7 success) and returned `review_status: fail`,
+P0=0, P1=9, P2=1. The data-only remediation keeps request-owned context and
+the immutable validated decision authoritative, propagates the three typed
+target reasons, and applies the shared root-or-path schema to every applicable
+configuration/request/source-root surface. This does not rewrite the failure:
+fresh exact-SHA Strict is pending, readiness is unconfirmed, and production
+implementation has not started.
+
 Issue #8 uses one canonical configuration value object and one canonical
 snapshot request projection.  The same values are copied into the domain
 manifest and the root run manifest; a consumer must not reconstruct Next

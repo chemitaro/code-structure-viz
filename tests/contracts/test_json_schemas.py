@@ -54,6 +54,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-semantic-v1",
         "next-source-plan-v1",
         "next-path-v1",
+        "next-root-or-path-v1",
         "next-run-context-v1",
         "next-trusted-type-environment-v1",
     }
@@ -81,6 +82,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-runtime-manifest-v1.schema.json",
         "next-source-plan-v1.schema.json",
         "next-path-v1.schema.json",
+        "next-root-or-path-v1.schema.json",
         "next-run-context-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
@@ -223,6 +225,7 @@ def _next_compatibility_descriptor() -> dict[str, object]:
             "relation": 1,
             "fact": 1,
             "boundary": 1,
+            "identifier_unicode": "ecma-unicode-15.0",
         },
         "semantic_profile_id": "next-trusted-profile-v1",
         "compatibility_id": "a" * 64,
@@ -452,7 +455,7 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
             "paths": {},
         },
     }
-    semantic = {
+    semantic: dict[str, Any] = {
         "type": "semantic_snapshot",
         "schema": "code-structure-viz.semantic/v1",
         "domain": "next",
@@ -496,7 +499,7 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
     with pytest.raises(ValidationError):
         semantic_validator.validate({**semantic, "absolute_path": "/private/secret"})
 
-    domain = {
+    domain: dict[str, Any] = {
         "domain": "next",
         "status": "complete",
         "payload_available": True,
@@ -576,16 +579,109 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
     with pytest.raises(ValidationError):
         domain_validator.validate({**domain, "incomplete_kind": "partial_safe"})
 
+    # ``.`` is the explicit project/source-root sentinel.  The same shared
+    # root-or-path schema must accept it through every nested surface that
+    # carries SourceAcquisitionPlan/Config/Request/Semantic project roots.
+    root_semantic = deepcopy(semantic)
+    root_semantic["projects"][0]["source_roots"] = ["."]
+    root_semantic["request"]["projects"][0]["source_roots"] = ["."]
+    root_semantic["request"]["source_plan"]["projects"][0]["source_roots"] = ["."]
+    semantic_validator.validate(root_semantic)
+    root_domain = deepcopy(domain)
+    for projection in (
+        root_domain["projects"],
+        root_domain["request"]["projects"],
+        root_domain["config"]["projects"],
+        root_domain["config"]["source_plan"]["projects"],
+    ):
+        projection[0]["source_roots"] = ["."]
+    domain_validator.validate(root_domain)
+    for validator, value in (
+        (semantic_validator, root_semantic),
+        (domain_validator, root_domain),
+    ):
+        invalid_root = deepcopy(value)
+        if validator is semantic_validator:
+            surfaces: tuple[Any, ...] = (
+                invalid_root["projects"],
+                invalid_root["request"]["projects"],
+                invalid_root["request"]["source_plan"]["projects"],
+            )
+        else:
+            surfaces = (
+                invalid_root["projects"],
+                invalid_root["request"]["projects"],
+                invalid_root["config"]["projects"],
+                invalid_root["config"]["source_plan"]["projects"],
+            )
+        for projection in surfaces:
+            projection[0]["source_roots"] = ["./src"]
+        with pytest.raises(ValidationError):
+            validator.validate(invalid_root)
+
+    config_validator = _validator("next-config-v1.schema.json")
+    root_config = deepcopy(domain["config"])
+    root_config["projects"][0]["source_roots"] = ["."]
+    root_config["source_plan"]["projects"][0]["source_roots"] = ["."]
+    config_validator.validate(root_config)
+    source_plan_validator = _validator("next-source-plan-v1.schema.json")
+    root_source_plan = deepcopy(domain["config"]["source_plan"])
+    root_source_plan["projects"][0]["source_roots"] = ["."]
+    source_plan_validator.validate(root_source_plan)
+
+    adapter_request_validator = _validator("next-adapter-request-v1.schema.json")
+    adapter_project = _next_project()
+    adapter_project["source_roots"] = ["."]
+    adapter_request: dict[str, Any] = {
+        "schema": "code-structure-viz.next-adapter-request/v1",
+        "protocol": "code-structure-viz.next-adapter/v1",
+        "request_id": "a" * 64,
+        "adapter_version": "1.0.0",
+        "trusted_type_environment": {
+            "schema": "code-structure-viz.next-trusted-types/v1",
+            "environment_version": "1",
+            "semantic_profile_id": "next-trusted-profile-v1",
+            "sha256": "7" * 64,
+        },
+        "projects": [adapter_project],
+        "files": [],
+        "targets": [],
+        "limits": _next_limits(),
+        "run_context": {
+            "requested_formats": ["semantic-json"],
+            "budget_requested": None,
+            "budget_resolved": 500,
+            "budget_source": "builtin",
+            "stdout_selector": "next:semantic-json",
+        },
+    }
+    adapter_request_validator.validate(adapter_request)
+    for validator, value in (
+        (config_validator, root_config),
+        (source_plan_validator, root_source_plan),
+        (adapter_request_validator, adapter_request),
+    ):
+        invalid_root = deepcopy(value)
+        project_paths = (
+            (invalid_root["projects"], invalid_root["source_plan"]["projects"])
+            if validator is config_validator
+            else (invalid_root["projects"],)
+        )
+        for projects in project_paths:
+            projects[0]["source_roots"] = ["./src"]
+        with pytest.raises(ValidationError):
+            validator.validate(invalid_root)
+
     for validator, value in (
         (semantic_validator, semantic),
         (domain_validator, domain),
     ):
         for length in (40, 64):
-            candidate = cast(dict[str, Any], deepcopy(value))
+            candidate = deepcopy(value)
             candidate["source"]["head_commit"] = "a" * length
             validator.validate(candidate)
         for length in (39, 41, 63, 65):
-            candidate = cast(dict[str, Any], deepcopy(value))
+            candidate = deepcopy(value)
             candidate["source"]["head_commit"] = "a" * length
             with pytest.raises(ValidationError):
                 validator.validate(candidate)

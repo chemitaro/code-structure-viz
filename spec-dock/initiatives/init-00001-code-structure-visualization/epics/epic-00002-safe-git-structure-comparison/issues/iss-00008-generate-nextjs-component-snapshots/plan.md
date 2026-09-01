@@ -175,6 +175,31 @@ adapter/CLIの`src/**`実装を開始しない。
 
 | Plan ID | implementation/verification step | Design trace |
 | --- | --- | --- |
+### Round 13 review state and remediation gate
+
+Round 13 Strict は対象SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`、CI run `33446911714`
+（7/7 success）で `review_status: fail`、P0=0、P1=9、P2=1だった。証拠は
+`artifacts/20260901t040000z-disc-strict-spec-review-round-13.md` に固定し、failをpassへ書き換えない。
+data-only契約のfocused/full gateが通っても、fresh exact-SHA Strictは未実行・未通過、readinessは
+未確定、production adapter/CLIは未着手である。
+
+Round 13のproduction実装前チェックリスト:
+
+1. full semantic六collection/PlantUML publicationを一つのimmutable validated decisionから生成し、
+   schema-validなorder/payload mutation、artifact hash、root descriptor mutationを拒否する。
+2. proof-base（IDs/refs/order、causal edge、export-owner join、target completeness）をtyped target
+   routingより先に検証し、`missing`/`component_only`/`duplicate`をresponse→diagnostic→domain→root→
+   stdoutへ保持する。
+3. double alias、empty/multi star（default除外）、cycle/conflictを別whole-run vectorsとして
+   `CSV-NEXT-EXPORT-001`、unavailable、exit 3まで通す。re-export joinは全observation/raw edgeを
+   original/exported name、syntax identity、byte span込みで一対一消費する。
+4. IdentifierName表をUnicode 15.0.0へ固定し、Other_ID_Start/ContinueとU+00B7を含め、profile version
+   をcompatibility/run-fingerprint preimageへ含める。shared root-or-path schemaは全適用面でroot `.`を
+   許可し、raw response `max_stdout_bytes`はdecode/materialize前に16 MiB境界を検査する。
+5. P2-1のHTML重複項目を除き、artifactへ対象SHA、CI、P0/P1/P2 fail counts、fresh Strict pending/readiness
+   unconfirmed/product absentを記録する。これらを満たしfresh StrictがP0/P1=0になるまで I05-PLAN-002以降の
+   production implementationへ進まない。
+
 | I05-PLAN-000 | implementation判断を残さないfield-level identity/source/protocol/type/taint/public schema/config/package contractをcanonical Designへ固定する。 | I05-DES-001〜007 |
 | I05-PLAN-001 | identity/export、project/target、protocol、type IR、relations/boundary、outcome/publication、TrustedTypeEnvironment、packaging/regressionのI05-AT-001〜011 fixtures/schemaを先に固定する。 | I05-DES-001〜007 |
 | I05-PLAN-008 | actual schema/docs/catalog/golden/mutation fixtureを含むclean pushed exact SHAでChatGPT Use Strictを再実行し、P0/P1=0をproduction implementation gateとする。 | I05-DES-001〜007 |

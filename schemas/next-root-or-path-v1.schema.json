@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-root-or-path-v1",
+  "title": "CodeStructureViz canonical root-or-path value v1",
+  "description": "The shared path-bearing value used for project and source roots. The root sentinel is the single POSIX value '.', while all other values use next-path-v1. The reference validator additionally enforces NFC and the inclusive 4096 UTF-8-byte bound.",
+  "additionalProperties": false,
+  "anyOf": [
+    {"const": "."},
+    {"$ref": "urn:code-structure-viz:schema:next-path-v1"}
+  ]
+}

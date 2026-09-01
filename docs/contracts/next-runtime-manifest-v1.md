@@ -8,6 +8,14 @@ locally represented; fresh exact-SHA Strict is pending, readiness is
 unconfirmed, and production implementation has not started. The fail result is
 not rewritten as a pass.
 
+Round 13 review state: Strict reviewed SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`
+with CI run `33446911714` (7/7 success) and returned `review_status: fail`,
+P0=0, P1=9, P2=1. The local publication checks bind semantic and PlantUML
+bytes, artifact hashes, and root descriptors to the same validated model and
+reject schema-valid order or payload substitutions. The historical fail is not
+rewritten: fresh exact-SHA Strict is pending, readiness is unconfirmed, and
+production implementation has not started.
+
 `schemas/next-runtime-manifest-v1.schema.json` is the checked-in compatibility
 unit inventory. `members` are sorted by safe wheel-relative path and unique;
 `licenses` are sorted by `(ecosystem,name,version,license_id)` and unique.

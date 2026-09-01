@@ -107,7 +107,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["target_key", "status", "record_ids"],
-      "properties": {"target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"}, "status": {"enum": ["resolved", "failed"]}, "record_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"}}}
+      "properties": {"target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"}, "status": {"enum": ["resolved", "failed"]}, "record_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"}}, "reason": {"enum": ["missing", "component_only", "duplicate"]}}
     },
     "export_resolution_witness": {
       "type": "object",
@@ -126,10 +126,13 @@
     "export_reexport_witness": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["owner_module_id", "owner_file_path", "syntax_identity", "source_specifier", "imported_name", "original_exported_name", "exported_name", "resolved_source_module_id", "expanded_exported_name", "target_declaration_id", "resolution", "diagnostic"],
+      "required": ["owner_module_id", "owner_file_path", "byte_start", "byte_end", "token_identity", "syntax_identity", "source_specifier", "imported_name", "original_exported_name", "exported_name", "resolved_source_module_id", "expanded_exported_name", "target_declaration_id", "resolution", "diagnostic"],
       "properties": {
         "owner_module_id": {"type": "string", "pattern": "^next:module:[0-9a-f]{64}$"},
         "owner_file_path": {"$ref": "urn:code-structure-viz:schema:next-path-v1"},
+        "byte_start": {"type": "integer", "minimum": 0},
+        "byte_end": {"type": "integer", "minimum": 1},
+        "token_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "syntax_identity": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
         "source_specifier": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
         "imported_name": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"const": "*"}]},

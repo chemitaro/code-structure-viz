@@ -63,6 +63,105 @@
     {
       "path": "src/ExportTypes.ts",
       "exports": []
+    },
+    {
+      "path": "src/GraphAliasBarrel.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphAliasButton.tsx",
+      "exports": [
+        {
+          "name": "Button",
+          "resolution": "component",
+          "target_declaration_key": "Button"
+        }
+      ]
+    },
+    {
+      "path": "src/GraphAliasIndex.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphConflictIndex.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphCycleA.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphCycleB.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphDefaultIndex.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphDefaultSource.ts",
+      "exports": [
+        {
+          "name": "Visible",
+          "resolution": "value",
+          "target_declaration_key": null
+        },
+        {
+          "name": "default",
+          "resolution": "value",
+          "target_declaration_key": null
+        }
+      ]
+    },
+    {
+      "path": "src/GraphEmpty.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphEmptyIndex.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphOne.ts",
+      "exports": [
+        {
+          "name": "Shared",
+          "resolution": "component",
+          "target_declaration_key": "Shared"
+        }
+      ]
+    },
+    {
+      "path": "src/GraphSameIndex.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphSameSource.ts",
+      "exports": [
+        {
+          "name": "Foo",
+          "resolution": "component",
+          "target_declaration_key": "Foo"
+        }
+      ]
+    },
+    {
+      "path": "src/GraphStarCycleA.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphStarCycleB.ts",
+      "exports": []
+    },
+    {
+      "path": "src/GraphTwo.ts",
+      "exports": [
+        {
+          "name": "Shared",
+          "resolution": "component",
+          "target_declaration_key": "Shared"
+        }
+      ]
     }
   ],
   "edges": [
@@ -70,31 +169,163 @@
       "owner_file_path": "src/Button.tsx",
       "source_specifier": "./Other",
       "imported_name": "*",
-      "exported_name": "*"
+      "exported_name": "*",
+      "syntax_identity": "export:src/Button.tsx:92:116:export_all:*",
+      "byte_start": 92,
+      "byte_end": 116
     },
     {
       "owner_file_path": "src/ExportReexport.ts",
       "source_specifier": "./ExportGrammar",
       "imported_name": "*",
-      "exported_name": "*"
+      "exported_name": "*",
+      "syntax_identity": "export:src/ExportReexport.ts:81:113:export_all:*",
+      "byte_start": 81,
+      "byte_end": 113
     },
     {
       "owner_file_path": "src/ExportReexport.ts",
       "source_specifier": "./ExportGrammar",
       "imported_name": "Props",
-      "exported_name": "PublicProps"
+      "exported_name": "PublicProps",
+      "syntax_identity": "export:src/ExportReexport.ts:29:54:reexport:PublicProps",
+      "byte_start": 29,
+      "byte_end": 54
     },
     {
       "owner_file_path": "src/ExportReexport.ts",
       "source_specifier": "./ExportGrammar",
       "imported_name": "default",
-      "exported_name": "default"
+      "exported_name": "default",
+      "syntax_identity": "export:src/ExportReexport.ts:9:27:reexport:default",
+      "byte_start": 9,
+      "byte_end": 27
     },
     {
       "owner_file_path": "src/ExportTypes.ts",
       "source_specifier": "./ExportGrammar",
       "imported_name": "Props",
-      "exported_name": "PublicProps"
+      "exported_name": "PublicProps",
+      "syntax_identity": "export:src/ExportTypes.ts:14:34:reexport:PublicProps",
+      "byte_start": 14,
+      "byte_end": 34
+    },
+    {
+      "owner_file_path": "src/GraphAliasBarrel.ts",
+      "source_specifier": "./GraphAliasButton",
+      "imported_name": "Button",
+      "exported_name": "ButtonAlias",
+      "syntax_identity": "export:src/GraphAliasBarrel.ts:9:30:reexport:ButtonAlias",
+      "byte_start": 9,
+      "byte_end": 30
+    },
+    {
+      "owner_file_path": "src/GraphAliasIndex.ts",
+      "source_specifier": "./GraphAliasBarrel",
+      "imported_name": "ButtonAlias",
+      "exported_name": "FinalButton",
+      "syntax_identity": "export:src/GraphAliasIndex.ts:9:35:reexport:FinalButton",
+      "byte_start": 9,
+      "byte_end": 35
+    },
+    {
+      "owner_file_path": "src/GraphConflictIndex.ts",
+      "source_specifier": "./GraphOne",
+      "imported_name": "*",
+      "exported_name": "*",
+      "syntax_identity": "export:src/GraphConflictIndex.ts:0:27:export_all:*",
+      "byte_start": 0,
+      "byte_end": 27
+    },
+    {
+      "owner_file_path": "src/GraphConflictIndex.ts",
+      "source_specifier": "./GraphTwo",
+      "imported_name": "*",
+      "exported_name": "*",
+      "syntax_identity": "export:src/GraphConflictIndex.ts:28:55:export_all:*",
+      "byte_start": 28,
+      "byte_end": 55
+    },
+    {
+      "owner_file_path": "src/GraphCycleA.ts",
+      "source_specifier": "./GraphCycleB",
+      "imported_name": "Loop",
+      "exported_name": "Loop",
+      "syntax_identity": "export:src/GraphCycleA.ts:9:13:reexport:Loop",
+      "byte_start": 9,
+      "byte_end": 13
+    },
+    {
+      "owner_file_path": "src/GraphCycleB.ts",
+      "source_specifier": "./GraphCycleA",
+      "imported_name": "Loop",
+      "exported_name": "Loop",
+      "syntax_identity": "export:src/GraphCycleB.ts:9:13:reexport:Loop",
+      "byte_start": 9,
+      "byte_end": 13
+    },
+    {
+      "owner_file_path": "src/GraphDefaultIndex.ts",
+      "source_specifier": "./GraphDefaultSource",
+      "imported_name": "*",
+      "exported_name": "*",
+      "syntax_identity": "export:src/GraphDefaultIndex.ts:0:37:export_all:*",
+      "byte_start": 0,
+      "byte_end": 37
+    },
+    {
+      "owner_file_path": "src/GraphEmptyIndex.ts",
+      "source_specifier": "./GraphEmpty",
+      "imported_name": "*",
+      "exported_name": "*",
+      "syntax_identity": "export:src/GraphEmptyIndex.ts:0:29:export_all:*",
+      "byte_start": 0,
+      "byte_end": 29
+    },
+    {
+      "owner_file_path": "src/GraphSameIndex.ts",
+      "source_specifier": "./GraphSameSource",
+      "imported_name": "Foo",
+      "exported_name": "A",
+      "syntax_identity": "export:src/GraphSameIndex.ts:65:73:reexport:A",
+      "byte_start": 65,
+      "byte_end": 73
+    },
+    {
+      "owner_file_path": "src/GraphSameIndex.ts",
+      "source_specifier": "./GraphSameSource",
+      "imported_name": "Foo",
+      "exported_name": "A",
+      "syntax_identity": "export:src/GraphSameIndex.ts:9:17:reexport:A",
+      "byte_start": 9,
+      "byte_end": 17
+    },
+    {
+      "owner_file_path": "src/GraphSameIndex.ts",
+      "source_specifier": "./GraphSameSource",
+      "imported_name": "Foo",
+      "exported_name": "B",
+      "syntax_identity": "export:src/GraphSameIndex.ts:19:27:reexport:B",
+      "byte_start": 19,
+      "byte_end": 27
+    },
+    {
+      "owner_file_path": "src/GraphStarCycleA.ts",
+      "source_specifier": "./GraphStarCycleB",
+      "imported_name": "*",
+      "exported_name": "*",
+      "syntax_identity": "export:src/GraphStarCycleA.ts:0:34:export_all:*",
+      "byte_start": 0,
+      "byte_end": 34
+    },
+    {
+      "owner_file_path": "src/GraphStarCycleB.ts",
+      "source_specifier": "./GraphStarCycleA",
+      "imported_name": "*",
+      "exported_name": "*",
+      "syntax_identity": "export:src/GraphStarCycleB.ts:0:34:export_all:*",
+      "byte_start": 0,
+      "byte_end": 34
     }
   ]
 }
