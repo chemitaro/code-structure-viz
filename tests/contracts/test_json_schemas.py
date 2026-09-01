@@ -142,6 +142,8 @@ def _next_limits(*, max_entities: int = 500) -> dict[str, int]:
         "max_collection_items": 20000,
         "max_model_records": 10000,
         "max_stdout_bytes": 16777216,
+        "max_adapter_response_bytes": 16777216,
+        "max_selected_stdout_bytes": 16777216,
         "max_stderr_bytes": 65536,
         "max_adapter_stderr_capture_bytes": 65536,
         "max_adapter_stdout_capture_bytes": 16777216,

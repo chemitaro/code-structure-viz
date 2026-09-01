@@ -399,3 +399,69 @@ summary, `manifest` returns the exact committed manifest bytes, and
 unavailable result. Fatal and interrupt runs have no manifest and cannot be
 reinterpreted as a domain result; usage exits with code 2, no manifest/domain,
 and an empty stdout stream.
+
+## Round 15 decision and provenance closure
+
+Every Next outcome is one member of the closed `NextRunDecision` union:
+`ValidatedResponseDecision`, `PreResponseFailureDecision`, or
+`NotApplicableDecision`. Each member carries one immutable
+`NextPublicationContext` containing the sealed SourceView descriptor/fingerprint,
+the FinalSourceAcquisitionPlan descriptor/digest/seal identity, public Next
+config/request (when a request exists), complete compatibility descriptor and
+identity versions, actual toolchain/trusted environment,
+`NextRunContext`, and the run-fingerprint preimage. Domain, root manifest,
+stdout, stderr, and artifact writers consume this decision only; they do not
+rebuild a request or default config from a fixture. When an early failure
+cannot produce an adapter request, `NextDecisionContext` carries the known
+run identity, closed failure kind/stage/code, known or null counts, outcome,
+payload flag, and exit code.
+
+`ValidatedResponseDecision` deep-copies and checks the request at construction:
+schema and request ID, exact run-context and target equality, gate resolved
+limits, allowed pre-budget transition, and canonical target/export failure
+rows. Mutating the caller's nested request, model, proof, or publication
+context after construction cannot alter the decision.
+
+The response limit authority is derived from actual wire collections:
+`published_model_records` is the sum of model collection items;
+`proof_only_records` counts only proof payload records absent from the model;
+`discovered_records` is their sum. Submitted summary counts and the former
+`proof_records or model_records` shortcut are not authoritative. Raw bytes are
+checked before decode, aggregate JSON-array items before materialization, and
+the model-record limit after structural response validation. The three named
+byte boundaries (`max_adapter_stdout_capture_bytes`,
+`max_adapter_response_bytes`, `max_selected_stdout_bytes`) have separate
+exact/+1 outcomes; a selected-artifact copy failure does not rewrite the
+validated semantic outcome.
+
+Target-unavailable stdout is restricted to `next:semantic-json` and
+`next:plantuml`. It carries at most one canonical sorted row per target from
+the closed reasons `missing`, `component_only`, `duplicate`, `out_of_scope`,
+`non_program`, `control_context`, `project_ambiguity`, and `selected_taint`.
+Available, not-applicable, generic unavailable, fatal, and interrupted
+branches carry neither this array nor the legacy single `reason`.
+
+The source contract is `SourceDiscoveryIntent` → two-phase single-read → final
+drift check → one `seal_source_acquisition` operation producing both plan and
+view. A caller cannot inject a plan-only or view-only authority, and no
+filesystem read occurs after the seal. Role/effective-role, local-extends and
+control closure, file digest/size, duplicate-read, and post-drift mismatches
+are fail-closed.
+
+IdentifierName is pinned to the checked-in Unicode 15.0.0 table and used by
+context-specific `is_identifier_name`, `is_binding_identifier`, and
+`is_declaration_key` predicates. The table includes Other_ID sets, U+00B7,
+and Join_Control; reserved words are rejected only in binding contexts. The
+full scalar-range classification bitstream has a known-answer SHA-256, so
+host `unicodedata.category()` changes cannot alter semantics. The same rules
+cover component declarations, import/export names, external/trusted
+references, JSX segments, and re-export witnesses.
+
+`BoundaryRolePropagation/v1` is the sole role authority. A client-entry seed
+itself is not a `client_dependency`; only static value-closure targets are.
+A client application seed is not a `server_candidate`, and server traversal
+stops before a client entry. A dual role requires two distinct closures.
+Roles are recomputed from facts, router context, and static value edges and
+must exactly equal submitted model roles. All public JSON and stdout-result
+bytes use the existing lexicographic canonical encoder (`sort_keys=True`,
+NFC, UTF-8, LF), including `target_failures`.

@@ -61,3 +61,25 @@ payload-unavailable protocol failure; no semantic or PlantUML artifact is
 published. Known-answer mutations cover local extends, control-path identity,
 file-role assignment, project order, single-read counts, drift rejection, and
 the atomic plan/view seal.
+
+## Round 15 single-seal authority
+
+The only supported acquisition entry point is
+`seal_source_acquisition(intent, reader, inventory)`. It accepts a
+`SourceDiscoveryIntent`, not a caller-supplied final plan or a caller-supplied
+SourceView. The function reads the union of discovery and final paths once,
+checks the before/after inventory revision, derives the final role map and
+local-extends closure from the frozen bytes/config, computes both descriptors,
+and invokes exactly one seal operation. The returned
+`SourceAcquisitionSeal` is the sole owner of `final_plan`, `source_view`, both
+digests, and `seal_id`.
+
+The negative contract is executable: a final-plan keyword is rejected, a
+plan-only or view-only reconstruction is rejected, duplicate paths within a
+phase are rejected, post-drift revisions are rejected, and inventory
+file-digest/size, role/effective-role, control-path, or extends-closure
+mismatches are rejected. Once sealed, an instrumented reader fails every
+subsequent filesystem read. Cross-phase overlap is allowed only because the
+path is read once and shared by both phases. Domain and publication contexts
+carry the resulting descriptors/fingerprints; downstream writers never reopen
+the repository.

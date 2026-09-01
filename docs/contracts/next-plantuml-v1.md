@@ -134,3 +134,22 @@ external literal dynamic import, external JSX render, member facets, and
 malicious quote/newline/
 markup labels. The exact-byte golden and parser must agree before a renderer
 change can be accepted.
+
+## Round 15 authority and boundary propagation
+
+PlantUML is rendered from the same immutable `NextRunDecision` and validated
+model as semantic JSON. The renderer does not rebuild roles, source plan,
+limits, or target status. `BoundaryRolePropagation/v1` is recomputed from
+client/router facts and static value edges: a client-entry seed itself is not
+`client_dependency`, its closure targets are; a client app seed is not
+`server_candidate`; server traversal stops before a client entry; and dual
+role requires two distinct closures. The submitted model roles must equal this
+independent result.
+
+For target-related unavailable results, only `next:semantic-json` and
+`next:plantuml` may carry the canonical sorted target-failure rows. The reason
+enum is `missing`, `component_only`, `duplicate`, `out_of_scope`,
+`non_program`, `control_context`, `project_ambiguity`, or `selected_taint`,
+with exactly one row per target. All bytes use the existing sorted-key,
+NFC-normalized UTF-8 JSON/LF contract; PlantUML aliases and labels remain
+deterministic and contain no manual stdout field-order variant.

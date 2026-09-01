@@ -68,3 +68,15 @@ separators, and no floating-point values. The data-only vectors in
 `tests/contracts/test_next_contracts.py` include known-answer and traversal,
 duplicate, and digest-negative cases. The existing Python/SQLAlchemy runtime
 inventory remains outside this Next section and is not rewritten by Issue #8.
+
+## Round 15 provenance boundary
+
+The runtime manifest is one input to the immutable `NextPublicationContext`,
+not an independent publication authority. The context records the actual
+toolchain/trusted-environment descriptor and its digest together with the
+sealed source-view and source-plan identities. A pre-response failure may
+carry a null or unavailable toolchain version, but it retains the same closed
+failure kind, diagnostic, known/null counts, and exit behavior; a writer must
+not substitute a local default runtime inventory. The Unicode 15.0.0 table
+version and exact table digest are part of this trusted profile and its
+compatibility/run-fingerprint preimages.

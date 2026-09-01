@@ -218,7 +218,8 @@ Round 13 Strict は対象SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`、CI run
   含むbijective joinを要求する。IdentifierName表はUnicode 15.0.0へ固定し、Other_ID setsとU+00B7を
   含め、そのversionをcompatibility/run-fingerprintへ入れる。
 - **Shared boundaries:** root-or-path schemaを全path surfaceへ適用し、root `.`を文脈限定で受理する。
-  raw responseの`max_stdout_bytes`はdecode前に検査し、16 MiB+1はmaterializationもpartial writeも行わない。
+  private adapter responseの`max_adapter_response_bytes`はdecode前に検査し、16 MiB+1はmaterializationもpartial
+  writeも行わない。`max_stdout_bytes`は公開selected stdoutのv1互換aliasである。
 - **Evidence hygiene:** Round 13の対象SHA/CI/fail countsとP1-1..P1-9/P2-1をartifactへ記録し、HTMLの
   重複項目を除く。local gate successをStrict pass、readiness、またはproduct implementationの開始と解釈しない。
 
@@ -417,8 +418,8 @@ downstreamはsource→dependency/render target、upstreamはreverse。depth trav
 
 - direct `client_entry`: exact directive prologue。
 - direct `router_context`: `app_ui`、`pages_ui`、`pages_api`、`app_route_handler`、`none`。
-- derived `client_dependency`: client_entryからinternal static value import/re-exportで到達。
-- derived `server_candidate`: closed App Router UI seedからclient entry直前まで到達。runtime server claimではない。
+- derived `client_dependency`: direct client_entry factをseedにしたinternal static value closureのtargetとして到達。seed自身はこのroleに含めない。
+- derived `server_candidate`: closed App Router UI seedからclient entry直前まで到達。seedがclient entryなら含めず停止し、runtime server claimではない。
 - `unknown`: positive evidenceなし。Pages Routerも自動server扱いしない。
 - 同一Moduleのclient_dependency/server_candidate dual roleを許す。type-only/dynamic/JSX/external/unresolved edgeはpropagationに使わない。
 - boundary crossingはunderlying value edgeの`boundary_effect` facetでduplicate traversal edgeを作らない。Issue #9はprimitive fact/edgeをprimary diffにする。
@@ -1034,7 +1035,7 @@ JS merge precedenceはJSDoc type、parameter/destructuring inference、`propType
 - `dynamic(() => import("./literal"))`はtrusted `next/dynamic`でdefault。`.then(m => m.Name)`のdirect property一件だけnamedを許す。optionsはobject literalなら無視、他はunknown。alias/namespaceはtrusted symbol identityが同じ場合だけ。
 - logical `&&`はright、`||`/`??`は両operand、conditionalは両branchを追い、conditionは追わない。
 - arrayはelements、`map/flatMap`はtrusted Array/ReadonlyArray receiver + inline callback一件のreturnだけ。任意method/helperは追わない。
-- app UI seedがdirect client entryなら`client_entry`と`client_dependency`を持ち`server_candidate`にはしない。server traversalはseed時点で停止。
+- app UI seedがdirect client entryなら`client_entry`だけを持ち、`client_dependency`にも`server_candidate`にも加えない。client dependencyはvalue closureのtargetだけ、server traversalはseed時点で停止する。
 
 ### Partial-safe taint proof
 
@@ -1253,3 +1254,73 @@ Output --> Agent : manifest 付き Artifact
 ```
 
 Next固有semanticsはfirst-party TypeScript adapterが所有する。source bytes、process trust、public validation/rendering、outcome/publicationはPython coreが所有し、両者はversioned private JSONで接続する。
+
+## Round 15 remediation design: one decision, one provenance context
+
+Round 15の設計固定点は、`NextRunDecision`を唯一の出版入力にすることである。
+`ValidatedResponseDecision`、`PreResponseFailureDecision`、`NotApplicableDecision`の全variantは
+同じ`NextPublicationContext`を保持する。contextは、(a) final read後にsealedされたSourceViewのdescriptorと
+fingerprint、(b)同じseal operationで得たFinalSourceAcquisitionPlanのdescriptor/digest/seal identity、
+(c) public Next config/request、(d) semantic compatibility descriptor/identity versions、(e)実際に検証した
+toolchain/trusted environment、(f) `NextRunContext`、(g) run-fingerprint preimageを含む。projection writerは
+fixture/default/request再構成を行わず、decisionと
+そのcontextを参照する。requestを作れない失敗はrequest-independent `NextDecisionContext`（run identity、
+targetsが既知ならtargets、resolved limitsが既知ならlimits、closed stage/code/failure kind、known/null
+counts、outcome、payload flag、exit）で同じshapeを維持する。
+
+```plantuml
+@startuml
+title Round 15: NextRunDecision を唯一の出版 authority にする
+left to right direction
+component "SourceDiscoveryIntent" as Intent
+component "single-read + drift check" as Read
+component "atomic seal\nSourceView + FinalSourceAcquisitionPlan" as Seal
+component "bounded response boundary" as Boundary
+component "NextRunDecision union" as Decision
+component "NextPublicationContext" as Context
+component "domain / root manifest / stdout / stderr / artifacts" as Surfaces
+Intent --> Read
+Read --> Seal
+Seal --> Context
+Boundary --> Decision
+Context --> Decision
+Decision --> Surfaces : decision-only projections
+note right of Decision
+ValidatedResponseDecision
+PreResponseFailureDecision
+NotApplicableDecision
+end note
+@enduml
+```
+
+Response boundaryの順序は、child stdout capture（count-before-retain）→完全private response byte cap
+`max_adapter_response_bytes`→bounded UTF-8/JSON decode（duplicate/nesting/string/array）→schema/proof/reference
+validation→EntityBudgetGate→publication-copy cap `max_selected_stdout_bytes`である。raw→aggregate→model limitの
+precedenceを一つのclassifierにし、model countは実collection合計、proof-only payloadだけの追加、discoveredは
+その和とする。`max_model_records=10,000`はschema-valid generated envelopeでexact/+1を検査し、proofのID-only
+observationが配列itemとして存在しても、aggregate 100,000とresponse 16 MiBの内側（実wire）で到達することを
+確認する。aggregate+1はschema-valid envelopeを実bytes化してbounded decoderが検出し、raw+1は同じ全runで
+decode前に検出する。
+
+failure taxonomyはcatalogのref permissionと一対一に対応する。`CSV-NEXT-SOURCE-001`はlocality proofのある
+partial-safe、隔離不能なsourceは`CSV-NEXT-SOURCE-003` payload-unavailable、意図的unsupportedはcompleteの
+`CSV-NEXT-UNSUPPORTED-001`、adapter proofの`over_budget`はprotocol rejection、entity budget超過はPythonの
+`CSV-NEXT-LIMIT-005`だけが所有する。target unavailableはclosed eight-reason enumをtargetごとに一件、
+canonical sortedに保持し、Next二selectorのunavailable branchだけへ出す。
+
+Source acquisitionはcallerがfinal plan/path/viewを注入できない。Intentからcontrol/extends/role intentを
+読み、final snapshotを一度だけ取得し、revision drift、file digest/size、role/effective role、extends closure
+を照合してから一つのsealでplan/viewを生成する。seal後のfilesystem readは不変条件違反であり、instrumented
+readerでduplicate read、post-drift read、plan-only/view-only、descriptor mismatchをnegative testする。
+
+IdentifierNameはUnicode 15.0.0のchecked-in interval/tableを全contextで共有し、
+`is_identifier_name`（一般名）、`is_binding_identifier`（reserved除外）、`is_declaration_key`（property/export
+key）へ分ける。Other_ID sets、U+00B7、Join_Control、NFC、reserved word、JSX/import/export/re-export witness
+の同一判定を使い、full Unicode scalar rangeのclassification bitstream digestをknown-answerとしてCIで固定する。
+BoundaryRolePropagation/v1はfacts/router/static value edgesだけから再計算する。client seed自身はdependencyに
+ならず、client closureのtargetだけがdependency、client app seedはserver candidateでなく、server traversalは
+client entryの直前で止める。別closureの結果のみdual roleとなり、submitted roleとexact compareする。
+
+stdoutは別order encoderを持たず、既存canonical JSON（sorted keys、NFC、UTF-8、LF）を唯一のbyte contractとする。
+target_failuresを含むunavailable resultも同じencoderでgolden化する。HTMLのresource limit説明は固定個数の断定を
+避け、schema/catalogが追加可能なdrift-resistant wordingにする。

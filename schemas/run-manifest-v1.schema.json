@@ -1369,6 +1369,7 @@
             "CSV-NEXT-PROTOCOL-001",
             "CSV-NEXT-SOURCE-001",
             "CSV-NEXT-SOURCE-002",
+            "CSV-NEXT-SOURCE-003",
             "CSV-NEXT-TARGET-001",
             "CSV-NEXT-TRUST-001",
             "CSV-NEXT-TRUST-002",
@@ -1389,6 +1390,7 @@
         "line": {"type": ["integer", "null"], "minimum": 1},
         "recoverable": {"type": "boolean"},
         "message": {"type": "string", "minLength": 1},
+        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]},
         "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
         "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
       },

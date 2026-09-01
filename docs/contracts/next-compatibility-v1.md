@@ -57,3 +57,30 @@ whitespace, and integer versions. The known-answer vector in
 identity or algorithm version changes the ID; changing only a Node or adapter
 patch version, source/config digest, or content-only environment digest does
 not. Issue #9 may compare snapshots only when this ID is exactly equal.
+
+## Round 15 semantic identity closure
+
+The checked-in Unicode table is the semantic source of truth for
+IdentifierName classification. Its exact byte digest is
+`c9336daa555ce98e93cbd48e6b91df22f50a221881bd10b3ed79cf9180297969`, and the
+algorithm version is `ecma-unicode-15.0`. The table includes Unicode 15.0.0
+ID_Start/ID_Continue plus Other_ID_Start, Other_ID_Continue (including
+U+00B7), and Join_Control. Context-specific binding/declaration-key checks
+share this data while applying reserved-word rules by context. The full
+scalar-range classification bitstream has a known-answer SHA-256 test and
+does not consult host `unicodedata.category()` or host UCD classification;
+shared NFC canonicalization remains an explicit transport rule.
+
+The table version and digest are part of the trusted semantic profile,
+compatibility preimage, and run-fingerprint preimage. A table or algorithm
+change therefore requires an explicit compatibility version change; changing
+only operational limits or a Node/adapter patch does not change the semantic
+compatibility ID.
+
+All semantic and publication projections also carry the immutable
+`NextPublicationContext` through their `NextRunDecision`. This context binds
+the sealed source-view/plan identity, resolved request/config, the complete
+compatibility descriptor and identity versions, toolchain, trusted
+environment, and run-fingerprint inputs, so an artifact cannot claim
+semantic compatibility while silently using a different source, identity, or
+trust profile.

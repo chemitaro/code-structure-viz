@@ -2,6 +2,7 @@ import base64
 import copy
 import hashlib
 import json
+import sys
 from itertools import combinations
 from typing import Any, cast
 
@@ -20,11 +21,14 @@ from tests.contracts.ecmascript_unicode_15_0 import (
 from tests.contracts.next_reference_validation import (
     COLLECTIONS,
     ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
+    ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
+    IDENTIFIER_CLASSIFICATION_SHA256,
     LIMIT_CONTRACTS,
     ROLE_ORDER,
     ROLE_PRECEDENCE,
     RUNTIME_PHYSICAL_TO_VIRTUAL,
     RUNTIME_REQUIRED_PATHS,
+    TARGET_FAILURE_REASONS,
     TRUSTED_PROFILE_CERTIFIED_SYMBOLS,
     TRUSTED_PROFILE_FILE_LICENSES,
     TRUSTED_PROFILE_FILE_SHA256,
@@ -35,11 +39,13 @@ from tests.contracts.next_reference_validation import (
     TRUSTED_PROFILE_SHADOWING_WITNESS,
     VALIDATOR_SCHEMA,
     InstrumentedSourceReader,
+    NextDecisionContext,
     NextRunContext,
     NextRunDecision,
     NextValidatedDecision,
     NotApplicableDecision,
     PreResponseFailureDecision,
+    SourceDiscoveryIntent,
     _assert_file_path,
     _assert_path,
     _derived_taint_fixed_point,
@@ -57,7 +63,10 @@ from tests.contracts.next_reference_validation import (
     capture_adapter_stderr,
     capture_adapter_stdout,
     classify_response_limit,
+    classify_source_failure,
+    copy_selected_stdout,
     count_array_items_before_materialization,
+    derive_boundary_roles,
     derive_pre_budget_outcome,
     derive_required_causal_edges,
     digest,
@@ -70,8 +79,11 @@ from tests.contracts.next_reference_validation import (
     expected_export_resolution_witness,
     export_failure_decision,
     export_reexport_failure_rows,
-    freeze_source_acquisition,
+    identifier_classification_digest,
     internal_entity_count,
+    is_binding_identifier,
+    is_declaration_key,
+    is_identifier_name,
     is_next_run_decision,
     join_reexport_observations_to_edges,
     load_export_census_fixture,
@@ -80,6 +92,7 @@ from tests.contracts.next_reference_validation import (
     load_export_graph_raw_fixture,
     model_record_budget_allowed,
     model_wire_record_count,
+    not_applicable_decision,
     pre_response_failure_decision,
     project_config_digest,
     recompute_compatibility_id,
@@ -93,6 +106,7 @@ from tests.contracts.next_reference_validation import (
     resolve_target_resolutions,
     response_boundary_decision,
     scan_export_syntax_census,
+    seal_source_acquisition,
     source_plan_descriptor,
     target_completeness_failure,
     validate_compatibility_descriptor,
@@ -528,7 +542,7 @@ def _model() -> dict[str, Any]:
         "path": "src/Button.tsx",
         "router_context": "app_ui",
         "client_entry": True,
-        "derived_roles": ["client_dependency"],
+        "derived_roles": [],
     }
     module_two = {
         "kind": "module",
@@ -537,7 +551,7 @@ def _model() -> dict[str, Any]:
         "path": "src/Card.tsx",
         "router_context": "none",
         "client_entry": False,
-        "derived_roles": [],
+        "derived_roles": ["client_dependency"],
     }
     component_one = {
         "kind": "component",
@@ -979,6 +993,8 @@ def _trim_to_card_module(model: dict[str, Any]) -> dict[str, Any]:
         if record["path"] in card_paths or record["path"].endswith("types.d.ts")
     ]
     model["modules"] = [record for record in model["modules"] if record["id"] in card_module_ids]
+    for module in model["modules"]:
+        module["derived_roles"] = []
     model["components"] = [
         record for record in model["components"] if record["id"] in card_component_ids
     ]
@@ -1409,7 +1425,7 @@ def _response(
                     "record_ids": row["record_ids"],
                     **(
                         {"reason": row["reason"]}
-                        if row.get("reason") in {"missing", "component_only", "duplicate"}
+                        if row.get("reason") in TARGET_FAILURE_REASONS
                         else {}
                     ),
                 }
@@ -1490,7 +1506,7 @@ def _public_diagnostic(
     }
     if reason is not None:
         assert code == "CSV-NEXT-TARGET-001"
-        assert reason in {"missing", "component_only", "duplicate"}
+        assert reason in TARGET_FAILURE_REASONS
         value["reason"] = reason
     return value
 
@@ -1545,7 +1561,7 @@ def _target_reason_for_domain(domain: dict[str, Any], target_key: str | None = N
             ),
             None,
         )
-    return reason if reason in {"missing", "component_only", "duplicate"} else None
+    return reason if reason in TARGET_FAILURE_REASONS else None
 
 
 def _target_failures_for_domain(domain: dict[str, Any]) -> list[dict[str, str]]:
@@ -1560,7 +1576,7 @@ def _target_failures_for_domain(domain: dict[str, Any]) -> list[dict[str, str]]:
             "reason": item["reason"],
         }
         for item in decision.target_failures
-        if item.get("reason") in {"missing", "component_only", "duplicate"}
+        if item.get("reason") in TARGET_FAILURE_REASONS
     ]
     return sorted(failures, key=canonical_json_bytes)
 
@@ -1749,7 +1765,7 @@ def _legacy_domain_fixture(
                 reason=(
                     target_reason_by_key.get(failed_target["target_key"])
                     if target_reason_by_key.get(failed_target["target_key"])
-                    in {"missing", "component_only", "duplicate"}
+                    in TARGET_FAILURE_REASONS
                     else None
                 ),
             )
@@ -1873,6 +1889,15 @@ def _legacy_domain_fixture(
         "artifact_paths": artifact_paths,
         "diagnostics": diagnostics,
     }
+    if validated_decision is not None:
+        sealed = validated_decision.publication_context
+        assert sealed is not None
+        value["source"]["fingerprint"] = sealed.source_view_fingerprint
+        value["source"]["file_count"] = sealed.source_view_descriptor["file_count"]
+        value["config"]["source_plan"] = copy.deepcopy(sealed.final_source_acquisition_plan)
+        value["config"]["source_plan_digest"] = sealed.source_plan_digest
+        value["request"]["source_plan"] = copy.deepcopy(sealed.final_source_acquisition_plan)
+        value["request"]["source_plan_digest"] = sealed.source_plan_digest
     if incomplete_kind is not None:
         value["incomplete_kind"] = incomplete_kind
     value["run_fingerprint"] = recompute_run_fingerprint(
@@ -1935,7 +1960,7 @@ def _legacy_domain_fixture(
             # project ambiguity, and a missing descendant program file) keep
             # the failure row reason-free while the diagnostic identifies the
             # rejected path.
-            if reason in {"missing", "component_only", "duplicate"}:
+            if reason in TARGET_FAILURE_REASONS:
                 row["reason"] = reason
         value["coverage"]["target_completeness"].append(row)
     if validated_decision is None:
@@ -1952,9 +1977,7 @@ def _legacy_domain_fixture(
             {
                 "target_key": row["target_key"],
                 **(
-                    {"reason": row["reason"]}
-                    if row.get("reason") in {"missing", "component_only", "duplicate"}
-                    else {}
+                    {"reason": row["reason"]} if row.get("reason") in TARGET_FAILURE_REASONS else {}
                 ),
             }
             for row in value["coverage"]["target_completeness"]
@@ -1983,6 +2006,12 @@ def _legacy_domain_fixture(
                 "stdout_selector": run_context["stdout_selector"],
                 "artifact_paths": value["artifact_paths"],
             },
+            request=_request(
+                model=model,
+                targets=target_values,
+                limits=limits,
+                run_context=run_context,
+            ),
             targets=tuple(target_values),
             target_failures=target_evidence,
             export_failures=export_evidence,
@@ -1994,84 +2023,224 @@ def _legacy_domain_fixture(
     )
 
 
-def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
-    """Project one closed run decision into the domain publication boundary.
+def _decision_model_shell(decision: NextRunDecision) -> dict[str, Any]:
+    """Build only the non-authoritative empty model needed by no-payload runs."""
 
-    The older fixture builder below remains available for status-vector tests,
-    but it is deliberately not a second authority.  New pre-response vectors
-    enter here with the immutable decision object; the structural fixture is
-    used only to supply the schema-required manifest shape and is overwritten
-    with the decision's diagnostic, context, and zero-publication outcome.
+    if isinstance(decision, NextValidatedDecision):
+        return copy.deepcopy(decision.validated_model)
+    publication_context = decision.publication_context
+    assert publication_context is not None
+    adapter_request = publication_context.public_next_request
+    projects = copy.deepcopy(adapter_request["projects"]) if adapter_request is not None else []
+    files = (
+        [
+            {key: copy.deepcopy(file_record[key]) for key in file_record if key != "content_base64"}
+            for file_record in adapter_request["files"]
+        ]
+        if adapter_request is not None
+        else []
+    )
+    model: dict[str, Any] = {
+        "schema": "code-structure-viz.next-model/v1",
+        "projects": projects,
+        "files": files,
+        "modules": [],
+        "components": [],
+        "members": [],
+        "relations": [],
+        "facts": [],
+        "coverage": _next_coverage(),
+        "diagnostics": [],
+    }
+    _refresh_model_counts(model)
+    return model
+
+
+def _decision_diagnostics(decision: NextRunDecision, model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project diagnostics from the decision, never from a fixture status flag."""
+
+    if isinstance(decision, (PreResponseFailureDecision, NotApplicableDecision)):
+        return [copy.deepcopy(decision.diagnostic)]
+    if decision.target_failures:
+        return [
+            _public_diagnostic(
+                "CSV-NEXT-TARGET-001",
+                path=failure["target_key"].removeprefix("path:"),
+                reason=failure["reason"],
+            )
+            for failure in decision.target_failures
+        ]
+    if decision.export_failures:
+        return [_public_diagnostic("CSV-NEXT-EXPORT-001")]
+    diagnostic_code = decision.gate.get("diagnostic_code")
+    if isinstance(diagnostic_code, str):
+        return [_public_diagnostic(diagnostic_code)]
+    if decision.gate["outcome"] == "partial_safe":
+        return [_public_diagnostic("CSV-NEXT-FLOW-001")]
+    # ``model`` is an authority carried by the decision.  It is intentionally
+    # accepted as an argument to make this branch explicit for future partial
+    # diagnostics, while a complete decision has no public diagnostics.
+    assert not model["diagnostics"]
+    return []
+
+
+def _decision_target_resolutions(
+    decision: NextRunDecision, model: dict[str, Any], targets: list[str]
+) -> list[dict[str, Any]]:
+    if isinstance(decision, NextValidatedDecision):
+        proof_rows = decision.validated_proof.get("target_resolutions", [])
+        if proof_rows:
+            return copy.deepcopy(proof_rows)
+        return resolve_target_resolutions(targets, model)
+    if isinstance(decision, NotApplicableDecision):
+        return [
+            {"target_key": target, "status": "resolved", "record_ids": []} for target in targets
+        ]
+    return [{"target_key": target, "status": "failed", "record_ids": []} for target in targets]
+
+
+def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
+    """Project the closed decision and its immutable publication context.
+
+    This builder deliberately has no legacy-fixture fallback.  Every
+    authority-bearing field comes from ``decision`` or its
+    ``NextPublicationContext``; the only synthetic values are schema-required
+    empty collections for a run that has no validated payload.
     """
 
     assert isinstance(
         decision, (NextValidatedDecision, PreResponseFailureDecision, NotApplicableDecision)
     )
+    publication_context = decision.publication_context
+    assert publication_context is not None
+    context = publication_context.run_context
+    assert context == decision.run_context
+    model = _decision_model_shell(decision)
+    public_config = publication_context.public_next_config
+    config = copy.deepcopy(public_config)
+    config["source_plan"] = copy.deepcopy(publication_context.final_source_acquisition_plan)
+    config["source_plan_digest"] = publication_context.source_plan_digest
+    config["trusted_environment_digest"] = publication_context.trusted_environment["sha256"]
+    config["domain_config_digest"] = public_config["domain_config_digest"]
+    limits = copy.deepcopy(config["limits"])
+    targets = list(config["targets"])
+    formats = list(context["requested_formats"])
+    request = {
+        "schema": "code-structure-viz.next-snapshot-request/v1",
+        "projects": copy.deepcopy(config["projects"]),
+        "targets": copy.deepcopy(targets),
+        "upstream_depth": config["upstream_depth"],
+        "downstream_depth": config["downstream_depth"],
+        "formats": formats,
+        "limits": copy.deepcopy(limits),
+        "trusted_environment_digest": config["trusted_environment_digest"],
+        "source_plan": copy.deepcopy(config["source_plan"]),
+        "source_plan_digest": config["source_plan_digest"],
+        "domain_config_digest": config["domain_config_digest"],
+        "run_fingerprint": "0" * 64,
+    }
+    source_view = publication_context.source_view_descriptor
+    source = {
+        "schema": source_view["schema"],
+        "kind": source_view["kind"],
+        "head_commit": source_view["head_commit"],
+        "fingerprint": publication_context.source_view_fingerprint,
+        "file_count": source_view["file_count"],
+    }
+    toolchain = copy.deepcopy(publication_context.toolchain)
+    trusted_environment = copy.deepcopy(publication_context.trusted_environment)
     if isinstance(decision, NextValidatedDecision):
-        return _legacy_domain_fixture(response_decision={"validated_decision": decision})
-
-    request = decision.request
-    context = decision.run_context
-    base = _legacy_domain_fixture(
-        "not_applicable" if isinstance(decision, NotApplicableDecision) else "incomplete",
-        runtime_unavailable=isinstance(decision, PreResponseFailureDecision),
-        targets=copy.deepcopy(request["targets"]),
-        formats=list(context["requested_formats"]),
-        max_entities=context["budget_resolved"],
-        budget_source=context["budget_source"],
-        budget_requested=context["budget_requested"],
-        stdout_selector=context["stdout_selector"],
-    )
-    value = copy.deepcopy(dict(base))
-    value["diagnostics"] = [copy.deepcopy(decision.diagnostic)]
-    value["run_context"] = copy.deepcopy(context)
-    value["request"]["targets"] = copy.deepcopy(request["targets"])
-    value["request"]["formats"] = list(context["requested_formats"])
-    value["request"]["limits"] = copy.deepcopy(request["limits"])
-    value["limits"] = copy.deepcopy(request["limits"])
-    value["status"] = (
-        "not_applicable" if isinstance(decision, NotApplicableDecision) else "incomplete"
-    )
-    value["payload_available"] = False
-    value["entity_count"] = 0 if isinstance(decision, NotApplicableDecision) else None
-    value["artifact_paths"] = []
-    if isinstance(decision, PreResponseFailureDecision):
-        value["incomplete_kind"] = "payload_unavailable"
-        node_stages = {"node_discovery", "node_spawn", "node_timeout", "node_process"}
-        if decision.stage in node_stages:
-            failure_kind = {
-                "node_discovery": "missing",
-                "node_spawn": "spawn_failed",
-                "node_timeout": "timeout",
-                "node_process": "process_failed",
-            }[decision.stage]
-            value["toolchain"]["node"] = {
-                "status": "unavailable",
-                "version": None,
-                "failure_kind": failure_kind,
-            }
-            value["toolchain"]["node_version"] = None
-        else:
-            value["toolchain"]["node"] = {
-                "status": "available",
-                "version": "22.14.0",
-                "failure_kind": None,
-            }
-            value["toolchain"]["node_version"] = "22.14.0"
-        value["budget"]["actual"] = None
-        value["budget"]["outcome"] = "payload_unavailable"
+        outcome = decision.gate["outcome"]
+        payload_available = bool(decision.gate["payload_available"])
+        actual = decision.gate["actual"]
+        artifact_paths = list(decision.gate["artifact_paths"])
     else:
-        value.pop("incomplete_kind", None)
-        value["budget"]["actual"] = 0
-        value["budget"]["outcome"] = "not_applicable"
-        value["toolchain"]["node"] = {
-            "status": "not_applicable",
-            "version": None,
-            "failure_kind": None,
+        outcome = decision.outcome
+        payload_available = decision.payload_available
+        actual = 0 if isinstance(decision, NotApplicableDecision) else None
+        artifact_paths = list(decision.artifact_paths)
+    status = (
+        "not_applicable"
+        if outcome == "not_applicable"
+        else "complete"
+        if outcome == "complete"
+        else "incomplete"
+    )
+    incomplete_kind = None if status != "incomplete" else outcome
+    diagnostics = _decision_diagnostics(decision, model)
+    target_resolutions = _decision_target_resolutions(decision, model, targets)
+    coverage = copy.deepcopy(model["coverage"])
+    coverage["target_completeness"] = []
+    target_reasons = {
+        item["target_key"]: item["reason"]
+        for item in (
+            decision.target_failures if isinstance(decision, NextValidatedDecision) else ()
+        )
+    }
+    for item in target_resolutions:
+        row = {
+            "target_key": item["target_key"],
+            "status": "complete" if item["status"] == "resolved" else "failed",
+            "record_ids": copy.deepcopy(item["record_ids"]),
         }
-        value["toolchain"]["node_version"] = None
-    value["run_fingerprint"] = recompute_run_fingerprint(
-        source_view_fingerprint=value["source"]["fingerprint"],
+        reason = target_reasons.get(item["target_key"])
+        if row["status"] == "failed" and reason in TARGET_FAILURE_REASONS:
+            row["reason"] = reason
+        coverage["target_completeness"].append(row)
+    counts = coverage["counts"]
+    for collection in COLLECTIONS:
+        counts[collection] = len(model[collection])
+    counts["published"] = sum(len(model[collection]) for collection in COLLECTIONS)
+    counts["discovered"] = counts["published"]
+    counts["internal_entities"] = len(model["modules"]) + len(model["components"])
+    compatibility_descriptor = copy.deepcopy(publication_context.compatibility_descriptor)
+    value: dict[str, Any] = {
+        "domain": "next",
+        "status": status,
+        "payload_available": payload_available,
+        "entity_count": (
+            actual
+            if payload_available
+            else 0
+            if isinstance(decision, NotApplicableDecision)
+            else None
+        ),
+        "budget": {
+            "name": "max_entities",
+            "requested": context["budget_requested"],
+            "resolved": context["budget_resolved"],
+            "actual": actual,
+            "source": context["budget_source"],
+            "outcome": outcome,
+        },
+        "semantic_compatibility_id": compatibility_descriptor["compatibility_id"],
+        "compatibility_descriptor": compatibility_descriptor,
+        "identity_versions": copy.deepcopy(compatibility_descriptor["identity_versions"]),
+        "source_plan_digest": publication_context.source_plan_digest,
+        "domain_config_digest": config["domain_config_digest"],
+        "run_fingerprint": "0" * 64,
+        "source": source,
+        "request": request,
+        "config": config,
+        "run_context": copy.deepcopy(context),
+        "projects": copy.deepcopy(model["projects"]),
+        "targets": targets,
+        "formats": formats,
+        "toolchain": toolchain,
+        "trusted_environment": trusted_environment,
+        "limits": limits,
+        "coverage": coverage,
+        "artifact_paths": artifact_paths,
+        "diagnostics": diagnostics,
+    }
+    if incomplete_kind is not None:
+        value["incomplete_kind"] = incomplete_kind
+    preimage = publication_context.run_fingerprint_preimage
+    assert preimage["domain_config_digest"] == value["domain_config_digest"]
+    assert preimage["projects"] == value["projects"]
+    value["run_fingerprint"] = digest(preimage)
+    assert value["run_fingerprint"] == recompute_run_fingerprint(
+        source_view_fingerprint=source["fingerprint"],
         source_plan_digest=value["source_plan_digest"],
         domain_config_digest=value["domain_config_digest"],
         projects=value["projects"],
@@ -2079,16 +2248,16 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
         formats=value["formats"],
         stdout_selector=context["stdout_selector"],
         limits=value["limits"],
-        node_version=value["toolchain"]["node_version"],
-        typescript_version=value["toolchain"]["typescript_version"],
-        adapter_version=value["toolchain"]["adapter_version"],
-        protocol=value["toolchain"]["protocol"],
-        trusted_environment_digest=value["trusted_environment"]["sha256"],
+        node_version=toolchain["node_version"],
+        typescript_version=toolchain["typescript_version"],
+        adapter_version=toolchain["adapter_version"],
+        protocol=toolchain["protocol"],
+        trusted_environment_digest=trusted_environment["sha256"],
     )
     value["request"]["run_fingerprint"] = value["run_fingerprint"]
     return _DomainProjection(
         value,
-        validated_model=base.validated_model,
+        validated_model=model,
         validated_decision=decision,
     )
 
@@ -3361,6 +3530,7 @@ def test_round13_ecmascript_identifier_tables_are_pinned_and_complete() -> None:
     assert not _is_jsx_identifier_part("\u0375")
     assert _is_export_identifier("Foo\u00b7Bar")
     assert not _is_export_identifier("\u00b7Foo")
+    assert identifier_classification_digest() == IDENTIFIER_CLASSIFICATION_SHA256
 
     descriptor = _descriptor()
     assert descriptor["algorithm_versions"]["identifier_unicode"] == "ecma-unicode-15.0"
@@ -3422,6 +3592,31 @@ def test_round13_ecmascript_identifier_tables_are_pinned_and_complete() -> None:
     assert table_fingerprint != domain["run_fingerprint"]
 
 
+def test_round15_identifier_name_is_contextual_and_host_ucd_independent() -> None:
+    # Unicode 15.0 Other_ID_Start/Continue and Join_Control are part of the
+    # checked-in table, while a code point introduced after 15.0 is rejected.
+    assert is_identifier_name("\u1885")
+    assert is_identifier_name("\u212e")
+    assert is_identifier_name("A\u00b7B")
+    assert is_identifier_name("A\u200cB")
+    assert not is_identifier_name("\u00b7A")
+    assert not is_identifier_name("\u200cA")
+    assert not is_identifier_name("\U0002ebf0")
+    assert is_identifier_name("class")
+    assert not is_binding_identifier("class")
+    assert is_declaration_key("class")
+    assert not is_binding_identifier("default")
+    assert is_declaration_key("default")
+    assert not is_identifier_name("e\u0301")
+    assert not is_identifier_name("A\x00B")
+    assert identifier_classification_digest() == IDENTIFIER_CLASSIFICATION_SHA256
+
+    # The same contextual predicates are intentionally used by component
+    # bindings, export/import names, property keys, and external references.
+    assert _is_export_identifier("class", allow_keyword=True)
+    assert not _is_export_identifier("class")
+
+
 def test_round14_proof_reason_semantics_keep_selection_and_unsupported_complete() -> None:
     model = {
         "diagnostics": [
@@ -3443,6 +3638,34 @@ def test_round14_proof_reason_semantics_keep_selection_and_unsupported_complete(
             {"failure_roots": [], "excluded": [{"reason": "tainted"}], "failed": []},
             {"diagnostics": []},
         )
+
+
+@pytest.mark.parametrize(
+    ("localized", "safe_subset_proven", "code", "outcome", "payload_available"),
+    [
+        (True, True, "CSV-NEXT-SOURCE-001", "partial_safe", True),
+        (False, True, "CSV-NEXT-SOURCE-003", "payload_unavailable", False),
+        (True, False, "CSV-NEXT-SOURCE-003", "payload_unavailable", False),
+        (False, False, "CSV-NEXT-SOURCE-003", "payload_unavailable", False),
+    ],
+)
+def test_round15_source_failure_preserves_locality_boundary(
+    localized: bool,
+    safe_subset_proven: bool,
+    code: str,
+    outcome: str,
+    payload_available: bool,
+) -> None:
+    result = classify_source_failure(
+        localized=localized,
+        safe_subset_proven=safe_subset_proven,
+    )
+    assert result == {
+        "diagnostic_code": code,
+        "outcome": outcome,
+        "payload_available": payload_available,
+        "exit_code": 3,
+    }
 
 
 def test_round14_adapter_proof_cannot_claim_entity_over_budget() -> None:
@@ -3942,21 +4165,27 @@ def test_source_plan_descriptor_hashes_every_resolved_field_and_known_mutations(
 
 
 def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None:
-    plan = copy.deepcopy(_config_projection()["source_plan"])
-    reader = InstrumentedSourceReader(
-        {
-            "package.json": b'{"name":"fixture"}',
-            "tsconfig.json": b'{"compilerOptions":{}}',
-            "src/Button.tsx": b"export default Button;\n",
-            "src/types.d.ts": b"export interface Props {}\n",
-        }
-    )
-    seal = freeze_source_acquisition(
-        reader,
+    config = _config_projection()
+    plan = config["source_plan"]
+    files = {
+        "package.json": b'{"name":"fixture"}',
+        "tsconfig.json": b'{"compilerOptions":{}}',
+        "src/Button.tsx": b"export default Button;\n",
+        "src/types.d.ts": b"export interface Props {}\n",
+    }
+    intent = SourceDiscoveryIntent(
         discovery_paths=("package.json", "tsconfig.json"),
-        final_paths=("package.json", "tsconfig.json", "src/Button.tsx", "src/types.d.ts"),
-        final_plan=plan,
+        final_paths=tuple(files),
+        config={
+            "projects": copy.deepcopy(config["projects"]),
+            "limits": copy.deepcopy(config["limits"]),
+            "trusted_environment_digest": config["trusted_environment_digest"],
+        },
+        local_extends=tuple(plan["local_extends"]),
+        file_role_map=tuple(plan["file_role_map"]),
     )
+    reader = InstrumentedSourceReader(files)
+    seal = seal_source_acquisition(intent, reader)
     assert reader.sealed is True
     assert reader.seal_calls == 1
     assert seal.seal_operation == 1
@@ -3980,12 +4209,108 @@ def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None
     with pytest.raises(AssertionError):
         reader.read("src/Button.tsx")
     with pytest.raises(AssertionError):
-        freeze_source_acquisition(
+        seal_source_acquisition(
+            SourceDiscoveryIntent(
+                discovery_paths=("package.json",),
+                final_paths=("package.json",),
+                config=intent.config,
+                local_extends=intent.local_extends,
+                file_role_map=intent.file_role_map,
+            ),
             InstrumentedSourceReader({"package.json": b"{}"}),
-            discovery_paths=("package.json",),
-            final_paths=("package.json",),
-            final_plan=plan,
-            inventory_revision_after="inventory-v2",
+            {"revision_before": "inventory-v1", "revision_after": "inventory-v2"},
+        )
+
+
+def test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift() -> None:
+    config = _config_projection()
+    plan = config["source_plan"]
+    files = {
+        "package.json": b'{"name":"fixture"}',
+        "tsconfig.json": b'{"compilerOptions":{}}',
+        "src/Button.tsx": b"export default Button;\n",
+        "src/types.d.ts": b"export interface Props {}\n",
+    }
+    intent = SourceDiscoveryIntent(
+        discovery_paths=("package.json", "tsconfig.json"),
+        final_paths=tuple(files),
+        config={
+            "projects": copy.deepcopy(config["projects"]),
+            "limits": copy.deepcopy(config["limits"]),
+            "trusted_environment_digest": config["trusted_environment_digest"],
+        },
+        local_extends=tuple(plan["local_extends"]),
+        file_role_map=tuple(plan["file_role_map"]),
+    )
+    reader = InstrumentedSourceReader(files)
+    seal = seal_source_acquisition(intent, reader)
+    assert seal.final_plan == plan
+    assert seal.source_view["file_count"] == len(files)
+    assert reader.seal_calls == 1
+    assert reader.read_counts == {path: 1 for path in files}
+
+    with pytest.raises(TypeError):
+        seal_source_acquisition(intent, InstrumentedSourceReader(files), final_plan=plan)  # type: ignore[call-arg]
+
+    plan_only_intent = SourceDiscoveryIntent(
+        discovery_paths=("package.json",),
+        final_paths=("package.json",),
+    )
+    with pytest.raises(AssertionError):
+        seal_source_acquisition(
+            plan_only_intent,
+            InstrumentedSourceReader({"package.json": files["package.json"]}),
+            {"derived_plan": plan},
+        )
+    with pytest.raises(AssertionError):
+        seal_source_acquisition(
+            plan_only_intent,
+            InstrumentedSourceReader({"package.json": files["package.json"]}),
+            {"file_digests": []},
+        )
+
+    with pytest.raises(AssertionError):
+        seal_source_acquisition(
+            SourceDiscoveryIntent(
+                discovery_paths=intent.discovery_paths,
+                final_paths=intent.final_paths,
+                config=intent.config,
+                local_extends=intent.local_extends,
+                file_role_map=intent.file_role_map,
+            ),
+            InstrumentedSourceReader(files),
+            {"revision_before": "v1", "revision_after": "v2"},
+        )
+    with pytest.raises(AssertionError):
+        seal_source_acquisition(
+            SourceDiscoveryIntent(
+                discovery_paths=("package.json", "package.json"),
+                final_paths=intent.final_paths,
+                config=intent.config,
+                local_extends=intent.local_extends,
+                file_role_map=intent.file_role_map,
+            ),
+            InstrumentedSourceReader(files),
+        )
+    with pytest.raises(AssertionError):
+        seal_source_acquisition(
+            intent,
+            InstrumentedSourceReader(files),
+            {"file_digests": [{"path": "package.json", "size_bytes": 0, "sha256": "0" * 64}]},
+        )
+    wrong_role_map = copy.deepcopy(plan["file_role_map"])
+    wrong_role_map[0]["effective_role"] = "program"
+    with pytest.raises(AssertionError):
+        seal_source_acquisition(
+            SourceDiscoveryIntent(
+                discovery_paths=intent.discovery_paths,
+                final_paths=intent.final_paths,
+                config=intent.config,
+                local_extends=intent.local_extends,
+                file_role_map=tuple(wrong_role_map),
+            ),
+            InstrumentedSourceReader(files),
+            {"file_role_map": plan["file_role_map"]},
         )
 
 
@@ -4220,7 +4545,12 @@ def test_public_targets_are_path_only_and_resolve_frozen_file_or_directory_sets(
 
 
 def test_taint_edges_are_derived_for_boundary_and_shared_frontier() -> None:
-    model = _model()
+    base_model = _model()
+    base_roles = derive_boundary_roles(base_model)
+    assert base_roles[_id("module", "3")] == []
+    assert base_roles[_id("module", "4")] == ["client_dependency"]
+
+    model = base_model
     boundary_relation: dict[str, Any] = {
         "kind": "static_import",
         "id": "",
@@ -4236,7 +4566,10 @@ def test_taint_edges_are_derived_for_boundary_and_shared_frontier() -> None:
     model["coverage"]["counts"]["relations"] += 1
     model["coverage"]["counts"]["published"] += 1
     model["coverage"]["counts"]["discovered"] += 1
-    model["modules"][1]["derived_roles"] = ["server_candidate"]
+    model["modules"][1]["derived_roles"] = ["client_dependency", "server_candidate"]
+    roles = derive_boundary_roles(model)
+    assert roles[_id("module", "3")] == []
+    assert roles[_id("module", "4")] == ["client_dependency", "server_candidate"]
     validate_model(model)
 
     proof = _complete_proof(model)
@@ -4522,6 +4855,48 @@ def test_schema_valid_model_record_limit_is_reachable_on_generated_wire() -> Non
     assert over_decision.payload_available is False
 
 
+def test_schema_valid_wire_aggregate_plus_one_precedes_model_and_schema_routing() -> None:
+    """Exercise aggregate+1 on a schema-valid envelope, not a counter stub."""
+
+    request = _request()
+    response = _response(_model(), request=request)
+    baseline = bounded_decode_json(canonical_json_bytes(response), limits=request["limits"])
+    assert baseline["allowed"] is True
+    aggregate_limit = request["limits"]["max_total_array_items"]
+    extra = aggregate_limit + 1 - baseline["total_array_items"]
+    assert extra > 1
+    excluded_count = extra // 2
+    failed_count = extra - excluded_count
+    response["proof"]["excluded"] = [
+        {
+            "collection": "files",
+            "record_id": f"next:file:{index:064x}",
+            "reason": "not_selected",
+        }
+        for index in range(excluded_count)
+    ]
+    response["proof"]["failed"] = [
+        {
+            "collection": "files",
+            "record_id": f"next:file:{index + excluded_count:064x}",
+            "reason": "read_file",
+        }
+        for index in range(failed_count)
+    ]
+    _validator("next-adapter-response-v1.schema.json").validate(response)
+    response_bytes = canonical_json_bytes(response)
+    assert len(response_bytes) < request["limits"]["max_adapter_response_bytes"]
+    bounded = bounded_decode_json(response_bytes, limits=request["limits"])
+    assert bounded["allowed"] is False
+    assert bounded["reason"] == "max_total_array_items"
+    assert bounded["total_array_items"] == aggregate_limit + 1
+    decision = response_boundary_decision(response_bytes, request)
+    assert isinstance(decision, PreResponseFailureDecision)
+    assert decision.stage == "response_decode"
+    assert decision.diagnostic_code == "CSV-NEXT-PROTOCOL-001"
+    assert decision.known_counts["stdout_bytes"] == len(response_bytes)
+
+
 def test_actual_json_aggregate_boundary_precedes_schema_validation() -> None:
     request = _request()
     aggregate_limit = request["limits"]["max_total_array_items"]
@@ -4637,7 +5012,7 @@ def test_next_diagnostic_catalog_is_the_public_and_manifest_authority() -> None:
     catalog = _schema("next-diagnostic-catalog-v1.json")
     assert catalog["domain"] == "next"
     entries = cast(list[dict[str, Any]], catalog["entries"])
-    assert len(entries) == 26
+    assert len(entries) == 27
     assert len({entry["code"] for entry in entries}) == len(entries)
     validator = _validator("diagnostic-v1.schema.json")
     for entry in entries:
@@ -4934,7 +5309,9 @@ def test_direct_context_target_is_manifest_and_stdout_payload_unavailable() -> N
     domain["artifact_paths"] = []
     domain["budget"]["actual"] = None
     domain["budget"]["outcome"] = "payload_unavailable"
-    domain["diagnostics"] = [_public_diagnostic("CSV-NEXT-TARGET-001", path="src/types.d.ts")]
+    domain["diagnostics"] = [
+        _public_diagnostic("CSV-NEXT-TARGET-001", path="src/types.d.ts", reason="non_program")
+    ]
     validate_domain_manifest(domain)
     manifest = _run_manifest(domain)
     published: dict[str, bytes] = {}
@@ -4949,7 +5326,9 @@ def test_direct_context_target_is_manifest_and_stdout_payload_unavailable() -> N
     assert canonical_json_bytes(stream) + b"\n" == (
         b'{"artifact":null,"availability":false,"domain_status":"incomplete",'
         b'"schema":"code-structure-viz.stdout-result/v1",'
-        b'"selector":"next:semantic-json","stable_reason":"domain_payload_unavailable",'
+        b'"selector":"next:semantic-json","stable_reason":"target_payload_unavailable",'
+        b'"target_failures":[{"reason":"non_program",'
+        b'"target_key":"path:src/types.d.ts"}],'
         b'"type":"stdout_result"}\n'
     )
 
@@ -5476,6 +5855,7 @@ def test_adapter_stdout_capture_is_incremental_and_disposes_overrun() -> None:
     assert exact["retained_bytes"] == limit
     assert exact["retained"] == b"a" * 17 + b"b" * 15
     assert exact["decoder_called"] is True
+    assert exact["retained_bytes"] <= limit
     assert decoded == [b"a" * 17 + b"b" * 15]
     assert exact_reads == [17, 15]
 
@@ -5496,6 +5876,8 @@ def test_adapter_stdout_capture_is_incremental_and_disposes_overrun() -> None:
     assert over["process_group_terminated"] is True
     assert over["raw_disposed"] is True
     assert over["partial_disposed"] is True
+    assert over["read_stopped"] is True
+    assert over["process_group_disposed"] is True
     assert over["decoder_called"] is False
     assert over_decoded == []
     assert over["diagnostic_code"] == "CSV-NEXT-LIMIT-003"
@@ -5513,6 +5895,66 @@ def test_adapter_stdout_capture_is_incremental_and_disposes_overrun() -> None:
     assert unbounded["retained_bytes"] <= 10
     assert unbounded["retained"] == b""
     assert unbounded_reads == [0, 1]
+
+
+def test_capture_success_routes_schema_valid_private_response_to_one_decision() -> None:
+    request = _request()
+    response_bytes = canonical_json_bytes(_response(_model(), request=request))
+    decisions: list[NextRunDecision] = []
+
+    def decode(payload: bytes) -> None:
+        decisions.append(response_boundary_decision(payload, request))
+
+    captured = capture_adapter_stdout(
+        (response_bytes,),
+        limit=request["limits"]["max_adapter_stdout_capture_bytes"],
+        decoder=decode,
+    )
+    assert captured["allowed"] is True
+    assert captured["decoder_called"] is True
+    assert captured["retained"] == response_bytes
+    assert len(decisions) == 1
+    assert isinstance(decisions[0], NextValidatedDecision)
+
+
+def test_adapter_stderr_harness_stops_before_retaining_child_text() -> None:
+    limit = 8
+    reads: list[int] = []
+
+    def chunks() -> Any:
+        for chunk in (b"a" * limit, b"b"):
+            reads.append(len(chunk))
+            yield chunk
+        raise AssertionError("stderr capture continued after process-group termination")
+
+    result = capture_adapter_stderr(chunks(), limit=limit)
+    assert result["allowed"] is False
+    assert result["captured_bytes"] == limit + 1
+    assert result["read_stopped"] is True
+    assert result["process_group_terminated"] is True
+    assert result["process_group_disposed"] is True
+    assert result["raw_disposed"] is True
+    assert result["partial_disposed"] is True
+    assert result["manifest_stderr_bytes"] == 0
+    assert result["child_text_leaked"] is False
+    assert reads == [limit, 1]
+
+
+def test_selected_stdout_copy_has_exact_and_plus_one_publication_boundaries() -> None:
+    payload = "UTF-8 表示\n".encode()
+    exact = copy_selected_stdout(payload, limit=len(payload))
+    assert exact["allowed"] is True
+    assert exact["retained"] == payload
+    assert exact["retained_bytes"] == len(payload)
+    assert exact["publication_outcome"] == "published_artifact"
+
+    over = copy_selected_stdout(payload, limit=len(payload) - 1)
+    assert over["allowed"] is False
+    assert over["retained"] == b""
+    assert over["retained_bytes"] == 0
+    assert over["partial_disposed"] is True
+    assert over["publication_outcome"] == "selected_artifact_unavailable"
+    assert over["diagnostic_code"] == "CSV-NEXT-LIMIT-003"
 
 
 def test_public_diagnostic_stderr_is_utf8_jsonl_all_or_none() -> None:
@@ -5665,7 +6107,8 @@ def test_raw_response_stdout_byte_cap_has_exact_and_plus_one_whole_run_projectio
     model = _model()
     request = _request(model)
     response_bytes = canonical_json_bytes(_response(model, request=request))
-    limit = request["limits"]["max_stdout_bytes"]
+    limit = request["limits"]["max_adapter_response_bytes"]
+    assert limit == request["limits"]["max_stdout_bytes"]
     assert len(response_bytes) < limit
     exact = response_bytes + b" " * (limit - len(response_bytes))
     exact_result = bounded_decode_json(exact, limits=request["limits"])
@@ -5899,6 +6342,129 @@ def test_validated_decision_is_the_only_publication_authority() -> None:
     validate_published_projection(domain, published)
 
 
+def test_all_decision_variants_project_without_legacy_fixture_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request()
+    response = _response(_model(), request=request)
+    validated_projection = validate_response_envelope(canonical_json_bytes(response), request)
+    decisions: list[NextRunDecision] = [
+        validated_projection["validated_decision"],
+        pre_response_failure_decision(
+            request,
+            stage="response_protocol",
+            diagnostic_code="CSV-NEXT-PROTOCOL-001",
+        ),
+        not_applicable_decision(request),
+    ]
+
+    def legacy_must_not_be_called(*_args: Any, **_kwargs: Any) -> _DomainProjection:
+        pytest.fail("decision projection consulted the legacy fixture")
+
+    def authority_helper_must_not_be_called(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        pytest.fail("decision projection consulted an external compatibility descriptor")
+
+    monkeypatch.setattr(sys.modules[__name__], "_legacy_domain_fixture", legacy_must_not_be_called)
+    monkeypatch.setattr(sys.modules[__name__], "_descriptor", authority_helper_must_not_be_called)
+    for decision in decisions:
+        domain = _domain(decision=decision)
+        context = decision.publication_context
+        assert context is not None
+        assert domain["source"]["fingerprint"] == context.source_view_fingerprint
+        assert domain["config"]["source_plan"] == context.final_source_acquisition_plan
+        assert domain["config"]["limits"] == context.public_next_config["limits"]
+        assert domain["run_context"] == context.run_context
+        assert domain["toolchain"] == context.toolchain
+        assert domain["trusted_environment"] == context.trusted_environment
+        assert domain["compatibility_descriptor"] == context.compatibility_descriptor
+        assert (
+            domain["semantic_compatibility_id"]
+            == context.compatibility_descriptor["compatibility_id"]
+        )
+        assert domain["identity_versions"] == context.compatibility_descriptor["identity_versions"]
+        assert domain["run_fingerprint"] == digest(context.run_fingerprint_preimage)
+        validate_domain_manifest(domain)
+
+
+def test_validated_decision_defensively_copies_request_and_publication_context() -> None:
+    request = _request()
+    response = _response(_model(), request=request)
+    projection = validate_response_envelope(canonical_json_bytes(response), request)
+    decision = projection["validated_decision"]
+    assert isinstance(decision, NextValidatedDecision)
+    request_snapshot = copy.deepcopy(decision.request)
+    context_snapshot = decision.publication_context
+    assert context_snapshot is not None
+    assert (
+        context_snapshot.run_fingerprint_preimage["identifier_unicode_version"]
+        == ECMASCRIPT_IDENTIFIER_UNICODE_VERSION
+    )
+    assert (
+        context_snapshot.run_fingerprint_preimage["identifier_unicode_table_digest"]
+        == ECMASCRIPT_UNICODE_TABLE_DIGEST
+    )
+    request["limits"]["max_entities"] = 1
+    request["targets"].append("path:src/Other.tsx")
+    response["model"]["files"].clear()
+    mutated_context = decision.publication_context
+    assert decision.request == request_snapshot
+    assert decision.publication_context == context_snapshot
+    assert mutated_context is not None
+    mutated_context.public_next_config["limits"]["max_entities"] = 1
+    mutated_context.compatibility_descriptor["algorithm_versions"]["props"] = 99
+    assert decision.publication_context == context_snapshot
+
+    with pytest.raises(AssertionError):
+        NextValidatedDecision(
+            validated_model=decision.validated_model,
+            validated_proof=decision.validated_proof,
+            run_context=decision.run_context,
+            pre_budget_outcome=decision.pre_budget_outcome,
+            gate=decision.gate,
+            request=decision.request,
+            targets=decision.targets,
+            target_failures=({"target_key": "path:src/Other.tsx", "reason": "missing"},),
+        )
+
+
+def test_request_independent_pre_response_decision_keeps_closed_context() -> None:
+    context = NextRunContext(
+        requested_formats=["semantic-json", "plantuml"],
+        budget_requested=None,
+        budget_resolved=500,
+        budget_source="builtin",
+        stdout_selector="next:semantic-json",
+    )
+    decision_context = NextDecisionContext(
+        run_context=context,
+        request_id=None,
+        targets=(),
+        limits=None,
+        stage="config_validation",
+        diagnostic_code="CSV-NEXT-CONFIG-001",
+        known_counts={
+            "files": None,
+            "source_bytes": None,
+            "model_records": None,
+            "stdout_bytes": None,
+        },
+    )
+    decision = pre_response_failure_decision(
+        None,
+        stage="config_validation",
+        diagnostic_code="CSV-NEXT-CONFIG-001",
+        decision_context=decision_context,
+    )
+    assert decision.request is None
+    assert decision.decision_context is not None
+    assert decision.decision_context.request_id is None
+    assert decision.decision_context.limits is None
+    assert decision.publication_context is not None
+    assert decision.publication_context.public_next_request is None
+    assert decision.outcome == "payload_unavailable"
+    assert decision.exit_code == 3
+
+
 @pytest.mark.parametrize(
     ("run_status", "selector", "stable_reason"),
     [
@@ -6016,7 +6582,9 @@ def test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exi
     assert decision.payload_available is False
     assert decision.artifact_paths == ()
     assert decision.exit_code == 3
-    assert decision.request["request_id"] == request["request_id"]
+    decision_request = decision.request
+    assert decision_request is not None
+    assert decision_request["request_id"] == request["request_id"]
 
     domain = _domain(decision=decision)
     assert domain.validated_decision is decision
@@ -6124,6 +6692,33 @@ def test_stdout_target_failures_are_bijective_sorted_and_target_only() -> None:
         ]
         with pytest.raises(ValidationError):
             _validator("stdout-result-v1.schema.json").validate(base_stream)
+
+
+@pytest.mark.parametrize("reason", sorted(TARGET_FAILURE_REASONS))
+def test_stdout_target_failure_reason_enum_is_closed_for_each_resolution_failure(
+    reason: str,
+) -> None:
+    stream: dict[str, Any] = {
+        "type": "stdout_result",
+        "schema": "code-structure-viz.stdout-result/v1",
+        "selector": "next:semantic-json",
+        "availability": False,
+        "domain_status": "incomplete",
+        "stable_reason": "target_payload_unavailable",
+        "artifact": None,
+        "target_failures": [{"target_key": "path:src/Example.tsx", "reason": reason}],
+    }
+    _validator("stdout-result-v1.schema.json").validate(stream)
+    duplicate_reason = copy.deepcopy(stream)
+    duplicate_reason["target_failures"].append(
+        {"target_key": "path:src/Other.tsx", "reason": reason}
+    )
+    duplicate_reason["target_failures"].sort(key=canonical_json_bytes)
+    _validator("stdout-result-v1.schema.json").validate(duplicate_reason)
+    with pytest.raises(ValidationError):
+        _validator("stdout-result-v1.schema.json").validate(
+            {**stream, "selector": "python:semantic-json"}
+        )
 
 
 def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests() -> None:
@@ -6302,7 +6897,7 @@ def test_plantuml_exact_bytes_and_control_character_golden() -> None:
             "boundary_effect": "none",
         }
     )
-    rich["modules"][1]["derived_roles"] = ["server_candidate"]
+    rich["modules"][1]["derived_roles"] = ["client_dependency", "server_candidate"]
     boundary_relation: dict[str, Any] = {
         "kind": "static_import",
         "id": "",

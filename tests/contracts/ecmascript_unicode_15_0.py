@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from bisect import bisect_right
 
 UNICODE_VERSION = "15.0.0"
 ALGORITHM_VERSION = "ecma-unicode-15.0"
@@ -1504,7 +1505,18 @@ def canonical_table_bytes() -> bytes:
 def contains(intervals: tuple[tuple[int, int], ...], codepoint: int) -> bool:
     """Membership check over sorted inclusive intervals."""
 
-    return any(start <= codepoint <= end for start, end in intervals)
+    if intervals is ID_START_INTERVALS:
+        starts = _ID_START_INTERVALS_STARTS
+    elif intervals is ID_CONTINUE_INTERVALS:
+        starts = _ID_CONTINUE_INTERVALS_STARTS
+    else:
+        starts = tuple(start for start, _end in intervals)
+    index = bisect_right(starts, codepoint) - 1
+    return index >= 0 and codepoint <= intervals[index][1]
+
+
+_ID_START_INTERVALS_STARTS = tuple(start for start, _end in ID_START_INTERVALS)
+_ID_CONTINUE_INTERVALS_STARTS = tuple(start for start, _end in ID_CONTINUE_INTERVALS)
 
 
 assert hashlib.sha256(canonical_table_bytes()).hexdigest() == TABLE_DIGEST

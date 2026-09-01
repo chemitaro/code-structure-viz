@@ -10,8 +10,8 @@ production implementation has not started; the fail result is not a pass.
 
 Round 13 review state: Strict reviewed SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`
 with CI run `33446911714` (7/7 success) and returned `review_status: fail`,
-P0=0, P1=9, P2=1. The data-only remediation checks the complete raw response
-byte length against `max_stdout_bytes` before UTF-8 decoding or materialization;
+P0=0, P1=9, P2=1. The data-only remediation checks the complete private adapter
+response byte length against `max_adapter_response_bytes` before UTF-8 decoding or materialization;
 the exact limit is accepted and limit+1 follows the unavailable/exit-3 path.
 The historical fail is preserved. Fresh exact-SHA Strict is pending, readiness
 is unconfirmed, and production implementation has not started.
@@ -22,7 +22,10 @@ incrementally on each bytes chunk before retaining that chunk. Equality is
 accepted; the first byte above the limit terminates the adapter process group,
 discards raw and partial bytes, calls no decoder, and produces a manifest-only
 `CSV-NEXT-LIMIT-003` / `payload_unavailable` result with exit 3. This capture
-bound is distinct from the public selected-artifact `max_stdout_bytes` bound.
+bound is distinct from both the private complete-response
+`max_adapter_response_bytes` bound and the public selected-artifact
+`max_selected_stdout_bytes` bound. `max_stdout_bytes` remains a v1 compatibility
+alias for the selected-artifact value.
 The response limit vector also uses ID-only proof evidence: a published model
 record is counted once in `discovered_records`; proof-only records may carry a
 payload only when they are not present in the published model. Thus the model
@@ -61,7 +64,9 @@ total-RSS promise.
 | `max_total_array_items` | 100,000 | items across all JSON arrays in one response | streaming aggregate counter before item materialization | N/A | `payload_unavailable` |
 | `max_collection_items` | 20,000 | records per model collection | record emission, before append | N/A | `payload_unavailable` |
 | `max_model_records` | 10,000 | all discovered model records | model assembly, before publication | N/A | `payload_unavailable` |
-| `max_stdout_bytes` | 16,777,216 | UTF-8 bytes per stdout payload | canonical output encode, before write | UTF-8 | `payload_unavailable` |
+| `max_stdout_bytes` | 16,777,216 | compatibility alias for selected stdout bytes | canonical output encode, before write | UTF-8 | `payload_unavailable` |
+| `max_adapter_response_bytes` | 16,777,216 | complete UTF-8 bytes of private adapter response | after child capture, before decode | UTF-8 | `payload_unavailable` |
+| `max_selected_stdout_bytes` | 16,777,216 | UTF-8 bytes of public selected artifact copy | canonical output encode, before copy/write | UTF-8 | `payload_unavailable` |
 | `max_stderr_bytes` | 65,536 | UTF-8 bytes per stderr payload | diagnostic encode, before write | UTF-8 | `payload_unavailable` |
 | `max_adapter_stderr_capture_bytes` | 65,536 | UTF-8 bytes captured from adapter stderr | incremental process-group capture before append | UTF-8 | `payload_unavailable` |
 | `max_adapter_stdout_capture_bytes` | 16,777,216 | UTF-8 bytes captured from adapter stdout | incremental process-group capture before append/decode | UTF-8 | `payload_unavailable` |
@@ -84,14 +89,18 @@ submitted summary count. `actual <= resolved` publishes normally, while an
 overrun records `CSV-NEXT-LIMIT-005`, keeps the actual count in the domain
 manifest, returns `payload_unavailable`, and publishes neither semantic JSON
 nor PlantUML. `max_model_records` remains the structural all-record boundary
-and is fixed at 10,000. Because each published model record also needs one
-ID-only proof row, the aggregate counter sees at least two record-array items
-per model record. The 10,000 value is therefore a deliberate reachable bound
-under the fixed 100,000 aggregate-item and 16 MiB raw-response limits.
-The response schema keeps `proof.discovered_records` at a structural `maxItems`
-of 20,000 (separate from the semantic model cap), so a schema-valid cap+1
-envelope can reach model-limit validation and produce `CSV-NEXT-LIMIT-005`
-instead of being rejected by the schema first.
+and is fixed at 10,000. A published model record is represented by one ID-only
+`discovered_records` observation; proof payload is not duplicated. The proof
+observation is still a separate JSON-array item, so reachability must be proved
+against the aggregate counter rather than asserted from the model count alone.
+The generated exact-cap response (9,999 context Files plus one Project) is
+schema-valid, 5,642,861 bytes, and 40,001 aggregate items; the 10,001-record
+counterpart is schema-valid, 5,643,426 bytes, and 40,005 aggregate items. Both
+are below the 100,000 aggregate and 16 MiB response bounds, so the model cap
+and its +1 diagnostic are genuinely reachable. The response schema keeps
+`proof.discovered_records` at structural `maxItems=20,000`, separate from the
+semantic model cap, so cap+1 reaches `CSV-NEXT-LIMIT-005` rather than schema
+rejection.
 
 The gate receives an explicitly derived pre-budget outcome; there is no
 implicit `complete` default. A valid `partial_safe` result remains
@@ -119,8 +128,12 @@ accepted chunks; it never invokes the decoder on a partial over-limit stream.
 The exact boundary is a complete capture, while limit+1 is terminated and
 disposed. The public unavailable result is manifest-only and cannot contain
 the discarded response or a partial semantic model. A successful bounded
-capture then enters the one raw-response path, where `max_stdout_bytes` is
-checked on the complete bytes before decoding.
+capture then enters the one raw-response path, where
+`max_adapter_response_bytes` is checked on the complete bytes before decoding.
+After semantic/PlantUML rendering, `max_selected_stdout_bytes` applies to the
+public selected-artifact copy. A copy breach is an explicit
+`selected_artifact_unavailable` publication result; it must not rewrite the
+validated semantic domain outcome.
 
 The public renderer applies the same all-or-none rule to diagnostics: it encodes
 the complete canonical JSONL stream (`canonical JSON` plus one `LF` per line)
@@ -143,16 +156,38 @@ the suite does not allocate a 96 MiB payload merely to prove an inclusive
 boundary. It also covers 500 internal entities with additional non-entity
 boundary. It also covers exact/+1 child stdout capture with a faithful
 iterable chunk-reader harness and decoder spy (not an OS process-level test),
-500 internal entities with additional non-entity records, 501 unavailable, and
-a 600 override with 501 successful. A generated, schema-valid wire envelope
-with 9,999 compact context Files plus one Project reaches the exact 10,000
-record boundary at 5,642,861 bytes and 40,001 aggregate array items. Its
-10,001-record counterpart is 5,643,426 bytes and 40,005 aggregate items, so it
-reaches the model-record gate specifically. Both pass through
-`bounded_decode_json`, `validate_response_envelope`, and
+public selected-copy exact/+1, 501 unavailable, and a 600 override with 501
+successful. Generated schema-valid wire envelopes cover model exact/+1 and an
+aggregate+1 response through `bounded_decode_json` and
 `response_boundary_decision`; no huge checked-in fixture is required. The
 precedence is raw bytes first, aggregate array items second, then model
 records. Aggregate counts
 (`discovered`, `published`, `excluded`, `failed`, every collection count, and
 `internal_entities`) are recomputed from records and the proof; a caller
 cannot bypass a limit by mutating a summary count.
+
+## Round 15 measurement and authority addendum
+
+The three byte limits are intentionally named by boundary: child capture is
+`max_adapter_stdout_capture_bytes`, the complete private response is
+`max_adapter_response_bytes`, and the public selected-artifact copy is
+`max_selected_stdout_bytes`. They may share the v1 value (16 MiB), but they
+are not interchangeable measurements. Capture measures each `Iterable[bytes]`
+chunk before retaining it; response measures complete bytes before decode;
+selected stdout measures the fully rendered bytes before the public copy. The
+first over-limit result at each boundary disposes partial bytes and does not
+silently change the semantic decision.
+
+The `NextRunDecision` union and its immutable `NextPublicationContext` are the
+authority that carries resolved limits and their measurement provenance to
+domain, manifest, stdout, stderr, and publication. A request-independent
+failure carries a `NextDecisionContext` with null counts where measurement was
+not possible. This prevents a downstream writer from inventing a model count,
+source plan, or output limit after an early failure.
+
+The aggregate boundary is tested using a schema-valid generated response whose
+extra `proof.excluded` and `proof.failed` rows make the decoded array-item
+counter exactly 100,001 while the raw response remains below 16 MiB. The test
+therefore proves the actual byte/decode path and its `CSV-NEXT-PROTOCOL-001`
+precedence; it is not a direct call to the arithmetic classifier. The model
+cap test separately reaches 10,000 and 10,001 model records below both caps.

@@ -15,6 +15,7 @@ import re
 import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
@@ -23,7 +24,7 @@ from jsonschema import Draft202012Validator, ValidationError  # type: ignore[imp
 from referencing import Registry, Resource
 
 from tests.contracts.ecmascript_unicode_15_0 import (
-    ALGORITHM_VERSION as ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
+    ALGORITHM_VERSION as _ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
 )
 from tests.contracts.ecmascript_unicode_15_0 import (
     ID_CONTINUE_INTERVALS as ECMASCRIPT_ID_CONTINUE_INTERVALS,
@@ -47,6 +48,7 @@ from tests.contracts.ecmascript_unicode_15_0 import (
     contains as _unicode_table_contains,
 )
 
+ECMASCRIPT_IDENTIFIER_UNICODE_VERSION: str = _ECMASCRIPT_IDENTIFIER_UNICODE_VERSION
 ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST: str = _ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST
 
 VALIDATOR_SCHEMA = "code-structure-viz.next-reference-validation/v1"
@@ -131,7 +133,13 @@ LIMIT_DEFAULTS = {
     "max_total_array_items": 100000,
     "max_collection_items": 20000,
     "max_model_records": 10000,
+    # ``max_stdout_bytes`` is retained as the v1 compatibility alias for the
+    # public selected-artifact limit.  New boundaries use the three explicit
+    # names below so private adapter response bytes can never be confused with
+    # public output bytes.
     "max_stdout_bytes": 16777216,
+    "max_adapter_response_bytes": 16777216,
+    "max_selected_stdout_bytes": 16777216,
     "max_stderr_bytes": 65536,
     "max_adapter_stderr_capture_bytes": 65536,
     "max_adapter_stdout_capture_bytes": 16777216,
@@ -160,6 +168,141 @@ class NextRunContext(TypedDict):
 
 
 @dataclass(frozen=True)
+class NextDecisionContext:
+    """Request-independent identity carried by every pre-response failure.
+
+    A failed discovery or process launch cannot manufacture a schema-valid
+    adapter request.  This small closed context keeps the run identity,
+    resolved limits, and diagnostic routing available without pretending that
+    an unavailable request exists.
+    """
+
+    run_context: NextRunContext
+    request_id: str | None = None
+    targets: tuple[str, ...] = ()
+    limits: dict[str, Any] | None = None
+    stage: str | None = None
+    diagnostic_code: str | None = None
+    failure_kind: str | None = None
+    known_counts: dict[str, int | None] | None = None
+    outcome: str = "payload_unavailable"
+    payload_unavailable: bool = True
+    exit_code: int = 3
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
+        object.__setattr__(
+            self, "targets", tuple(canonical_target_key(item) for item in self.targets)
+        )
+        if self.limits is not None:
+            object.__setattr__(self, "limits", copy.deepcopy(self.limits))
+        if self.known_counts is not None:
+            object.__setattr__(self, "known_counts", copy.deepcopy(self.known_counts))
+            assert set(self.known_counts) == set(KNOWN_COUNT_KEYS)
+            assert all(
+                value is None or (isinstance(value, int) and value >= 0)
+                for value in self.known_counts.values()
+            )
+        assert self.outcome in {"payload_unavailable", "not_applicable"}
+        assert self.payload_unavailable is (self.outcome == "payload_unavailable")
+        assert self.exit_code == (3 if self.outcome == "payload_unavailable" else 0)
+        if self.diagnostic_code is not None:
+            expected_kind = decision_failure_kind(self.diagnostic_code)
+            assert self.failure_kind in {None, expected_kind}
+            object.__setattr__(self, "failure_kind", expected_kind)
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name in {"run_context", "targets", "limits", "known_counts"}:
+            return copy.deepcopy(value)
+        return value
+
+
+@dataclass(frozen=True)
+class NextPublicationContext:
+    """Immutable provenance shared by all Next publication projections.
+
+    It is deliberately a data-only object.  A production implementation must
+    construct it at the same trust boundary as the run decision and pass this
+    object, rather than rebuilding config/source/toolchain facts in a writer.
+    """
+
+    source_view_descriptor: dict[str, Any]
+    source_view_fingerprint: str
+    final_source_acquisition_plan: dict[str, Any]
+    source_plan_digest: str
+    seal_id: str
+    public_next_config: dict[str, Any]
+    public_next_request: dict[str, Any] | None
+    compatibility_descriptor: dict[str, Any]
+    toolchain: dict[str, Any]
+    trusted_environment: dict[str, Any]
+    run_context: NextRunContext
+    run_fingerprint_preimage: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        for name in (
+            "source_view_descriptor",
+            "final_source_acquisition_plan",
+            "public_next_config",
+            "public_next_request",
+            "compatibility_descriptor",
+            "toolchain",
+            "trusted_environment",
+            "run_fingerprint_preimage",
+        ):
+            object.__setattr__(self, name, copy.deepcopy(getattr(self, name)))
+        object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
+        validate_compatibility_descriptor(self.compatibility_descriptor)
+        assert re.fullmatch(r"[0-9a-f]{64}", self.source_view_fingerprint)
+        assert re.fullmatch(r"[0-9a-f]{64}", self.source_plan_digest)
+        assert re.fullmatch(r"[0-9a-f]{64}", self.seal_id)
+        assert self.source_view_fingerprint == digest(self.source_view_descriptor)
+        assert self.source_plan_digest == digest(self.final_source_acquisition_plan)
+        assert self.seal_id == digest(
+            {
+                "source_plan_digest": self.source_plan_digest,
+                "source_view_fingerprint": self.source_view_fingerprint,
+                "operation": "decision-boundary-seal-v1",
+            }
+        )
+        preimage = self.run_fingerprint_preimage
+        assert preimage["source_view_fingerprint"] == self.source_view_fingerprint
+        assert preimage["source_plan_digest"] == self.source_plan_digest
+        assert preimage["targets"] == self.public_next_config["targets"]
+        assert preimage["formats"] == self.run_context["requested_formats"]
+        assert preimage["stdout_selector"] == self.run_context["stdout_selector"]
+        assert preimage["limits"] == self.public_next_config["limits"]
+        assert preimage["trusted_environment_digest"] == self.trusted_environment["sha256"]
+        assert preimage["node_version"] == self.toolchain["node_version"]
+        assert preimage["typescript_version"] == self.toolchain["typescript_version"]
+        assert preimage["adapter_version"] == self.toolchain["adapter_version"]
+        assert preimage["protocol"] == self.toolchain["protocol"]
+        if self.public_next_request is not None:
+            assert self.public_next_request["run_context"] == self.run_context
+            assert self.public_next_config["limits"] == self.public_next_request["limits"]
+            assert self.public_next_config["targets"] == self.public_next_request["targets"]
+            assert self.public_next_config["source_plan"] == self.final_source_acquisition_plan
+            assert self.public_next_config["source_plan_digest"] == self.source_plan_digest
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name in {
+            "source_view_descriptor",
+            "final_source_acquisition_plan",
+            "public_next_config",
+            "public_next_request",
+            "compatibility_descriptor",
+            "toolchain",
+            "trusted_environment",
+            "run_context",
+            "run_fingerprint_preimage",
+        }:
+            return copy.deepcopy(value)
+        return value
+
+
+@dataclass(frozen=True)
 class ValidatedResponseDecision:
     """Immutable trust-boundary decision consumed by every publication surface.
 
@@ -175,22 +318,94 @@ class ValidatedResponseDecision:
     run_context: NextRunContext
     pre_budget_outcome: str
     gate: dict[str, Any]
+    request: dict[str, Any]
     targets: tuple[str, ...] = ()
     target_failures: tuple[dict[str, Any], ...] = ()
     export_failures: tuple[dict[str, Any], ...] = ()
-    request: dict[str, Any] | None = None
+    publication_context: NextPublicationContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "validated_model", copy.deepcopy(self.validated_model))
         object.__setattr__(self, "validated_proof", copy.deepcopy(self.validated_proof))
         object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
-        object.__setattr__(self, "gate", copy.deepcopy(self.gate))
+        request = copy.deepcopy(self.request)
+        assert isinstance(request, dict)
+        assert request.get("schema") == "code-structure-viz.next-adapter-request/v1"
+        assert isinstance(request.get("request_id"), str)
+        assert request["run_context"] == self.run_context
+        object.__setattr__(self, "request", request)
+        gate = copy.deepcopy(self.gate)
+        if "resolved_limits" in gate:
+            assert gate["resolved_limits"] == request["limits"]
+        else:
+            gate["resolved_limits"] = copy.deepcopy(request["limits"])
+        assert gate.get("outcome") in {
+            "complete",
+            "partial_safe",
+            "payload_unavailable",
+            "not_applicable",
+        }
+        assert self.pre_budget_outcome in {
+            "complete",
+            "partial_safe",
+            "payload_unavailable",
+            "not_applicable",
+        }
+        original_outcome = gate.get("original_outcome", self.pre_budget_outcome)
+        assert original_outcome in {
+            "complete",
+            "partial_safe",
+            "payload_unavailable",
+            "not_applicable",
+        }
+        allowed_transitions = {
+            "complete": {"complete"},
+            "partial_safe": {"partial_safe"},
+            "payload_unavailable": {"complete", "partial_safe", "payload_unavailable"},
+            "not_applicable": {"not_applicable"},
+        }
+        assert self.pre_budget_outcome in allowed_transitions[original_outcome]
+        if gate["outcome"] == "complete":
+            assert original_outcome == "complete" and self.pre_budget_outcome == "complete"
+        elif gate["outcome"] == "partial_safe":
+            assert original_outcome == "partial_safe" and self.pre_budget_outcome == "partial_safe"
+        elif gate["outcome"] == "not_applicable":
+            assert original_outcome == "not_applicable"
+        object.__setattr__(self, "gate", gate)
         normalized_targets = tuple(canonical_target_key(target) for target in self.targets)
         assert list(normalized_targets) == sorted(normalized_targets)
         assert len(normalized_targets) == len(set(normalized_targets))
+        assert (
+            tuple(canonical_target_key(target) for target in request["targets"])
+            == normalized_targets
+        )
         object.__setattr__(self, "targets", normalized_targets)
-        object.__setattr__(self, "target_failures", tuple(copy.deepcopy(self.target_failures)))
-        object.__setattr__(self, "export_failures", tuple(copy.deepcopy(self.export_failures)))
+        target_failures = tuple(copy.deepcopy(self.target_failures))
+        assert target_failures == tuple(sorted(target_failures, key=canonical_json_bytes))
+        assert len({item.get("target_key") for item in target_failures}) == len(target_failures)
+        for failure in target_failures:
+            assert set(failure) == {"target_key", "reason"}
+            assert canonical_target_key(failure["target_key"]) in normalized_targets
+            assert failure["reason"] in TARGET_FAILURE_REASONS
+        if target_failures:
+            assert gate["outcome"] == "payload_unavailable"
+            assert gate.get("diagnostic_code") == "CSV-NEXT-TARGET-001"
+        export_failures = tuple(copy.deepcopy(self.export_failures))
+        assert export_failures == tuple(sorted(export_failures, key=canonical_json_bytes))
+        assert len({item.get("syntax_identity") for item in export_failures}) == len(
+            export_failures
+        )
+        if export_failures:
+            assert gate["outcome"] == "payload_unavailable"
+            assert gate.get("diagnostic_code") == "CSV-NEXT-EXPORT-001"
+        object.__setattr__(self, "target_failures", target_failures)
+        object.__setattr__(self, "export_failures", export_failures)
+        context = self.publication_context or _publication_context_from_request(
+            request, self.run_context
+        )
+        assert context.run_context == self.run_context
+        assert context.public_next_request == request
+        object.__setattr__(self, "publication_context", context)
 
     def __getattribute__(self, name: str) -> Any:
         """Return defensive snapshots so nested containers cannot be mutated."""
@@ -205,6 +420,7 @@ class ValidatedResponseDecision:
             "target_failures",
             "export_failures",
             "request",
+            "publication_context",
         }:
             return copy.deepcopy(value)
         return value
@@ -217,8 +433,13 @@ NextValidatedDecision = ValidatedResponseDecision
 
 DECISION_FAILURE_STAGES = frozenset(
     {
+        "config_validation",
+        "project_validation",
         "source_selection",
         "source_read",
+        "source_integrity",
+        "target_resolution",
+        "trust_validation",
         "stdin_encode",
         "adapter_heap",
         "node_discovery",
@@ -243,13 +464,59 @@ DECISION_FAILURE_CODES = frozenset(
         "CSV-NEXT-LIMIT-003",
         "CSV-NEXT-LIMIT-004",
         "CSV-NEXT-LIMIT-005",
+        "CSV-NEXT-CONFIG-001",
+        "CSV-NEXT-CONFIG-002",
         "CSV-NEXT-NODE-001",
         "CSV-NEXT-NODE-002",
         "CSV-NEXT-NODE-003",
         "CSV-NEXT-NODE-004",
         "CSV-NEXT-PROTOCOL-001",
+        "CSV-NEXT-PROJECT-001",
+        "CSV-NEXT-PROJECT-002",
+        "CSV-NEXT-SOURCE-002",
+        "CSV-NEXT-SOURCE-003",
+        "CSV-NEXT-TARGET-001",
+        "CSV-NEXT-TRUST-001",
+        "CSV-NEXT-TRUST-002",
+        "CSV-NEXT-TRUST-003",
     }
 )
+DECISION_FAILURE_KIND_BY_CODE = {
+    "CSV-NEXT-CONFIG-001": "config",
+    "CSV-NEXT-CONFIG-002": "config",
+    "CSV-NEXT-PROJECT-001": "project",
+    "CSV-NEXT-PROJECT-002": "project",
+    "CSV-NEXT-SOURCE-001": "source",
+    "CSV-NEXT-SOURCE-002": "source",
+    "CSV-NEXT-SOURCE-003": "source",
+    "CSV-NEXT-TARGET-001": "target",
+    "CSV-NEXT-TRUST-001": "trust",
+    "CSV-NEXT-TRUST-002": "trust",
+    "CSV-NEXT-TRUST-003": "trust",
+    "CSV-NEXT-NODE-001": "node",
+    "CSV-NEXT-NODE-002": "node",
+    "CSV-NEXT-NODE-003": "node",
+    "CSV-NEXT-NODE-004": "node",
+    "CSV-NEXT-LIMIT-001": "limit",
+    "CSV-NEXT-LIMIT-002": "limit",
+    "CSV-NEXT-LIMIT-003": "limit",
+    "CSV-NEXT-LIMIT-004": "limit",
+    "CSV-NEXT-LIMIT-005": "limit",
+    "CSV-NEXT-PROTOCOL-001": "protocol",
+    "CSV-NEXT-EXPORT-001": "export",
+    "CSV-NEXT-IDENTITY-001": "identity",
+}
+
+
+def decision_failure_kind(diagnostic_code: str) -> str:
+    """Return the closed pre-response failure category for one code."""
+
+    if diagnostic_code == "CSV-NEXT-APPLICABILITY-001":
+        return "applicability"
+    assert diagnostic_code in DECISION_FAILURE_CODES
+    return DECISION_FAILURE_KIND_BY_CODE.get(diagnostic_code, "protocol")
+
+
 KNOWN_COUNT_KEYS = ("files", "source_bytes", "model_records", "stdout_bytes")
 
 
@@ -257,7 +524,7 @@ KNOWN_COUNT_KEYS = ("files", "source_bytes", "model_records", "stdout_bytes")
 class PreResponseFailureDecision:
     """The sole authority when no schema-valid adapter response exists."""
 
-    request: dict[str, Any]
+    request: dict[str, Any] | None
     run_context: NextRunContext
     stage: str
     diagnostic_code: str
@@ -267,6 +534,8 @@ class PreResponseFailureDecision:
     payload_available: bool = False
     artifact_paths: tuple[str, ...] = ()
     exit_code: int = 3
+    decision_context: NextDecisionContext | None = None
+    publication_context: NextPublicationContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "request", copy.deepcopy(self.request))
@@ -282,12 +551,90 @@ class PreResponseFailureDecision:
         assert self.payload_available is False
         assert self.artifact_paths == ()
         assert self.exit_code == 3
-        assert self.request["run_context"] == self.run_context
         assert self.diagnostic["code"] == self.diagnostic_code
+        catalog_entry = _diagnostic_catalog()[self.diagnostic_code]
+        permission = catalog_entry["ref_permission"]
+        path = self.diagnostic["path"]
+        symbol = self.diagnostic["symbol"]
+        if permission == "none":
+            assert path is None and symbol is None
+        elif permission == "path":
+            assert path is not None and symbol is None
+            _assert_file_path(path)
+        elif permission == "symbol":
+            assert path is None and symbol is not None
+            _id_kind(symbol)
+        else:
+            assert permission == "path_or_symbol"
+            assert (path is None) != (symbol is None)
+            if path is not None:
+                _assert_file_path(path)
+            if symbol is not None:
+                _id_kind(symbol)
+        known_counts = copy.deepcopy(self.known_counts)
+        decision_context = self.decision_context or NextDecisionContext(
+            run_context=self.run_context,
+            request_id=(self.request or {}).get("request_id"),
+            targets=tuple((self.request or {}).get("targets", ())),
+            limits=copy.deepcopy((self.request or {}).get("limits")),
+            stage=self.stage,
+            diagnostic_code=self.diagnostic_code,
+            known_counts=known_counts,
+        )
+        if decision_context.known_counts is None or (
+            self.request is not None and decision_context.limits is None
+        ):
+            decision_context = NextDecisionContext(
+                run_context=decision_context.run_context,
+                request_id=decision_context.request_id
+                if decision_context.request_id is not None
+                else (self.request or {}).get("request_id"),
+                targets=decision_context.targets or tuple((self.request or {}).get("targets", ())),
+                limits=decision_context.limits
+                if decision_context.limits is not None
+                else copy.deepcopy((self.request or {}).get("limits")),
+                stage=decision_context.stage,
+                diagnostic_code=decision_context.diagnostic_code,
+                failure_kind=decision_context.failure_kind,
+                known_counts=known_counts,
+                outcome=decision_context.outcome,
+                payload_unavailable=decision_context.payload_unavailable,
+                exit_code=decision_context.exit_code,
+            )
+        assert decision_context.run_context == self.run_context
+        assert decision_context.stage == self.stage
+        assert decision_context.diagnostic_code == self.diagnostic_code
+        assert decision_context.failure_kind == decision_failure_kind(self.diagnostic_code)
+        assert decision_context.outcome == self.outcome
+        assert decision_context.payload_unavailable is True
+        assert decision_context.exit_code == self.exit_code
+        assert (
+            decision_context.known_counts is None or decision_context.known_counts == known_counts
+        )
+        if self.request is not None:
+            assert self.request["run_context"] == self.run_context
+            assert decision_context.request_id == self.request.get("request_id")
+            assert tuple(decision_context.targets) == tuple(self.request.get("targets", ()))
+            if decision_context.limits is not None:
+                assert decision_context.limits == self.request.get("limits")
+        object.__setattr__(self, "decision_context", decision_context)
+        context = self.publication_context or _publication_context_from_request(
+            self.request, self.run_context, decision_context=decision_context
+        )
+        assert context.run_context == self.run_context
+        object.__setattr__(self, "publication_context", context)
 
     def __getattribute__(self, name: str) -> Any:
         value = object.__getattribute__(self, name)
-        if name in {"request", "run_context", "diagnostic", "known_counts", "artifact_paths"}:
+        if name in {
+            "request",
+            "run_context",
+            "diagnostic",
+            "known_counts",
+            "artifact_paths",
+            "decision_context",
+            "publication_context",
+        }:
             return copy.deepcopy(value)
         return value
 
@@ -304,6 +651,8 @@ class NotApplicableDecision:
     payload_available: bool = False
     artifact_paths: tuple[str, ...] = ()
     exit_code: int = 0
+    decision_context: NextDecisionContext | None = None
+    publication_context: NextPublicationContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "request", copy.deepcopy(self.request))
@@ -319,10 +668,56 @@ class NotApplicableDecision:
         assert self.artifact_paths == ()
         assert self.exit_code == 0
         assert self.request["run_context"] == self.run_context
+        decision_context = self.decision_context or NextDecisionContext(
+            run_context=self.run_context,
+            request_id=self.request.get("request_id"),
+            targets=tuple(self.request.get("targets", ())),
+            limits=copy.deepcopy(self.request.get("limits")),
+            diagnostic_code="CSV-NEXT-APPLICABILITY-001",
+            outcome="not_applicable",
+            payload_unavailable=False,
+            exit_code=0,
+            known_counts=copy.deepcopy(self.known_counts),
+        )
+        if decision_context.known_counts is None:
+            decision_context = NextDecisionContext(
+                run_context=decision_context.run_context,
+                request_id=decision_context.request_id,
+                targets=decision_context.targets,
+                limits=decision_context.limits,
+                stage=decision_context.stage,
+                diagnostic_code=decision_context.diagnostic_code,
+                failure_kind=decision_context.failure_kind,
+                known_counts=copy.deepcopy(self.known_counts),
+                outcome=decision_context.outcome,
+                payload_unavailable=decision_context.payload_unavailable,
+                exit_code=decision_context.exit_code,
+            )
+        assert decision_context.outcome == self.outcome
+        assert decision_context.payload_unavailable is False
+        assert decision_context.exit_code == self.exit_code
+        assert (
+            decision_context.known_counts is None
+            or decision_context.known_counts == self.known_counts
+        )
+        object.__setattr__(self, "decision_context", decision_context)
+        context = self.publication_context or _publication_context_from_request(
+            self.request, self.run_context, decision_context=decision_context
+        )
+        assert context.run_context == self.run_context
+        object.__setattr__(self, "publication_context", context)
 
     def __getattribute__(self, name: str) -> Any:
         value = object.__getattribute__(self, name)
-        if name in {"request", "run_context", "diagnostic", "known_counts", "artifact_paths"}:
+        if name in {
+            "request",
+            "run_context",
+            "diagnostic",
+            "known_counts",
+            "artifact_paths",
+            "decision_context",
+            "publication_context",
+        }:
             return copy.deepcopy(value)
         return value
 
@@ -421,6 +816,20 @@ LIMIT_CONTRACTS: dict[str, dict[str, Any]] = {
     },
     "max_stdout_bytes": {
         "unit": "utf8_bytes_per_stdout_payload",
+        "measurement": "compatibility_alias_for_max_selected_stdout_bytes",
+        "encoding": "utf8",
+        "inclusive": True,
+        "outcome": "payload_unavailable",
+    },
+    "max_adapter_response_bytes": {
+        "unit": "utf8_bytes_per_adapter_response_payload",
+        "measurement": "complete_child_capture_before_decode",
+        "encoding": "utf8",
+        "inclusive": True,
+        "outcome": "payload_unavailable",
+    },
+    "max_selected_stdout_bytes": {
+        "unit": "utf8_bytes_per_selected_artifact_payload",
         "measurement": "canonical_output_encode_before_write",
         "encoding": "utf8",
         "inclusive": True,
@@ -803,26 +1212,67 @@ class SourceAcquisitionSeal:
     seal_operation: int
 
 
-def freeze_source_acquisition(
-    reader: InstrumentedSourceReader,
-    *,
-    discovery_paths: tuple[str, ...],
-    final_paths: tuple[str, ...],
-    final_plan: dict[str, Any],
-    inventory_revision_before: str = "inventory-v1",
-    inventory_revision_after: str = "inventory-v1",
-) -> SourceAcquisitionSeal:
-    """Reference the required intent/read/read-drift-check/seal sequence."""
+@dataclass(frozen=True)
+class SourceDiscoveryIntent:
+    """Sealed description of what the two-phase source read intends to do."""
 
-    assert discovery_paths == tuple(dict.fromkeys(discovery_paths))
-    assert final_paths == tuple(dict.fromkeys(final_paths))
-    contents: dict[str, bytes] = {}
-    for path in discovery_paths:
-        contents[path] = reader.read(path)
-    for path in final_paths:
-        if path not in contents:
-            contents[path] = reader.read(path)
-    assert inventory_revision_after == inventory_revision_before
+    discovery_paths: tuple[str, ...]
+    final_paths: tuple[str, ...]
+    config: dict[str, Any] | None = None
+    local_extends: tuple[dict[str, Any], ...] = ()
+    file_role_map: tuple[dict[str, Any], ...] = ()
+
+
+def seal_source_acquisition(
+    intent: SourceDiscoveryIntent | dict[str, Any],
+    reader: InstrumentedSourceReader,
+    inventory: dict[str, Any] | None = None,
+) -> SourceAcquisitionSeal:
+    """Derive and atomically seal the final plan and SourceView.
+
+    ``intent`` contains only discovery intent.  The final plan is derived from
+    its frozen config and the acquired bytes; callers cannot submit an
+    independent plan or view.  ``inventory`` is an optional read-only witness
+    used to prove the final revision, role map, extends closure, and
+    digest/size values match what was actually read.
+    """
+
+    if isinstance(intent, SourceDiscoveryIntent):
+        discovery_paths = tuple(intent.discovery_paths)
+        final_paths = tuple(intent.final_paths)
+        config = copy.deepcopy(intent.config)
+        local_extends = list(copy.deepcopy(intent.local_extends))
+        file_role_map = list(copy.deepcopy(intent.file_role_map))
+    else:
+        discovery_paths = tuple(intent.get("discovery_paths", intent.get("control_paths", ())))
+        final_paths = tuple(intent.get("final_paths", intent.get("source_paths", ())))
+        config = copy.deepcopy(cast(dict[str, Any] | None, intent.get("config")))
+        local_extends = list(copy.deepcopy(intent.get("local_extends", ())))
+        file_role_map = list(copy.deepcopy(intent.get("file_role_map", ())))
+    inventory = copy.deepcopy(inventory or {})
+    # Duplicate entries within either phase would make the read contract
+    # ambiguous.  Cross-phase overlap is intentional and is read once by the
+    # union below.
+    assert len(discovery_paths) == len(set(discovery_paths))
+    assert len(final_paths) == len(set(final_paths))
+    discovery_paths = tuple(dict.fromkeys(discovery_paths))
+    final_paths = tuple(dict.fromkeys(final_paths))
+    assert discovery_paths == tuple(str(path) for path in discovery_paths)
+    assert final_paths == tuple(str(path) for path in final_paths)
+    all_paths = tuple(dict.fromkeys((*discovery_paths, *final_paths)))
+    assert all_paths
+    contents = {path: reader.read(path) for path in all_paths}
+    before = inventory.get("revision_before", inventory.get("revision", "inventory-v1"))
+    after = inventory.get("revision_after", before)
+    assert after == before
+
+    assert config is not None, "source intent must provide derivable config"
+    plan = source_plan_descriptor(
+        config,
+        local_extends=local_extends or None,
+        file_role_map=file_role_map or None,
+    )
+
     view_files = [
         {
             "path": path,
@@ -831,14 +1281,26 @@ def freeze_source_acquisition(
         }
         for path in sorted(contents)
     ]
-    plan_copy = copy.deepcopy(final_plan)
-    plan_digest = digest(plan_copy)
     source_view = {
         "schema": "code-structure-viz.source-view/v1",
         "files": view_files,
         "file_count": len(view_files),
     }
+    expected_files = inventory.get("file_digests")
+    if expected_files is not None:
+        assert expected_files == view_files
+    expected_roles = inventory.get("file_role_map")
+    if expected_roles is not None:
+        assert plan["file_role_map"] == sorted(expected_roles, key=canonical_json_bytes)
+    expected_extends = inventory.get("local_extends")
+    if expected_extends is not None:
+        assert plan["local_extends"] == sorted(expected_extends, key=canonical_json_bytes)
+    plan_digest = digest(plan)
     source_view_fingerprint = digest(source_view)
+    if inventory.get("plan_digest") is not None:
+        assert inventory["plan_digest"] == plan_digest
+    if inventory.get("source_view_fingerprint") is not None:
+        assert inventory["source_view_fingerprint"] == source_view_fingerprint
     seal_operation = reader.seal()
     seal_id = digest(
         {
@@ -848,7 +1310,7 @@ def freeze_source_acquisition(
         }
     )
     return SourceAcquisitionSeal(
-        final_plan=plan_copy,
+        final_plan=plan,
         source_view=source_view,
         plan_digest=plan_digest,
         source_view_fingerprint=source_view_fingerprint,
@@ -983,6 +1445,116 @@ def _is_jsx_identifier_part(character: str) -> bool:
         or ord(character) in ECMASCRIPT_JOIN_CONTROL
         or _unicode_table_contains(ECMASCRIPT_ID_CONTINUE_INTERVALS, ord(character))
     )
+
+
+# These sets are intentionally lexical/contextual rather than derived from
+# Python's keyword table.  The adapter and the Python boundary must agree on
+# the same ECMAScript IdentifierName grammar even when the host UCD changes.
+_ECMASCRIPT_RESERVED_WORDS = frozenset(
+    {
+        "await",
+        "break",
+        "case",
+        "catch",
+        "class",
+        "const",
+        "continue",
+        "debugger",
+        "default",
+        "delete",
+        "do",
+        "else",
+        "enum",
+        "export",
+        "extends",
+        "false",
+        "finally",
+        "for",
+        "function",
+        "if",
+        "implements",
+        "import",
+        "in",
+        "instanceof",
+        "interface",
+        "let",
+        "new",
+        "null",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "static",
+        "super",
+        "switch",
+        "this",
+        "throw",
+        "true",
+        "try",
+        "typeof",
+        "var",
+        "void",
+        "while",
+        "with",
+        "yield",
+    }
+)
+
+
+def is_identifier_name(value: str) -> bool:
+    """Return whether *value* is a canonical ECMAScript IdentifierName."""
+
+    if not isinstance(value, str) or not value:
+        return False
+    if unicodedata.normalize("NFC", value) != value:
+        return False
+    return _is_jsx_identifier_start(value[0]) and all(
+        _is_jsx_identifier_part(character) for character in value[1:]
+    )
+
+
+def is_binding_identifier(value: str) -> bool:
+    """Return whether *value* can be used as a lexical binding name."""
+
+    return is_identifier_name(value) and value not in _ECMASCRIPT_RESERVED_WORDS
+
+
+def is_declaration_key(value: str) -> bool:
+    """Return whether *value* is an IdentifierName used as a property key.
+
+    Property/export keys may be reserved words; they still cannot contain a
+    non-canonical form or a character outside the pinned Unicode table.
+    """
+
+    return is_identifier_name(value)
+
+
+@lru_cache(maxsize=1)
+def identifier_classification_bitstream() -> bytes:
+    """Encode the full Unicode range as one byte per code point.
+
+    Bit 0 is IdentifierStart and bit 1 is IdentifierPart.  The fixed
+    code-point order and byte encoding make the known-answer digest
+    independent of Python's host Unicode database.
+    """
+
+    return bytes(
+        (1 if _is_jsx_identifier_start(chr(codepoint)) else 0)
+        | (2 if _is_jsx_identifier_part(chr(codepoint)) else 0)
+        for codepoint in range(0x110000)
+    )
+
+
+IDENTIFIER_CLASSIFICATION_SHA256 = (
+    "2b5d2feba3292a321e8c2497969be9e03ca24113de9e7f4803791ce4b645b1fa"
+)
+
+
+def identifier_classification_digest() -> str:
+    """Return the known-answer SHA-256 for the complete classification map."""
+
+    return hashlib.sha256(identifier_classification_bitstream()).hexdigest()
 
 
 def _jsx_quoted_end(text: str, start: int) -> int:
@@ -1448,14 +2020,9 @@ def _is_export_identifier(
 ) -> bool:
     if allow_default and value == "default":
         return True
-    if value in _EXPORT_KEYWORDS and not allow_keyword:
-        return False
-    if not value or unicodedata.normalize("NFC", value) != value:
-        return False
-    first = value[0]
-    return _is_jsx_identifier_start(first) and all(
-        _is_jsx_identifier_part(char) for char in value[1:]
-    )
+    if allow_keyword:
+        return is_declaration_key(value)
+    return is_binding_identifier(value)
 
 
 def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]]:
@@ -2119,6 +2686,248 @@ def digest(value: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
 
 
+def _trusted_environment_snapshot() -> dict[str, Any]:
+    """Return the checked-in trusted profile used by decision projections."""
+
+    environment: dict[str, Any] = {
+        "schema": "code-structure-viz.next-trusted-types/v1",
+        "environment_version": "1",
+        "semantic_profile_id": "next-trusted-profile-v1",
+        "typescript_version": "5.9.2",
+        "identifier_unicode_table_digest": ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
+        "license_inventory_digest": TRUSTED_PROFILE_LICENSE_DIGEST,
+        "files": [
+            {
+                "physical_path": physical_path,
+                "virtual_path": virtual_path,
+                "size_bytes": TRUSTED_PROFILE_FILE_SIZES[virtual_path],
+                "sha256": TRUSTED_PROFILE_FILE_SHA256[virtual_path],
+                "license_id": TRUSTED_PROFILE_FILE_LICENSES[virtual_path],
+            }
+            for physical_path, virtual_path in TRUSTED_PROFILE_PHYSICAL_TO_VIRTUAL
+        ],
+        "reserved_module_specifiers": list(TRUSTED_MODULES),
+        "reserved_global_names": list(TRUSTED_GLOBALS),
+        "certified_symbols": copy.deepcopy(list(TRUSTED_PROFILE_CERTIFIED_SYMBOLS)),
+        "anti_shadowing_witness": list(TRUSTED_PROFILE_SHADOWING_WITNESS),
+    }
+    environment["sha256"] = digest(environment)
+    return environment
+
+
+def _toolchain_snapshot(*, node_status: str = "available") -> dict[str, Any]:
+    """Return the closed toolchain descriptor owned by the run decision."""
+
+    node_available = node_status == "available"
+    node_failure_kind = None if node_available or node_status == "not_applicable" else "missing"
+    return {
+        "node": {
+            "status": node_status,
+            "version": "22.14.0" if node_available else None,
+            "failure_kind": node_failure_kind,
+        },
+        "node_version": "22.14.0" if node_available else None,
+        "typescript_version": "5.9.2",
+        "adapter_version": "1.0.0",
+        "protocol": "code-structure-viz.next-adapter/v1",
+    }
+
+
+def _compatibility_descriptor_snapshot() -> dict[str, Any]:
+    """Return the pinned semantic descriptor sealed into each run decision."""
+
+    descriptor: dict[str, Any] = {
+        "schema": "code-structure-viz.next-semantic-compatibility/v1",
+        "semantic_schema": "code-structure-viz.semantic/v1",
+        "identity_versions": copy.deepcopy(IDENTITY_VERSIONS),
+        "algorithm_versions": {
+            "recognition": 1,
+            "export": 1,
+            "props": 1,
+            "relation": 1,
+            "fact": 1,
+            "boundary": 1,
+            "identifier_unicode": ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
+            "identifier_unicode_table_digest": ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
+        },
+        "semantic_profile_id": "next-trusted-profile-v1",
+    }
+    descriptor["compatibility_id"] = digest(
+        {
+            "semantic_schema": descriptor["semantic_schema"],
+            "identity_versions": descriptor["identity_versions"],
+            "algorithm_versions": descriptor["algorithm_versions"],
+            "semantic_profile_id": descriptor["semantic_profile_id"],
+        }
+    )
+    return descriptor
+
+
+def _publication_context_from_request(
+    request: dict[str, Any] | None,
+    run_context: NextRunContext,
+    *,
+    decision_context: NextDecisionContext | None = None,
+    toolchain: dict[str, Any] | None = None,
+    trusted_environment: dict[str, Any] | None = None,
+    projects_for_fingerprint: list[dict[str, Any]] | None = None,
+) -> NextPublicationContext:
+    """Construct the immutable publication provenance at the boundary.
+
+    This helper exists only for the data-only reference contract.  It is
+    intentionally the *single* place that fills provenance when a fixture
+    does not provide an already sealed context; writers never get to rebuild
+    these values independently.
+    """
+
+    context = canonical_run_context(**run_context)
+    source_request = copy.deepcopy(request) if request is not None else {}
+    limits = copy.deepcopy(
+        source_request.get("limits")
+        or (decision_context.limits if decision_context is not None else None)
+        or {**LIMIT_DEFAULTS, "max_entities": context["budget_resolved"]}
+    )
+    limits = {**LIMIT_DEFAULTS, **limits}
+    limits["max_entities"] = context["budget_resolved"]
+    projects = copy.deepcopy(source_request.get("projects", []))
+    project_descriptors = [
+        {
+            key: copy.deepcopy(project[key])
+            for key in ("root", "source_roots", "config_path", "compiler_options")
+        }
+        for project in projects
+        if isinstance(project, dict)
+        and {"root", "source_roots", "config_path", "compiler_options"} <= set(project)
+    ]
+    trusted_digest = (
+        source_request.get("trusted_environment_digest")
+        or source_request.get("trusted_type_environment", {}).get("sha256")
+        or ("0" * 64)
+    )
+    plan_input = {
+        "projects": project_descriptors,
+        "limits": limits,
+        "trusted_environment_digest": trusted_digest,
+    }
+    supplied_plan = source_request.get("source_plan")
+    if isinstance(supplied_plan, dict):
+        final_plan = copy.deepcopy(supplied_plan)
+        _validate_source_plan_descriptor(final_plan)
+    elif project_descriptors:
+        final_plan = source_plan_descriptor(plan_input)
+    else:
+        # A request-independent failure has no source plan.  Keep a closed,
+        # digestable descriptor rather than inventing a filesystem authority.
+        final_plan = {
+            "schema": "code-structure-viz.source-acquisition-plan/next/v1",
+            "version": SOURCE_PLAN_VERSION,
+            "projects": [],
+            "resolved_control_paths": [],
+            "local_extends": [],
+            "file_role_map": [],
+            "program_suffixes": list(SOURCE_PLAN_PROGRAM_SUFFIXES),
+            "context_suffixes": list(SOURCE_PLAN_CONTEXT_SUFFIXES),
+            "hard_exclusions": sorted(SOURCE_PLAN_HARD_EXCLUSIONS),
+            "limits": limits,
+            "trusted_environment_digest": trusted_digest,
+        }
+    source_files = [
+        {
+            "path": file_record.get("path"),
+            "size_bytes": file_record.get("size_bytes", 0),
+            "sha256": file_record.get("sha256", "0" * 64),
+        }
+        for file_record in source_request.get("files", [])
+        if isinstance(file_record, dict) and file_record.get("path") is not None
+    ]
+    source_view = {
+        "schema": "code-structure-viz.source-view/v1",
+        "kind": "working-tree",
+        "head_commit": None,
+        "files": sorted(source_files, key=canonical_json_bytes),
+        "file_count": len(source_files),
+    }
+    source_view_fingerprint = digest(source_view)
+    source_plan_digest = digest(final_plan)
+    seal_id = digest(
+        {
+            "source_plan_digest": source_plan_digest,
+            "source_view_fingerprint": source_view_fingerprint,
+            "operation": "decision-boundary-seal-v1",
+        }
+    )
+    public_config = {
+        "schema": "code-structure-viz.domain-config/next/v1",
+        "projects": project_descriptors,
+        "targets": list(
+            source_request.get("targets", decision_context.targets if decision_context else ())
+        ),
+        "upstream_depth": 1,
+        "downstream_depth": 1,
+        "formats": list(context["requested_formats"]),
+        "limits": limits,
+        "source_plan": copy.deepcopy(final_plan),
+        "source_plan_digest": source_plan_digest,
+        "trusted_environment_digest": trusted_digest,
+    }
+    public_config["domain_config_digest"] = digest(
+        {key: value for key, value in public_config.items() if key != "domain_config_digest"}
+    )
+    compatibility_descriptor = _compatibility_descriptor_snapshot()
+    resolved_toolchain = copy.deepcopy(toolchain or source_request.get("toolchain", {}))
+    resolved_toolchain.setdefault(
+        "node",
+        {"status": "unavailable", "version": None, "failure_kind": "missing"},
+    )
+    resolved_toolchain.setdefault("node_version", None)
+    resolved_toolchain.setdefault("typescript_version", "5.9.2")
+    resolved_toolchain.setdefault("adapter_version", source_request.get("adapter_version", "1.0.0"))
+    resolved_toolchain.setdefault(
+        "protocol", source_request.get("protocol", "code-structure-viz.next-adapter/v1")
+    )
+    resolved_trusted_environment = copy.deepcopy(
+        trusted_environment
+        or source_request.get("trusted_environment")
+        or source_request.get("trusted_type_environment")
+        or {"sha256": trusted_digest}
+    )
+    run_fingerprint_preimage = {
+        "source_view_fingerprint": source_view_fingerprint,
+        "source_plan_digest": source_plan_digest,
+        "domain_config_digest": public_config["domain_config_digest"],
+        "projects": copy.deepcopy(
+            projects_for_fingerprint
+            if projects_for_fingerprint is not None
+            else source_request.get("projects", [])
+        ),
+        "targets": public_config["targets"],
+        "formats": public_config["formats"],
+        "stdout_selector": context["stdout_selector"],
+        "limits": limits,
+        "trusted_environment_digest": resolved_trusted_environment["sha256"],
+        "node_version": resolved_toolchain["node_version"],
+        "typescript_version": resolved_toolchain["typescript_version"],
+        "adapter_version": resolved_toolchain["adapter_version"],
+        "protocol": resolved_toolchain["protocol"],
+        "identifier_unicode_version": ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
+        "identifier_unicode_table_digest": ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
+    }
+    return NextPublicationContext(
+        source_view_descriptor=source_view,
+        source_view_fingerprint=source_view_fingerprint,
+        final_source_acquisition_plan=final_plan,
+        source_plan_digest=source_plan_digest,
+        seal_id=seal_id,
+        public_next_config=public_config,
+        public_next_request=source_request or None,
+        compatibility_descriptor=compatibility_descriptor,
+        toolchain=resolved_toolchain,
+        trusted_environment=resolved_trusted_environment,
+        run_context=context,
+        run_fingerprint_preimage=run_fingerprint_preimage,
+    )
+
+
 TRUSTED_PROFILE_LICENSE_DIGEST = digest(list(TRUSTED_PROFILE_LICENSES))
 
 
@@ -2658,11 +3467,7 @@ def _validate_target_exception_proof_base(
             "target_key": row["target_key"],
             "status": "complete" if row["status"] == "resolved" else "failed",
             "record_ids": row["record_ids"],
-            **(
-                {"reason": row["reason"]}
-                if row.get("reason") in {"missing", "component_only", "duplicate"}
-                else {}
-            ),
+            **({"reason": row["reason"]} if row.get("reason") in TARGET_FAILURE_REASONS else {}),
         }
         for row in expected_target_rows
     ]
@@ -2695,6 +3500,20 @@ class NextTargetCompletenessFailure(AssertionError):
     def __init__(self, failures: list[dict[str, Any]]) -> None:
         self.failures = failures
         super().__init__("selected target has no unique program File→Module mapping")
+
+
+TARGET_FAILURE_REASONS = frozenset(
+    {
+        "missing",
+        "component_only",
+        "duplicate",
+        "out_of_scope",
+        "non_program",
+        "control_context",
+        "project_ambiguity",
+        "selected_taint",
+    }
+)
 
 
 def target_completeness_failure(
@@ -2735,11 +3554,11 @@ def target_completeness_failure(
         if not matching_files:
             reason = "missing"
         elif len(project_ids) != 1 or len(exact_files) > 1:
-            reason = "ambiguous"
+            reason = "project_ambiguity"
         elif exact_files and not _is_program_file(exact_files[0]):
-            reason = "non_program_file"
+            reason = "non_program"
         elif not selected_program_files:
-            reason = "no_program_file"
+            reason = "control_context"
         else:
             for file in selected_program_files:
                 key = (file.get("project_id"), file.get("path"))
@@ -2915,6 +3734,14 @@ def target_failure_decision(
     """Return the stable response-envelope projection for a target failure."""
 
     context = canonical_run_context(**run_context)
+    assert failure.failures
+    normalized_failures = [
+        {"target_key": canonical_target_key(item["target_key"]), "reason": item["reason"]}
+        for item in failure.failures
+    ]
+    assert all(item["reason"] in TARGET_FAILURE_REASONS for item in normalized_failures)
+    assert normalized_failures == sorted(normalized_failures, key=canonical_json_bytes)
+    assert len({item["target_key"] for item in normalized_failures}) == len(normalized_failures)
     return {
         "actual": None,
         "resolved": context["budget_resolved"],
@@ -2929,7 +3756,7 @@ def target_failure_decision(
         "budget_source": context["budget_source"],
         "stdout_selector": context["stdout_selector"],
         "artifact_paths": [],
-        "target_failures": copy.deepcopy(failure.failures),
+        "target_failures": normalized_failures,
     }
 
 
@@ -2998,6 +3825,30 @@ def derive_pre_budget_outcome(proof: dict[str, Any], model: dict[str, Any]) -> s
     return "complete"
 
 
+def classify_source_failure(*, localized: bool, safe_subset_proven: bool) -> dict[str, Any]:
+    """Close the source failure boundary before semantic projection.
+
+    `SOURCE-001` is reserved for a proven local omission.  Any source failure
+    that can affect an unbounded dependency or target set is a typed
+    `SOURCE-003` unavailable result; it must not be downgraded to a misleading
+    partial snapshot.
+    """
+
+    if localized and safe_subset_proven:
+        return {
+            "diagnostic_code": "CSV-NEXT-SOURCE-001",
+            "outcome": "partial_safe",
+            "payload_available": True,
+            "exit_code": 3,
+        }
+    return {
+        "diagnostic_code": "CSV-NEXT-SOURCE-003",
+        "outcome": "payload_unavailable",
+        "payload_available": False,
+        "exit_code": 3,
+    }
+
+
 def _validate_proof_reason_semantics(proof: dict[str, Any], model: dict[str, Any]) -> None:
     """Keep proof dispositions and outcome ownership mutually reachable."""
 
@@ -3055,6 +3906,16 @@ def _with_validated_decision(
         )
         if key in projection
     }
+    gate["resolved_limits"] = copy.deepcopy(request["limits"])
+    canonical_targets = tuple(canonical_target_key(target) for target in request["targets"])
+    assert tuple(canonical_target_key(target) for target in targets) == canonical_targets
+    publication_context = _publication_context_from_request(
+        request,
+        run_context,
+        toolchain=_toolchain_snapshot(),
+        trusted_environment=_trusted_environment_snapshot(),
+        projects_for_fingerprint=copy.deepcopy(model["projects"]),
+    )
     projection["validated_decision"] = NextValidatedDecision(
         validated_model=model,
         validated_proof=proof,
@@ -3065,6 +3926,7 @@ def _with_validated_decision(
         target_failures=tuple(target_failures),
         export_failures=tuple(export_failures),
         request=request,
+        publication_context=publication_context,
     )
     return projection
 
@@ -3395,7 +4257,7 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             # example `.d.ts`) is a separate target-classification failure
             # and intentionally has no typed cardinality reason.
             reason = item.get("reason")
-            assert reason is None or reason in {"missing", "component_only", "duplicate"}
+            assert reason is None or reason in TARGET_FAILURE_REASONS
         else:
             assert "reason" not in item
     failed_targets = [item for item in target_completeness if item["status"] == "failed"]
@@ -3498,6 +4360,10 @@ def validate_limits(limits: dict[str, Any]) -> None:
     assert 1 <= limits["max_entities"] <= 100000
     for name, expected in LIMIT_DEFAULTS.items():
         assert limits[name] == expected, name
+    # ``max_stdout_bytes`` is the historical public alias.  Keeping it equal
+    # to the explicit selected-artifact bound avoids two authorities while
+    # allowing old v1 request fixtures to remain readable.
+    assert limits["max_stdout_bytes"] == limits["max_selected_stdout_bytes"]
     validate_limit_contracts()
 
 
@@ -3928,8 +4794,12 @@ def bounded_decode_json(
     resolved_limits = {**LIMIT_DEFAULTS, **(limits or {})}
     # This is the sole raw-response entry point.  Measure the complete byte
     # stream before UTF-8 decoding, parser construction, or object
-    # materialization so whitespace-only padding cannot evade max_stdout_bytes.
-    if len(payload) > resolved_limits["max_stdout_bytes"]:
+    # materialization so whitespace-only padding cannot evade the private
+    # adapter-response limit.
+    response_limit = resolved_limits.get(
+        "max_adapter_response_bytes", resolved_limits["max_stdout_bytes"]
+    )
+    if len(payload) > response_limit:
         return {
             "allowed": False,
             "bytes": len(payload),
@@ -3938,7 +4808,9 @@ def bounded_decode_json(
             "max_array_items": 0,
             "max_nesting": 0,
             "max_string_bytes": 0,
-            "failed_at_byte": resolved_limits["max_stdout_bytes"],
+            "failed_at_byte": response_limit,
+            # Keep the historical decoder reason as a wire-compatibility
+            # label; the selected limit is resolved above by name.
             "reason": "max_stdout_bytes",
             "materialized": False,
         }
@@ -3986,16 +4858,16 @@ def response_boundary_decision(response_bytes: bytes, request: dict[str, Any]) -
     if isinstance(decoded, dict):
         model = decoded.get("model")
         proof = decoded.get("proof")
-        model_records = (
-            sum(len(model.get(collection, [])) for collection in COLLECTIONS)
-            if isinstance(model, dict)
-            else 0
+        published_model_records, proof_only_records, discovered_records = (
+            response_model_record_counts(model, proof)
+            if isinstance(model, dict) and isinstance(proof, dict)
+            else (0, 0, 0)
         )
-        proof_records = len(proof.get("discovered_records", [])) if isinstance(proof, dict) else 0
         classification = classify_response_limit(
             raw_bytes=bounded["bytes"],
             aggregate_array_items=bounded["total_array_items"],
-            model_records=proof_records or model_records,
+            model_records=published_model_records,
+            proof_only_records=proof_only_records,
             limits=request["limits"],
         )
         if not classification["allowed"]:
@@ -4003,7 +4875,7 @@ def response_boundary_decision(response_bytes: bytes, request: dict[str, Any]) -
                 request,
                 stage=classification["stage"],
                 diagnostic_code=classification["diagnostic_code"],
-                model_records=classification["measured"],
+                model_records=discovered_records,
                 stdout_bytes=bounded["bytes"],
             )
     try:
@@ -4023,16 +4895,17 @@ def response_boundary_decision(response_bytes: bytes, request: dict[str, Any]) -
 
 
 def capture_adapter_stderr(
-    chunks: list[bytes],
+    chunks: Iterable[bytes],
     *,
     limit: int = LIMIT_DEFAULTS["max_adapter_stderr_capture_bytes"],
 ) -> dict[str, Any]:
     """Model bounded adapter stderr capture and disposal semantics.
 
-    The caller supplies already-read chunks; the counter is byte-based and
-    increments before retaining a chunk.  A breach terminates the process
-    group and disposes both raw and partial stderr, so no adapter text can
-    reach public diagnostics.
+    The iterable is the runner's faithful incremental read boundary.  The
+    counter is byte-based and increments before retaining a chunk.  A breach
+    stops reading, requests process-group termination, and disposes both raw
+    and partial stderr, so no adapter text can reach public diagnostics.  This
+    reference does not claim to exercise an OS process.
     """
 
     assert limit >= 1
@@ -4048,6 +4921,9 @@ def capture_adapter_stderr(
                 "process_group_terminated": True,
                 "raw_disposed": True,
                 "partial_disposed": True,
+                "read_stopped": True,
+                "child_text_leaked": False,
+                "process_group_disposed": True,
                 "diagnostic_code": "CSV-NEXT-LIMIT-003",
                 "outcome": "payload_unavailable",
                 "manifest_stderr_bytes": 0,
@@ -4059,6 +4935,9 @@ def capture_adapter_stderr(
         "process_group_terminated": False,
         "raw_disposed": False,
         "partial_disposed": False,
+        "read_stopped": False,
+        "child_text_leaked": False,
+        "process_group_disposed": False,
         "diagnostic_code": None,
         "outcome": "complete",
         "manifest_stderr_bytes": 0,
@@ -4096,6 +4975,8 @@ def capture_adapter_stdout(
                 "process_group_terminated": True,
                 "raw_disposed": True,
                 "partial_disposed": True,
+                "read_stopped": True,
+                "process_group_disposed": True,
                 "decoder_called": False,
                 "diagnostic_code": "CSV-NEXT-LIMIT-003",
                 "outcome": "payload_unavailable",
@@ -4117,6 +4998,8 @@ def capture_adapter_stdout(
         "process_group_terminated": False,
         "raw_disposed": False,
         "partial_disposed": False,
+        "read_stopped": False,
+        "process_group_disposed": False,
         "decoder_called": decoder_called,
         "diagnostic_code": None,
         "outcome": "complete",
@@ -4200,6 +5083,41 @@ def render_public_diagnostic_stderr(
     }
 
 
+def copy_selected_stdout(
+    payload: bytes,
+    *,
+    limit: int = LIMIT_DEFAULTS["max_selected_stdout_bytes"],
+) -> dict[str, Any]:
+    """Apply the public selected-artifact byte gate as an all-or-none copy.
+
+    A copy failure is a publication result, not a semantic-domain rewrite:
+    the validated domain decision remains immutable and the caller publishes
+    an unavailable selected artifact with no partial bytes.
+    """
+
+    assert isinstance(payload, bytes)
+    assert limit >= 1
+    if len(payload) <= limit:
+        return {
+            "allowed": True,
+            "bytes": len(payload),
+            "retained": payload,
+            "retained_bytes": len(payload),
+            "partial_disposed": False,
+            "publication_outcome": "published_artifact",
+            "diagnostic_code": None,
+        }
+    return {
+        "allowed": False,
+        "bytes": len(payload),
+        "retained": b"",
+        "retained_bytes": 0,
+        "partial_disposed": True,
+        "publication_outcome": "selected_artifact_unavailable",
+        "diagnostic_code": "CSV-NEXT-LIMIT-003",
+    }
+
+
 def model_record_budget_allowed(measured: int, limit: int) -> bool:
     """Apply max_model_records without allocating a model-sized fixture."""
 
@@ -4207,11 +5125,39 @@ def model_record_budget_allowed(measured: int, limit: int) -> bool:
 
 
 def model_wire_record_count(model_records: int, proof_only_records: int = 0) -> int:
-    """Count the wire model once; proof IDs do not duplicate model payloads."""
+    """Count published model records plus proof-only evidence records.
+
+    ``discovered_records`` is a bijective observation of model IDs.  It is
+    not another payload copy.  Only a proof ID absent from the model consumes
+    an additional record budget.
+    """
 
     assert model_records >= 0
     assert proof_only_records >= 0
     return model_records + proof_only_records
+
+
+def response_model_record_counts(
+    model: dict[str, Any], proof: dict[str, Any]
+) -> tuple[int, int, int]:
+    """Return ``(published, proof_only, discovered)`` from actual wire IDs."""
+
+    model_ids = {
+        record["id"]
+        for collection in COLLECTIONS
+        for record in model.get(collection, [])
+        if isinstance(record, dict) and isinstance(record.get("id"), str)
+    }
+    published = sum(
+        len(model.get(collection, []))
+        for collection in COLLECTIONS
+        if isinstance(model.get(collection), list)
+    )
+    proof_rows = proof.get("discovered_records", []) if isinstance(proof, dict) else []
+    proof_only = sum(
+        1 for row in proof_rows if isinstance(row, dict) and row.get("record_id") not in model_ids
+    )
+    return published, proof_only, model_wire_record_count(published, proof_only)
 
 
 def classify_response_limit(
@@ -4228,7 +5174,8 @@ def classify_response_limit(
     assert raw_bytes >= 0
     assert aggregate_array_items >= 0
     measured_model_records = model_wire_record_count(model_records, proof_only_records)
-    if raw_bytes > resolved["max_stdout_bytes"]:
+    response_limit = resolved.get("max_adapter_response_bytes", resolved["max_stdout_bytes"])
+    if raw_bytes > response_limit:
         return {
             "allowed": False,
             "diagnostic_code": "CSV-NEXT-LIMIT-003",
@@ -4534,11 +5481,7 @@ def _assert_external_target(target: dict[str, Any]) -> None:
     assert target["kind"] in {"external", "unresolved"}
     assert PACKAGE_RE.fullmatch(target["safe_specifier"]), target
     exported_name = target["exported_name"]
-    assert (
-        exported_name is None
-        or exported_name == "default"
-        or re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", exported_name)
-    )
+    assert exported_name is None or exported_name == "default" or is_declaration_key(exported_name)
 
 
 def _validate_type_node(
@@ -4581,14 +5524,10 @@ def _validate_type_node(
         scope = node["scope"]
         if scope == "repository":
             assert node["module"] in module_ids
-            assert node["exported_name"] == "default" or re.fullmatch(
-                r"[A-Za-z_$][A-Za-z0-9_$]*", node["exported_name"]
-            )
+            assert node["exported_name"] == "default" or is_declaration_key(node["exported_name"])
         elif scope == "external":
             assert PACKAGE_RE.fullmatch(node["module"])
-            assert node["exported_name"] == "default" or re.fullmatch(
-                r"[A-Za-z_$][A-Za-z0-9_$]*", node["exported_name"]
-            )
+            assert node["exported_name"] == "default" or is_declaration_key(node["exported_name"])
         else:
             assert scope == "trusted"
             assert node["module"] in TRUSTED_REFERENCE_MODULES
@@ -4606,7 +5545,7 @@ def _validate_type_node(
             assert (
                 node["exported_name"] is None
                 or node["exported_name"] == "default"
-                or re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", node["exported_name"])
+                or is_declaration_key(node["exported_name"])
             )
         for child in node["type_arguments"]:
             _validate_type_node(
@@ -4828,6 +5767,106 @@ def _validate_model_collections(model: dict[str, Any]) -> dict[str, dict[str, di
     return result
 
 
+def derive_boundary_roles(model: dict[str, Any]) -> dict[str, list[str]]:
+    """Recompute BoundaryRolePropagation/v1 from facts, router, and value edges.
+
+    ``derived_roles`` is output evidence, never an input to this calculation.
+    Client-entry seeds are deliberately excluded from ``client_dependency``;
+    the forward closure contains only their internal static value targets.
+    Server traversal starts at non-client ``app_ui`` modules and at explicit
+    server-to-client edge sources, and stops before entering a client entry.
+    The two independently computed closures may overlap and therefore produce
+    a legitimate dual role.
+    """
+
+    modules = {
+        module["id"]: module for module in model.get("modules", []) if isinstance(module, dict)
+    }
+    client_entries = {
+        module_id for module_id, module in modules.items() if module.get("client_entry") is True
+    }
+    router_contexts = {
+        module_id: module.get("router_context") for module_id, module in modules.items()
+    }
+    for fact in model.get("facts", []):
+        if not isinstance(fact, dict) or fact.get("owner_id") not in modules:
+            continue
+        if fact.get("kind") == "client_entry":
+            assert fact.get("value") is True
+            client_entries.add(fact["owner_id"])
+        elif fact.get("kind") == "router_context":
+            router_contexts[fact["owner_id"]] = fact.get("value")
+
+    value_edges: dict[str, set[str]] = {module_id: set() for module_id in modules}
+    server_seeds: set[str] = {
+        module_id
+        for module_id, context in router_contexts.items()
+        if context == "app_ui" and module_id not in client_entries
+    }
+    for relation in model.get("relations", []):
+        if not isinstance(relation, dict) or relation.get("kind") != "static_import":
+            continue
+        source_id = relation.get("source_id")
+        target = relation.get("target")
+        if (
+            relation.get("role") != "value"
+            or not isinstance(source_id, str)
+            or source_id not in modules
+            or not isinstance(target, dict)
+            or target.get("kind") != "internal"
+            or target.get("module_id") not in modules
+        ):
+            continue
+        target_id = target["module_id"]
+        if not isinstance(target_id, str):
+            continue
+        value_edges[source_id].add(target_id)
+        if relation.get("boundary_effect") == "server_to_client_entry":
+            assert source_id not in client_entries
+            assert target_id in client_entries
+            server_seeds.add(source_id)
+
+    client_dependency: set[str] = set()
+    pending = list(sorted(client_entries))
+    visited: set[str] = set(client_entries)
+    while pending:
+        source_id = pending.pop(0)
+        for target_id in sorted(value_edges.get(source_id, ())):
+            if target_id not in client_entries:
+                client_dependency.add(target_id)
+            if target_id not in visited:
+                visited.add(target_id)
+                pending.append(target_id)
+
+    server_candidate: set[str] = set()
+    pending = list(sorted(server_seeds))
+    visited = set()
+    while pending:
+        source_id = pending.pop(0)
+        if source_id in visited or source_id not in modules:
+            continue
+        visited.add(source_id)
+        if source_id in client_entries:
+            continue
+        server_candidate.add(source_id)
+        for target_id in sorted(value_edges.get(source_id, ())):
+            if target_id in client_entries:
+                continue
+            pending.append(target_id)
+
+    return {
+        module_id: sorted(
+            role
+            for role, members in (
+                ("client_dependency", client_dependency),
+                ("server_candidate", server_candidate),
+            )
+            if module_id in members
+        )
+        for module_id in sorted(modules)
+    }
+
+
 def _diagnostic_catalog() -> dict[str, dict[str, Any]]:
     return {
         entry["code"]: entry
@@ -4836,14 +5875,14 @@ def _diagnostic_catalog() -> dict[str, dict[str, Any]]:
 
 
 def _decision_known_counts(
-    request: dict[str, Any],
+    request: dict[str, Any] | None,
     *,
     stdout_bytes: int | None = None,
     model_records: int | None = None,
 ) -> dict[str, int | None]:
     """Derive bounded counters owned by a pre-response decision."""
 
-    files = request.get("files")
+    files = request.get("files") if request is not None else None
     return {
         "files": len(files) if isinstance(files, list) else None,
         "source_bytes": (
@@ -4857,46 +5896,112 @@ def _decision_known_counts(
 
 
 def pre_response_failure_decision(
-    request: dict[str, Any],
+    request: dict[str, Any] | None,
     *,
     stage: str,
     diagnostic_code: str,
     known_counts: dict[str, int | None] | None = None,
     stdout_bytes: int | None = None,
     model_records: int | None = None,
+    run_context: NextRunContext | None = None,
+    decision_context: NextDecisionContext | None = None,
+    path: str | None = None,
+    symbol: str | None = None,
 ) -> PreResponseFailureDecision:
     """Create the closed authority for a failure before response validation."""
 
-    context = canonical_run_context(**request["run_context"])
+    # A request-independent failure (for example config/project discovery)
+    # cannot fabricate a request.  Prefer the closed decision context as the
+    # source of run identity when one is supplied, then fall back to the
+    # explicit context used by the legacy fixture path.
+    context_source = (
+        request["run_context"]
+        if request is not None
+        else (decision_context.run_context if decision_context is not None else run_context)
+    )
+    context = canonical_run_context(
+        **(
+            context_source
+            or {
+                "requested_formats": ["semantic-json", "plantuml"],
+                "budget_requested": None,
+                "budget_resolved": DEFAULT_MAX_ENTITIES,
+                "budget_source": "builtin",
+                "stdout_selector": "next:semantic-json",
+            }
+        )
+    )
     entry = _diagnostic_catalog()[diagnostic_code]
     assert entry["outcome"] == "payload_unavailable"
-    assert entry["ref_permission"] == "none"
+    permission = entry["ref_permission"]
+    if permission == "none":
+        assert path is None and symbol is None
+    elif permission == "path":
+        assert path is not None and symbol is None
+        _assert_file_path(path)
+    elif permission == "symbol":
+        assert path is None and symbol is not None
+        _id_kind(symbol)
+    else:
+        assert permission == "path_or_symbol"
+        assert (path is None) != (symbol is None)
+        if path is not None:
+            _assert_file_path(path)
+        if symbol is not None:
+            _id_kind(symbol)
     diagnostic = {
         "type": "diagnostic",
         "schema": "code-structure-viz.diagnostic/v1",
         "code": diagnostic_code,
         "severity": entry["severity"],
         "domain": "next",
-        "path": None,
-        "symbol": None,
+        "path": path,
+        "symbol": symbol,
         "line": None,
         "recoverable": entry["recoverable"],
         "message": entry["message"],
         "outcome": entry["outcome"],
         "ref_permission": entry["ref_permission"],
     }
+    context_counts = decision_context.known_counts if decision_context is not None else None
+    resolved_counts = copy.deepcopy(
+        known_counts
+        if known_counts is not None
+        else context_counts
+        if context_counts is not None
+        else _decision_known_counts(
+            request,
+            stdout_bytes=stdout_bytes,
+            model_records=model_records,
+        )
+    )
+    node_stages = {"node_discovery", "node_spawn", "node_timeout", "node_process"}
+    publication_context = _publication_context_from_request(
+        request,
+        context,
+        decision_context=decision_context,
+        toolchain=_toolchain_snapshot(
+            node_status="unavailable" if stage in node_stages else "available"
+        ),
+        trusted_environment=_trusted_environment_snapshot(),
+    )
     return PreResponseFailureDecision(
         request=request,
         run_context=context,
         stage=stage,
         diagnostic_code=diagnostic_code,
         diagnostic=diagnostic,
-        known_counts=known_counts
-        or _decision_known_counts(
-            request,
-            stdout_bytes=stdout_bytes,
-            model_records=model_records,
+        known_counts=resolved_counts,
+        decision_context=decision_context
+        or NextDecisionContext(
+            run_context=context,
+            request_id=(request or {}).get("request_id"),
+            targets=tuple((request or {}).get("targets", ())),
+            limits=copy.deepcopy((request or {}).get("limits")),
+            stage=stage,
+            diagnostic_code=diagnostic_code,
         ),
+        publication_context=publication_context,
     )
 
 
@@ -4922,6 +6027,12 @@ def not_applicable_decision(request: dict[str, Any]) -> NotApplicableDecision:
             "ref_permission": entry["ref_permission"],
         },
         known_counts=_decision_known_counts(request),
+        publication_context=_publication_context_from_request(
+            request,
+            canonical_run_context(**request["run_context"]),
+            toolchain=_toolchain_snapshot(node_status="not_applicable"),
+            trusted_environment=_trusted_environment_snapshot(),
+        ),
     )
 
 
@@ -4936,7 +6047,7 @@ def _validate_model_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
             assert diagnostic[field] == entry[field]
         if "reason" in diagnostic:
             assert diagnostic["code"] == "CSV-NEXT-TARGET-001"
-            assert diagnostic["reason"] in {"missing", "component_only", "duplicate"}
+            assert diagnostic["reason"] in TARGET_FAILURE_REASONS
         assert diagnostic["count"] >= 1
         permission = entry["ref_permission"]
         path_ref = diagnostic["path_ref"]
@@ -4984,7 +6095,7 @@ def _validate_public_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
             assert diagnostic[field] == entry[field]
         if "reason" in diagnostic:
             assert diagnostic["code"] == "CSV-NEXT-TARGET-001"
-            assert diagnostic["reason"] in {"missing", "component_only", "duplicate"}
+            assert diagnostic["reason"] in TARGET_FAILURE_REASONS
         permission = entry["ref_permission"]
         path = diagnostic["path"]
         symbol = diagnostic["symbol"]
@@ -5762,6 +6873,7 @@ def validate_model(
             component["module_id"] in module_records
             or component["module_id"] in allowed_missing_module_ids
         )
+        assert is_binding_identifier(component["declaration_key"])
         _assert_canonical(component["recognition_evidence"])
     _assert_unique(
         [
@@ -5775,6 +6887,9 @@ def validate_model(
     for member in member_records.values():
         if member["kind"] == "export_binding":
             assert member["owner_id"] in module_records
+            assert _is_export_identifier(
+                member["exported_name"], allow_default=True, allow_keyword=True
+            )
             assert member["resolution_kind"] in {"component", "value", "type"}
             if member["resolution_kind"] == "component":
                 assert member["role"] == "value"
@@ -5788,6 +6903,9 @@ def validate_model(
             member_keys.append((member["kind"], member["owner_id"], member["exported_name"]))
         elif member["kind"] == "import_binding":
             assert member["owner_id"] in module_records
+            assert _is_export_identifier(
+                member["imported_name"], allow_default=True, allow_keyword=True
+            )
             if member["local_component_id"] is not None:
                 assert member["local_component_id"] in component_records
             source = member["source"]
@@ -5807,6 +6925,7 @@ def validate_model(
         else:
             assert member["kind"] == "prop"
             assert member["owner_id"] in component_records
+            assert is_declaration_key(member["name"])
             type_state: dict[str, int] = {
                 "nodes": 0,
                 "properties": 0,
@@ -5915,6 +7034,10 @@ def validate_model(
         (fact["kind"], fact["owner_id"], fact["value"]) for fact in fact_records.values()
     }
     assert actual_facts == expected_facts
+
+    expected_boundary_roles = derive_boundary_roles(model)
+    for module_id, module in module_records.items():
+        assert module["derived_roles"] == expected_boundary_roles[module_id]
 
     _validate_model_diagnostics(model["diagnostics"])
 

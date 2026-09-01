@@ -162,3 +162,30 @@ EntityBudgetGate, domain manifest, root run, and stdout result. The selector is
 manifest bytes, or a requested `next:<format>` renderer; no projection uses an
 implicit format-order fallback or infers provenance. Formats and selector are
 also included in the run-fingerprint preimage.
+
+## Round 15 authority and limits
+
+The resolved config and request are copied into the immutable
+`NextPublicationContext` held by every `NextRunDecision`; publication code does
+not reconstruct them from defaults. `ValidatedResponseDecision` requires a
+deep-copied request whose schema/id, run context, targets, and limits exactly
+match the gate. A pre-response failure that cannot own a request uses
+`NextDecisionContext` with the known run context and null fields for facts that
+were not measurable.
+
+The three 16 MiB byte boundaries are distinct even when their v1 values match:
+`max_adapter_stdout_capture_bytes` counts child chunks before retain,
+`max_adapter_response_bytes` counts complete private response bytes before
+decode, and `max_selected_stdout_bytes` counts public artifact bytes before
+selected copy. The historical `max_stdout_bytes` name is retained only as the
+selected-output compatibility alias. Raw bytes precede aggregate arrays, and
+aggregate arrays precede model-record validation. `max_model_records=10,000`
+is proven reachable by generated schema-valid exact/+1 envelopes below the
+aggregate/raw caps.
+
+Target failure rows are canonical sorted `{target_key, reason}` pairs from the
+closed eight-reason enum and are legal only for the Next unavailable target
+stdout branch. All other result branches reject them. Source acquisition
+consumes one `SourceDiscoveryIntent` and atomically seals plan plus view after
+the final drift check; caller-injected final paths/plan/view are not an
+authority.

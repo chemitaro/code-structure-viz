@@ -64,7 +64,7 @@
     {
       "required": ["domain_status", "target_failures"],
       "properties": {
-        "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+        "selector": {"enum": ["next:semantic-json", "next:plantuml"]},
         "availability": {"const": false},
         "domain_status": {"const": "incomplete"},
         "stable_reason": {"const": "target_payload_unavailable"},
@@ -152,7 +152,7 @@
       "required": ["target_key", "reason"],
       "properties": {
         "target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"},
-        "reason": {"enum": ["missing", "component_only", "duplicate"]}
+        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]}
       }
     }
   }

@@ -319,7 +319,7 @@
       }
     },
     "correlation_loss": {"type": "object", "additionalProperties": false, "required": ["component_id", "prop_ids", "signature_count"], "properties": {"component_id": {"$ref": "#/$defs/component_id"}, "prop_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/member_id"}}, "signature_count": {"type": "integer", "minimum": 2}}},
-    "target_completeness": {"type": "object", "additionalProperties": false, "required": ["target_key", "status", "record_ids"], "properties": {"target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"}, "status": {"enum": ["complete", "failed"]}, "record_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}, "reason": {"enum": ["missing", "component_only", "duplicate"]}}},
+    "target_completeness": {"type": "object", "additionalProperties": false, "required": ["target_key", "status", "record_ids"], "properties": {"target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"}, "status": {"enum": ["complete", "failed"]}, "record_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}, "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]}}},
     "diagnostic": {
       "type": "object",
       "additionalProperties": false,
@@ -332,7 +332,7 @@
         "path_ref": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
         "symbol_ref": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
         "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
-        "reason": {"enum": ["missing", "component_only", "duplicate"]},
+        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]},
         "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
       }
     }

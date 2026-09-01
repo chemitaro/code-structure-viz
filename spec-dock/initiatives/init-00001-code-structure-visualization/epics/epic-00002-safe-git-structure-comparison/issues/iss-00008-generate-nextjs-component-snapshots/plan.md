@@ -195,7 +195,8 @@ Round 13のproduction実装前チェックリスト:
    original/exported name、syntax identity、byte span込みで一対一消費する。
 4. IdentifierName表をUnicode 15.0.0へ固定し、Other_ID_Start/ContinueとU+00B7を含め、profile version
    をcompatibility/run-fingerprint preimageへ含める。shared root-or-path schemaは全適用面でroot `.`を
-   許可し、raw response `max_stdout_bytes`はdecode/materialize前に16 MiB境界を検査する。
+   許可し、private adapter response `max_adapter_response_bytes`はdecode/materialize前に16 MiB境界を検査する。
+   `max_stdout_bytes`は公開selected stdoutのv1互換aliasとしてのみ扱う。
 5. P2-1のHTML重複項目を除き、artifactへ対象SHA、CI、P0/P1/P2 fail counts、fresh Strict pending/readiness
    unconfirmed/product absentを記録する。これらを満たしfresh StrictがP0/P1=0になるまで I05-PLAN-002以降の
    production implementationへ進まない。
@@ -388,3 +389,55 @@ uv run pytest
 - residual risk、unsupported static pattern、coverage limitation、explicit override を release note と manifest diagnostic contract に残す。
 - downstream handoff: Next snapshot preview。Python/SQLAlchemy の install/runtime requirement へ Node を持ち込まない optional adapter separation を完成させる。
 - completion 後も implementation/report の実績は canonical Report に別途記録し、本 Plan を実行ログにしない。
+
+### Round 15 remediation plan (pre-implementation gate)
+
+Round 15の三試行（connector-only、verification-only retry、content review follow-up）は
+`artifacts/20260901t060000z-disc-strict-spec-review-round-15.md`へ個別のtranscript path/SHAとして保存する。
+固定点は branch `iss-00008-generate-nextjs-component-snapshots` のSHA
+`c3f8e4188ca715a29d60a7454a66390938bce496`、CI `33472932927`（7/7 green）であり、content reviewの
+historical verdictは P0=0/P1=13/P2=1、`review_status=fail`、`implementation_ready=no`である。
+fresh current-SHA Strictはpending/readiness unconfirmed/product implementation absentとして扱う。
+
+実装前の作業順は次のとおりである。
+
+1. `NextPublicationContext`（semantic compatibility descriptor/identity versionsを含む）とclosed
+   `NextRunDecision`をreference validatorで閉じる。validated responseは
+   requestをdeep-copyし、schema/id、run_context、targets、resolved limits、gate transition、target/export
+   failure consistencyをconstructor invariantにする。request-independent failureには
+   `NextDecisionContext`を使い、domain/root/manifest/stdout/stderr/publicationをdecision-onlyへ限定する。
+2. catalogに基づくfailure kind/stage/ref/count/outcome/exit matrixを全config/project/source/target/trust/process/
+   limit/protocolへ適用する。SOURCE-001（local partial）とSOURCE-003（global unavailable）、unsupported complete、
+   adapter over_budget rejection、Python EntityBudgetGateを別テストで固定する。
+3. response actual-wire gateを実装する。`published_model_records + proof_only_records = discovered_records`を
+   authorityとし、`max_model_records=10,000` exact/+1、aggregate+1、raw+1をschema-valid generated responseで
+   bounded decode→response boundary decisionへ通す。`max_adapter_stdout_capture_bytes`、
+   `max_adapter_response_bytes`、`max_selected_stdout_bytes`を各々exact/+1で測定し、child stderrも同じ
+   count-before-retain/read-stop/disposal contractにする。
+4. `seal_source_acquisition(intent, reader, inventory)`にplan/viewの生成を一本化し、single-read、drift、role、
+   extends、digest/sizeのnegative/positive fixtureを追加する。target failureのeight-reason canonical array、
+   Next selector branch、canonical sorted JSON bytesをschemas/goldensへ同期する。
+5. Unicode 15.0 checked-in classification tableを全identifier contextへ配線し、Other_ID/U+00B7/Join_Control/
+   reserved/non-NFC/control/post-15.0とfull scalar bitstream digestをminimum/latest laneで検査する。BoundaryRolePropagation
+   はfacts/router/static value closureから独立再計算し、Button/Card fixtureを修正する。
+6. Requirement/Design/Plan、関連contract docs、schema/catalog、human HTML、Round15 artifactを同期後、focused
+   contracts、full pytest、mypy、ruff、SpecDock、HTML PlantUML、TS trusted gateを実行する。`src/**`差分、
+   generated `node_modules`、未知のproduction implementationがないことを確認する。fresh StrictのP0/P1=0 passまで
+   I05-PLAN-002以降のproduction implementationへ進まない。
+
+#### Round 15 criterion → executable evidence
+
+| criterion | reference evidence |
+| --- | --- |
+| P1-1 decision-only authority/context | `test_validated_decision_defensively_copies_request_and_publication_context`, `test_request_independent_pre_response_decision_keeps_closed_context`, existing decision projection vectors |
+| P1-2 reason/outcome ownership | `test_round14_proof_reason_semantics_keep_selection_and_unsupported_complete`, adapter `over_budget` rejection and source failure vectors |
+| P1-3/P1-9 Unicode contextual and pinned table | `test_round15_identifier_name_is_contextual_and_host_ucd_independent`, full table digest KAT |
+| P1-4 count and reachable limits | generated model exact/+1 and `test_schema_valid_wire_aggregate_plus_one_precedes_model_and_schema_routing` |
+| P1-5/P1-6 capture boundaries | stdout/stderr faithful iterable exact/+1 tests and selected stdout copy boundary |
+| P1-7 source seal | `test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift` |
+| P1-8/P2-1 target failure branch | `test_stdout_target_failure_reason_enum_is_closed_for_each_resolution_failure` and bijective whole-run vector |
+| P1-10 full Unicode bitstream | `identifier_classification_digest()` known-answer assertion |
+| P1-11 source-specific unavailable | `classify_source_failure` local/global matrix |
+| P1-12 boundary role sole authority | `derive_boundary_roles` independent recomputation and Button/Card fixtures |
+| P1-13 canonical stdout bytes | canonical JSON exact-byte and target-failure goldens |
+| HTML/evidence durability | pinned PlantUML validator and Round15 artifact hash/provenance table |

@@ -89,6 +89,7 @@
         "CSV-NEXT-PROTOCOL-001",
         "CSV-NEXT-SOURCE-001",
         "CSV-NEXT-SOURCE-002",
+        "CSV-NEXT-SOURCE-003",
         "CSV-NEXT-TARGET-001",
         "CSV-NEXT-TRUST-001",
         "CSV-NEXT-TRUST-002",
@@ -106,7 +107,7 @@
     "line": {"type": ["integer", "null"], "minimum": 1},
     "recoverable": {"type": "boolean"},
     "message": {"type": "string", "minLength": 1},
-    "reason": {"enum": ["missing", "component_only", "duplicate"]},
+    "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]},
     "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
     "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
   },
@@ -580,6 +581,12 @@
         },
         {
           "properties": {
+            "code": {"const": "CSV-NEXT-SOURCE-003"},
+            "message": {"const": "A Next.js source failure cannot be isolated to a safe subset."}
+          }
+        },
+        {
+          "properties": {
             "code": {"const": "CSV-NEXT-TARGET-001"},
             "message": {"const": "An explicit Next.js target cannot be resolved uniquely."}
           }
@@ -699,6 +706,7 @@
                 "CSV-NEXT-PROJECT-002",
                 "CSV-NEXT-PROTOCOL-001",
                 "CSV-NEXT-SOURCE-002",
+                "CSV-NEXT-SOURCE-003",
                 "CSV-NEXT-TARGET-001",
                 "CSV-NEXT-TRUST-001",
                 "CSV-NEXT-TRUST-002",
@@ -967,7 +975,7 @@
                 "CSV-NEXT-LIMIT-001", "CSV-NEXT-LIMIT-002", "CSV-NEXT-LIMIT-003", "CSV-NEXT-LIMIT-004",
                 "CSV-NEXT-LIMIT-005", "CSV-NEXT-NODE-001", "CSV-NEXT-NODE-002", "CSV-NEXT-NODE-003",
                 "CSV-NEXT-NODE-004", "CSV-NEXT-PROJECT-001", "CSV-NEXT-PROJECT-002", "CSV-NEXT-PROTOCOL-001",
-                "CSV-NEXT-SOURCE-001", "CSV-NEXT-SOURCE-002", "CSV-NEXT-TARGET-001", "CSV-NEXT-TRUST-001",
+                "CSV-NEXT-SOURCE-001", "CSV-NEXT-SOURCE-002", "CSV-NEXT-SOURCE-003", "CSV-NEXT-TARGET-001", "CSV-NEXT-TRUST-001",
                 "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003", "CSV-NEXT-TYPE-001", "CSV-NEXT-UNSUPPORTED-001"
               ]
             },
@@ -1013,7 +1021,7 @@
           },
           {
             "properties": {
-              "code": {"enum": ["CSV-NEXT-PROJECT-001", "CSV-NEXT-PROJECT-002", "CSV-NEXT-SOURCE-002", "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003"]},
+              "code": {"enum": ["CSV-NEXT-PROJECT-001", "CSV-NEXT-PROJECT-002", "CSV-NEXT-SOURCE-002", "CSV-NEXT-SOURCE-003", "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003"]},
               "severity": {"const": "error"}, "recoverable": {"const": false},
               "outcome": {"const": "payload_unavailable"}, "ref_permission": {"const": "path"}
             }

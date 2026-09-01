@@ -283,8 +283,9 @@ Next adapter/CLI実装は未着手のままとする。
    Unicode 15.0.0（U+00B7を含む）とprofile versionをcompatibilityおよびrun-fingerprint preimageへ含める。
 8. shared root-or-path schemaを全source-root/path surfaceへ適用し、root文脈の`.`を受理する一方、
    非root unsafe pathを拒否する。
-9. raw response全bytesの `max_stdout_bytes` をdecode/materialize前に測定し、16 MiBは受理、16 MiB+1は
-   partial writeなしのunavailable/manifest-only/exit 3へ通す。
+9. private adapter response全bytesの `max_adapter_response_bytes` をdecode/materialize前に測定し、16 MiBは受理、
+   16 MiB+1はpartial writeなしのunavailable/manifest-only/exit 3へ通す。`max_stdout_bytes` は公開selected
+   stdoutのv1互換aliasであり、private responseの判定には使わない。
 10. 人間向けHTMLの重複Round 11 Pass C itemを一つだけ残す。上記のlocal修復・テスト成功はfresh
     Strict passやIssue完了を意味しない。
 
@@ -472,3 +473,70 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 - direct/indirect dependency は lockfile で exact resolve し、license inventory と offline runtime test を持つ。runtime に network access を要求しない。
 - `pyclassuml` と `tree-git-diff` への runtime/package/CLI dependency を持たない。legacy code の直接 copy は license/provenance 未確認のまま行わず、初期実装は contract/test evidence を基に repository-owned code として再実装する。
 - product HTML report generation、HTML command、Tailscale publication は本 Issue の製品 scope 外。`explanation.html` は specification Artifact である。
+
+### Round 15 review state and remediation contract
+
+Round 15 content review は、三つのStrict試行を別物として扱う。初回connector-only試行
+`issue-eight-strict-round-fifteen` の transcript SHA-256 は
+`a5b7fbcb3b1b9a8655cf5bc14adea42bca9f340d589209738d64b00a2de2de19`、verification-only retry
+`issue-eight-strict-round-fifteen-2` は `171cf56350a4665c4f48446fe3b91c5b77f464f442024a8dc01ece306e1ab221`、
+content review follow-up `required-strict-github-connector-verificati-609` は
+`85506ccacb634b1c21816032b9bd0a11fa4d3be95f6416657fab441e8011713c` である。最後のレビューは
+対象SHA `c3f8e4188ca715a29d60a7454a66390938bce496`、CI `33472932927`（7/7 green）を確認したうえで
+`review_status: fail`、P0=0、P1=13、P2=1、`implementation_ready: no`を返した。
+このfailは履歴として保存し、fresh current-SHA Strictはpending、readinessは未確認、production
+implementationは未着手とする。
+
+Round 15で実装前に閉じる契約は次のとおりである。
+
+1. 全 `NextRunDecision` variant が同じ immutable `NextPublicationContext` を保持する。contextは
+   sealed SourceView descriptor/fingerprint、FinalSourceAcquisitionPlan descriptor/digest/seal identity、
+   public Next config/request、semantic compatibility descriptor/identity versions、実toolchain/trusted
+   environment、run context、run-fingerprint preimageを含む。
+   domain/root/manifest/stdout/stderr/publicationはdecision以外から値を再構成しない。
+2. `ValidatedResponseDecision` はschema/id、run context、targets、gate resolved limits、許可された
+   pre-budget→gate transition、canonical target/export failureを検証したrequestのdeep copyを必須とする。
+   元のnested request、model/proof、publication bytesを後から変更してもdecisionは変化しない。
+3. response前の失敗をconfig/project/source/target/trust/process/limit/protocolのclosed
+   `DecisionFailureKind` とし、requestを作れない段階はrequest-independent `NextDecisionContext` で
+   run identity、stage、code、known/null counts、outcome、exitを保持する。具体的なcatalog code/ref
+   permissionをAssertionErrorへ丸めず、`SOURCE-003`などの意味を失わない。
+4. response count authorityは実model collectionの合計を`published_model_records`、modelに存在しない
+   proof payloadだけを`proof_only_records`、その合計を`discovered_records`とする。`proof_records or
+   model_records`やsubmitted countは権威にしない。model exact、model+1、aggregate+1、raw+1は、
+   schema-valid wireを実際にbounded decode→schema/gate→decisionへ通し、raw→aggregate→modelの優先順位を
+   固定する。`max_model_records=10,000`は、10,000件の実wireがaggregate/raw cap内で到達可能であることを
+   testで示す。
+5. `max_adapter_stdout_capture_bytes`（child capture）、`max_adapter_response_bytes`（完全capture後の
+   private response）、`max_selected_stdout_bytes`（public selected artifact copy）を分離する。各境界は
+   exactを許可し、+1は測定点で全量破棄し、decoder/publicationへpartial bytesを渡さない。public copy失敗は
+   semantic outcomeを改変せず、selected artifactだけのpublication resultとして記録する。
+6. child stderr harnessは`Iterable[bytes]`をchunkごとにcount-before-retainし、超過時read-stop、dispose、
+   process-group termination flag、text leakなし、zero publicationを証明する。これはOS process-level test
+   ではないことを明記する。
+7. Source acquisitionはcaller-injected final plan/viewを受けず、`SourceDiscoveryIntent`、two-phase
+   single-read、final drift checkから `seal_source_acquisition(intent, reader, inventory)` がplan/viewを
+   同一sealで導出する。role/effective-role、extends/control closure、digest/size、duplicate/post-drift
+   readの不一致をnegative testで拒否する。
+8. target unavailable stdoutはNextの `next:semantic-json|next:plantuml` だけに許可し、reasonは
+   `missing`、`component_only`、`duplicate`、`out_of_scope`、`non_program`、`control_context`、
+   `project_ambiguity`、`selected_taint` のclosed enumから一件一理由をcanonical sortedに出す。
+   available、not_applicable、generic unavailable、fatal、interruptには出さない。
+9. IdentifierName判定は全surfaceでcontext-specificな`is_identifier_name`、`is_binding_identifier`、
+   `is_declaration_key`を使うUnicode 15.0.0 checked-in tableに統一する。Other_ID sets、U+00B7、Join_Control、
+   reserved word、non-NFC、control、post-15.0を検証し、0..0x10FFFF bitstreamのknown-answer SHA-256を
+   minimum/latest Python laneで再確認する。host UCD依存や暗黙のsupport縮小は認めない。
+10. source failureがlocal safe subsetへ隔離不能なら`CSV-NEXT-SOURCE-003`/payload_unavailable、
+    local proofがある場合だけ`SOURCE-001`/partial_safeとする。同じ失敗のlocal/global差をfixtureで示す。
+11. `BoundaryRolePropagation/v1`だけがrole authorityである。client seed自身はclient_dependencyではなく、
+    value-closure targetだけがそうなる。client app seedはserver_candidateでなく、server traversalはclient
+    entry直前で止まり、dual roleは別closureの和だけで生じる。facts/router/static edgesから再計算し、
+    submitted modelとexact compareする。
+12. stdout/result bytesは既存のcanonical lexicographic JSON（`sort_keys=True`、NFC、UTF-8、LF）を使う。
+    手書きfield order encoderを導入せず、`target_failures`も同じcanonical orderでgolden化する。
+13. HTMLは固定個数のlimitsを断定せず、schema-driven resource contractを説明し、上記のdecision/count/
+    capture/seal/Unicode/role/target/orderingをPlantUMLとともに図示する。Round 15の三試行・SHA・CI・fail
+    count・fresh Strict pendingを新規durable artifactへ保存し、過去のfail verdictを上書きしない。
+
+これらはproduction implementationの完了宣言ではない。全てのlocal contract testがgreenでも、fresh
+current-SHA Strictの`P0=0/P1=0`と`review_status=pass`が確認されるまで実装開始可能性は未確定である。

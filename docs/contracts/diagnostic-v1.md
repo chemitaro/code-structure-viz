@@ -30,3 +30,35 @@ The following outcome mapping is normative:
 - unsupported runtime patterns are `complete` with an informational record;
 - configuration, project, target, trust, process, protocol, identity, and
   resource-limit failures are `payload_unavailable`.
+
+## Round 15 closed failure routing
+
+The `NextRunDecision` union is the sole authority for diagnostic stage, code,
+safe references, known/null counts, outcome, and exit projection. A
+request-independent `NextDecisionContext` is used when configuration or
+project/source discovery fails before a schema-valid adapter request can be
+made. Downstream code must not synthesize a default request or collapse a
+specific catalog entry into a generic protocol assertion.
+
+`CSV-NEXT-SOURCE-001` means a local source failure with an independently proven
+safe subset (`partial_safe`, exit 3). A source failure whose impact cannot be
+isolated is `CSV-NEXT-SOURCE-003` (`payload_unavailable`, path reference,
+manifest-only, exit 3); `CSV-NEXT-SOURCE-002` remains the symlink-specific
+unavailable code. Intentional unsupported behavior is complete with
+`CSV-NEXT-UNSUPPORTED-001` and unknown coverage. `over_budget` is not an
+adapter proof reason: the Python EntityBudgetGate alone emits
+`CSV-NEXT-LIMIT-005`.
+
+Target resolution uses `CSV-NEXT-TARGET-001` with one stable reason per target:
+`missing`, `component_only`, `duplicate`, `out_of_scope`, `non_program`,
+`control_context`, `project_ambiguity`, or `selected_taint`. References obey
+the catalog's exact `none`, `path`, `symbol`, or `path_or_symbol` permission.
+The reason rows are retained only by the target-related unavailable stdout
+branch; generic unavailable, not-applicable, complete, fatal, and interrupt
+branches cannot carry them.
+
+The byte-limit codes have ordered measurement points: child capture first,
+complete private response raw bytes before decode, aggregate arrays before
+materialization, model records after schema/proof validation, and public
+selected-artifact copy after rendering. Exact values are accepted; +1 is
+all-or-none and never exposes partial adapter or artifact text.
