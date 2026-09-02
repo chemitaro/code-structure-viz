@@ -132,7 +132,13 @@
     "round20-source-integrity-projection",
     "round20-process-observation",
     "round20-stage-provenance",
-    "round20-coverage-index"
+    "round20-coverage-index",
+    "round21-applicability-end-to-end",
+    "round21-config-closed-grammar",
+    "round21-source-graph-module-plane",
+    "round21-provenance-stage-union",
+    "round21-process-observation-fingerprint",
+    "round21-coverage-index"
   ],
   "negative": [
     "cross-domain",
@@ -250,7 +256,13 @@
     "round20-source-integrity-mutation",
     "round20-process-observation-fake-identity",
     "round20-stage-provenance-mutation",
-    "round20-coverage-mapping-mutation"
+    "round20-coverage-mapping-mutation",
+    "round21-applicability-malformed-no-node",
+    "round21-config-extends-injection",
+    "round21-source-open-edge",
+    "round21-provenance-stage-mismatch",
+    "round21-process-identity-substitution",
+    "round21-coverage-mapping-mutation"
   ],
   "criterion_test_map": {
     "round14.p1-1": ["test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exit"],
@@ -419,6 +431,66 @@
     ],
     "round20.p2-1": [
       "test_round20_fixture_coverage_index_is_substantive"
+    ],
+    "round21.p1-1": [
+      "test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces",
+      "test_round21_applicability_source_observation_precedes_node_and_is_read_once"
+    ],
+    "round21.p1-2": [
+      "test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_deterministic"
+    ],
+    "round21.p1-3": [
+      "test_round21_source_graph_scanner_closes_supported_import_planes_and_open_edges"
+    ],
+    "round21.p1-4": [
+      "test_round21_provenance_catalog_has_single_request_independent_source_control_union"
+    ],
+    "round21.p1-5": [
+      "test_round21_process_observation_is_normative_and_fingerprint_excludes_ephemeral_identity"
+    ],
+    "round21.p2-1": [
+      "test_round21_coverage_index_is_bidirectional_and_self_validating"
     ]
+  },
+  "criterion_evidence": {
+    "round21.p1-1": {
+      "tests": [
+        "test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces",
+        "test_round21_applicability_source_observation_precedes_node_and_is_read_once"
+      ],
+      "positive_vectors": ["round21-applicability-end-to-end"],
+      "negative_vectors": ["round21-applicability-malformed-no-node"],
+      "validator": "next-applicability-decision-v1.schema.json"
+    },
+    "round21.p1-2": {
+      "tests": ["test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_deterministic"],
+      "positive_vectors": ["round21-config-closed-grammar"],
+      "negative_vectors": ["round21-config-extends-injection"],
+      "validator": "next-reference-validation"
+    },
+    "round21.p1-3": {
+      "tests": ["test_round21_source_graph_scanner_closes_supported_import_planes_and_open_edges"],
+      "positive_vectors": ["round21-source-graph-module-plane"],
+      "negative_vectors": ["round21-source-open-edge"],
+      "validator": "next-source-plan-v1.schema.json"
+    },
+    "round21.p1-4": {
+      "tests": ["test_round21_provenance_catalog_has_single_request_independent_source_control_union"],
+      "positive_vectors": ["round21-provenance-stage-union"],
+      "negative_vectors": ["round21-provenance-stage-mismatch"],
+      "validator": "next-provenance-v1.schema.json"
+    },
+    "round21.p1-5": {
+      "tests": ["test_round21_process_observation_is_normative_and_fingerprint_excludes_ephemeral_identity"],
+      "positive_vectors": ["round21-process-observation-fingerprint"],
+      "negative_vectors": ["round21-process-identity-substitution"],
+      "validator": "next-process-launch-observation-v1.schema.json"
+    },
+    "round21.p2-1": {
+      "tests": ["test_round21_coverage_index_is_bidirectional_and_self_validating"],
+      "positive_vectors": ["round21-coverage-index"],
+      "negative_vectors": ["round21-coverage-mapping-mutation"],
+      "validator": "next-contract-vectors/v1"
+    }
   }
 }

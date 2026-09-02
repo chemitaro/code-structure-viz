@@ -52,8 +52,8 @@
             "jsx": {"enum": ["preserve", "react", "react-jsx", "react-jsxdev"]},
             "module": {"const": "esnext"},
             "module_resolution": {"const": "bundler"},
-            "base_url": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
-            "paths": {"type": "object", "additionalProperties": false, "patternProperties": {"^[A-Za-z0-9_.*?/-]+$": {"type": "array", "items": {"$ref": "#/$defs/path"}}}}
+            "base_url": {"anyOf": [{"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}, {"type": "null"}]},
+            "paths": {"type": "object", "additionalProperties": false, "patternProperties": {"^[A-Za-z0-9_.*?/@-]+$": {"type": "array", "items": {"$ref": "#/$defs/path"}}}}
           }
         }
       }

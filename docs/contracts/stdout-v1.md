@@ -181,3 +181,22 @@ Round 20 executable checks are
 `test_round20_package_applicability_matrix_is_direct_dependency_only`.
 Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
 production implementation is absent.
+
+## Round 21 closed applicability and provenance output
+
+The stdout result is a projection of the applicability decision, never an independently inferred project
+list. The frozen `PackageApplicabilityMatrix` makes direct non-empty Next dependencies applicable, missing or
+non-direct roots non-applicable, and malformed package observations globally unavailable. All-non-applicable
+uses the no-Node-probe `NotApplicableDecision`; a mixed matrix includes applicable roots only. Matrix rows,
+toolchain permission, domain/root manifest, stdout/stderr diagnostics, and exit are checked for exact equality.
+
+Control and source failures use the same stage/code provenance union as the decision context. The sealed source
+graph recognizes static/side-effect imports, export-from, literal dynamic import, literal require, and
+`baseUrl`/`paths`; unsupported, ambiguous, unresolved, or external edges stay open. Unobserved suffix values
+cannot be fabricated in stdout. The process authority is `next-process-launch-observation-v1`, and its stable
+fingerprint intentionally excludes ephemeral FD/device/inode values.
+
+The executable evidence is `test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces`,
+`test_round21_provenance_catalog_has_single_request_independent_source_control_union`, and
+`test_round21_coverage_index_is_bidirectional_and_self_validating`. Fresh current-SHA Strict is pending,
+readiness is unconfirmed, and production implementation is absent.

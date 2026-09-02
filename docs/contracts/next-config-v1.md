@@ -210,13 +210,14 @@ it does not synthesize public project/request/config fields.
 
 The final publication decision seals child capture, private response, public
 stderr, and selected summary/manifest/artifact stream-copy results. This keeps
-the semantic outcome stable when a selected copy is unavailable. The process launch descriptor is a
-separate versioned provenance value covering verified Node realpath, fixed
-argv/environment/FDs, and process-group behavior.
+the semantic outcome stable when a selected copy is unavailable. The
+`next-process-launch-observation-v1` object is the separate versioned process
+authority covering verified Node realpath, fixed argv/environment/FDs, and
+process-group behavior; any old launch descriptor is derived from it.
 
-The descriptor is not optional: every `NextPublicationContext`, including
+The observation is not optional: every `NextPublicationContext`, including
 request-independent pre-response and not-applicable decisions, carries the
-validated process-launch descriptor explicitly and fingerprints it. Likewise,
+validated process-launch observation explicitly and fingerprints it. Likewise,
 `PreResponseFailureDecision` and `NotApplicableDecision` carry an explicit
 `NextDecisionContext`; their constructors do not rebuild a context from a
 fixture, default limits, or a later writer.
@@ -362,3 +363,34 @@ Observed values stop at the failure stage; later values are explicit
 uses the same no-fake-identity rule and the closed fixture/production schema.
 Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
 production implementation is absent.
+
+## Round 21 closed acquisition and provenance
+
+`PackageApplicabilityMatrix` is derived from the one frozen `package.json` observation per project root.
+Only direct non-empty `dependencies.next`/`devDependencies.next` strings are applicable. Missing/no-direct
+Next is non-applicable; duplicate or conflicting direct declarations, encoding/JSON/type/value errors are
+malformed. This matrix alone controls project filtering and Node permission: all non-applicable is a
+`NotApplicableDecision` with no Node probe, mixed retains applicable roots only, and malformed is global
+unavailable. The matrix observation and its decision/domain/root/stdout/stderr/exit projection are validated
+together; config presence or a lockfile cannot authorize Node.
+
+Control parsing is a closed JSONC boundary: UTF-8 BOM, comments, and trailing commas (including a comment
+between comma and closing delimiter) are accepted outside strings; duplicate keys and invalid types are not.
+`extends` is one explicit project-local `./...` string. Bare/package, array, absolute, `../`, URL-like,
+ambiguous, and cyclic forms are rejected, as are `plugins`, `typeRoots`, `types`, unsafe paths, and invalid
+module/moduleResolution. Include/exclude uses segment `*`, `?`, and whole-segment `**`, not `fnmatch`.
+Control read/parse failure is a typed global-unavailable result and is never replaced with `{}`.
+
+The source plan and graph are sealed from these frozen controls and source bytes. The module-plane scanner
+recognizes static/side-effect imports, export-from, literal dynamic `import()`, literal `require()`, and
+`baseUrl`/`paths` aliases. It ignores comments, templates, and regex literals. Unsupported, ambiguous,
+unresolved, or external dependencies remain `open_edge`; they cannot be silently omitted to claim
+`partial_safe`. The caller's graph and recomputed digest are not authority.
+
+Request-bound and request-independent config use the same stage-dependent provenance union. The catalog
+constrains every stage/code pair and the observed prefix; later request, limits, source plan, toolchain,
+trusted environment, process, compatibility, and budget fields are `unobserved`/`null`. `source_control`
+is an explicit closed stage, and its failure projects through the same decision, domain, root manifest,
+stdout, stderr, and exit path. `next-process-launch-observation-v1` is the normative process object; the old
+launch descriptor is only a derived compatibility view. Fresh current-SHA Strict is pending, readiness is
+unconfirmed, and production implementation is absent.

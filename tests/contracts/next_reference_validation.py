@@ -489,6 +489,7 @@ class NextPublicationContext:
             assert preimage["adapter_version"] is None
             assert preimage["protocol"] is None
             assert preimage["process_launch_descriptor_digest"] is None
+            assert preimage["process_launch_observation_digest"] == digest(process_observation)
             assert preimage["targets"] == self.public_next_config["targets"]
             assert preimage["formats"] == self.run_context["requested_formats"]
             assert preimage["stdout_selector"] == self.run_context["stdout_selector"]
@@ -554,6 +555,7 @@ class NextPublicationContext:
         assert preimage["process_launch_descriptor_digest"] == digest(
             self.process_launch_descriptor
         )
+        assert preimage["process_launch_observation_digest"] == digest(process_observation)
         if self.public_next_request is not None:
             assert self.public_next_request["formats"] == self.run_context["requested_formats"]
             assert self.public_next_config["limits"] == self.public_next_request["limits"]
@@ -855,8 +857,10 @@ NextValidatedDecision = ValidatedResponseDecision
 
 DECISION_FAILURE_STAGES = frozenset(
     {
+        "applicability",
         "config_validation",
         "project_validation",
+        "source_control",
         "source_selection",
         "source_read",
         "source_integrity",
@@ -881,6 +885,7 @@ DECISION_FAILURE_STAGES = frozenset(
 )
 DECISION_FAILURE_CODES = frozenset(
     {
+        "CSV-NEXT-APPLICABILITY-001",
         "CSV-NEXT-LIMIT-001",
         "CSV-NEXT-LIMIT-002",
         "CSV-NEXT-LIMIT-003",
@@ -909,6 +914,7 @@ DECISION_FAILURE_CODES = frozenset(
     }
 )
 DECISION_FAILURE_KIND_BY_CODE = {
+    "CSV-NEXT-APPLICABILITY-001": "applicability",
     "CSV-NEXT-CONFIG-001": "config",
     "CSV-NEXT-CONFIG-002": "config",
     "CSV-NEXT-PROJECT-001": "project",
@@ -940,8 +946,6 @@ DECISION_FAILURE_KIND_BY_CODE = {
 def decision_failure_kind(diagnostic_code: str) -> str:
     """Return the closed pre-response failure category for one code."""
 
-    if diagnostic_code == "CSV-NEXT-APPLICABILITY-001":
-        return "applicability"
     assert diagnostic_code in DECISION_FAILURE_CODES
     return DECISION_FAILURE_KIND_BY_CODE.get(diagnostic_code, "protocol")
 
@@ -966,14 +970,18 @@ DECISION_FAILURE_MATRIX: dict[str, dict[str, Any]] = {
         "exit_code": 3,
     }
     for code, (stages, outcome) in {
+        "CSV-NEXT-APPLICABILITY-001": (("applicability",), "not_applicable"),
         "CSV-NEXT-CONFIG-001": (("config_validation",), "payload_unavailable"),
-        "CSV-NEXT-CONFIG-002": (("config_validation",), "payload_unavailable"),
+        "CSV-NEXT-CONFIG-002": (
+            ("config_validation", "source_control"),
+            "payload_unavailable",
+        ),
         "CSV-NEXT-PROJECT-001": (("project_validation",), "payload_unavailable"),
         "CSV-NEXT-PROJECT-002": (("project_validation",), "payload_unavailable"),
         "CSV-NEXT-SOURCE-001": (("source_read",), "partial_safe"),
         "CSV-NEXT-SOURCE-002": (("source_integrity",), "payload_unavailable"),
         "CSV-NEXT-SOURCE-003": (
-            ("source_selection", "source_read", "source_integrity"),
+            ("source_control", "source_selection", "source_read", "source_integrity"),
             "payload_unavailable",
         ),
         "CSV-NEXT-TARGET-001": (("target_resolution",), "payload_unavailable"),
@@ -1015,6 +1023,12 @@ DECISION_FAILURE_MATRIX: dict[str, dict[str, Any]] = {
     }.items()
 }
 
+# Applicability is a successful no-op when every observed project is outside
+# the Next applicability set.  Keep that exit behavior in the same catalog
+# row as the stage/code/outcome relationship instead of letting callers
+# reconstruct it independently.
+DECISION_FAILURE_MATRIX["CSV-NEXT-APPLICABILITY-001"]["exit_code"] = 0
+
 
 def decision_failure_spec(diagnostic_code: str, stage: str) -> dict[str, Any]:
     """Return the catalog-derived row for one legal failure combination."""
@@ -1045,7 +1059,9 @@ PROVENANCE_FIELDS = (
 )
 PROVENANCE_SOURCE_STAGES = frozenset({"source_selection", "source_read", "source_integrity"})
 PROVENANCE_TRUST_STAGES = frozenset({"trust_validation"})
-PROVENANCE_EARLY_STAGES = frozenset({"config_validation", "project_validation"})
+PROVENANCE_EARLY_STAGES = frozenset(
+    {"applicability", "config_validation", "project_validation", "source_control"}
+)
 PROVENANCE_LATE_STAGES = (
     DECISION_FAILURE_STAGES
     - PROVENANCE_SOURCE_STAGES
@@ -2074,6 +2090,7 @@ def derive_package_applicability_matrix(
         try:
             package = _package_json(payload, package_path)
             direct_next = False
+            direct_versions: list[str] = []
             malformed = False
             for table_name in ("dependencies", "devDependencies"):
                 if table_name not in package:
@@ -2089,6 +2106,12 @@ def derive_package_applicability_matrix(
                     malformed = True
                 else:
                     direct_next = True
+                    direct_versions.append(version.strip())
+            # A project may not carry duplicate direct Next declarations.
+            # Treat both equal and conflicting dependency/devDependency pairs
+            # as globally malformed before Node probing.
+            if len(direct_versions) > 1:
+                malformed = True
             state = "malformed" if malformed else "applicable" if direct_next else "non_applicable"
             evidence = (
                 "malformed_package"
@@ -2114,6 +2137,226 @@ def derive_package_applicability_matrix(
         else "non_applicable"
     )
     return PackageApplicabilityMatrix(entries=tuple(entries), aggregate_state=aggregate_state)
+
+
+APPLICABILITY_PROJECTION_SCHEMA = "code-structure-viz.next-applicability-decision/v1"
+
+
+def _applicability_diagnostic(code: str) -> dict[str, Any]:
+    """Build the one catalog-owned diagnostic used by applicability routing."""
+
+    entry = _diagnostic_catalog()[code]
+    return {
+        "type": "diagnostic",
+        "schema": "code-structure-viz.diagnostic/v1",
+        "code": code,
+        "severity": entry["severity"],
+        "domain": "next",
+        "path": None,
+        "symbol": None,
+        "line": None,
+        "recoverable": entry["recoverable"],
+        "message": entry["message"],
+        "outcome": entry["outcome"],
+        "ref_permission": entry["ref_permission"],
+    }
+
+
+def package_applicability_projection(
+    matrix: PackageApplicabilityMatrix,
+    *,
+    node_status: str | None = None,
+) -> dict[str, Any]:
+    """Project package applicability through probe, surfaces, and exit.
+
+    ``node_status`` is required only after the matrix has explicitly permitted
+    a probe.  This prevents a pre-probe fixture/default from pretending that
+    Node was observed, while making the all-non-applicable and malformed
+    branches prove that no probe occurred.
+    """
+
+    assert isinstance(matrix, PackageApplicabilityMatrix)
+    applicable = list(matrix.applicable_projects)
+    non_applicable = list(matrix.non_applicable_projects)
+    assert matrix.aggregate_state != "applicable" or applicable
+    if matrix.aggregate_state == "applicable":
+        assert node_status in {"available", "unavailable"}
+        probe_permission = "permitted"
+        probe_performed = True
+        if node_status == "available":
+            decision_kind = "ValidatedResponseDecision"
+            outcome = "complete"
+            payload_available = True
+            diagnostic = None
+            domain_status = "complete"
+            run_status = "complete"
+            exit_code = 0
+            stdout_branch = "summary"
+        else:
+            decision_kind = "PreResponseFailureDecision"
+            outcome = "payload_unavailable"
+            payload_available = False
+            diagnostic = _applicability_diagnostic("CSV-NEXT-NODE-001")
+            domain_status = "incomplete"
+            run_status = "incomplete"
+            exit_code = 3
+            stdout_branch = "typed_unavailable"
+        toolchain_status = node_status
+    elif matrix.aggregate_state == "non_applicable":
+        assert node_status is None
+        probe_permission = "prohibited"
+        probe_performed = False
+        decision_kind = "NotApplicableDecision"
+        outcome = "not_applicable"
+        payload_available = False
+        diagnostic = _applicability_diagnostic("CSV-NEXT-APPLICABILITY-001")
+        domain_status = "not_applicable"
+        run_status = "not_applicable"
+        exit_code = 0
+        stdout_branch = "typed_unavailable"
+        toolchain_status = "not_applicable"
+    else:
+        assert node_status is None
+        probe_permission = "prohibited"
+        probe_performed = False
+        decision_kind = "PreResponseFailureDecision"
+        outcome = "payload_unavailable"
+        payload_available = False
+        diagnostic = _applicability_diagnostic("CSV-NEXT-CONFIG-002")
+        domain_status = "incomplete"
+        run_status = "incomplete"
+        exit_code = 3
+        stdout_branch = "typed_unavailable"
+        toolchain_status = "unavailable"
+
+    # A malformed observation is globally unavailable.  Retain its rows as
+    # evidence, but do not expose any project as probe-eligible or publishable
+    # until the complete matrix is valid.
+    published_projects = applicable if matrix.aggregate_state == "applicable" else []
+
+    diagnostics = [] if diagnostic is None else [diagnostic]
+    domain = {
+        "status": domain_status,
+        "payload_available": payload_available,
+        "project_roots": published_projects,
+        "applicability_observations": matrix.as_dict()["projects"],
+        "coverage": {"projects": len(applicable)},
+        "diagnostics": diagnostics,
+    }
+    root_manifest = {
+        "status": run_status,
+        "exit_code": exit_code,
+        "project_roots": published_projects,
+        "applicability_observations": matrix.as_dict()["projects"],
+        "diagnostics": diagnostics,
+    }
+    stdout_result = {
+        "schema": "code-structure-viz.stdout-result/next/v1",
+        "branch": stdout_branch,
+        "availability": payload_available,
+        "run_status": run_status,
+        "domain_status": domain_status,
+        "reason": (
+            "complete"
+            if outcome == "complete"
+            else "not_applicable"
+            if outcome == "not_applicable"
+            else "domain_payload_unavailable"
+        ),
+        "project_roots": published_projects,
+        "diagnostics": diagnostics,
+    }
+    return {
+        "schema": APPLICABILITY_PROJECTION_SCHEMA,
+        "version": 1,
+        "matrix": matrix.as_dict(),
+        "matrix_digest": digest(matrix.as_dict()),
+        "node_probe": {"permission": probe_permission, "performed": probe_performed},
+        "decision_kind": decision_kind,
+        "outcome": outcome,
+        "payload_available": payload_available,
+        "project_filter": published_projects,
+        "non_applicable_observations": non_applicable,
+        "toolchain": {"node_status": toolchain_status},
+        "domain": domain,
+        "root_manifest": root_manifest,
+        "stdout_result": stdout_result,
+        "stderr": _public_diagnostic_jsonl(diagnostics).decode("utf-8"),
+        "exit_code": exit_code,
+    }
+
+
+def validate_package_applicability_projection(value: dict[str, Any]) -> None:
+    """Validate the closed applicability projection without external state."""
+
+    assert set(value) == {
+        "schema",
+        "version",
+        "matrix",
+        "matrix_digest",
+        "node_probe",
+        "decision_kind",
+        "outcome",
+        "payload_available",
+        "project_filter",
+        "non_applicable_observations",
+        "toolchain",
+        "domain",
+        "root_manifest",
+        "stdout_result",
+        "stderr",
+        "exit_code",
+    }
+    assert value["schema"] == APPLICABILITY_PROJECTION_SCHEMA
+    assert value["version"] == 1
+    matrix = value["matrix"]
+    assert value["matrix_digest"] == digest(matrix)
+    assert matrix["aggregate_state"] in PACKAGE_APPLICABILITY_STATES
+    expected_filter = (
+        list(matrix["applicable_projects"]) if matrix["aggregate_state"] == "applicable" else []
+    )
+    assert value["project_filter"] == expected_filter
+    assert value["non_applicable_observations"] == list(matrix["non_applicable_projects"])
+    probe = value["node_probe"]
+    assert set(probe) == {"permission", "performed"}
+    assert probe["permission"] in {"permitted", "prohibited"}
+    assert isinstance(probe["performed"], bool)
+    assert probe["performed"] is (probe["permission"] == "permitted")
+    diagnostics = value["domain"]["diagnostics"]
+    assert value["root_manifest"]["diagnostics"] == diagnostics
+    assert value["stdout_result"]["diagnostics"] == diagnostics
+    assert value["stderr"].encode("utf-8") == _public_diagnostic_jsonl(diagnostics)
+    if matrix["aggregate_state"] == "non_applicable":
+        assert probe == {"permission": "prohibited", "performed": False}
+        assert value["decision_kind"] == "NotApplicableDecision"
+        assert value["outcome"] == "not_applicable"
+        assert value["exit_code"] == 0
+        assert value["toolchain"] == {"node_status": "not_applicable"}
+        assert diagnostics[0]["code"] == "CSV-NEXT-APPLICABILITY-001"
+    elif matrix["aggregate_state"] == "malformed":
+        assert probe == {"permission": "prohibited", "performed": False}
+        assert value["decision_kind"] == "PreResponseFailureDecision"
+        assert value["outcome"] == "payload_unavailable"
+        assert value["exit_code"] == 3
+        assert value["toolchain"] == {"node_status": "unavailable"}
+        assert diagnostics[0]["code"] == "CSV-NEXT-CONFIG-002"
+    else:
+        assert probe == {"permission": "permitted", "performed": True}
+        assert value["toolchain"]["node_status"] in {"available", "unavailable"}
+        if value["toolchain"]["node_status"] == "available":
+            assert value["decision_kind"] == "ValidatedResponseDecision"
+            assert value["outcome"] == "complete"
+            assert value["exit_code"] == 0
+            assert value["payload_available"] is True
+            assert not diagnostics
+        else:
+            assert value["decision_kind"] == "PreResponseFailureDecision"
+            assert value["outcome"] == "payload_unavailable"
+            assert value["exit_code"] == 3
+            assert diagnostics[0]["code"] == "CSV-NEXT-NODE-001"
+    assert value["domain"]["project_roots"] == expected_filter
+    assert value["root_manifest"]["project_roots"] == expected_filter
+    assert value["stdout_result"]["project_roots"] == expected_filter
 
 
 @dataclass(frozen=True)
@@ -2220,9 +2463,310 @@ def _default_source_graph(
     }
 
 
-_RELATIVE_IMPORT_RE = re.compile(
-    r"(?:from\s*|import\s*|export\s+[^;]*?\sfrom\s*)[\"'](\.{1,2}/[^\"']+)[\"']"
-)
+class SourceGraphScanError(AssertionError):
+    """The module-plane scanner found an unsupported or ambiguous construct."""
+
+
+def _decode_module_string(value: str) -> str:
+    """Decode the small JavaScript string escape subset used for specifiers."""
+
+    decoded: list[str] = []
+    index = 0
+    escapes = {
+        "b": "\b",
+        "f": "\f",
+        "n": "\n",
+        "r": "\r",
+        "t": "\t",
+        "v": "\v",
+    }
+    while index < len(value):
+        character = value[index]
+        if character != "\\":
+            decoded.append(character)
+            index += 1
+            continue
+        index += 1
+        if index >= len(value):
+            raise SourceGraphScanError("unterminated module string escape")
+        escaped = value[index]
+        if escaped in escapes:
+            decoded.append(escapes[escaped])
+            index += 1
+        elif escaped in {"\\", "'", '"'}:
+            decoded.append(escaped)
+            index += 1
+        elif escaped == "u" and index + 4 < len(value):
+            digits = value[index + 1 : index + 5]
+            if not re.fullmatch(r"[0-9a-fA-F]{4}", digits):
+                raise SourceGraphScanError("invalid module string unicode escape")
+            decoded.append(chr(int(digits, 16)))
+            index += 5
+        elif escaped == "x" and index + 2 < len(value):
+            digits = value[index + 1 : index + 3]
+            if not re.fullmatch(r"[0-9a-fA-F]{2}", digits):
+                raise SourceGraphScanError("invalid module string hex escape")
+            decoded.append(chr(int(digits, 16)))
+            index += 3
+        elif escaped in "\r\n":
+            if escaped == "\r" and index + 1 < len(value) and value[index + 1] == "\n":
+                index += 1
+            index += 1
+        else:
+            decoded.append(escaped)
+            index += 1
+    return "".join(decoded)
+
+
+def _scan_module_specifiers(text: str) -> tuple[tuple[dict[str, str], ...], bool]:
+    """Scan the normative module-plane forms while ignoring lexical decoys.
+
+    The scanner intentionally recognizes only static import/export-from,
+    literal dynamic ``import()``, and literal ``require()``.  Comments,
+    templates, and regex literals are skipped as opaque regions.  A dynamic,
+    malformed, or otherwise unsupported dependency sets the open-edge bit so
+    locality code cannot silently treat the graph as complete.
+    """
+
+    tokens: list[tuple[str, str]] = []
+    index = 0
+    previous: tuple[str, str] | None = None
+    regex_prefix = {
+        "=",
+        "(",
+        "[",
+        "{",
+        ",",
+        ":",
+        ";",
+        "!",
+        "?",
+        "=>",
+        "return",
+        "throw",
+        "case",
+    }
+
+    def append(kind: str, value: str) -> None:
+        nonlocal previous
+        token = (kind, value)
+        tokens.append(token)
+        previous = token
+
+    def skip_quoted(start: int, quote: str) -> tuple[str, int]:
+        cursor = start + 1
+        raw: list[str] = []
+        while cursor < len(text):
+            character = text[cursor]
+            if character == quote:
+                return _decode_module_string("".join(raw)), cursor + 1
+            if character in "\r\n":
+                raise SourceGraphScanError("newline in module string")
+            if character == "\\" and cursor + 1 < len(text):
+                raw.append(character)
+                raw.append(text[cursor + 1])
+                cursor += 2
+                continue
+            raw.append(character)
+            cursor += 1
+        raise SourceGraphScanError("unterminated module string")
+
+    def skip_template(start: int) -> int:
+        cursor = start + 1
+        while cursor < len(text):
+            if text[cursor] == "\\":
+                cursor += 2
+                continue
+            if text[cursor] == "`":
+                return cursor + 1
+            cursor += 1
+        raise SourceGraphScanError("unterminated template literal")
+
+    def skip_regex(start: int) -> int:
+        cursor = start + 1
+        in_class = False
+        while cursor < len(text):
+            character = text[cursor]
+            if character == "\\":
+                cursor += 2
+                continue
+            if character == "[":
+                in_class = True
+            elif character == "]":
+                in_class = False
+            elif character == "/" and not in_class:
+                cursor += 1
+                while cursor < len(text) and (text[cursor].isalpha() or text[cursor].isdigit()):
+                    cursor += 1
+                return cursor
+            elif character in "\r\n":
+                raise SourceGraphScanError("unterminated regex literal")
+            cursor += 1
+        raise SourceGraphScanError("unterminated regex literal")
+
+    while index < len(text):
+        character = text[index]
+        if character.isspace():
+            index += 1
+            continue
+        if text.startswith("//", index):
+            index += 2
+            while index < len(text) and text[index] not in "\r\n":
+                index += 1
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            if end < 0:
+                raise SourceGraphScanError("unterminated comment")
+            index = end + 2
+            continue
+        if character in "'\"":
+            value, index = skip_quoted(index, character)
+            append("string", value)
+            continue
+        if character == "`":
+            index = skip_template(index)
+            continue
+        if character == "/" and (previous is None or previous[1] in regex_prefix):
+            index = skip_regex(index)
+            continue
+        if character.isalpha() or character in "_$" or ord(character) >= 0x80:
+            end = index + 1
+            while end < len(text) and (
+                text[end].isalnum() or text[end] in "_$" or ord(text[end]) >= 0x80
+            ):
+                end += 1
+            append("identifier", text[index:end])
+            index = end
+            continue
+        if text.startswith("=>", index):
+            append("punct", "=>")
+            index += 2
+            continue
+        append("punct", character)
+        index += 1
+
+    observations: list[dict[str, str]] = []
+    open_dependency = False
+
+    def scan_from(start: int) -> tuple[str | None, int, bool]:
+        cursor = start
+        while cursor < len(tokens) and tokens[cursor][1] not in {";", "import", "export"}:
+            if tokens[cursor][1] == "from":
+                if cursor + 1 < len(tokens) and tokens[cursor + 1][0] == "string":
+                    return tokens[cursor + 1][1], cursor + 2, False
+                return None, cursor + 1, True
+            cursor += 1
+        return None, cursor, False
+
+    index = 0
+    while index < len(tokens):
+        kind, value = tokens[index]
+        if kind == "identifier" and value == "import":
+            if index + 1 < len(tokens) and tokens[index + 1][1] == "(":
+                if index + 2 < len(tokens) and tokens[index + 2][0] == "string":
+                    observations.append(
+                        {"kind": "literal_dynamic_import", "specifier": tokens[index + 2][1]}
+                    )
+                else:
+                    open_dependency = True
+            elif index + 1 < len(tokens) and tokens[index + 1][0] == "string":
+                observations.append({"kind": "static_import", "specifier": tokens[index + 1][1]})
+            else:
+                specifier, next_index, ambiguous = scan_from(index + 1)
+                if specifier is not None:
+                    observations.append({"kind": "static_import", "specifier": specifier})
+                open_dependency = open_dependency or ambiguous
+                index = max(index, next_index - 1)
+        elif kind == "identifier" and value == "export":
+            specifier, next_index, ambiguous = scan_from(index + 1)
+            if specifier is not None:
+                observations.append({"kind": "export_from", "specifier": specifier})
+            open_dependency = open_dependency or ambiguous
+            index = max(index, next_index - 1)
+        elif kind == "identifier" and value == "require":
+            if (
+                index + 1 < len(tokens)
+                and tokens[index + 1][1] == "("
+                and index + 2 < len(tokens)
+                and tokens[index + 2][0] == "string"
+            ):
+                observations.append({"kind": "require", "specifier": tokens[index + 2][1]})
+            elif index + 1 < len(tokens) and tokens[index + 1][1] == "(":
+                open_dependency = True
+        index += 1
+    return tuple(observations), open_dependency
+
+
+def _normalise_module_specifier(value: str, source_path: str) -> str | None:
+    """Normalize a relative module specifier or reject root escape."""
+
+    parent = str(Path(source_path).parent)
+    raw_target = f"{parent}/{value}" if parent != "." else value
+    parts: list[str] = []
+    for part in raw_target.split("/"):
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not parts:
+                return None
+            parts.pop()
+        else:
+            parts.append(part)
+    return "/".join(parts)
+
+
+def _module_resolution_candidates(
+    source_path: str,
+    specifier: str,
+    plan: Mapping[str, Any],
+    node_id_by_path: Mapping[str, str],
+) -> tuple[str, ...]:
+    """Resolve relative and sealed tsconfig alias/baseUrl candidates."""
+
+    project = next(
+        (project for project in plan.get("projects", ()) if _under(source_path, project["root"])),
+        None,
+    )
+    if project is None:
+        return ()
+    options = project.get("compiler_options", {})
+    roots: list[str] = []
+    if specifier.startswith("."):
+        normalized = _normalise_module_specifier(specifier, source_path)
+        if normalized is not None:
+            roots.append(normalized)
+    else:
+        aliases = options.get("paths", {})
+        for pattern, replacements in sorted(aliases.items(), key=lambda item: item[0]):
+            if "*" in pattern:
+                prefix, suffix = pattern.split("*", 1)
+                if not (specifier.startswith(prefix) and specifier.endswith(suffix)):
+                    continue
+                wildcard = specifier[len(prefix) : len(specifier) - len(suffix) if suffix else None]
+                for replacement in replacements:
+                    roots.append(str(replacement).replace("*", wildcard, 1))
+            elif specifier == pattern:
+                roots.extend(str(replacement) for replacement in replacements)
+        base_url = options.get("base_url")
+        if isinstance(base_url, str):
+            roots.append(f"{base_url}/{specifier}")
+    candidates: list[str] = []
+    suffixes = ("", ".ts", ".tsx", ".js", ".jsx", ".d.ts")
+    for root in roots:
+        normalized = (
+            _normalise_module_specifier(root, source_path) if root.startswith(".") else root
+        )
+        if normalized is None:
+            continue
+        for candidate in (
+            normalized,
+            *(f"{normalized}{suffix}" for suffix in suffixes[1:]),
+            *(f"{normalized}/index{suffix}" for suffix in suffixes[1:]),
+        ):
+            if candidate in node_id_by_path:
+                candidates.append(candidate)
+    return tuple(dict.fromkeys(candidates))
 
 
 def _derive_source_graph_from_frozen_bytes(
@@ -2242,15 +2786,6 @@ def _derive_source_graph_from_frozen_bytes(
     graph = _default_source_graph(files, project_roots)
     nodes = list(graph["nodes"])
     node_id_by_path = {node["path"]: node["id"] for node in nodes}
-    candidates_by_stem: dict[str, list[str]] = {}
-    suffixes = ("", ".ts", ".tsx", ".js", ".jsx", ".d.ts")
-    for path in node_id_by_path:
-        if not path.endswith(SOURCE_PLAN_PROGRAM_SUFFIXES + SOURCE_PLAN_CONTEXT_SUFFIXES):
-            continue
-        stem = path[: -len(".d.ts")] if path.endswith(".d.ts") else path.rsplit(".", 1)[0]
-        candidates_by_stem.setdefault(stem, []).append(path)
-    for values in candidates_by_stem.values():
-        values.sort(key=_path_sort_key)
 
     edges: list[dict[str, str]] = []
     open_edges: list[dict[str, str]] = []
@@ -2264,38 +2799,24 @@ def _derive_source_graph_from_frozen_bytes(
         except UnicodeDecodeError:
             open_edges.append({"source": source_id})
             continue
-        for specifier in _RELATIVE_IMPORT_RE.findall(text):
-            parent = str(Path(source_path).parent)
-            raw_target = f"{parent}/{specifier}" if parent != "." else specifier
-            parts: list[str] = []
-            escapes = False
-            for part in raw_target.split("/"):
-                if part in {"", "."}:
-                    continue
-                if part == "..":
-                    if not parts:
-                        escapes = True
-                        break
-                    parts.pop()
-                else:
-                    parts.append(part)
-            if escapes:
-                open_edges.append({"source": source_id})
-                continue
-            normalized = "/".join(parts)
-            possible = [
-                candidate
-                for candidate in (
-                    normalized,
-                    *(f"{normalized}{suffix}" for suffix in suffixes[1:]),
-                    *(f"{normalized}/index{suffix}" for suffix in suffixes[1:]),
-                )
-                if candidate in node_id_by_path
-            ]
-            unique = tuple(dict.fromkeys(possible))
-            if len(unique) == 1:
-                edges.append({"source": source_id, "target": node_id_by_path[unique[0]]})
+        try:
+            observations, scanner_open = _scan_module_specifiers(text)
+        except SourceGraphScanError:
+            observations, scanner_open = (), True
+        if scanner_open:
+            open_edges.append({"source": source_id})
+        for observation in observations:
+            possible = _module_resolution_candidates(
+                source_path,
+                observation["specifier"],
+                plan,
+                node_id_by_path,
+            )
+            if len(possible) == 1:
+                edges.append({"source": source_id, "target": node_id_by_path[possible[0]]})
             else:
+                # External, unsupported, unresolved, and ambiguous imports
+                # all remain open evidence; none may be treated as localized.
                 open_edges.append({"source": source_id})
 
     for extension in plan.get("local_extends", ()):
@@ -2330,6 +2851,30 @@ def _strip_jsonc(payload: bytes, path: str) -> str:
             "CSV-NEXT-CONFIG-002", "source_control", f"invalid UTF-8 control file: {path}"
         ) from exc
     output: list[str] = []
+
+    def next_value_index(start: int) -> int:
+        """Skip JSONC whitespace/comments while probing a trailing comma."""
+
+        cursor = start
+        while cursor < len(text):
+            while cursor < len(text) and text[cursor].isspace():
+                cursor += 1
+            if text.startswith("//", cursor):
+                cursor += 2
+                while cursor < len(text) and text[cursor] not in "\r\n":
+                    cursor += 1
+                continue
+            if text.startswith("/*", cursor):
+                end = text.find("*/", cursor + 2)
+                if end < 0:
+                    raise SourceAcquisitionError(
+                        "CSV-NEXT-CONFIG-002", "source_control", f"unterminated comment: {path}"
+                    )
+                cursor = end + 2
+                continue
+            break
+        return cursor
+
     index = 0
     in_string = False
     escaped = False
@@ -2365,9 +2910,7 @@ def _strip_jsonc(payload: bytes, path: str) -> str:
             index = end + 2
             continue
         if character == ",":
-            lookahead = index + 1
-            while lookahead < len(text) and text[lookahead].isspace():
-                lookahead += 1
+            lookahead = next_value_index(index + 1)
             if lookahead < len(text) and text[lookahead] in "]}":
                 index += 1
                 continue
@@ -2414,15 +2957,43 @@ def _control_json(contents: dict[str, bytes], path: str) -> dict[str, Any]:
     return value
 
 
+def _resolve_local_extends_path(config_path: str, project_root: str, specifier: str) -> str:
+    """Resolve the closed ``./...`` extends grammar without widening it."""
+
+    if (
+        not isinstance(specifier, str)
+        or not specifier.startswith("./")
+        or specifier in {"./", "./."}
+        or "://" in specifier
+        or "\\" in specifier
+    ):
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", "extends must be an explicit local ./ path"
+        )
+    candidate = f"{Path(config_path).parent}/{specifier}"
+    resolved = _normalise_control_path(candidate, project_root=project_root)
+    if not _under(resolved, project_root):
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", "extends escapes project root"
+        )
+    return resolved
+
+
 def _normalise_control_path(value: str, *, project_root: str) -> str:
     """Resolve a config-relative path into the repository-relative form."""
 
     if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
-        raise AssertionError("absolute control path")
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", "absolute control path"
+        )
     if any(part == ".." for part in value.split("/")):
-        raise AssertionError("parent traversal is not a control path")
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", "parent traversal is not a control path"
+        )
     if any(part == "" for part in value.split("/") if part != "."):
-        raise AssertionError("empty control path segment")
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", "empty control path segment"
+        )
     candidate = value
     if project_root != "." and not candidate.startswith(f"{project_root}/"):
         candidate = f"{project_root.rstrip('/')}/{candidate}"
@@ -2432,7 +3003,9 @@ def _normalise_control_path(value: str, *, project_root: str) -> str:
         if part in {"", "."}:
             continue
         if part == "..":
-            raise AssertionError("parent traversal is not a control path")
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "parent traversal is not a control path"
+            )
         else:
             resolved.append(part)
     result = "/".join(resolved) or "."
@@ -2543,11 +3116,10 @@ def _derive_project_descriptors_from_control_bytes(
         )
 
     def control_parent_path(path: str, root: str, extends: str) -> str:
-        if extends.startswith("."):
-            base = str(Path(path).parent)
-            candidate = f"{base}/{extends}" if base != "." else extends
-            return _normalise_control_path(candidate, project_root=root)
-        return _normalise_control_path(extends, project_root=root)
+        # The raw specifier must be an explicit local ``./...`` path.  Bare,
+        # package, URL-like, absolute, parent-traversing, and array forms are
+        # rejected before normalization can turn them into a local file.
+        return _resolve_local_extends_path(path, root, extends)
 
     def control_closure(
         path: str,
@@ -2936,13 +3508,7 @@ def seal_source_acquisition(
             )
         project_root = next((root for root in project_roots if _under(path, root)), None)
         assert project_root is not None
-        extend_path = (
-            _normalise_control_path(
-                f"{Path(path).parent}/{extends_value}", project_root=project_root
-            )
-            if extends_value.startswith(".")
-            else _normalise_control_path(extends_value, project_root=project_root)
-        )
+        extend_path = _resolve_local_extends_path(path, project_root, extends_value)
         if extend_path not in enumerated_set:
             raise SourceAcquisitionError(
                 "CSV-NEXT-CONFIG-002",
@@ -4772,15 +5338,58 @@ def validate_process_launch_observation(value: dict[str, Any]) -> None:
         Draft202012Validator(schema).validate(value)
     except ValidationError as exc:
         raise AssertionError("invalid process launch observation") from exc
+    if "stable_fingerprint" in value:
+        assert value["stable_fingerprint"] == process_launch_stable_fingerprint(value)
     if value["kind"] == "production" and value["node_status"] == "available":
         assert value["file_identity_at_hash"] == value["file_identity_at_spawn"]
         identity = value["file_identity_at_hash"]
         assert value["node_realpath"] == identity["realpath"]
         assert value["node_sha256"] == identity["sha256"]
         assert value["post_spawn_identity_check"]["identity_at_spawn"] == identity
-        expected_primitive = f"{value['host_os']}-posix-spawn-verified-fd"
+        expected_primitive = (
+            "windows-create-process-verified-handle"
+            if value["host_os"] == "windows"
+            else f"{value['host_os']}-posix-spawn-verified-fd"
+        )
         assert value["spawn_primitive"] == expected_primitive
         assert value["toctou_failure_point"] == "none"
+
+
+def _process_launch_stable_projection(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Select process facts that remain stable across hosts.
+
+    Security evidence keeps device/inode and the verified handle, but those
+    values are intentionally excluded from the run fingerprint.  The stable
+    projection still binds the executable hash/version, OS-specific launch
+    primitive, argv and process policy, so a caller cannot replace the
+    executable while preserving a fingerprint.
+    """
+
+    projection = {
+        "schema": value["schema"],
+        "version": value["version"],
+        "kind": value["kind"],
+        "node_status": value["node_status"],
+        "host_os": value["host_os"],
+        "argv": copy.deepcopy(value["argv"]),
+        "shell": value["shell"],
+        "process_group": copy.deepcopy(value["process_group"]),
+        "node_realpath": value.get("node_realpath"),
+        "node_sha256": value.get("node_sha256"),
+        "node_version": value.get("node_version"),
+        "spawn_primitive": value.get("spawn_primitive"),
+        "toctou_failure_point": value["toctou_failure_point"],
+    }
+    if value["kind"] == "fixture":
+        projection["fixture_id"] = value["fixture_id"]
+        projection["identity_token"] = value["identity_token"]
+    return projection
+
+
+def process_launch_stable_fingerprint(value: Mapping[str, Any]) -> str:
+    """Return the host-independent process observation fingerprint."""
+
+    return digest(_process_launch_stable_projection(value))
 
 
 def process_launch_observation_from_descriptor(
@@ -4795,7 +5404,7 @@ def process_launch_observation_from_descriptor(
     """
 
     if descriptor is None:
-        return {
+        observation = {
             "schema": "code-structure-viz.next-process-launch-observation/v1",
             "version": 1,
             "kind": "production",
@@ -4819,10 +5428,12 @@ def process_launch_observation_from_descriptor(
             "fd_lifecycle": None,
             "toctou_failure_point": "node-discovery",
         }
+        observation["stable_fingerprint"] = process_launch_stable_fingerprint(observation)
+        return observation
     validate_process_launch_descriptor(descriptor)
     status = descriptor["node_status"]
     if status == "available":
-        return {
+        observation = {
             "schema": "code-structure-viz.next-process-launch-observation/v1",
             "version": 1,
             "kind": "fixture",
@@ -4836,7 +5447,9 @@ def process_launch_observation_from_descriptor(
             "shell": False,
             "process_group": descriptor["process_group"],
         }
-    return {
+        observation["stable_fingerprint"] = process_launch_stable_fingerprint(observation)
+        return observation
+    observation = {
         "schema": "code-structure-viz.next-process-launch-observation/v1",
         "version": 1,
         "kind": "fixture",
@@ -4850,6 +5463,8 @@ def process_launch_observation_from_descriptor(
         "shell": False,
         "process_group": descriptor["process_group"],
     }
+    observation["stable_fingerprint"] = process_launch_stable_fingerprint(observation)
+    return observation
 
 
 def _compatibility_descriptor_snapshot() -> dict[str, Any]:
@@ -5096,7 +5711,13 @@ def _seal_publication_context(
         ),
         "adapter_version": resolved_toolchain["adapter_version"] if resolved_toolchain else None,
         "protocol": resolved_toolchain["protocol"] if resolved_toolchain else None,
+        # The descriptor is retained only as a compatibility view.  The
+        # observation digest is the normative process authority in the
+        # fingerprint and in every downstream context.
         "process_launch_descriptor_digest": digest(launch) if launch is not None else None,
+        "process_launch_observation_digest": digest(
+            process_launch_observation_from_descriptor(launch)
+        ),
         "source_failure_ledger": copy.deepcopy(list(ledger_rows)),
         "identifier_unicode_version": ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
         "identifier_unicode_table_digest": ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
@@ -6958,6 +7579,7 @@ def recompute_run_fingerprint(
     identifier_unicode_version: str = ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
     identifier_unicode_table_digest: str = ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
     process_launch_descriptor_digest: str | None = None,
+    process_launch_observation_digest: str | None = None,
     source_failure_ledger: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
     source_failure_ledger_digest: str | None = None,
 ) -> str:
@@ -6981,6 +7603,8 @@ def recompute_run_fingerprint(
     }
     if process_launch_descriptor_digest is not None:
         preimage["process_launch_descriptor_digest"] = process_launch_descriptor_digest
+    if process_launch_observation_digest is not None:
+        preimage["process_launch_observation_digest"] = process_launch_observation_digest
     if source_failure_ledger_digest is not None:
         preimage["source_failure_ledger_digest"] = source_failure_ledger_digest
     return digest(preimage)
@@ -7267,6 +7891,11 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
         if is_next_run_decision(decision)
         else None
     )
+    observation_digest = (
+        digest(decision.publication_context.process_launch_observation)
+        if is_next_run_decision(decision)
+        else None
+    )
     assert value["run_fingerprint"] == recompute_run_fingerprint(
         source_view_fingerprint=value["source"]["fingerprint"],
         source_plan_digest=value["source_plan_digest"],
@@ -7282,6 +7911,7 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
         protocol=value["toolchain"]["protocol"],
         trusted_environment_digest=value["trusted_environment"]["sha256"],
         process_launch_descriptor_digest=launch_digest,
+        process_launch_observation_digest=observation_digest,
         source_failure_ledger=(
             decision.publication_context.source_failure_ledger
             if is_next_run_decision(decision)

@@ -11,7 +11,7 @@
     "fixture_id": {}, "identity_token": {}, "spawn_primitive": {},
     "toctou_failure_point": {}, "node_realpath": {}, "node_sha256": {},
     "node_version": {}, "file_identity_at_hash": {},
-    "file_identity_at_spawn": {}, "verified_open_handle": {},
+    "file_identity_at_spawn": {}, "verified_open_handle": {}, "stable_fingerprint": {},
     "post_spawn_identity_check": {}, "fd_lifecycle": {}
   },
   "oneOf": [
@@ -22,6 +22,7 @@
   ],
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "stable_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "absolute_path": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
     "file_identity": {
       "type": "object",
@@ -103,18 +104,18 @@
         {"$ref": "#/$defs/common_process"},
         {
           "type": "object",
-          "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point"],
+          "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point", "stable_fingerprint"],
           "properties": {
             "kind": {"const": "production"},
             "node_status": {"const": "available"},
-            "host_os": {"enum": ["darwin", "linux"]},
+            "host_os": {"enum": ["darwin", "linux", "windows"]},
             "node_realpath": {"$ref": "#/$defs/absolute_path"},
             "node_sha256": {"$ref": "#/$defs/sha256"},
             "node_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
             "file_identity_at_hash": {"$ref": "#/$defs/file_identity"},
             "file_identity_at_spawn": {"$ref": "#/$defs/file_identity"},
             "verified_open_handle": {"$ref": "#/$defs/verified_handle"},
-            "spawn_primitive": {"enum": ["darwin-posix-spawn-verified-fd", "linux-posix-spawn-verified-fd"]},
+            "spawn_primitive": {"enum": ["darwin-posix-spawn-verified-fd", "linux-posix-spawn-verified-fd", "windows-create-process-verified-handle"]},
             "post_spawn_identity_check": {"$ref": "#/$defs/identity_check"},
             "fd_lifecycle": {"$ref": "#/$defs/fd_lifecycle"},
             "toctou_failure_point": {"enum": ["none", "open", "hash", "spawn_bind", "post_spawn_check"]}
@@ -130,6 +131,10 @@
           "then": {"properties": {"spawn_primitive": {"const": "linux-posix-spawn-verified-fd"}}}
         },
         {
+          "if": {"properties": {"host_os": {"const": "windows"}}},
+          "then": {"properties": {"spawn_primitive": {"const": "windows-create-process-verified-handle"}}}
+        },
+        {
           "not": {"properties": {"file_identity_at_hash": {"const": {}}}}
         }
       ]
@@ -139,11 +144,11 @@
         {"$ref": "#/$defs/common_process"},
         {
           "type": "object",
-          "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point"],
+          "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point", "stable_fingerprint"],
           "properties": {
             "kind": {"const": "production"},
             "node_status": {"const": "unavailable"},
-            "host_os": {"enum": ["darwin", "linux", "unknown"]},
+            "host_os": {"enum": ["darwin", "linux", "windows", "unknown"]},
             "argv": {"const": ["<unavailable>", "/.code-structure-viz/next-adapter.mjs"]},
             "node_realpath": {"type": "null"},
             "node_sha256": {"type": "null"},
@@ -165,7 +170,7 @@
         {"$ref": "#/$defs/common_process"},
         {
           "type": "object",
-          "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point"],
+          "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point", "stable_fingerprint"],
           "properties": {
             "kind": {"const": "production"},
             "node_status": {"const": "not_applicable"},

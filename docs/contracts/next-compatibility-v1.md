@@ -89,8 +89,9 @@ trust profile.
 
 The compatibility descriptor is owned by the sealed `NextPublicationContext`.
 The checked-in Unicode 15.0.0 table digest, identity/algorithm versions, and
-trusted semantic profile are part of its preimage; the observed process-launch
-descriptor is separately included in the run fingerprint. A writer must not
+trusted semantic profile are part of its preimage; the observed
+`next-process-launch-observation-v1` digest is separately included in the run
+fingerprint. A writer must not
 replace either value with a host-derived or fixture-derived default.
 
 IdentifierName checks are contextual: binding identifiers exclude reserved
@@ -99,3 +100,12 @@ default declarations use the reserved `@anonymous-default` slot at most once
 per module. The same table covers import/export, JSX, re-export, and trusted
 reference names. Round 16 keeps this as a data-only contract; fresh Strict is
 pending and the historical verdict remains fail.
+
+## Round 21 process fingerprint split
+
+The process observation is the only process authority. Its security fields retain OS-native file identity,
+verified-open handle, and spawn/TOCTOU evidence for darwin, linux, and windows. The stable run-fingerprint
+projection excludes host-ephemeral FD number, device, and inode values, so equivalent observations remain
+cross-machine stable while identity substitutions still fail validation. The legacy launch descriptor is only a
+derived compatibility view. Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
+implementation is absent.

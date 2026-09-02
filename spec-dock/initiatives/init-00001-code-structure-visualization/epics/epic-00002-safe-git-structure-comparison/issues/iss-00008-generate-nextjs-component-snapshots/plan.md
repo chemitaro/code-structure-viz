@@ -57,7 +57,7 @@ fresh current-SHA Strictはpending、readinessは未確認、production implemen
    Evidence: `test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy`、
    `test_round18_publication_projections_return_sealed_candidate_bytes`。
 5. **process identity:** `next-process-launch-observation-v1`のfixture/production unionを検証する。productionは
-   darwin/linuxだけにし、OS-native file identity、verified handle、hash/version、actual spawn primitive、
+   darwin/linux/windowsを対象にし、OS-native file identity、verified handle、hash/version、actual spawn primitive、
    post-spawn equality、FD lifecycle、process group、TOCTOU pointを必須にする。referenceではhostを操作せず、
    faithful harnessをprocess-level acceptanceと主張しない。Evidence: `test_round19_process_observation_is_fixture_or_supported_os_production`。
 6. **provenance and schema:** `next-provenance-v1`のstage/code/observed prefixをclosed oneOfにし、normal/
@@ -522,7 +522,7 @@ fresh current-SHA Strictはpending、readinessは未確認、production implemen
    一回の`seal_source_acquisition`で導出する。plan/view caller injection、duplicate read、
    drift後のreadをnegative testする。
 2. 実SourceAcquisitionSeal、resolved public/private request、observed toolchain、trusted
-   environment、compatibility descriptor、versioned process-launch descriptorからimmutable
+   environment、compatibility descriptor、versioned process-launch observationからimmutable
    `NextPublicationContext`を一度だけ構築し、全decision variantと全projectionへ渡す。
    descriptorは省略不可でtoolchainのNode statusと一致し、fingerprint preimageへ含める。
    pre-response/not-applicableの`NextDecisionContext`も明示的にsealし、後段のfallbackを
@@ -539,7 +539,7 @@ fresh current-SHA Strictはpending、readinessは未確認、production implemen
    受け付けず、selected copy failureはsemantic statusを変えずpublication resultへsealする。
 5. target failure eight reasonsの一target一行、Unicode 15.0 contextual predicates/full
    scalar KAT、BoundaryRolePropagationのclient seed/server traversal規則、canonical
-   sort_keys/NFC/UTF-8/LF bytes、versioned process launch descriptorを各golden/schemaへ
+   sort_keys/NFC/UTF-8/LF bytes、versioned process launch observationを各golden/schemaへ
    同期する。faithful capture harnessはOS process-level testと主張しない。
 6. Round 16 artifactへ三試行の利用可能なprovenance、findings→remediation→test map、全gate
    command/resultを追記する。artifactのhistorical failは上書きせず、fresh Strict passまで
@@ -635,7 +635,7 @@ fresh current-SHA Strictはpending、readinessは未確認、production implemen
 5. `PublicationBoundaryDecision`をfinal publication authorityとし、summary/manifest/artifact/typed
    unavailableのexact bytes、selector、diagnostic JSONL、capture/stderr/selected-copy measurementsを一度
    sealする。全projectionから独立 outcome/map/payloadを削り、exact/+1 substitution testを通す。
-6. process launch descriptorはOS identity/hash/versionとactual spawn handle/TOCTOU、fixed argv/env/FD/
+6. `next-process-launch-observation-v1`はOS identity/hash/versionとactual spawn handle/TOCTOU、fixed argv/env/FD/
    process groupをrequiredにする。referenceではhost processを実行せず、faithful iterable capture testと
    production OS acceptance boundaryを明記する。
 7. stdout union、target reason、schema discriminator、shared path grammar/safe-ID、NFC UTF-8 path orderと
@@ -686,7 +686,7 @@ positive/negative testで閉じる。
    内部導出する。caller/request/reader graphを無視し、edge deletion + digest recomputationをreject
    する。source integrity resultをComplete/Partial/Unavailable/Fatal unionへ投影し、fatalと
    payload_unavailableのstage/code/manifest/stdout/exitを相互に検証する。
-4. process launch observationをfixture/production unionへ固定する。productionはdarwin/linuxと
+4. process launch observationをfixture/production unionへ固定する。productionはdarwin/linux/windowsと
    verified Node identities、handle、spawn primitive、post-spawn equality、FD/process group、TOCTOUを
    要求し、unavailable/not_applicableではidentityをnullにする。reference checksはhost processを
    実行済みと主張せず、後続production acceptanceをPlanに残す。
@@ -713,3 +713,53 @@ Required checks are focused Round20 tests, focused Next/schema tests, contract/f
 check/format, SpecDock, pinned HTML PlantUML/browser validation, diff check, empty `src/**` diff, and no
 generated `node_modules`. Passing these checks does not change the historical Strict verdict or establish
 implementation readiness.
+
+### Round 21 remediation plan
+
+Round 21の固定点は SHA `67351f970835afe05b3f4db1aa40b73b3abf0198`、Strictの
+`P0=0 / P1=5 / P2=1 / fail / implementation_ready=no` である。verification-only は
+`issue-eight-strict-round-twenty-3`、full review は `required-strict-github-connector-verificati-704`。
+historical verdictは保持し、fresh current-SHA Strictはpending、readinessは未確認、production
+implementationは未着手とする。実装順序は authorityの上流から下流へ固定し、各stepをpositive/negative
+contract testとSchemaで閉じる。
+
+1. **Applicability:** frozen package bytesを一度だけ読み、direct Nextのみによる
+   `PackageApplicabilityMatrix`を導出する。applicable/non-applicable/malformedを表にし、mixedでは
+   applicable rootsのみ、all non-applicableではNode probe禁止のNotApplicableDecision、malformedでは
+   global unavailableを同一projectionから出す。indirect/lockfile/config/dirnameはNode probeの根拠にしない。
+2. **Config/source membership:** known root control candidatesだけをJSONC lexerで読み、BOM/comments/
+   trailing comma（comma+comment+closingを含む）を受理する。local `extends`はproject内 explicit
+   `./...` string一件だけとし、bare/package、array、absolute、`../`、URL-like、ambiguity、cycle、
+   forbidden compiler optionsを拒否する。include/excludeはsegment grammarで導出し、read/parse errorを
+   empty objectへ置換しない。
+3. **Source graph/locality:** frozen bytesとsealed planのownerから module-plane scannerで static/
+   side-effect/export-from/literal dynamic/require と baseUrl/pathsを解決する。comment/template/regexの
+   false positiveを除外し、unsupported/ambiguous/unresolved/externalはopen edgeとして残す。caller graphや
+   edge削除後digestを受け取らない。
+4. **Provenance:** request-bound/request-independentの一つのdiscriminated shapeで stage/code、observed
+   prefix/value、budget correlationを保持する。project_validation、source_control、Node/process、
+   response、modelのcatalog pairをSchema/reference validatorで検査し、後続未観測値をnull/unobserved
+   とする。control failureをdomain/root/stdout/exitへ通す。
+5. **Process:** `next-process-launch-observation-v1`を唯一の正本とする。darwin/linux/windowsの
+   OS-native verified-open/execution、realpath/hash/version、hash/spawn identity、spawn primitive、
+   post-spawn equality、argv/cwd/env/FD/group、TOCTOUを束ね、旧descriptorはcompatibility viewに限定する。
+   ephemeral device/inode/FDはsecurity observationに残すがstable fingerprintから除外する。fixture-only
+   reference testをOS process-level acceptanceと主張しない。
+6. **Coverage:** fixtureのpositive/negative vector、test body、validator、criterion mapを相互に検証し、
+   missing/misassigned criterion/vector/validator/mutationをcoverage gateが拒否する。coverage自身の
+   mapping mutationも独立negativeとして実行する。
+
+#### Round 21 criterion → executable evidence
+
+| criterion | substantive test | vectors |
+| --- | --- | --- |
+| R21-P1-01 applicability | `test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces`; `test_round21_applicability_source_observation_precedes_node_and_is_read_once` | `round21-applicability-end-to-end`; `round21-applicability-malformed-no-node` |
+| R21-P1-02 config boundary | `test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_deterministic` | `round21-config-closed-grammar`; `round21-config-extends-injection` |
+| R21-P1-03 source locality | `test_round21_source_graph_scanner_closes_supported_import_planes_and_open_edges` | `round21-source-graph-module-plane`; `round21-source-open-edge` |
+| R21-P1-04 provenance | `test_round21_provenance_catalog_has_single_request_independent_source_control_union` | `round21-provenance-stage-union`; `round21-provenance-stage-mismatch` |
+| R21-P1-05 process authority | `test_round21_process_observation_is_normative_and_fingerprint_excludes_ephemeral_identity` | `round21-process-observation-fingerprint`; `round21-process-identity-substitution` |
+| R21-P2-01 bidirectional coverage | `test_round21_coverage_index_is_bidirectional_and_self_validating` | `round21-coverage-index`; `round21-coverage-mapping-mutation` |
+
+Focused tests must run before the complete contract suite. Completion also requires full pytest, mypy, ruff,
+SpecDock, pinned HTML validation, diff cleanliness, empty `src/**` diff, and no `node_modules`. Even with all
+local checks green, only a fresh Strict `review_status=pass` with P0=0/P1=0 can authorize I05 production work.

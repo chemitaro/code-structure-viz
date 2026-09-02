@@ -26,17 +26,18 @@ Node 実体を後段の writer が再構成しない。
 - process group を作り、timeout または capture overrun では group 全体を終了し、
   終了後に wait する。子 process だけの kill や silent truncation は契約外である。
 
-Descriptor の field、配列順、固定 map は JSON Schema と canonical JSON bytes で
+Observation の field、配列順、固定 map は JSON Schema と canonical JSON bytes で
 検証する。PATH shadow、symlink の実体置換、hostile environment、locale/TZ の変更、
-extra FD、process-group の scope 変更はいずれも descriptor mutation として拒否し、
+extra FD、process-group の scope 変更はいずれも observation mutation として拒否し、
 検証済みの semantic/publication decision を作らない。
 
-`process_launch_descriptor` は `NextPublicationContext` の必須フィールドであり、
+`next-process-launch-observation-v1` は `NextPublicationContext` の必須フィールドであり、
 default factory、host の PATH、または `node_status` からの後段 fallback は持たない。
 available/unavailable/not-applicable の各 decision variant は、実際にその境界で
-検証した descriptor を明示的に seal し、descriptor の digest を run-fingerprint
-preimage に含める。descriptor を省略した構築、toolchain の node status と異なる
-descriptor、preimage だけを差し替えた構築は受理しない。
+検証した observation を明示的に seal し、observation の digest を run-fingerprint
+preimage に含める。observation を省略した構築、toolchain の node status と異なる
+observation、preimage だけを差し替えた構築は受理しない。旧 descriptor はこの observation
+からの互換 view に限る。
 
 ## capture と証拠の境界
 
@@ -110,7 +111,7 @@ The launch boundary is represented by
 (`fixture_id`, `identity_token`, and `recorded-fixture`); it must never be
 promoted to production launch evidence.
 
-The production branch is supported only on `darwin` and `linux`. It requires
+The production branch is supported on `darwin`, `linux`, and `windows`. It requires
 the absolute verified Node realpath, Node digest/version, file identity at
 hash and spawn (realpath, digest, version, device, inode), a verified open FD
 handle retained through spawn, the OS-specific verified-FD spawn primitive,
@@ -137,8 +138,8 @@ implementation is absent.
 
 The process observation remains a closed `fixture | production` union and is
 derived once at the launch boundary. A fixture is named reference evidence
-only; it is never promoted to production. The production branch is limited to
-`darwin` and `linux` and correlates the observed Node version, absolute realpath,
+only; it is never promoted to production. The production branch is supported on
+`darwin`, `linux`, and `windows` and correlates the observed Node version, absolute realpath,
 hash-time and spawn-time OS file identities, verified-open handle, concrete
 OS-specific spawn primitive, `argv[0]`, and post-spawn identity check. The
 descriptor also seals the fixed cwd, environment allowlist/denied variables,
@@ -155,3 +156,20 @@ unavailable branch contains no fabricated identity:
 `test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_identity`.
 Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 21 normative observation
+
+`next-process-launch-observation-v1` is the sole normative process authority. The older
+`process_launch_descriptor` is not an independent source of truth; when retained for compatibility it is a
+mechanically derived view of this observation. The production union supports `darwin`, `linux`, and `windows`.
+Each OS binds a verified-open Node executable to the concrete OS spawn primitive, compares the hash-time and
+spawn-time file identities, performs a post-spawn equality check, and fails closed on path, symlink, mount/inode,
+hash, version, handle, primitive, or TOCTOU mismatch. The observation also seals argv, cwd, allowlisted/denied
+environment, stdio and FD inheritance, and process-group policy.
+
+`stable_fingerprint` is calculated from the cross-machine stable projection: schema/version, node status, host OS,
+argv, shell/process-group policy, Node realpath/hash/version, spawn primitive, and TOCTOU result (plus fixture
+identity for fixture rows). Host-ephemeral FD number, device, and inode values remain in the security observation
+and are validated, but are deliberately excluded from this fingerprint. `unavailable` and `not_applicable` carry
+explicit null identity fields and never use a PATH/default executable. The reference suite validates this split
+without opening or spawning a host executable; OS process-level acceptance remains a later production gate.

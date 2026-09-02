@@ -261,3 +261,28 @@ Round 20 evidence is
 `test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`.
 Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 21 sealed locality contract
+
+The source-plan boundary is downstream of `PackageApplicabilityMatrix` and the known-root control
+observation. It is not allowed to rebuild a plan from request files. `SourceDiscoveryIntent` contains only
+project roots, known control candidates, and fixed discovery rules. A trusted frozen inventory is enumerated
+once; control bytes are parsed with the closed JSONC dialect and the plan derives local `extends`, compiler
+options, include/exclude membership, source roots, roles, and final paths internally.
+
+`extends` is exactly one project-local `./...` string. Bare/package, array, absolute, `../`, URL-like,
+ambiguous, and cyclic forms fail closed. BOM/comments/trailing commas are normalized outside strings,
+including comma+comment+closing sequences; duplicate keys and invalid types do not receive an empty-object
+fallback. Include/exclude is the segment grammar `*`, `?`, and whole-segment `**`, not `fnmatch`.
+
+The graph scanner uses the frozen source bytes and sealed plan to recognize static and side-effect imports,
+export-from, literal dynamic `import()`, literal `require()`, and `baseUrl`/`paths` aliases. It skips
+comments, templates, and regex literals. An unsupported, ambiguous, unresolved, or external dependency is
+an `open_edge`; dropping it cannot establish locality or `partial_safe`. Reader-supplied graph data is
+observation-only, and edge deletion followed by digest recomputation is rejected.
+
+Applicability, graph, source failure, and provenance are propagated as one decision-owned chain. The
+request-independent branch records only the observed prefix; later request/limits/toolchain/trusted
+environment/process/budget values are `unobserved`/`null`. The production process authority is
+`next-process-launch-observation-v1`, including its darwin/linux/windows identity and stable-fingerprint
+split. Fresh current-SHA Strict is pending, readiness is unconfirmed, and production implementation is absent.

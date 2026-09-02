@@ -71,8 +71,10 @@ from tests.contracts.next_reference_validation import (
     _is_jsx_identifier_part,
     _is_jsx_identifier_start,
     _path_sort_key,
+    _process_launch_for_toolchain,
     _publication_context_for_validated_request,
     _scan_export_file,
+    _scan_module_specifiers,
     _toolchain_snapshot,
     _trusted_fixture_source_seal,
     assert_encoded_stdin_boundary,
@@ -119,9 +121,11 @@ from tests.contracts.next_reference_validation import (
     model_record_budget_allowed,
     model_wire_record_count,
     not_applicable_decision,
+    package_applicability_projection,
     pre_response_failure_decision,
     process_launch_descriptor,
     process_launch_observation_from_descriptor,
+    process_launch_stable_fingerprint,
     project_config_digest,
     recompute_compatibility_id,
     recompute_export_graph_case,
@@ -150,6 +154,7 @@ from tests.contracts.next_reference_validation import (
     validate_limits_consistency,
     validate_model,
     validate_no_trusted_shadowing,
+    validate_package_applicability_projection,
     validate_plantuml_contract,
     validate_process_launch_descriptor,
     validate_process_launch_observation,
@@ -1148,7 +1153,7 @@ def _semantic(
             }
             for diagnostic in domain["diagnostics"]
         ]
-    value = {
+    value: dict[str, Any] = {
         "type": "semantic_snapshot",
         "schema": "code-structure-viz.semantic/v1",
         "domain": "next",
@@ -2019,6 +2024,16 @@ def _legacy_domain_fixture(
         value["request"]["source_plan_digest"] = sealed.source_plan_digest
     if incomplete_kind is not None:
         value["incomplete_kind"] = incomplete_kind
+    launch_for_fingerprint = _process_launch_for_toolchain(
+        value["toolchain"],
+        node_realpath=(
+            None if status == "not_applicable" or runtime_unavailable else "/usr/local/bin/node"
+        ),
+        node_sha256=(None if status == "not_applicable" or runtime_unavailable else "1" * 64),
+        spawn_executable=(
+            None if status == "not_applicable" or runtime_unavailable else "/usr/local/bin/node"
+        ),
+    )
     value["run_fingerprint"] = recompute_run_fingerprint(
         source_view_fingerprint=value["source"]["fingerprint"],
         source_plan_digest=value["source_plan_digest"],
@@ -2082,6 +2097,9 @@ def _legacy_domain_fixture(
                     else "fixture-process-group"
                 ),
             )
+        ),
+        process_launch_observation_digest=digest(
+            process_launch_observation_from_descriptor(launch_for_fingerprint)
         ),
     )
     value["request"]["run_fingerprint"] = value["run_fingerprint"]
@@ -2534,6 +2552,9 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
             protocol=toolchain["protocol"],
             trusted_environment_digest=trusted_environment["sha256"],
             process_launch_descriptor_digest=digest(publication_context.process_launch_descriptor),
+            process_launch_observation_digest=digest(
+                publication_context.process_launch_observation
+            ),
             source_failure_ledger=publication_context.source_failure_ledger,
             source_failure_ledger_digest=publication_context.source_failure_ledger_digest,
         )
@@ -5212,8 +5233,8 @@ def test_round19_source_acquisition_union_is_typed_and_fail_closed() -> None:
         (b'{"devDependencies":{"next":"^15"}}', "applicable", "direct_next_dependency"),
         (
             b'{"dependencies":{"next":"14"},"devDependencies":{"next":"15"}}',
-            "applicable",
-            "direct_next_dependency",
+            "malformed",
+            "malformed_package",
         ),
         (b'{"dependencies":{"next":""}}', "malformed", "malformed_package"),
         (b'{"dependencies":{"next":false}}', "malformed", "malformed_package"),
@@ -5250,6 +5271,409 @@ def test_round20_package_applicability_matrix_rejects_encoding_duplicates_and_mi
     assert mixed.aggregate_state == "malformed"
     assert mixed.applicable_projects == ("apps/a",)
     assert mixed.non_applicable_projects == ()
+
+
+def test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces() -> None:
+    assert "round21-applicability-end-to-end"
+    assert "round21-applicability-malformed-no-node"
+
+    def validate_projection(projection: dict[str, Any]) -> None:
+        validate_package_applicability_projection(projection)
+        _validator("next-applicability-decision-v1.schema.json").validate(projection)
+
+    not_applicable = package_applicability_projection(
+        derive_package_applicability_matrix({"package.json": b'{"name":"plain-package"}'}, (".",))
+    )
+    validate_projection(not_applicable)
+    assert not_applicable["decision_kind"] == "NotApplicableDecision"
+    assert not_applicable["project_filter"] == []
+    assert not_applicable["node_probe"] == {"permission": "prohibited", "performed": False}
+    assert not_applicable["exit_code"] == 0
+
+    mixed = package_applicability_projection(
+        derive_package_applicability_matrix(
+            {
+                "apps/a/package.json": b'{"dependencies":{"next":"15"}}',
+                "apps/b/package.json": b'{"name":"plain"}',
+            },
+            ("apps/a", "apps/b"),
+        ),
+        node_status="available",
+    )
+    validate_projection(mixed)
+    assert mixed["project_filter"] == ["apps/a"]
+    assert mixed["non_applicable_observations"] == ["apps/b"]
+    assert mixed["decision_kind"] == "ValidatedResponseDecision"
+    assert mixed["domain"]["project_roots"] == ["apps/a"]
+    assert mixed["root_manifest"]["project_roots"] == ["apps/a"]
+    assert mixed["stdout_result"]["project_roots"] == ["apps/a"]
+
+    malformed = package_applicability_projection(
+        derive_package_applicability_matrix(
+            {
+                "apps/a/package.json": b'{"dependencies":{"next":"15"}}',
+                "apps/b/package.json": b'{"dependencies":{"next":false}}',
+            },
+            ("apps/a", "apps/b"),
+        )
+    )
+    validate_projection(malformed)
+    assert malformed["project_filter"] == []
+    assert malformed["node_probe"] == {"permission": "prohibited", "performed": False}
+    assert malformed["decision_kind"] == "PreResponseFailureDecision"
+    assert malformed["domain"]["project_roots"] == []
+    assert malformed["root_manifest"]["exit_code"] == 3
+    assert malformed["stdout_result"]["branch"] == "typed_unavailable"
+
+    # Conflicting direct declarations are malformed before any probe can be
+    # permitted; equal declarations remain one applicable fact.
+    conflicting = derive_package_applicability_matrix(
+        {"package.json": b'{"dependencies":{"next":"14"},"devDependencies":{"next":"15"}}'},
+        (".",),
+    )
+    assert conflicting.aggregate_state == "malformed"
+    assert package_applicability_projection(conflicting)["node_probe"]["performed"] is False
+    duplicate_direct = derive_package_applicability_matrix(
+        {"package.json": b'{"dependencies":{"next":"15"},"devDependencies":{"next":"15"}}'},
+        (".",),
+    )
+    assert duplicate_direct.aggregate_state == "malformed"
+
+
+def test_round21_applicability_source_observation_precedes_node_and_is_read_once() -> None:
+    assert "round21-applicability-end-to-end"
+    assert "round21-applicability-malformed-no-node"
+    files = {
+        "package.json": b'{"name":"plain"}',
+        "tsconfig.json": b'{"include":["src/**/*.tsx"]}',
+        "src/App.tsx": b"export const App = 1;\n",
+    }
+    reader = InstrumentedSourceReader(files)
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    assert seal.package_applicability.aggregate_state == "non_applicable"
+    projection = package_applicability_projection(seal.package_applicability)
+    validate_package_applicability_projection(projection)
+    assert projection["node_probe"]["performed"] is False
+    assert reader.read_counts == {"package.json": 1, "src/App.tsx": 1, "tsconfig.json": 1}
+
+
+def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_deterministic() -> None:
+    assert "round21-config-closed-grammar"
+    assert "round21-config-extends-injection"
+    assert "next-reference-validation"
+    base = {
+        "tsconfig.json": (
+            b'\xef\xbb\xbf{\n // root control\n "extends": "./base.json",\n '
+            b'"include": ["src/**/*.tsx", /* trailing comment */],\n}'
+        ),
+        "base.json": b'{"compilerOptions":{"module":"esnext","moduleResolution":"bundler",},}',
+        "src/App.tsx": b"export const App = 1;\n",
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        InstrumentedSourceReader(base),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    _validator("next-source-plan-v1.schema.json").validate(seal.final_plan)
+    assert seal.final_plan["local_extends"] == [
+        {"project_root": ".", "config_path": "tsconfig.json", "extends": ["base.json"]}
+    ]
+    assert "src/App.tsx" in seal.captured_files
+
+    invalid_extends = (
+        "base.json",
+        "@scope/base",
+        ["./base.json"],
+        "/base.json",
+        "../base.json",
+        "https://example/base.json",
+    )
+    for specifier in invalid_extends:
+        raw = json.dumps({"extends": specifier}).encode()
+        reader = InstrumentedSourceReader(
+            {"tsconfig.json": raw, "base.json": b"{}", "src/App.tsx": b"export const App=1;"}
+        )
+        with pytest.raises(SourceAcquisitionError) as error:
+            seal_source_acquisition(
+                SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+                reader,
+                {
+                    "observed_limits": _next_limits(),
+                    "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+                },
+            )
+        assert error.value.code == "CSV-NEXT-CONFIG-002"
+        assert error.value.stage == "source_control"
+
+    cyclic = {
+        "tsconfig.json": b'{"extends":"./base.json"}',
+        "base.json": b'{"extends":"./tsconfig.json"}',
+        "src/App.tsx": b"export const App=1;",
+    }
+    with pytest.raises(SourceAcquisitionError) as error:
+        seal_source_acquisition(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+            InstrumentedSourceReader(cyclic),
+            {
+                "observed_limits": _next_limits(),
+                "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+            },
+        )
+    assert error.value.code == "CSV-NEXT-CONFIG-002"
+
+    for option_name, option_value in (
+        ("plugins", []),
+        ("typeRoots", ["types"]),
+        ("types", ["node"]),
+        ("module", "commonjs"),
+        ("moduleResolution", "node"),
+    ):
+        invalid = {
+            "tsconfig.json": json.dumps(
+                {"compilerOptions": {option_name: option_value}, "include": ["src/**/*.tsx"]}
+            ).encode(),
+            "src/App.tsx": b"export const App=1;",
+        }
+        with pytest.raises(SourceAcquisitionError) as option_error:
+            seal_source_acquisition(
+                SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+                InstrumentedSourceReader(invalid),
+                {
+                    "observed_limits": _next_limits(),
+                    "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+                },
+            )
+        assert option_error.value.code == "CSV-NEXT-CONFIG-002"
+        assert option_error.value.stage == "source_control"
+
+
+def test_round21_source_graph_scanner_closes_supported_import_planes_and_open_edges() -> None:
+    assert "round21-source-graph-module-plane"
+    assert "round21-source-open-edge"
+    text = r"""
+      // import "./comment-false";
+      const template = `import("./template-false")`;
+      const regex = /import\("\.\/regex-false"\)/;
+      import "./side";
+      import { value } from "./static";
+      export { value } from "./reexport";
+      const dynamic = import("./dynamic");
+      const required = require("./required");
+      import { alias } from "@/alias";
+      import("./missing");
+      import("./ambiguous");
+      import(name);
+    """
+    observations, open_dependency = _scan_module_specifiers(text)
+    assert {row["kind"] for row in observations} == {
+        "static_import",
+        "export_from",
+        "literal_dynamic_import",
+        "require",
+    }
+    assert {
+        "./side",
+        "./static",
+        "./reexport",
+        "./dynamic",
+        "./required",
+        "./missing",
+        "./ambiguous",
+        "@/alias",
+    } <= {row["specifier"] for row in observations}
+    assert open_dependency is True
+    assert "comment-false" not in {row["specifier"] for row in observations}
+    assert "template-false" not in {row["specifier"] for row in observations}
+    assert "regex-false" not in {row["specifier"] for row in observations}
+
+    files = {
+        "tsconfig.json": json.dumps(
+            {
+                "include": ["src/**/*.ts"],
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {"@/*": ["src/*"]},
+                    "module": "esnext",
+                    "moduleResolution": "bundler",
+                },
+            }
+        ).encode(),
+        "src/entry.ts": text.encode(),
+        "src/side.ts": b"export const side = 1;",
+        "src/static.ts": b"export const value = 1;",
+        "src/reexport.ts": b"export const value = 1;",
+        "src/dynamic.ts": b"export const dynamic = 1;",
+        "src/required.ts": b"export const required = 1;",
+        "src/ambiguous.ts": b"export const ambiguous = 1;",
+        "src/ambiguous/index.ts": b"export const ambiguous = 2;",
+        "src/alias.ts": b"export const alias = 1;",
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    _validator("next-source-plan-v1.schema.json").validate(seal.final_plan)
+    entry_id = digest({"kind": "source_node", "path": "src/entry.ts"})
+    node_ids = {path: digest({"kind": "source_node", "path": path}) for path in files}
+    targets = {
+        node_ids[path]
+        for path in (
+            "src/side.ts",
+            "src/static.ts",
+            "src/reexport.ts",
+            "src/dynamic.ts",
+            "src/required.ts",
+            "src/alias.ts",
+        )
+    }
+    assert {
+        edge["target"] for edge in seal.source_graph["edges"] if edge["source"] == entry_id
+    } >= targets
+    assert any(row["source"] == entry_id for row in seal.source_graph["open_edges"])
+    assert node_ids["src/ambiguous.ts"] not in {
+        edge["target"] for edge in seal.source_graph["edges"] if edge["source"] == entry_id
+    }
+
+
+def test_round21_provenance_catalog_has_single_request_independent_source_control_union() -> None:
+    assert "round21-provenance-stage-union"
+    assert "round21-provenance-stage-mismatch"
+
+    def row(observed: bool) -> dict[str, Any]:
+        return {
+            "state": "observed" if observed else "unobserved",
+            "value": True if observed else None,
+        }
+
+    value: dict[str, Any] = {
+        "kind": "request_independent",
+        "stage": "source_control",
+        "failure_code": "CSV-NEXT-CONFIG-002",
+        "observed": {
+            "request": row(False),
+            "limits": row(False),
+            "source_plan": row(False),
+            "toolchain": row(False),
+            "trusted_environment": row(False),
+            "compatibility": row(False),
+            "process_launch": row(False),
+            "budget": row(False),
+        },
+    }
+    observed = value["observed"]
+    assert isinstance(observed, dict)
+    validate_stage_dependent_provenance(value)
+    _validator("next-provenance-v1.schema.json").validate(value)
+    mutations: tuple[dict[str, Any], ...] = (
+        {**value, "stage": "response_schema"},
+        {**value, "failure_code": "CSV-NEXT-NODE-001"},
+        {**value, "observed": {**observed, "limits": row(True)}},
+        {
+            **value,
+            "observed": {
+                **observed,
+                "budget": {"state": "observed", "value": None},
+            },
+        },
+    )
+    for mutation in mutations:
+        with pytest.raises((AssertionError, ValidationError)):
+            validate_stage_dependent_provenance(mutation)
+
+    # Every provenance stage/code pair is checked through the same catalog
+    # validator; no parallel stage field may introduce an orphan combination.
+    pairs = (
+        ("applicability", "CSV-NEXT-APPLICABILITY-001"),
+        ("project_validation", "CSV-NEXT-PROJECT-001"),
+        ("node_discovery", "CSV-NEXT-NODE-001"),
+        ("response_schema", "CSV-NEXT-PROTOCOL-001"),
+        ("model_validation", "CSV-NEXT-LIMIT-005"),
+    )
+    for stage, code in pairs:
+        candidate = _decision_provenance(
+            kind="request_independent",
+            stage=stage,
+            failure_code=code,
+            request=False,
+            limits=stage not in {"applicability", "project_validation"},
+            source_plan=stage not in {"applicability", "project_validation"},
+            toolchain=stage in {"response_schema", "model_validation"},
+            trusted_environment=stage in {"response_schema", "model_validation"},
+            budget=False,
+        )
+        validate_stage_dependent_provenance(candidate)
+        _validator("next-provenance-v1.schema.json").validate(candidate)
+
+
+def test_round21_coverage_index_is_bidirectional_and_self_validating() -> None:
+    fixture = json.loads(
+        (ROOT / "tests" / "fixtures" / "next_contract_vectors.json").read_text(encoding="utf-8")
+    )
+    source = Path(__file__).read_text(encoding="utf-8")
+    declared_tests = set(re.findall(r"^def (test_[A-Za-z0-9_]+)\(", source, re.MULTILINE))
+    expected_criteria = {*(f"round21.p1-{index}" for index in range(1, 6)), "round21.p2-1"}
+    expected_vectors = {
+        "round21-applicability-end-to-end",
+        "round21-applicability-malformed-no-node",
+        "round21-config-closed-grammar",
+        "round21-config-extends-injection",
+        "round21-source-graph-module-plane",
+        "round21-source-open-edge",
+        "round21-provenance-stage-union",
+        "round21-provenance-stage-mismatch",
+        "round21-process-observation-fingerprint",
+        "round21-process-identity-substitution",
+        "round21-coverage-index",
+        "round21-coverage-mapping-mutation",
+    }
+
+    def check_index(candidate: dict[str, Any]) -> None:
+        evidence = candidate["criterion_evidence"]
+        assert set(evidence) == expected_criteria
+        vector_owner: dict[str, str] = {}
+        for criterion in sorted(expected_criteria):
+            item = evidence[criterion]
+            assert set(item) == {"tests", "positive_vectors", "negative_vectors", "validator"}
+            assert item["tests"] and item["positive_vectors"] and item["negative_vectors"]
+            assert isinstance(item["validator"], str) and item["validator"]
+            for vector_id in (*item["positive_vectors"], *item["negative_vectors"]):
+                assert vector_id in candidate["positive"] or vector_id in candidate["negative"]
+                assert vector_id not in vector_owner
+                vector_owner[vector_id] = criterion
+            mapped_bodies: list[str] = []
+            for test_name in item["tests"]:
+                assert test_name in declared_tests
+                start = source.index(f"def {test_name}(")
+                end = source.find("\ndef test_", start + 1)
+                body = source[start:] if end < 0 else source[start:end]
+                assert "round21" in body and "assert" in body
+                mapped_bodies.append(body)
+            body_text = "\n".join(mapped_bodies)
+            assert all(
+                vector_id in body_text
+                for vector_id in (*item["positive_vectors"], *item["negative_vectors"])
+            )
+        assert set(vector_owner) == expected_vectors
+
+    check_index(fixture)
+    mutated = copy.deepcopy(fixture)
+    del mutated["criterion_evidence"]["round21.p1-1"]["negative_vectors"][0]
+    with pytest.raises(AssertionError):
+        check_index(mutated)
 
 
 def test_round20_explicit_config_candidates_cannot_hide_package_applicability() -> None:
@@ -5399,6 +5823,84 @@ def test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_
     validate_process_launch_observation(fixture_observation)
     assert fixture_observation["kind"] == "fixture"
     assert process_launch_observation_from_descriptor(descriptor) == fixture_observation
+
+
+def test_round21_process_observation_is_normative_and_fingerprint_excludes_ephemeral_identity() -> (
+    None
+):
+    assert "round21-process-observation-fingerprint"
+    assert "round21-process-identity-substitution"
+    unavailable = process_launch_observation_from_descriptor(None)
+    validate_process_launch_observation(unavailable)
+    assert unavailable["stable_fingerprint"] == process_launch_stable_fingerprint(unavailable)
+    assert unavailable["node_realpath"] is None
+    assert unavailable["stable_fingerprint"]
+
+    identity = {
+        "realpath": "/opt/node/bin/node",
+        "sha256": "2" * 64,
+        "version": "22.14.0",
+        "device": 10,
+        "inode": 20,
+    }
+    production: dict[str, Any] = {
+        "schema": "code-structure-viz.next-process-launch-observation/v1",
+        "version": 1,
+        "kind": "production",
+        "host_os": "linux",
+        "node_status": "available",
+        "node_realpath": identity["realpath"],
+        "node_sha256": identity["sha256"],
+        "node_version": identity["version"],
+        "file_identity_at_hash": identity,
+        "file_identity_at_spawn": identity,
+        "verified_open_handle": {
+            "kind": "fd",
+            "number": 9,
+            "cloexec": True,
+            "retained_through_spawn": True,
+        },
+        "spawn_primitive": "linux-posix-spawn-verified-fd",
+        "post_spawn_identity_check": {
+            "performed": True,
+            "result": "equal",
+            "identity_at_spawn": identity,
+        },
+        "fd_lifecycle": {
+            "opened_before_hash": True,
+            "retained_through_spawn": True,
+            "inherited_by_child": False,
+            "closed_after_spawn_result": True,
+        },
+        "toctou_failure_point": "none",
+        "argv": [identity["realpath"], "/.code-structure-viz/next-adapter.mjs"],
+        "shell": False,
+        "process_group": {
+            "create": True,
+            "terminate_scope": "group",
+            "wait_after_terminate": True,
+        },
+    }
+    production["stable_fingerprint"] = process_launch_stable_fingerprint(production)
+    validate_process_launch_observation(production)
+    _validator("next-process-launch-observation-v1.schema.json").validate(production)
+    ephemeral: dict[str, Any] = copy.deepcopy(production)
+    ephemeral["file_identity_at_hash"]["device"] = 11
+    ephemeral["file_identity_at_hash"]["inode"] = 21
+    ephemeral["file_identity_at_spawn"]["device"] = 11
+    ephemeral["file_identity_at_spawn"]["inode"] = 21
+    ephemeral["post_spawn_identity_check"]["identity_at_spawn"]["device"] = 11
+    ephemeral["post_spawn_identity_check"]["identity_at_spawn"]["inode"] = 21
+    assert process_launch_stable_fingerprint(ephemeral) == production["stable_fingerprint"]
+    with pytest.raises(AssertionError):
+        validate_process_launch_observation({**production, "node_sha256": "3" * 64})
+
+    windows = copy.deepcopy(production)
+    windows["host_os"] = "windows"
+    windows["spawn_primitive"] = "windows-create-process-verified-handle"
+    windows["stable_fingerprint"] = process_launch_stable_fingerprint(windows)
+    validate_process_launch_observation(windows)
+    _validator("next-process-launch-observation-v1.schema.json").validate(windows)
 
 
 def test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection() -> None:
@@ -6270,6 +6772,7 @@ def test_run_fingerprint_preimage_includes_limits_and_toolchain() -> None:
         protocol=domain["toolchain"]["protocol"],
         trusted_environment_digest=domain["trusted_environment"]["sha256"],
         process_launch_descriptor_digest=launch_digest,
+        process_launch_observation_digest=digest(publication_context.process_launch_observation),
     )
     assert fingerprint == domain["run_fingerprint"]
     changed = copy.deepcopy(domain["limits"])
@@ -6290,6 +6793,9 @@ def test_run_fingerprint_preimage_includes_limits_and_toolchain() -> None:
             protocol=domain["toolchain"]["protocol"],
             trusted_environment_digest=domain["trusted_environment"]["sha256"],
             process_launch_descriptor_digest=launch_digest,
+            process_launch_observation_digest=digest(
+                publication_context.process_launch_observation
+            ),
         )
         != fingerprint
     )
@@ -6311,6 +6817,9 @@ def test_run_fingerprint_preimage_includes_limits_and_toolchain() -> None:
             protocol=domain["toolchain"]["protocol"],
             trusted_environment_digest=domain["trusted_environment"]["sha256"],
             process_launch_descriptor_digest=launch_digest,
+            process_launch_observation_digest=digest(
+                publication_context.process_launch_observation
+            ),
         )
         != fingerprint
     )
@@ -6856,6 +7365,9 @@ def test_round12_run_context_selector_is_exactly_echoed_across_request_response_
         trusted_environment_digest=domain["trusted_environment"]["sha256"],
         process_launch_descriptor_digest=digest(
             sealed_decision.publication_context.process_launch_descriptor
+        ),
+        process_launch_observation_digest=digest(
+            sealed_decision.publication_context.process_launch_observation
         ),
     )
 
@@ -8567,7 +9079,7 @@ def test_round16_failure_matrix_is_catalog_derived_and_rejects_cross_product() -
             resolved = decision_failure_spec(code, stage)
             assert resolved["diagnostic_code"] == code
             assert resolved["failure_kind"] == decision_failure_kind(code)
-            assert resolved["outcome"] in {"partial_safe", "payload_unavailable"}
+            assert resolved["outcome"] in {"not_applicable", "partial_safe", "payload_unavailable"}
             assert resolved["exit_code"] == (3 if resolved["outcome"] != "not_applicable" else 0)
             assert resolved["ref_permission"] in {"none", "path", "symbol", "path_or_symbol"}
         invalid_stage = next(stage for stage in all_stages if stage not in row["allowed_stages"])
@@ -9547,6 +10059,8 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round19.p2-1",
         *(f"round20.p1-{index}" for index in range(1, 7)),
         "round20.p2-1",
+        *(f"round21.p1-{index}" for index in range(1, 6)),
+        "round21.p2-1",
     }
     assert set(mapping) == expected_criteria
     mapped_tests = {name for names in mapping.values() for name in names}

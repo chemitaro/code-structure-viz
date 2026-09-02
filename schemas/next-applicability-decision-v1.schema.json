@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-applicability-decision-v1",
+  "title": "CodeStructureViz Next applicability decision projection v1",
+  "description": "One matrix-owned projection from package observations through probe permission and publication surfaces.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "matrix", "matrix_digest", "node_probe", "decision_kind", "outcome", "payload_available", "project_filter", "non_applicable_observations", "toolchain", "domain", "root_manifest", "stdout_result", "stderr", "exit_code"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-applicability-decision/v1"},
+    "version": {"const": 1},
+    "matrix": {"$ref": "urn:code-structure-viz:schema:next-package-applicability-v1"},
+    "matrix_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "node_probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permission", "performed"],
+      "properties": {
+        "permission": {"enum": ["permitted", "prohibited"]},
+        "performed": {"type": "boolean"}
+      }
+    },
+    "decision_kind": {"enum": ["ValidatedResponseDecision", "PreResponseFailureDecision", "NotApplicableDecision"]},
+    "outcome": {"enum": ["complete", "payload_unavailable", "not_applicable"]},
+    "payload_available": {"type": "boolean"},
+    "project_filter": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
+    "non_applicable_observations": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_status"],
+      "properties": {"node_status": {"enum": ["available", "unavailable", "not_applicable"]}}
+    },
+    "domain": {"$ref": "#/$defs/domain_surface"},
+    "root_manifest": {"$ref": "#/$defs/root_surface"},
+    "stdout_result": {"$ref": "#/$defs/stdout_surface"},
+    "stderr": {"type": "string"},
+    "exit_code": {"enum": [0, 3]}
+  },
+  "$defs": {
+    "surface_common": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "payload_available", "project_roots", "applicability_observations", "diagnostics"],
+      "properties": {
+        "status": {"enum": ["complete", "incomplete", "not_applicable", "summary", "typed_unavailable"]},
+        "payload_available": {"type": "boolean"},
+        "project_roots": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
+        "applicability_observations": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["project_root", "package_path", "state", "evidence"], "properties": {"project_root": {"type": "string"}, "package_path": {"type": "string"}, "state": {"enum": ["applicable", "non_applicable", "malformed"]}, "evidence": {"type": "string"}}}},
+        "coverage": {"type": "object", "additionalProperties": false, "required": ["projects"], "properties": {"projects": {"type": "integer", "minimum": 0}}},
+        "diagnostics": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+      }
+    },
+    "domain_surface": {
+      "allOf": [
+        {"$ref": "#/$defs/surface_common"},
+        {"required": ["coverage"]}
+      ]
+    },
+    "root_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "exit_code", "project_roots", "applicability_observations", "diagnostics"],
+      "properties": {
+        "status": {"enum": ["complete", "incomplete", "not_applicable"]},
+        "exit_code": {"enum": [0, 3]},
+        "project_roots": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
+        "applicability_observations": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+        "diagnostics": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "stdout_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "branch", "availability", "run_status", "domain_status", "reason", "project_roots", "diagnostics"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.stdout-result/next/v1"},
+        "branch": {"enum": ["summary", "typed_unavailable"]},
+        "availability": {"type": "boolean"},
+        "run_status": {"enum": ["complete", "incomplete", "not_applicable"]},
+        "domain_status": {"enum": ["complete", "incomplete", "not_applicable"]},
+        "reason": {"enum": ["complete", "not_applicable", "domain_payload_unavailable"]},
+        "project_roots": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
+        "diagnostics": {"type": "array", "items": {"type": "object"}}
+      }
+    }
+  }
+}

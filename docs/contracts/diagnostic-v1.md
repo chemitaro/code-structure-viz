@@ -192,3 +192,19 @@ closed pair, observed values form a prefix, and later values are explicit
 `test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch`, and
 the package/source acquisition tests. Fresh current-SHA Strict remains pending,
 readiness is unconfirmed, and production implementation is absent.
+
+## Round 21 catalog authority
+
+`PackageApplicabilityMatrix` is diagnosed before Node permission. Direct non-empty Next dependency is
+`applicable`; missing/no-direct Next is `non_applicable`; duplicate/conflicting, encoding, JSON, table, or
+value errors are `malformed`. The all-non-applicable case uses the closed
+`CSV-NEXT-APPLICABILITY-001` diagnostic, forbids a Node probe, and projects one matrix-owned observation
+through domain, root manifest, stdout, stderr, and exit. Mixed matrices publish applicable roots only;
+malformed matrices are global unavailable.
+
+The `source_control` stage is a catalog-owned closed stage and is paired with its allowed failure codes before
+projection. Request-bound and request-independent provenance use the same stage/code/observed-prefix validator;
+unobserved suffix values cannot be injected. Source graph open edges (unsupported, ambiguous, unresolved, or
+external) prevent a locality claim. `next-process-launch-observation-v1` is the process authority, while any
+legacy descriptor is derived only. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
+production implementation is absent.

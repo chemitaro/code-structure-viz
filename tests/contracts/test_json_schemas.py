@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -61,6 +62,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-run-context-v1",
         "next-provenance-v1",
         "next-package-applicability-v1",
+        "next-applicability-decision-v1",
         "next-trusted-type-environment-v1",
     }
     registry = Registry()
@@ -93,6 +95,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-run-context-v1.schema.json",
         "next-provenance-v1.schema.json",
         "next-package-applicability-v1.schema.json",
+        "next-applicability-decision-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
         "run-manifest-v1.schema.json",
@@ -969,6 +972,28 @@ def test_round19_process_observation_is_fixture_or_supported_os_production() -> 
         "shell": False,
         "process_group": {"create": True, "terminate_scope": "group", "wait_after_terminate": True},
     }
+    production["stable_fingerprint"] = hashlib.sha256(
+        json.dumps(
+            {
+                "schema": production["schema"],
+                "version": production["version"],
+                "kind": production["kind"],
+                "node_status": production["node_status"],
+                "host_os": production["host_os"],
+                "argv": production["argv"],
+                "shell": production["shell"],
+                "process_group": production["process_group"],
+                "node_realpath": production["node_realpath"],
+                "node_sha256": production["node_sha256"],
+                "node_version": production["node_version"],
+                "spawn_primitive": production["spawn_primitive"],
+                "toctou_failure_point": production["toctou_failure_point"],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
     validator.validate(production)
     for mutation in (
         {**production, "host_os": "windows"},

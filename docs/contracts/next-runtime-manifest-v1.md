@@ -161,15 +161,15 @@ production implementation is absent.
 
 ## Round 17 observed launch and publication provenance
 
-The process-launch descriptor is an observed boundary value, not a default
-runtime object. For an available Node run it binds the verified absolute
-realpath, executable digest, version, and the actual executable passed to
-spawn; for an unavailable or not-applicable run it records explicit absence as
-required by the closed schema. Toolchain status and descriptor status must
-agree, and the descriptor is included in the compatibility/run-fingerprint
-preimage. A fixture value is acceptable only as a named reference-test
-observation; it is not a production fallback and cannot be substituted after
-sealing.
+The `next-process-launch-observation-v1` object is an observed boundary value,
+not a default runtime object. For an available Node run it binds the verified
+absolute realpath, executable digest, version, and the actual executable
+passed to spawn; for an unavailable or not-applicable run it records explicit
+absence as required by the closed schema. Toolchain status and observation
+status must agree, and the observation is included in the compatibility/run-
+fingerprint preimage. A fixture value is acceptable only as a named
+reference-test observation; it is not a production fallback and cannot be
+substituted after sealing. Any legacy descriptor is derived from it.
 
 `PublicationBoundaryDecision` then seals the actual validated response bytes,
 validated request identity, model digest, exact artifact byte map and
@@ -182,3 +182,22 @@ the persisted artifact descriptor and semantic result but records the
 publication failure and exit 3. The faithful reference harness is not an OS
 process-level test. Fresh current-SHA Strict is pending and production
 implementation remains absent.
+
+## Round 21 applicability and process authority
+
+The manifest consumes the `PackageApplicabilityMatrix` projection, not an inferred project list. Each
+frozen project-root package is read once: direct non-empty Next dependency is `applicable`, missing/no-direct
+Next is `non_applicable`, and duplicate/conflicting or malformed package evidence is `malformed`. An all-
+non-applicable matrix emits the closed `NotApplicableDecision` without Node probing; a mixed matrix retains
+only applicable roots; malformed evidence is global unavailable. Matrix observations, project filter, toolchain
+permission, domain/root/stdout/stderr, and exit are one decision-owned projection.
+
+The source graph is derived from sealed bytes with the module-plane scanner (static/side-effect imports,
+export-from, literal dynamic import, literal require, and baseUrl/paths). Open, unresolved, ambiguous, or
+unsupported edges remain explicit and prevent `partial_safe`. Request-bound and request-independent manifest
+provenance use one catalog-derived stage/code union and never synthesize unobserved suffix values.
+
+The normative process object is `next-process-launch-observation-v1`; any legacy descriptor is a derived view.
+The observation binds darwin/linux/windows executable identity and spawn, while stable fingerprint excludes
+host-ephemeral FD/device/inode values that remain security evidence. Fresh current-SHA Strict is pending,
+readiness is unconfirmed, and production implementation is absent.

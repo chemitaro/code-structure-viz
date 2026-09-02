@@ -560,10 +560,12 @@ Round 16で実装前に閉じる要件は次のとおりである。
    `seal_source_acquisition(intent, reader, inventory)`内で導出する。callerがfinal plan/viewを注入する経路、
    plan-only/view-onlyの再構成、seal後のfilesystem readを許さない。
 2. 全`NextRunDecision` variantは実際の`SourceAcquisitionSeal`、resolved public request/config、観測済み
-   toolchain、検証済みtrusted environment、compatibility descriptor、versioned process launch descriptorから
+   toolchain、検証済みtrusted environment、compatibility descriptor、versioned
+   `next-process-launch-observation-v1`から
    一度だけ構築した`NextPublicationContext`を必須保持する。private `ValidatedAdapterRequest`とpublic request snapshotを
    分離し、fixture/default合成をdomain/root/manifest/stdout/stderr/publicationのauthorityにしない。
-   `process_launch_descriptor`は省略不可であり、そのdigestをrun-fingerprintへ含める。
+   observationは省略不可であり、そのdigestをrun-fingerprintへ含める。旧`process_launch_descriptor`は
+   observationから機械導出するcompatibility viewに限る。
    pre-response/not-applicable variantの`NextDecisionContext`も省略不可で、known/null countsやfailure stage/codeを
    writerが後から再構成してはならない。
 3. adapter requestはresponse前にschema、request ID、filesのbase64/size/digest/canonical bytes、limitsを検証・
@@ -602,10 +604,10 @@ Round 16で実装前に閉じる要件は次のとおりである。
 15. `BoundaryRolePropagation/v1`はfacts/router/static value closureからのみ導出する。client entry seed自身は
     `client_dependency`でも`server_candidate`でもなく、server traversalはclient entry前で停止する。dual roleは別の
     closureが両方を証明した場合だけ許し、PlantUMLのstale allowanceを残さない。
-16. process launch descriptorはverified absolute Node realpath、symlink policy、argv、固定env allowlist/denied env、
-    stdio、FD inheritance、process groupをversion付きでsealする。available/unavailable/not-applicable各variantで
-    toolchainのnode statusと一致する実測descriptorを明示し、PATH shadow、symlink、hostile env、locale/TZ、extra FD、
-    descriptor省略・preimage差し替えをclosed schema/reference testで拒否する。
+16. `next-process-launch-observation-v1`はverified absolute Node realpath、symlink policy、argv、固定env
+    allowlist/denied env、stdio、FD inheritance、process groupをversion付きでsealする。available/unavailable/
+    not-applicable各variantでtoolchainのnode statusと一致する実測observationを明示し、PATH shadow、symlink、
+    hostile env、locale/TZ、extra FD、observation省略・preimage差し替えをclosed schema/reference testで拒否する。
 
 これらの要件は後続実装の完了宣言ではない。local契約がgreenでも、fresh current-SHA StrictのP0=0/P1=0と
 `review_status: pass`が確認されるまでreadinessは未確認のままとする。
@@ -644,7 +646,7 @@ Round 19で実装前に閉じる契約は次のとおりである。
    再注入したdiagnostic bytesは受け取らない。最終化はsemantic decisionからsummary、root manifest、artifact、
    typed unavailableを一度だけ生成し、成功候補を一度測定する。selected copyの超過時は保存済みfailure
    manifest descriptorとtyped unavailable bytesを保持し、再copy・部分bytes・空文字列による回避を許さない。
-5. process launch observationは `fixture | production` のclosed unionである。productionでは対応OS（darwin/linux）、
+5. process launch observationは `fixture | production` のclosed unionである。productionでは対応OS（darwin/linux/windows）、
    OS-native file identity、verified-open handle、hash/version、具体的spawn primitive、post-spawn equality、
    FD lifecycle、process group、TOCTOU fail-closed点を記録する。fixtureはnamed reference evidenceだけであり、
    production launchの代用ではない。reference testはhost executableを操作せず、OS process-level acceptanceを
@@ -742,9 +744,9 @@ implementation_ready=no` を、production実装前の機械検証可能な要件
    measurementsとsealを一度だけ所有する。domain/root/manifest/stdout/stderr/artifact/exit projectionは
    final objectだけを入力とし、rerender、fallback、独立status/measurement/selected payload引数を
    持たない。selector null/manifest/domainのexact/+1とschema-valid unavailableを検証する。
-6. process launch descriptorはversioned OS identity contractとし、対応OSでverified absolute Node
+6. `next-process-launch-observation-v1`はversioned OS identity contractとし、対応OSでverified absolute Node
    realpath、file identity/hash/version、actual spawn identity/handle、TOCTOU、argv/cwd/env/FD/process
-   groupをbindする。PATH shadow、symlink replacement、hostile env、locale/TZ、extra FD、descriptor
+   groupをbindする。PATH shadow、symlink replacement、hostile env、locale/TZ、extra FD、observation
    omission/substitutionはfail-closedとする。reference iterable harnessはOS process-level testと
    主張せず、後続production acceptanceで実体検証する。
 7. target unavailableは`CSV-NEXT-TARGET-001`とし、8 reasonの一target一行をproof後にsealed roots/
@@ -787,7 +789,7 @@ fixtureであり、Node/Next adapterの実装開始ではない。
    それぞれのstage、manifest有無、payload有無、stdout reason、exitを一つのdecision projectionへ写し、
    未カバーのfatal branchを残さない。
 5. **process observation:** `next-process-launch-observation-v1` は `fixture` と `production` のclosed unionで、
-   productionはdarwin/linuxだけを対象にOS-native Node realpath、hash/version、hash時/spawn時file identity、
+   productionはdarwin/linux/windowsを対象にOS-native Node realpath、hash/version、hash時/spawn時file identity、
    verified-open handle、OS-specific spawn primitive、post-spawn equality、FD lifecycle、process group、
    TOCTOU failure pointを要求する。unavailable/not_applicableはidentityを捏造せず明示的nullで表す。
    fixtureはreference evidence専用で、host executableを触らないreference testをprocess-level acceptance済み
@@ -810,3 +812,63 @@ Round 20の機械的対応は `test_round20_package_applicability_matrix_is_dire
 `test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch` および
 `test_round20_fixture_coverage_index_is_substantive` である。local contractがgreenでもStrict passや
 implementation readinessを推測せず、fresh current-SHA Strict後にのみ次の実装判断を行う。
+
+### Round 21: applicability、source graph、provenance、process observation の最終閉包
+
+Round 21は reviewed SHA `67351f970835afe05b3f4db1aa40b73b3abf0198` に対する Strict
+content review の `P0=0 / P1=5 / P2=1 / review_status=fail / implementation_ready=no`
+を受けた data-only remediation である。verification-only session は
+`issue-eight-strict-round-twenty-3`、full review session は
+`required-strict-github-connector-verificati-704` である。historical verdict は変更せず、
+fresh current-SHA Strict は pending、readiness は未確認、production implementation は未着手とする。
+
+1. **ApplicabilityMatrix を唯一の Node optionality authority とする:** trusted frozen
+   `package.json` の直接 `dependencies.next` / `devDependencies.next` だけから各 project root を
+   `applicable`、`non_applicable`、`malformed` に分類する。duplicate/conflicting direct version、
+   encoding、JSON、table、value の異常は `malformed` とし、indirect dependency、lockfile、directory
+   名、control の存在を根拠にしない。全件 non-applicable は Node probe を禁止した
+   `NotApplicableDecision`、mixed は applicable roots だけを publish、malformed は全体 unavailable
+   とし、matrix の観測行、domain、root manifest、stdout、stderr、exit を同じ projection から出す。
+2. **config boundary を閉じる:** `extends` は project 内の explicit `./...` string 一件だけを許し、
+   bare/package specifier、array、absolute、`../`、URL-like、ambiguous path、cycle を拒否する。
+   JSONC lexer は BOM、文字列外 comment、trailing comma（comma→comment→closing delimiter を含む）を
+   規範化し、duplicate key と型異常を拒否する。`plugins`、`typeRoots`、`types`、不正な `module`/
+   `moduleResolution`、unsafe path、fnmatch の暗黙挙動は受理しない。include/exclude は segment
+   grammar（`*`、`?`、whole-segment `**`）で membership を導出し、control read/parse failure は
+   空object・空membershipへ置換せず global unavailable とする。
+3. **source locality を module-plane grammar で導出する:** sealed frozen bytesから static import、
+   side-effect import、export-from、literal dynamic `import()`、literal `require()` と
+   `baseUrl`/`paths` の解決を deterministic scannerで観測する。comment、template、regex 内の文字列は
+   edgeにしない。unsupported、ambiguous、unresolved、external は `open_edge` として保持し、edgeを
+   捨てて `partial_safe` を作らない。reader/request supplied graph、edge削除後のdigest再計算は
+   authorityではない。
+4. **provenance を一つの closed union にする:** request-bound と request-independent の両方が
+   canonical stage、failure code、observed prefix/value、budget correlation を同じ shapeで持つ。
+   `project_validation`、`source_control`、Node/process、response、model の stage/code pair を
+   catalogから制限し、後続の未観測値は `unobserved`/`null` とする。request-independent branchに
+   request、limits、source plan、toolchain、trusted environment、process、compatibility、budgetを
+   合成しない。project control failureもこの provenanceから domain、root manifest、stdout、exitへ
+   投影する。
+5. **process observation を唯一の process authority とする:**
+   `next-process-launch-observation-v1` の `fixture | production` unionを正本とし、旧
+   `process_launch_descriptor` は必要な場合だけ機械導出の互換 viewにする。production は darwin、
+   linux、windows のいずれでも OS-native verified-open/execution binding、Node realpath/hash/version、
+   hash時/spawn時 identity、spawn primitive、post-spawn equality、argv/cwd/env/FD/process-group、
+   TOCTOU fail-closed を満たす。unavailable/not_applicable は identityを捏造しない。host-ephemeral
+   FD/device/inodeは観測・検証するが stable fingerprint projectionから除外し、cross-machine stableな
+   digestを別に sealする。
+6. **coverage は実行可能な双方向証拠にする:** `next_contract_vectors.json` の各 Round21 criterion
+   は実在する substantive test、positive vector、negative vector、validatorを列挙し、test body側にも
+   vector IDとmutation rejectionを持つ。criterion、vector、validator、mutation、mapping のいずれか
+   が欠ける、または別criterionへ誤配置された場合は coverage validator 自身が失敗する。coverage
+   criterionも独立した negative meta-testで検証する。
+
+Round 21の対応テストは、`test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces`、
+`test_round21_applicability_source_observation_precedes_node_and_is_read_once`、
+`test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_deterministic`、
+`test_round21_source_graph_scanner_closes_supported_import_planes_and_open_edges`、
+`test_round21_provenance_catalog_has_single_request_independent_source_control_union`、
+`test_round21_process_observation_is_normative_and_fingerprint_excludes_ephemeral_identity`、
+`test_round21_coverage_index_is_bidirectional_and_self_validating` である。これらは Schema、reference
+validator、fixture vectorを同時に検証し、local greenをStrict passやimplementation readinessとは
+解釈しない。

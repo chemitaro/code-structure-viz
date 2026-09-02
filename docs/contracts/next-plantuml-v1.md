@@ -188,9 +188,10 @@ table and context-specific predicates for bindings, declaration/export keys,
 JSX segments, and external/trusted references. Canonical JSON remains
 lexicographic sorted keys, NFC, UTF-8, and LF.
 
-The process launch descriptor is versioned and seals verified Node realpath,
+`next-process-launch-observation-v1` is versioned and seals verified Node realpath,
 symlink policy, fixed argv, cwd, environment allowlist/denied variables,
-stdio, FD inheritance, and process-group termination. Reference capture tests
+stdio, FD inheritance, and process-group termination. Any old launch descriptor
+is a derived compatibility view. Reference capture tests
 use a faithful iterable harness and do not claim OS process-level coverage.
 Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
 production implementation has not started.
@@ -230,3 +231,18 @@ Round 20 reference evidence is
 and `test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`.
 Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
 production implementation is absent.
+
+## Round 21 renderer authority
+
+PlantUML is downstream of the same decision chain as semantic JSON. The applicable project set comes only
+from the frozen `PackageApplicabilityMatrix`; all-non-applicable roots produce no Node probe and a closed
+`NotApplicableDecision`, mixed matrices retain applicable roots only, and malformed package/control evidence
+is global unavailable. Source graph edges are derived from frozen bytes using the module-plane grammar; open,
+ambiguous, unresolved, and unsupported edges remain visible evidence and cannot be dropped for `partial_safe`.
+
+The renderer uses the catalog-derived stage/code provenance union and the normative
+`next-process-launch-observation-v1` object. Darwin, Linux, and Windows process identity is bound to spawn;
+host-ephemeral FD/device/inode values are checked in the security observation but excluded from the stable
+fingerprint. The old launch descriptor, if exposed, is a mechanically derived compatibility view. PlantUML
+bytes are emitted from the decision-owned sealed model and cannot be supplied independently. Fresh current-SHA
+Strict is pending, readiness is unconfirmed, and production implementation is absent.

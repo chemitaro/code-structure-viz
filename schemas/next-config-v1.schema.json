@@ -60,8 +60,8 @@
         "allow_js": {"type": "boolean"}, "check_js": {"type": "boolean"},
         "jsx": {"enum": ["preserve", "react", "react-jsx", "react-jsxdev"]},
         "module": {"const": "esnext"}, "module_resolution": {"const": "bundler"},
-        "base_url": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
-        "paths": {"type": "object", "patternProperties": {"^[A-Za-z0-9_.*?/-]+$": {"type": "array", "items": {"$ref": "#/$defs/path"}}}, "additionalProperties": false}
+        "base_url": {"anyOf": [{"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}, {"type": "null"}]},
+        "paths": {"type": "object", "patternProperties": {"^[A-Za-z0-9_.*?/@-]+$": {"type": "array", "items": {"$ref": "#/$defs/path"}}}, "additionalProperties": false}
       }
     },
     "project": {

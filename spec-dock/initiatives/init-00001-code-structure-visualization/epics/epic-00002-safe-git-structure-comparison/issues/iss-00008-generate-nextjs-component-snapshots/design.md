@@ -77,7 +77,7 @@ SHA-256もdecisionへopaqueに保持する。最終化はsemantic decisionと実
 sealed bytesだけを返し、候補、status、measurement、selected payloadを外から差し替えられない。
 
 process observationは`schemas/next-process-launch-observation-v1.schema.json`でfixture/productionを分離する。
-productionはdarwin/linuxのOS-native identity、verified-open handle、hash/version、actual spawn primitive、
+productionはdarwin/linux/windowsのOS-native identity、verified-open handle、hash/version、actual spawn primitive、
 post-spawn identity equality、FD lifecycle、process group、TOCTOU failure pointを必須にする。fixtureはreference
 testの証人であってproduction evidenceではない。host executableに触れないreference validationをprocess-level
 acceptanceと誤認せず、後続production planへ引き継ぐ。
@@ -1422,9 +1422,10 @@ validator・schema・fixtureで入力からpublicationまでのauthorityを閉�
    read、drift後のreadを拒否する。
 2. **Request and decision:** 実際のseal、resolved public request/config、
    observed toolchain、trusted environment、compatibility descriptor、versioned
-   process-launch descriptorを一度だけ`NextPublicationContext`へ束ね、全
-   `NextRunDecision` variantに持たせる。descriptorは必須でtoolchainのNode
-   statusと一致し、digestをfingerprintへ含める。private
+   `next-process-launch-observation-v1`を一度だけ`NextPublicationContext`へ束ね、全
+   `NextRunDecision` variantに持たせる。observationは必須でtoolchainのNode
+   statusと一致し、digestをfingerprintへ含める。旧descriptorはobservationからの
+   機械導出compatibility viewに限る。private
    `ValidatedAdapterRequest`はdeep copyし、ID、filesのbase64/size/digest/
    canonical bytes、limits、targets、run contextをresponse前に検証する。
    pre-response/not-applicableの`NextDecisionContext`も必須とし、requestが
@@ -1448,9 +1449,10 @@ validator・schema・fixtureで入力からpublicationまでのauthorityを閉�
    はclosed eight reasonsを一target一行でNext unavailable selectorへだけ出す。
    `BoundaryRolePropagation/v1`はfacts/router/static value closureから再計算し、
    client seed自身をderived roleにせず、dual roleは別closureだけで許す。
-6. **Process and bytes:** process-launch descriptorはverified Node realpath、
+6. **Process and bytes:** `next-process-launch-observation-v1`はverified Node realpath、
    symlink policy、fixed argv/env/FD/process groupをversion付きでsealする。
-   descriptor omission/substitutionとpreimage-only replacementを拒否する。
+   observation omission/substitutionとpreimage-only replacementを拒否し、旧descriptorは
+   observationから機械導出するcompatibility viewに限定する。
    stdoutはmanual encoderを持たず、sort_keys/NFC/UTF-8/LFを全surfaceで共有する。
    captureのreference evidenceはfaithful iterable harnessであり、OS process-level
    testとは主張しない。
@@ -1634,7 +1636,7 @@ stage/code catalogを使い、failureまでのobserved prefixと後続のunobser
 ### Process and publication authority
 
 process observationは `fixture | production` の閉じたunionである。fixtureはreference testの
-named evidenceに限定し、productionはdarwin/linuxのOS-native file identity、Node realpath/hash/version、
+named evidenceに限定し、productionはdarwin/linux/windowsのOS-native file identity、Node realpath/hash/version、
 hash時とspawn時のidentity、verified handle、OS-specific spawn primitive、post-spawn equality、
 FD lifecycle、process group、TOCTOU fail-closed pointを必須とする。host executableを触らない
 reference validatorはこのOS process-level guaranteeを証明済みとは扱わない。
@@ -1662,3 +1664,93 @@ limit+1はpartial bytesなしでtyped unavailableへ進む。canonical output or
 この設計のローカル検証はStrict reviewの代替ではない。fresh current-SHA Strictが `P0=0` かつ
 `P1=0`、`review_status=pass`を返すまで、I05-PLAN-002以降のproduction implementationを
 開始しない。
+
+## Round 21 authority closure
+
+Round 21は reviewed SHA `67351f970835afe05b3f4db1aa40b73b3abf0198`、
+`issue-eight-strict-round-twenty-3`（verification-only）、
+`required-strict-github-connector-verificati-704`（full review）に対する
+`P0=0 / P1=5 / P2=1 / fail / implementation_ready=no` を受けた修復である。
+この verdict は履歴として保持し、fresh current-SHA Strict は pending、readiness は未確認、
+production implementation は未着手とする。
+
+### 一つのauthority graph
+
+```text
+Frozen inventory/package/control bytes
+  -> PackageApplicabilityMatrix
+  -> closed config/extends/membership derivation
+  -> SourceAcquisitionSeal (bytes + plan + view + graph)
+  -> source result + canonical provenance
+  -> validated request/response + process observation
+  -> NextRunDecision / PublicationBoundaryDecision
+  -> exact domain/root/manifest/stdout/stderr/artifact/exit bytes
+```
+
+各矢印は下流が上流の観測を再構成しない一方向の境界である。特に applicability、source graph、
+failure provenance、process observation は caller supplied boolean、graph、path、descriptor、
+statusを採用しない。
+
+### Applicability と config の設計
+
+`PackageApplicabilityMatrix` は frozen project-root `package.json` を一度だけ読み、direct
+`dependencies.next` / `devDependencies.next` の非空 stringだけを `applicable` とする。missing/no
+direct Next は `non_applicable`、duplicate/conflicting key/version、encoding、JSON、table、value異常は
+`malformed`。aggregate が全件 non-applicable のときは `NotApplicableDecision` と Node probe禁止を
+同時に sealし、mixed の public project setは applicableだけ、malformedは全体 unavailableとする。
+matrix観測行と project filter、toolchain permission、domain/root/stdout/stderr/exitは
+`package_applicability_projection` の同一出力から検証する。
+
+known project-root control candidatesだけを先に観測する。JSONCは BOM/comments/trailing comma を
+文字列外でのみ正規化し、comma→comment→closing delimiterも扱う。`extends` は project内の明示的な
+`./...` string一件だけで、bare/package、array、absolute、`../`、URL-like、ambiguity、cycleを拒否する。
+plugins/typeRoots/types、不正module/moduleResolution、unsafe pathを拒否し、include/excludeは
+segment grammar（`*`、`?`、whole-segment `**`）で解決する。control read/parse failureを空objectへ
+置換しない。
+
+### Source graph と locality
+
+seal内部の deterministic scannerは static import、side-effect import、export-from、literal dynamic
+`import()`、literal `require()`を検出し、`baseUrl`/`paths`を含む候補を一意に解決する。comments、
+templates、regexは字句上の偽edgeにならない。unsupported、ambiguous、unresolved、externalは
+`open_edge`として保持するため、そのedgeを削除した graphや再計算したdigestから safe subsetを
+作れない。`SourceFailureLedger` のlocality/taintはこのseal-owned graph、frozen bytes、target
+ownershipからのみ再導出する。
+
+### Provenance と process
+
+request-bound/request-independentを分けるのは観測順を表すためであり、値のauthorityを二重化する
+ためではない。両者は同じ `{kind, stage, failure_code, observed}` unionを使い、stage/code catalogの
+closed pairと observed prefix/value、budget requested/resolved/source correlationを同じvalidatorで
+検査する。未観測suffixは `unobserved`/`null` とし、project/control failureが後段のlimits、toolchain、
+trust、process、budgetを合成することを禁止する。
+
+`next-process-launch-observation-v1` が process authorityである。productionは darwin/linux/windows
+それぞれの native verified-open/execution bindingを必要とし、realpath、hash/version、hash/spawn
+identity、verified handle、spawn primitive、post-spawn equality、argv/cwd/env/FD/process group、
+TOCTOUを一つの observationへ束ねる。unavailable/not_applicableでは identityをnullにする。
+device/inode/FDなどhost-ephemeral値はsecurity observationで保持・検証する一方、stable fingerprint
+projectionから除外し、cross-machine再現性を確保する。旧 descriptorはこのobservationから機械導出する
+互換viewに限る。
+
+### 実装者が守る projection rule
+
+`NextRunDecision` がsemantic outcome、applicability、source result、provenanceを所有し、
+`PublicationBoundaryDecision` がvalidated raw response、process observation、summary/root/manifest/
+artifact/typed unavailable、diagnostic bytes、capture measurementsを所有する。domain、root manifest、
+stdout、stderr、artifact、exit projectionはdecision/boundaryのsealed exact bytesだけを返し、別の
+status、candidate、graph、diagnostic、measurementを引数に受けない。
+
+| Round 21 criterion | positive / negative reference evidence |
+| --- | --- |
+| P1-1 applicability | `test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces`; `test_round21_applicability_source_observation_precedes_node_and_is_read_once` |
+| P1-2 config boundary | `test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_deterministic` |
+| P1-3 source locality | `test_round21_source_graph_scanner_closes_supported_import_planes_and_open_edges` |
+| P1-4 provenance | `test_round21_provenance_catalog_has_single_request_independent_source_control_union` |
+| P1-5 process authority | `test_round21_process_observation_is_normative_and_fingerprint_excludes_ephemeral_identity` |
+| P2-1 executable coverage | `test_round21_coverage_index_is_bidirectional_and_self_validating` |
+
+`next_contract_vectors.json` の各行は上表のtest、positive vector、negative vector、validatorを
+双方向に参照し、coverage自身のmutationも拒否する。これはHTMLやfixtureの存在確認ではなく、
+実行可能な契約である。production implementation開始条件は、上記local checksに加えて同一SHAの
+fresh Strictが `review_status=pass`、P0=0、P1=0を返すことであり、現在は未達である。

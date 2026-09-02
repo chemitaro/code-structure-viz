@@ -576,7 +576,7 @@ it. The semantic outcome is not silently rewritten.
 
 Process launch observation is the closed fixture/production union in
 `next-process-launch-observation-v1.schema.json`. Production records
-darwin/linux OS identity, verified handle, hash/version, actual spawn
+darwin/linux/windows OS identity, verified handle, hash/version, actual spawn
 primitive, post-spawn equality, FD lifecycle, process group, and TOCTOU
 failure point. Reference validation does not exercise a host process and is
 not an OS process-level acceptance claim.
@@ -609,3 +609,23 @@ trusted environment, or budget. Round 20 executable evidence is
 and `test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch`.
 Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
 production implementation is absent.
+
+## Round 21 semantic authority
+
+Semantic publication begins only after the frozen package observations produce a valid
+`PackageApplicabilityMatrix`. Direct non-empty Next declarations alone make a project applicable; an all-
+non-applicable matrix produces `NotApplicableDecision` without Node probing, mixed matrices retain only
+applicable roots, and malformed package evidence is global unavailable. The matrix and its project filter,
+toolchain permission, diagnostic, domain/root manifest, stdout/stderr, and exit are validated as one projection.
+
+The sealed source graph recognizes static and side-effect imports, export-from, literal dynamic import,
+literal require, and `baseUrl`/`paths` aliases while excluding comment/template/regex decoys. Every unresolved,
+ambiguous, unsupported, or external dependency is an `open_edge`; no omitted edge can be used as a locality
+proof. Config control uses the explicit project-local `./...` extends grammar and segment include/exclude
+grammar, with malformed control as typed global unavailable.
+
+Semantic request-bound and request-independent outcomes share the catalog-derived stage/code provenance union.
+The normative process evidence is `next-process-launch-observation-v1`; its darwin/linux/windows security
+identity includes ephemeral values, while the stable fingerprint intentionally excludes FD/device/inode. All
+downstream semantic bytes come from the decision-owned sealed model. Fresh current-SHA Strict is pending,
+readiness is unconfirmed, and production implementation is absent.
