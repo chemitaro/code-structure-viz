@@ -16,7 +16,8 @@
     "context_suffixes",
     "hard_exclusions",
     "limits",
-    "trusted_environment_digest"
+    "trusted_environment_digest",
+    "source_graph"
   ],
   "properties": {
     "schema": {"const": "code-structure-viz.source-acquisition-plan/next/v1"},

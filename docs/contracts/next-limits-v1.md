@@ -1,5 +1,9 @@
 # Next resolved limits v1
 
+## Current v1 normative authority
+
+adapter stdout capture、private adapter response、selected public stdoutはそれぞれ`max_adapter_stdout_capture_bytes`、`max_adapter_response_bytes`、`max_selected_stdout_bytes`で測定します。exactは許可し、+1はcount-before-retain/read-stopでpartial bytesを破棄します。構造resource overrunは`LIMIT-003`、malformed/closed schema/proofは`PROTOCOL-001`で、precedenceはraw cap→decode/aggregate→schema→base/path/reference/proof→model count→model/entity gate→selected copyです。以下のRound節はhistorical evidence（非normative）です。
+
 Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
 `48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
 The data-only limits and outcome vectors below remain pre-implementation

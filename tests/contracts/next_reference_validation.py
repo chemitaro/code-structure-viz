@@ -6455,6 +6455,10 @@ def source_plan_descriptor(
         "hard_exclusions": sorted(SOURCE_PLAN_HARD_EXCLUSIONS, key=_path_sort_key),
         "limits": copy.deepcopy(config_or_request["limits"]),
         "trusted_environment_digest": config_or_request["trusted_environment_digest"],
+        # Normal plans own a graph.  The empty value is only the pre-acquisition
+        # descriptor used by fixture builders; a real seal replaces it with
+        # the graph derived from its frozen bytes.
+        "source_graph": {"nodes": [], "edges": [], "open_edges": []},
     }
     _validate_source_plan_descriptor(descriptor)
     return descriptor
@@ -6474,7 +6478,7 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
         "limits",
         "trusted_environment_digest",
     }
-    assert set(descriptor) in (base_keys, base_keys | {"source_graph"})
+    assert set(descriptor) == base_keys | {"source_graph"}
     assert descriptor["schema"] == "code-structure-viz.source-acquisition-plan/next/v1"
     assert descriptor["version"] == SOURCE_PLAN_VERSION
     assert descriptor["projects"] == _source_plan_projects({"projects": descriptor["projects"]})
@@ -14451,3 +14455,2187 @@ def execute_runtime_vector_registry(
         executed.add(record["vector_id"])
     assert executed == {item["vector_id"] for item in RUNTIME_VECTOR_REGISTRY}
     return executed
+
+
+# ---------------------------------------------------------------------------
+# Round 23: one executable, data-only authority for the remaining contract.
+#
+# The production adapter is intentionally still absent.  This section is a
+# reference boundary: it gives the future implementation one closed shape to
+# implement and gives the contract suite actual counterexamples for authority
+# substitution.  It is deliberately kept in the reference validator rather
+# than in ``src`` so a green result cannot be mistaken for product evidence.
+
+R23_AUTHORITY_SCHEMA = "code-structure-viz.next-round23-authority/v1"
+R23_PROVENANCE_KINDS = (
+    "request_independent_not_applicable",
+    "request_independent_failure",
+    "request_bound_failure",
+    "request_bound_success",
+)
+R23_PROVENANCE_FIELDS = (
+    "applicability",
+    "request",
+    "limits",
+    "source_plan",
+    "toolchain",
+    "trusted_environment",
+    "compatibility",
+    "process_launch",
+    "budget",
+)
+R23_PROVENANCE_STAGE_ORDER = (
+    "applicability",
+    "project_validation",
+    "source_control",
+    "source_read",
+    "source_integrity",
+    "target_resolution",
+    "trust_validation",
+    "node_discovery",
+    "node_spawn",
+    "node_timeout",
+    "node_process",
+    "response_raw_bytes",
+    "response_decode",
+    "response_schema",
+    "response_validation",
+    "model_validation",
+)
+R23_FAILURE_CODES = {
+    "applicability": "CSV-NEXT-APPLICABILITY-002",
+    "project_validation": "CSV-NEXT-PROJECT-002",
+    "source_control": "CSV-NEXT-CONFIG-001",
+    "source_read": "CSV-NEXT-SOURCE-003",
+    "source_integrity": "CSV-NEXT-SOURCE-INTEGRITY-001",
+    "target_resolution": "CSV-NEXT-TARGET-001",
+    "trust_validation": "CSV-NEXT-TRUST-001",
+    "node_discovery": "CSV-NEXT-NODE-001",
+    "node_spawn": "CSV-NEXT-NODE-002",
+    "node_timeout": "CSV-NEXT-NODE-003",
+    "node_process": "CSV-NEXT-NODE-004",
+    "response_raw_bytes": "CSV-NEXT-LIMIT-003",
+    "response_decode": "CSV-NEXT-PROTOCOL-001",
+    "response_schema": "CSV-NEXT-PROTOCOL-001",
+    "response_validation": "CSV-NEXT-PROTOCOL-001",
+    "model_validation": "CSV-NEXT-LIMIT-005",
+}
+
+
+def _r23_wire_observed_value(value: Any) -> Any:
+    """Represent an observed value using only JSON-compatible data."""
+
+    if isinstance(value, bytes):
+        return {
+            "encoding": "base64",
+            "data": base64.b64encode(value).decode("ascii"),
+        }
+    return copy.deepcopy(value)
+
+
+def _r23_value_digest(value: Any) -> str:
+    return hashlib.sha256(canonical_json_bytes(_r23_wire_observed_value(value))).hexdigest()
+
+
+def _r23_json_safe(value: Any) -> Any:
+    """Make private reference values digestable without publishing raw bytes."""
+
+    if isinstance(value, bytes):
+        return {"encoding": "base64", "data": base64.b64encode(value).decode("ascii")}
+    if isinstance(value, Mapping):
+        return {str(key): _r23_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_r23_json_safe(item) for item in value]
+    return value
+
+
+def r23_observation_row(field: str, value: Any = None, *, observed: bool) -> dict[str, Any]:
+    """Create a value-bound observation row; boolean-only rows are invalid."""
+
+    assert field in R23_PROVENANCE_FIELDS
+    if not observed:
+        return {"state": "unobserved", "value": None, "identity": None}
+    wire_value = _r23_wire_observed_value(value)
+    return {
+        "state": "observed",
+        "value": wire_value,
+        "identity": {
+            "schema": f"code-structure-viz.next-observation.{field}/v1",
+            "version": 1,
+            "sha256": _r23_value_digest(value),
+        },
+    }
+
+
+def _r23_validate_observation_row(field: str, row: Mapping[str, Any]) -> None:
+    assert set(row) == {"state", "value", "identity"}
+    if row["state"] == "unobserved":
+        assert row["value"] is None
+        assert row["identity"] is None
+        return
+    assert row["state"] == "observed"
+    assert isinstance(row["identity"], Mapping)
+    identity = row["identity"]
+    assert set(identity) == {"schema", "version", "sha256"}
+    assert identity["schema"] == f"code-structure-viz.next-observation.{field}/v1"
+    assert identity["version"] == 1
+    assert re.fullmatch(r"[0-9a-f]{64}", identity["sha256"])
+    assert identity["sha256"] == _r23_value_digest(row["value"])
+
+
+def _r23_observed_fields_for_stage(stage: str) -> frozenset[str]:
+    assert stage in R23_PROVENANCE_STAGE_ORDER
+    index = R23_PROVENANCE_STAGE_ORDER.index(stage)
+    if index <= 1:
+        return frozenset({"applicability"})
+    if index <= 4:
+        return frozenset({"applicability", "limits", "source_plan"})
+    if index <= 6:
+        return frozenset(
+            {
+                "applicability",
+                "limits",
+                "source_plan",
+                "toolchain",
+                "trusted_environment",
+                "compatibility",
+            }
+        )
+    return frozenset(
+        {
+            "applicability",
+            "limits",
+            "source_plan",
+            "toolchain",
+            "trusted_environment",
+            "compatibility",
+            "process_launch",
+        }
+    )
+
+
+def r23_provenance(
+    *,
+    kind: str,
+    stage: str | None,
+    failure_code: str | None,
+    observed_values: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build one closed lifecycle provenance value with an observed prefix."""
+
+    assert kind in R23_PROVENANCE_KINDS
+    supplied = dict(observed_values or {})
+    assert set(supplied) <= set(R23_PROVENANCE_FIELDS)
+    if kind == "request_bound_success":
+        assert stage is None and failure_code is None
+        fields = set(R23_PROVENANCE_FIELDS)
+    elif kind == "request_independent_not_applicable":
+        assert stage == "applicability"
+        assert failure_code == "CSV-NEXT-APPLICABILITY-001"
+        fields = {"applicability"}
+    else:
+        assert stage in R23_PROVENANCE_STAGE_ORDER
+        assert isinstance(failure_code, str)
+        if kind == "request_bound_failure":
+            fields = set(R23_PROVENANCE_FIELDS)
+        else:
+            fields = set(_r23_observed_fields_for_stage(stage))
+        expected_code = R23_FAILURE_CODES[stage]
+        assert failure_code == expected_code
+    observed = {
+        field: r23_observation_row(field, supplied[field], observed=True)
+        if field in fields
+        else r23_observation_row(field, observed=False)
+        for field in R23_PROVENANCE_FIELDS
+    }
+    value = {
+        "schema": "code-structure-viz.next-provenance/v1",
+        "version": 1,
+        "kind": kind,
+        "stage": stage,
+        "failure_code": failure_code,
+        "observed": observed,
+    }
+    validate_r23_provenance(value)
+    return value
+
+
+def validate_r23_provenance(value: Mapping[str, Any]) -> None:
+    """Validate stage/code pairs and the exact observed-prefix invariant."""
+
+    assert set(value) == {"schema", "version", "kind", "stage", "failure_code", "observed"}
+    assert value["schema"] == "code-structure-viz.next-provenance/v1"
+    assert value["version"] == 1
+    kind = value["kind"]
+    assert kind in R23_PROVENANCE_KINDS
+    observed = value["observed"]
+    assert isinstance(observed, Mapping)
+    assert set(observed) == set(R23_PROVENANCE_FIELDS)
+    for observed_field in R23_PROVENANCE_FIELDS:
+        row = observed[observed_field]
+        assert isinstance(row, Mapping)
+        _r23_validate_observation_row(observed_field, row)
+    stage = value["stage"]
+    code = value["failure_code"]
+    if kind == "request_bound_success":
+        assert stage is None and code is None
+        assert all(observed[field]["state"] == "observed" for field in R23_PROVENANCE_FIELDS)
+        return
+    assert isinstance(stage, str) and stage in R23_PROVENANCE_STAGE_ORDER
+    assert isinstance(code, str)
+    if kind == "request_independent_not_applicable":
+        assert stage == "applicability" and code == "CSV-NEXT-APPLICABILITY-001"
+        expected = {"applicability"}
+    else:
+        assert code == R23_FAILURE_CODES[stage]
+        expected = (
+            set(R23_PROVENANCE_FIELDS)
+            if kind == "request_bound_failure"
+            else set(_r23_observed_fields_for_stage(stage))
+        )
+    for observed_field in R23_PROVENANCE_FIELDS:
+        assert observed[observed_field]["state"] == (
+            "observed" if observed_field in expected else "unobserved"
+        )
+
+
+def _r23_public_diagnostic(code: str | None) -> dict[str, Any] | None:
+    if code is None:
+        return None
+    entry = _diagnostic_catalog()[code]
+    return {
+        "code": code,
+        "severity": entry["severity"],
+        "outcome": entry["outcome"],
+        "recoverable": entry["recoverable"],
+        "ref_permission": entry["ref_permission"],
+    }
+
+
+def _r23_projection_for(
+    *,
+    kind: str,
+    package_projection: Mapping[str, Any],
+    provenance: Mapping[str, Any],
+    request: Mapping[str, Any] | None,
+    limits: Mapping[str, Any] | None,
+    source_plan: Mapping[str, Any] | None,
+    toolchain: Mapping[str, Any] | None,
+    trusted_environment: Mapping[str, Any] | None,
+    process_observation: Mapping[str, Any] | None,
+    run_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    if kind == "request_independent_not_applicable":
+        status = "not_applicable"
+        exit_code = 0
+        code = "CSV-NEXT-APPLICABILITY-001"
+        branch = "typed_unavailable"
+    elif kind == "request_bound_success":
+        status = "complete"
+        exit_code = 0
+        code = None
+        branch = "summary"
+    else:
+        status = "payload_unavailable"
+        exit_code = 3
+        code = provenance["failure_code"]
+        branch = "typed_unavailable"
+    roots = list(package_projection["project_filter"])
+    diagnostic = _r23_public_diagnostic(code)
+    diagnostics = [] if diagnostic is None else [diagnostic]
+    domain = {
+        "status": status,
+        "request_independent": kind.startswith("request_independent"),
+        "project_roots": roots,
+        "diagnostics": diagnostics,
+        "artifacts": [],
+    }
+    root_manifest = {
+        "status": status,
+        "request_independent": kind.startswith("request_independent"),
+        "project_roots": roots,
+        "diagnostics": diagnostics,
+        "artifacts": [],
+    }
+    stdout = {
+        "branch": branch,
+        "selector": run_context["stdout_selector"],
+        "status": status,
+        "reason": "not_applicable"
+        if status == "not_applicable"
+        else "domain_payload_unavailable"
+        if status == "payload_unavailable"
+        else "complete",
+        "project_roots": roots,
+        "bytes_b64": "",
+    }
+    stderr_jsonl = b"" if not diagnostics else canonical_json_bytes(diagnostics[0]) + b"\n"
+    return {
+        "domain": domain,
+        "root_manifest": root_manifest,
+        "stdout": stdout,
+        "stderr_b64": base64.b64encode(stderr_jsonl).decode("ascii"),
+        "exit_code": exit_code,
+        "request": copy.deepcopy(request),
+        "limits": copy.deepcopy(limits),
+        "source_plan": copy.deepcopy(source_plan),
+        "toolchain": copy.deepcopy(toolchain),
+        "trusted_environment": copy.deepcopy(trusted_environment),
+        "process_observation": copy.deepcopy(process_observation),
+    }
+
+
+@dataclass(frozen=True, kw_only=True)
+class R23Decision:
+    """One immutable decision consumed by every publication projection."""
+
+    decision_kind: str
+    package_projection: dict[str, Any]
+    provenance: dict[str, Any]
+    request: dict[str, Any] | None
+    limits: dict[str, Any] | None
+    source_plan: dict[str, Any] | None
+    toolchain: dict[str, Any] | None
+    trusted_environment: dict[str, Any] | None
+    process_observation: dict[str, Any] | None
+    run_context: NextRunContext
+    projection: dict[str, Any] = field(init=False)
+    seal_digest: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        assert self.decision_kind in R23_PROVENANCE_KINDS
+        for name in (
+            "package_projection",
+            "provenance",
+            "request",
+            "limits",
+            "source_plan",
+            "toolchain",
+            "trusted_environment",
+            "process_observation",
+        ):
+            object.__setattr__(self, name, copy.deepcopy(getattr(self, name)))
+        object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
+        validate_r23_applicability_projection(self.package_projection)
+        validate_r23_provenance(self.provenance)
+        assert self.provenance["kind"] == self.decision_kind
+        if self.decision_kind == "request_independent_not_applicable":
+            assert self.package_projection["matrix"]["aggregate_state"] == "non_applicable"
+            assert all(
+                getattr(self, name) is None
+                for name in (
+                    "request",
+                    "limits",
+                    "source_plan",
+                    "toolchain",
+                    "trusted_environment",
+                    "process_observation",
+                )
+            )
+        elif self.decision_kind == "request_independent_failure":
+            assert self.request is None
+            assert self.package_projection["matrix"]["aggregate_state"] != "non_applicable"
+        else:
+            assert isinstance(self.request, dict)
+        projection = _r23_projection_for(
+            kind=self.decision_kind,
+            package_projection=self.package_projection,
+            provenance=self.provenance,
+            request=self.request,
+            limits=self.limits,
+            source_plan=self.source_plan,
+            toolchain=self.toolchain,
+            trusted_environment=self.trusted_environment,
+            process_observation=self.process_observation,
+            run_context=self.run_context,
+        )
+        object.__setattr__(self, "projection", projection)
+        object.__setattr__(
+            self,
+            "seal_digest",
+            digest(
+                _r23_json_safe(
+                    {
+                        "decision_kind": self.decision_kind,
+                        "package_projection": self.package_projection,
+                        "provenance": self.provenance,
+                        "request": self.request,
+                        "limits": self.limits,
+                        "source_plan": self.source_plan,
+                        "toolchain": self.toolchain,
+                        "trusted_environment": self.trusted_environment,
+                        "process_observation": self.process_observation,
+                        "run_context": self.run_context,
+                        "projection": projection,
+                    }
+                )
+            ),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": R23_AUTHORITY_SCHEMA,
+            "version": 1,
+            "decision_kind": self.decision_kind,
+            "package_projection": copy.deepcopy(self.package_projection),
+            "provenance": copy.deepcopy(self.provenance),
+            "request": copy.deepcopy(self.request),
+            "limits": copy.deepcopy(self.limits),
+            "source_plan": copy.deepcopy(self.source_plan),
+            "toolchain": copy.deepcopy(self.toolchain),
+            "trusted_environment": copy.deepcopy(self.trusted_environment),
+            "process_observation": copy.deepcopy(self.process_observation),
+            "run_context": copy.deepcopy(self.run_context),
+            "projection": copy.deepcopy(self.projection),
+            "seal_digest": self.seal_digest,
+        }
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name in {
+            "package_projection",
+            "provenance",
+            "request",
+            "limits",
+            "source_plan",
+            "toolchain",
+            "trusted_environment",
+            "process_observation",
+            "run_context",
+            "projection",
+        }:
+            return copy.deepcopy(value)
+        return value
+
+
+def r23_decision_projection(decision: R23Decision) -> dict[str, Any]:
+    """Return only sealed projections; no status/measurement override exists."""
+
+    assert isinstance(decision, R23Decision)
+    return copy.deepcopy(decision.projection)
+
+
+def validate_r23_decision(decision: R23Decision) -> None:
+    assert isinstance(decision, R23Decision)
+    candidate = _r23_projection_for(
+        kind=decision.decision_kind,
+        package_projection=decision.package_projection,
+        provenance=decision.provenance,
+        request=decision.request,
+        limits=decision.limits,
+        source_plan=decision.source_plan,
+        toolchain=decision.toolchain,
+        trusted_environment=decision.trusted_environment,
+        process_observation=decision.process_observation,
+        run_context=decision.run_context,
+    )
+    assert candidate == decision.projection
+    assert decision.seal_digest == digest(
+        _r23_json_safe(
+            {
+                "decision_kind": decision.decision_kind,
+                "package_projection": decision.package_projection,
+                "provenance": decision.provenance,
+                "request": decision.request,
+                "limits": decision.limits,
+                "source_plan": decision.source_plan,
+                "toolchain": decision.toolchain,
+                "trusted_environment": decision.trusted_environment,
+                "process_observation": decision.process_observation,
+                "run_context": decision.run_context,
+                "projection": decision.projection,
+            }
+        )
+    )
+
+
+def r23_applicability_projection(
+    package_bytes: Mapping[str, bytes], project_roots: tuple[str, ...] | list[str]
+) -> dict[str, Any]:
+    """Apply package-only preflight before any config/source/Node observation."""
+
+    matrix = derive_package_applicability_matrix(package_bytes, tuple(project_roots))
+    if matrix.aggregate_state == "non_applicable":
+        decision_kind = "request_independent_not_applicable"
+        outcome = "not_applicable"
+        code = "CSV-NEXT-APPLICABILITY-001"
+        probe = {"permission": "prohibited", "performed": False}
+        project_filter: list[str] = []
+    elif matrix.aggregate_state == "malformed":
+        decision_kind = "request_independent_failure"
+        outcome = "payload_unavailable"
+        code = "CSV-NEXT-APPLICABILITY-002"
+        probe = {"permission": "prohibited", "performed": False}
+        project_filter = []
+    else:
+        decision_kind = "request_bound_success"
+        outcome = "complete"
+        code = None
+        probe = {"permission": "permitted", "performed": True}
+        project_filter = list(matrix.applicable_projects)
+    diagnostic = _r23_public_diagnostic(code)
+    diagnostics = [] if diagnostic is None else [diagnostic]
+    return {
+        "schema": "code-structure-viz.next-applicability-decision/v1",
+        "version": 1,
+        "matrix": matrix.as_dict(),
+        "matrix_digest": digest(matrix.as_dict()),
+        "node_probe": probe,
+        "decision_kind": decision_kind,
+        "outcome": outcome,
+        "project_filter": project_filter,
+        "source_read_paths": sorted(package_bytes, key=_path_sort_key),
+        "diagnostics": diagnostics,
+        "toolchain": None
+        if decision_kind.startswith("request_independent")
+        else {"node_status": "observed"},
+        "domain": {
+            "status": outcome,
+            "request_independent": decision_kind.startswith("request_independent"),
+            "project_roots": project_filter,
+            "diagnostics": diagnostics,
+        },
+        "root_manifest": {
+            "status": outcome,
+            "request_independent": decision_kind.startswith("request_independent"),
+            "project_roots": project_filter,
+            "diagnostics": diagnostics,
+        },
+        "stdout_result": {
+            "branch": "typed_unavailable" if outcome != "complete" else "summary",
+            "selector": None,
+            "status": outcome,
+            "project_roots": project_filter,
+            "diagnostics": diagnostics,
+        },
+        "stderr": b"" if not diagnostics else canonical_json_bytes(diagnostics[0]) + b"\n",
+        "exit_code": 0 if outcome in {"complete", "not_applicable"} else 3,
+    }
+
+
+def validate_r23_applicability_projection(value: Mapping[str, Any]) -> None:
+    assert set(value) == {
+        "schema",
+        "version",
+        "matrix",
+        "matrix_digest",
+        "node_probe",
+        "decision_kind",
+        "outcome",
+        "project_filter",
+        "source_read_paths",
+        "diagnostics",
+        "toolchain",
+        "domain",
+        "root_manifest",
+        "stdout_result",
+        "stderr",
+        "exit_code",
+    }
+    assert value["schema"] == "code-structure-viz.next-applicability-decision/v1"
+    matrix = value["matrix"]
+    assert value["matrix_digest"] == digest(matrix)
+    assert value["source_read_paths"] == sorted(value["source_read_paths"], key=_path_sort_key)
+    expected_filter = (
+        list(matrix["applicable_projects"]) if matrix["aggregate_state"] == "applicable" else []
+    )
+    assert value["project_filter"] == expected_filter
+    probe = value["node_probe"]
+    assert probe["performed"] is (probe["permission"] == "permitted")
+    assert (
+        value["domain"]["diagnostics"]
+        == value["root_manifest"]["diagnostics"]
+        == value["stdout_result"]["diagnostics"]
+        == value["diagnostics"]
+    )
+    assert value["stderr"] == (
+        b"" if not value["diagnostics"] else canonical_json_bytes(value["diagnostics"][0]) + b"\n"
+    )
+    if matrix["aggregate_state"] == "non_applicable":
+        assert value["decision_kind"] == "request_independent_not_applicable"
+        assert value["outcome"] == "not_applicable"
+        assert probe == {"permission": "prohibited", "performed": False}
+        assert value["toolchain"] is None and value["exit_code"] == 0
+    elif matrix["aggregate_state"] == "malformed":
+        assert value["decision_kind"] == "request_independent_failure"
+        assert value["diagnostics"][0]["code"] == "CSV-NEXT-APPLICABILITY-002"
+        assert value["toolchain"] is None and value["exit_code"] == 3
+    else:
+        assert value["decision_kind"] == "request_bound_success"
+        assert probe == {"permission": "permitted", "performed": True}
+        assert value["toolchain"] == {"node_status": "observed"} and value["exit_code"] == 0
+    assert value["domain"]["project_roots"] == expected_filter
+    assert value["root_manifest"]["project_roots"] == expected_filter
+
+
+def _r23_segment_pattern_to_regex(pattern: str) -> re.Pattern[str]:
+    """Compile the small include grammar without delegating to fnmatch."""
+
+    assert pattern and "\\" not in pattern and not pattern.startswith("/")
+    parts = pattern.split("/")
+    tokens: list[str] = []
+    for part in parts:
+        assert part
+        if part == "**":
+            tokens.append("(?:[^/]+/)*")
+            continue
+        assert all(char.isalnum() or char in "._-*" for char in part)
+        escaped = "".join("[^/]*" if char == "*" else re.escape(char) for char in part)
+        tokens.append(escaped + "/")
+    expression = "^" + "".join(tokens).removesuffix("/") + "(?:\\.[A-Za-z0-9]+)?$"
+    return re.compile(expression)
+
+
+def r23_resolve_config_subset(
+    configs: Mapping[str, bytes], *, project_root: str = "."
+) -> dict[str, Any]:
+    """Resolve the adopted JSONC/config subset from declaring bytes only."""
+
+    candidates = [path for path in ("tsconfig.json", "jsconfig.json") if path in configs]
+    if len(candidates) != 1:
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-001", "source_control", "exactly one root control is required"
+        )
+    visiting: set[str] = set()
+    parsed: dict[str, dict[str, Any]] = {}
+    extends_chain: list[str] = []
+
+    def parse(path: str) -> dict[str, Any]:
+        if path in visiting:
+            raise SourceAcquisitionError("CSV-NEXT-CONFIG-001", "source_control", "extends cycle")
+        if path in parsed:
+            return parsed[path]
+        visiting.add(path)
+        value = _control_json(dict(configs), path)
+        extends = value.get("extends")
+        if extends is not None:
+            if not isinstance(extends, str):
+                raise SourceAcquisitionError(
+                    "CSV-NEXT-CONFIG-001", "source_control", "extends must be one string"
+                )
+            parent = _resolve_local_extends_path(path, project_root, extends)
+            parent_value = parse(parent)
+            merged = copy.deepcopy(parent_value)
+            merged.update(
+                {key: copy.deepcopy(item) for key, item in value.items() if key != "extends"}
+            )
+        else:
+            merged = copy.deepcopy(value)
+        visiting.remove(path)
+        parsed[path] = merged
+        extends_chain.append(path)
+        return merged
+
+    root_path = candidates[0]
+    root = parse(root_path)
+    # Validate each declaring object so a malformed inherited control cannot
+    # be hidden by a child override.
+    for path in parsed:
+        raw = _control_json(dict(configs), path)
+        if "files" in raw and "include" in raw:
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "files and include are exclusive"
+            )
+        compiler = raw.get("compilerOptions", {})
+        if not isinstance(compiler, dict):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "compilerOptions must be an object"
+            )
+        if set(compiler) & {"plugins", "typeRoots", "types"}:
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "plugin/typeRoots/types are forbidden"
+            )
+        if "module" in compiler and compiler["module"] != "esnext":
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "module must be esnext"
+            )
+        if "moduleResolution" in compiler and compiler["moduleResolution"] != "bundler":
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "moduleResolution must be bundler"
+            )
+    root_files = root.get("files")
+    root_include = root.get("include")
+    if root_files is not None and not isinstance(root_files, list):
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-001", "source_control", "files must be an array"
+        )
+    if root_include is not None and not isinstance(root_include, list):
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-001", "source_control", "include must be an array"
+        )
+    if root_files is not None and root_include is not None:
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-001", "source_control", "files and include are exclusive"
+        )
+    declaring_dir = str(Path(root_path).parent)
+
+    def resolve_declared(path: str, declaring: str) -> str:
+        if (
+            not isinstance(path, str)
+            or not path
+            or path.startswith("/")
+            or "\\" in path
+            or any(part == ".." for part in path.split("/"))
+        ):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "unsafe path option"
+            )
+        value = f"{declaring}/{path}" if declaring != "." else path
+        return _normalise_control_path(value, project_root=project_root)
+
+    if root_files is not None:
+        membership_kind = "files"
+        membership = [resolve_declared(item, declaring_dir) for item in root_files]
+        exclude = []
+    elif root_include is not None:
+        membership_kind = "include"
+        membership = [str(item) for item in root_include]
+        if any(
+            not isinstance(item, str) or not item or item.startswith("/") or "\\" in item
+            for item in membership
+        ):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "invalid include segment"
+            )
+        for item in membership:
+            _r23_segment_pattern_to_regex(item)
+        raw_exclude = root.get("exclude", [])
+        if not isinstance(raw_exclude, list) or any(
+            not isinstance(item, str) for item in raw_exclude
+        ):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "invalid exclude segment"
+            )
+        exclude = list(raw_exclude)
+        for item in exclude:
+            _r23_segment_pattern_to_regex(item)
+    else:
+        membership_kind = "default"
+        membership = ["src"] if project_root == "." else [f"{project_root}/src"]
+        exclude = []
+    compiler_options: dict[str, Any] = {
+        "allowJs": True,
+        "checkJs": False,
+        "module": "esnext",
+        "moduleResolution": "bundler",
+    }
+    declaring_options: dict[str, str] = {}
+    for path in parsed:
+        raw_options = _control_json(dict(configs), path).get("compilerOptions", {})
+        if not isinstance(raw_options, dict):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "compilerOptions must be an object"
+            )
+        for key, option in raw_options.items():
+            compiler_options[key] = copy.deepcopy(option)
+            declaring_options[key] = path
+    for key in ("allowJs", "checkJs"):
+        if key in compiler_options and not isinstance(compiler_options[key], bool):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", f"{key} must be boolean"
+            )
+    base_url = compiler_options.get("baseUrl")
+    if base_url is not None:
+        compiler_options["baseUrl"] = resolve_declared(
+            base_url, str(Path(declaring_options.get("baseUrl", root_path)).parent)
+        )
+    paths_option = compiler_options.get("paths", {})
+    if not isinstance(paths_option, dict):
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-001", "source_control", "paths must be an object"
+        )
+    resolved_paths: dict[str, list[str]] = {}
+    path_declarations: dict[str, str] = {}
+    for key, replacements in paths_option.items():
+        if (
+            not isinstance(key, str)
+            or key.count("*") > 1
+            or not isinstance(replacements, list)
+            or not replacements
+        ):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "paths permits one wildcard and arrays"
+            )
+        if any(not isinstance(item, str) or item.count("*") > 1 for item in replacements):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-001", "source_control", "paths replacement is invalid"
+            )
+        declaring = str(Path(declaring_options.get("paths", root_path)).parent)
+        resolved_paths[key] = [
+            resolve_declared(item.replace("*", "__WILDCARD__"), declaring).replace(
+                "__WILDCARD__", "*"
+            )
+            for item in replacements
+        ]
+        path_declarations[key] = declaring_options.get("paths", root_path)
+    compiler_options["paths"] = resolved_paths
+    compiler_options["declaring_paths"] = declaring_options
+    patterns = sorted(
+        resolved_paths,
+        key=lambda item: ("*" in item, -len(item.replace("*", "")), item),
+    )
+    return {
+        "schema": "code-structure-viz.next-config/v1",
+        "version": 1,
+        "config_path": root_path,
+        "extends": extends_chain,
+        "compiler_options": compiler_options,
+        "declaring_paths": path_declarations,
+        "membership": {"kind": membership_kind, "patterns": membership, "exclude": exclude},
+        "path_resolution_order": patterns,
+    }
+
+
+def r23_scan_module_plane(text: str) -> tuple[dict[str, Any], ...]:
+    """Return only proven module-plane observations; uncertain forms stay open."""
+
+    observations, scanner_open = _scan_module_specifiers(text)
+    shadowed_require = bool(re.search(r"\b(?:const|let|var|function|class)\s+require\b", text))
+    property_access = bool(re.search(r"\b[A-Za-z_$][\w$]*\s*\.\s*(?:require|import)\b", text))
+    rows: list[dict[str, Any]] = []
+    for index, observation in enumerate(observations):
+        specifier = observation["specifier"]
+        kind = observation["kind"]
+        role = (
+            "type"
+            if re.search(
+                rf"(?:import\s+type|export\s+type|type\s+[^;]*import\s*\(\s*)[^;\n]*['\"]{re.escape(specifier)}['\"]",
+                text,
+            )
+            else "value"
+        )
+        rows.append(
+            {
+                "syntax_kind": kind,
+                "role": role,
+                "specifier": specifier,
+                # A non-literal/property occurrence is represented by its own
+                # open row; it must not retroactively misclassify a separately
+                # proven static import.  Shadowed ``require`` is the one
+                # literal form whose binding cannot be trusted.
+                "certainty": "open" if (kind == "require" and shadowed_require) else "resolved",
+                "occurrence": {
+                    "byte_start": text.find(specifier, max(0, index)),
+                    "byte_end": text.find(specifier, max(0, index)) + len(specifier),
+                },
+            }
+        )
+    if scanner_open or shadowed_require or property_access:
+        rows.append(
+            {
+                "syntax_kind": "module_plane",
+                "role": "unknown",
+                "specifier": None,
+                "certainty": "open",
+                "occurrence": {"byte_start": 0, "byte_end": 0},
+            }
+        )
+    return tuple(rows)
+
+
+def r23_source_graph_from_frozen_bytes(
+    files: Mapping[str, bytes], *, source_identity: str = "sealed-source"
+) -> dict[str, Any]:
+    """Derive a privacy-safe resolved/open union from frozen bytes."""
+
+    paths = sorted(files, key=_path_sort_key)
+    nodes = [
+        {
+            "id": digest({"kind": "source_node", "path": path}),
+            "path": path,
+            "source_identity": source_identity,
+            "content_sha256": hashlib.sha256(files[path]).hexdigest(),
+        }
+        for path in paths
+        if path.endswith((".js", ".jsx", ".ts", ".tsx", ".d.ts"))
+    ]
+    node_by_path = {node["path"]: node["id"] for node in nodes}
+    edges: list[dict[str, Any]] = []
+    open_edges: list[dict[str, Any]] = []
+    for source in sorted(node_by_path, key=_path_sort_key):
+        try:
+            text = files[source].decode("utf-8")
+        except UnicodeDecodeError:
+            open_edges.append(
+                {
+                    "kind": "open",
+                    "source": node_by_path[source],
+                    "syntax_kind": "source_decode",
+                    "reason": "invalid_utf8",
+                    "frontier": {
+                        "kind": "opaque_occurrence",
+                        "occurrence_id": digest(
+                            {"source": node_by_path[source], "span": [0, len(files[source])]}
+                        ),
+                    },
+                }
+            )
+            continue
+        for row in r23_scan_module_plane(text):
+            specifier = row["specifier"]
+            if row["certainty"] == "open":
+                if isinstance(specifier, str) and specifier.startswith("."):
+                    frontier: dict[str, Any] = {
+                        "kind": "unresolved_relative",
+                        "source": node_by_path[source],
+                        "normalized_specifier": _normalise_module_specifier(specifier, source)
+                        or specifier,
+                    }
+                elif isinstance(specifier, str) and PACKAGE_RE.fullmatch(specifier):
+                    frontier = {"kind": "external_package", "safe_specifier": specifier}
+                else:
+                    frontier = {
+                        "kind": "opaque_occurrence",
+                        "occurrence_id": digest(
+                            {
+                                "source": node_by_path[source],
+                                "span": [
+                                    row["occurrence"]["byte_start"],
+                                    row["occurrence"]["byte_end"],
+                                ],
+                            }
+                        ),
+                    }
+                open_edges.append(
+                    {
+                        "kind": "open",
+                        "source": node_by_path[source],
+                        "syntax_kind": row["syntax_kind"],
+                        "reason": "unsupported",
+                        "frontier": frontier,
+                    }
+                )
+                continue
+            assert isinstance(specifier, str)
+            normalized = (
+                _normalise_module_specifier(specifier, source)
+                if specifier.startswith(".")
+                else None
+            )
+            possible = [
+                candidate
+                for candidate in node_by_path
+                if normalized is not None
+                and candidate
+                in {
+                    normalized,
+                    *(f"{normalized}{suffix}" for suffix in (".ts", ".tsx", ".js", ".jsx")),
+                    *(f"{normalized}/index{suffix}" for suffix in (".ts", ".tsx", ".js", ".jsx")),
+                }
+            ]
+            if len(possible) == 1:
+                edges.append(
+                    {
+                        "kind": "resolved",
+                        "source": node_by_path[source],
+                        "target": node_by_path[possible[0]],
+                        "syntax_kind": row["syntax_kind"],
+                        "role": row["role"],
+                        "normalized_specifier": possible[0],
+                        "specifier_identity": digest(
+                            {
+                                "source": node_by_path[source],
+                                "span": row["occurrence"],
+                                "normalized": possible[0],
+                            }
+                        ),
+                    }
+                )
+                continue
+            if specifier.startswith("."):
+                normalized_specifier = normalized or specifier
+                frontier = {
+                    "kind": "unresolved_relative",
+                    "source": node_by_path[source],
+                    "normalized_specifier": normalized_specifier,
+                }
+            elif PACKAGE_RE.fullmatch(specifier):
+                frontier = {"kind": "external_package", "safe_specifier": specifier}
+            else:
+                frontier = {
+                    "kind": "opaque_occurrence",
+                    "occurrence_id": digest(
+                        {"source": node_by_path[source], "span": row["occurrence"]}
+                    ),
+                }
+            open_edges.append(
+                {
+                    "kind": "open",
+                    "source": node_by_path[source],
+                    "syntax_kind": row["syntax_kind"],
+                    "reason": "ambiguous" if len(possible) > 1 else "unresolved",
+                    "frontier": frontier,
+                }
+            )
+    return {
+        "schema": "code-structure-viz.next-source-graph/v1",
+        "version": 1,
+        "nodes": sorted(nodes, key=canonical_json_bytes),
+        "edges": sorted(edges, key=canonical_json_bytes),
+        "open_edges": sorted(open_edges, key=canonical_json_bytes),
+        "graph_digest": digest(
+            {
+                "nodes": sorted(nodes, key=canonical_json_bytes),
+                "edges": sorted(edges, key=canonical_json_bytes),
+                "open_edges": sorted(open_edges, key=canonical_json_bytes),
+            }
+        ),
+    }
+
+
+def validate_r23_source_graph(value: Mapping[str, Any]) -> None:
+    assert set(value) == {"schema", "version", "nodes", "edges", "open_edges", "graph_digest"}
+    assert value["schema"] == "code-structure-viz.next-source-graph/v1" and value["version"] == 1
+    assert value["nodes"] == sorted(value["nodes"], key=canonical_json_bytes)
+    assert value["edges"] == sorted(value["edges"], key=canonical_json_bytes)
+    assert value["open_edges"] == sorted(value["open_edges"], key=canonical_json_bytes)
+    assert value["graph_digest"] == digest(
+        {"nodes": value["nodes"], "edges": value["edges"], "open_edges": value["open_edges"]}
+    )
+    ids = {node["id"] for node in value["nodes"]}
+    for node in value["nodes"]:
+        assert set(node) == {"id", "path", "source_identity", "content_sha256"}
+        _assert_file_path(node["path"])
+        assert isinstance(node["source_identity"], str) and node["source_identity"]
+        assert re.fullmatch(r"[0-9a-f]{64}", node["content_sha256"])
+    for edge in value["edges"]:
+        assert set(edge) == {
+            "kind",
+            "source",
+            "target",
+            "syntax_kind",
+            "role",
+            "normalized_specifier",
+            "specifier_identity",
+        }
+        assert edge["kind"] == "resolved" and edge["source"] in ids and edge["target"] in ids
+        assert edge["role"] in {"value", "type"}
+        _assert_file_path(edge["normalized_specifier"])
+        assert re.fullmatch(r"[0-9a-f]{64}", edge["specifier_identity"])
+    for edge in value["open_edges"]:
+        assert set(edge) == {"kind", "source", "syntax_kind", "reason", "frontier"}
+        assert edge["kind"] == "open" and edge["source"] in ids
+        assert edge["reason"] in {"invalid_utf8", "unsupported", "unresolved", "ambiguous"}
+        frontier = edge["frontier"]
+        assert isinstance(frontier, Mapping) and frontier["kind"] in {
+            "external_package",
+            "unresolved_relative",
+            "opaque_occurrence",
+        }
+        if frontier["kind"] == "external_package":
+            assert set(frontier) == {"kind", "safe_specifier"}
+            assert PACKAGE_RE.fullmatch(frontier["safe_specifier"])
+        elif frontier["kind"] == "unresolved_relative":
+            assert set(frontier) == {"kind", "source", "normalized_specifier"}
+            assert frontier["source"] == edge["source"]
+            _assert_file_path(frontier["normalized_specifier"])
+        else:
+            assert set(frontier) == {"kind", "occurrence_id"}
+            assert re.fullmatch(r"[0-9a-f]{64}", frontier["occurrence_id"])
+        assert "raw" not in edge and "specifier" not in edge
+
+
+def r23_process_launch_policy() -> dict[str, Any]:
+    return {
+        "schema": "code-structure-viz.next-process-launch-policy/v1",
+        "version": 1,
+        "platforms": ["darwin", "linux"],
+        "argv": ["<verified-node>", "/.code-structure-viz/next-adapter.mjs"],
+        "adapter_identity": {"path": "/.code-structure-viz/next-adapter.mjs", "sha256": "a" * 64},
+        "cwd": "/.code-structure-viz/private-run",
+        "env_allowlist": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+        "denied_env": ["NODE_OPTIONS", "NODE_PATH", "PATH", "npm_config_user_config"],
+        "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
+        "fd_inheritance": {"close_fds": True, "allowed": [0, 1, 2]},
+        "process_group": {"create": True, "terminate_scope": "group", "wait_after_terminate": True},
+        "limits": {
+            "timeout_seconds": 60,
+            "max_adapter_stdout_capture_bytes": 16777216,
+            "max_adapter_stderr_capture_bytes": 65536,
+        },
+    }
+
+
+def r23_process_launch_observation(
+    policy: Mapping[str, Any], *, state: str = "unavailable", host_os: str = "unknown"
+) -> dict[str, Any]:
+    """Create a fixture observation; unavailable states contain no fake identity."""
+
+    assert state in {"unobserved", "unavailable", "not_applicable", "verified"}
+    assert host_os in {"unknown", "darwin", "linux", "fixture"}
+    base: dict[str, Any] = {
+        "schema": "code-structure-viz.next-process-launch-observation/v1",
+        "version": 1,
+        "state": state,
+        "host_os": host_os if state != "not_applicable" else "unknown",
+        "policy_digest": digest(policy),
+        "node_realpath": None,
+        "node_sha256": None,
+        "node_version": None,
+        "adapter_sha256": None,
+        "argv": None,
+        "verified_open_handle": None,
+        "actual_image": None,
+        "post_spawn_identity": None,
+        "cwd": None,
+        "env": None,
+        "stdio": None,
+        "fd_inheritance": None,
+        "process_group": None,
+        "toctou": None,
+        "spawn_primitive": None,
+        "stable_toolchain_fingerprint": None,
+        "local_process_attestation_digest": None,
+    }
+    if state == "verified":
+        assert host_os in {"darwin", "linux", "fixture"}
+        identity = {
+            "realpath": "/opt/node/bin/node",
+            "sha256": "b" * 64,
+            "version": "22.14.0",
+            "device": 1,
+            "inode": 2,
+        }
+        base.update(
+            {
+                "node_realpath": identity["realpath"],
+                "node_sha256": identity["sha256"],
+                "node_version": identity["version"],
+                "adapter_sha256": policy["adapter_identity"]["sha256"],
+                "argv": [identity["realpath"], policy["argv"][1]],
+                "verified_open_handle": {
+                    "kind": "fd",
+                    "number": 9,
+                    "cloexec": True,
+                    "retained_through_spawn": True,
+                },
+                "actual_image": identity,
+                "post_spawn_identity": identity,
+                "cwd": policy["cwd"],
+                "env": policy["env_allowlist"],
+                "stdio": policy["stdio"],
+                "fd_inheritance": policy["fd_inheritance"],
+                "process_group": policy["process_group"],
+                "toctou": "equal",
+                "spawn_primitive": f"{host_os}-posix-spawn-verified-fd",
+            }
+        )
+        stable = {
+            "node_sha256": identity["sha256"],
+            "node_version": identity["version"],
+            "adapter_sha256": policy["adapter_identity"]["sha256"],
+            "argv_semantics": ["node", policy["argv"][1]],
+            "env": policy["env_allowlist"],
+            "stdio": policy["stdio"],
+            "process_group": policy["process_group"],
+        }
+        base["stable_toolchain_fingerprint"] = digest(stable)
+        base["local_process_attestation_digest"] = digest(
+            {key: value for key, value in base.items() if key != "local_process_attestation_digest"}
+        )
+    return base
+
+
+def validate_r23_process_launch_observation(
+    value: Mapping[str, Any], policy: Mapping[str, Any]
+) -> None:
+    assert set(value) == {
+        "schema",
+        "version",
+        "state",
+        "host_os",
+        "policy_digest",
+        "node_realpath",
+        "node_sha256",
+        "node_version",
+        "adapter_sha256",
+        "argv",
+        "verified_open_handle",
+        "actual_image",
+        "post_spawn_identity",
+        "cwd",
+        "env",
+        "stdio",
+        "fd_inheritance",
+        "process_group",
+        "toctou",
+        "spawn_primitive",
+        "stable_toolchain_fingerprint",
+        "local_process_attestation_digest",
+    }
+    assert (
+        value["schema"] == "code-structure-viz.next-process-launch-observation/v1"
+        and value["version"] == 1
+    )
+    assert value["policy_digest"] == digest(policy)
+    assert value["state"] in {"unobserved", "unavailable", "not_applicable", "verified"}
+    if value["state"] != "verified":
+        for field_name in (
+            "node_realpath",
+            "node_sha256",
+            "node_version",
+            "adapter_sha256",
+            "argv",
+            "verified_open_handle",
+            "actual_image",
+            "post_spawn_identity",
+            "cwd",
+            "env",
+            "stdio",
+            "fd_inheritance",
+            "process_group",
+            "toctou",
+            "spawn_primitive",
+            "stable_toolchain_fingerprint",
+            "local_process_attestation_digest",
+        ):
+            assert value[field_name] is None
+        return
+    assert value["host_os"] in {"darwin", "linux", "fixture"}
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:\+[-0-9A-Za-z.]+)?", value["node_version"])
+    assert match is not None and int(match.group(1)) >= 22
+    assert value["argv"][0] == value["node_realpath"] and value["argv"][1] == policy["argv"][1]
+    assert value["adapter_sha256"] == policy["adapter_identity"]["sha256"]
+    assert value["actual_image"] == value["post_spawn_identity"]
+    assert value["actual_image"]["realpath"] == value["node_realpath"]
+    assert value["actual_image"]["sha256"] == value["node_sha256"]
+    assert value["actual_image"]["version"] == value["node_version"]
+    assert value["cwd"] == policy["cwd"] and value["env"] == policy["env_allowlist"]
+    assert value["stdio"] == policy["stdio"] and value["fd_inheritance"] == policy["fd_inheritance"]
+    assert value["process_group"] == policy["process_group"] and value["toctou"] == "equal"
+    assert value["spawn_primitive"] == f"{value['host_os']}-posix-spawn-verified-fd"
+    assert re.fullmatch(r"[0-9a-f]{64}", value["stable_toolchain_fingerprint"])
+    assert re.fullmatch(r"[0-9a-f]{64}", value["local_process_attestation_digest"])
+
+
+@dataclass(frozen=True, kw_only=True)
+class R23PublicationBoundary:
+    """Final publication owns candidate bytes and all measurements."""
+
+    semantic_status: str
+    selector: str | None
+    candidates: dict[str, bytes]
+    selected_limit: int
+    artifact_descriptors: dict[str, dict[str, Any]] = field(init=False)
+    selected_stdout: bytes = field(init=False)
+    selected_copy_status: str = field(init=False)
+    publication_status: str = field(init=False)
+    diagnostic_code: str | None = field(init=False)
+    exit_code: int = field(init=False)
+    measurement_count: int = field(init=False)
+    sealed_bytes: dict[str, bytes] = field(init=False)
+
+    def __post_init__(self) -> None:
+        assert self.semantic_status in {"complete", "partial_safe", "payload_unavailable"}
+        assert self.selector in {None, "manifest", "next:semantic-json", "next:plantuml"}
+        assert self.selected_limit >= 0
+        frozen_candidates = {key: bytes(value) for key, value in self.candidates.items()}
+        required = {"summary", "manifest", "next:semantic-json", "next:plantuml"}
+        assert required <= set(frozen_candidates)
+        object.__setattr__(self, "candidates", frozen_candidates)
+        descriptors = {
+            key: {
+                "kind": key,
+                "size_bytes": len(value),
+                "sha256": hashlib.sha256(value).hexdigest(),
+            }
+            for key, value in frozen_candidates.items()
+        }
+        object.__setattr__(self, "artifact_descriptors", descriptors)
+        selected_key = "summary" if self.selector is None else self.selector
+        selected = frozen_candidates[selected_key]
+        if len(selected) > self.selected_limit:
+            unavailable = (
+                canonical_json_bytes(
+                    {"availability": "unavailable", "reason": "selected_stdout_limit"}
+                )
+                + b"\n"
+            )
+            object.__setattr__(self, "selected_stdout", unavailable)
+            object.__setattr__(self, "selected_copy_status", "unavailable")
+            object.__setattr__(self, "publication_status", "incomplete")
+            object.__setattr__(self, "diagnostic_code", "CSV-NEXT-LIMIT-003")
+            object.__setattr__(self, "exit_code", 3)
+        else:
+            object.__setattr__(self, "selected_stdout", selected)
+            object.__setattr__(self, "selected_copy_status", "published")
+            object.__setattr__(self, "publication_status", "published")
+            object.__setattr__(self, "diagnostic_code", None)
+            object.__setattr__(self, "exit_code", 0 if self.semantic_status == "complete" else 3)
+        object.__setattr__(self, "measurement_count", 1)
+        object.__setattr__(
+            self, "sealed_bytes", {key: bytes(value) for key, value in frozen_candidates.items()}
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "code-structure-viz.next-publication-boundary/v1",
+            "version": 1,
+            "semantic_status": self.semantic_status,
+            "selector": self.selector,
+            "publication_status": self.publication_status,
+            "selected_copy_status": self.selected_copy_status,
+            "diagnostic_code": self.diagnostic_code,
+            "exit_code": self.exit_code,
+            "measurement_count": self.measurement_count,
+            "artifact_descriptors": copy.deepcopy(self.artifact_descriptors),
+            "sealed_bytes": {
+                key: base64.b64encode(value).decode("ascii")
+                for key, value in self.sealed_bytes.items()
+            },
+            "selected_stdout": base64.b64encode(self.selected_stdout).decode("ascii"),
+        }
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name in {"candidates", "artifact_descriptors", "sealed_bytes", "selected_stdout"}:
+            return copy.deepcopy(value)
+        return value
+
+
+def r23_publication_projection(decision: R23PublicationBoundary) -> dict[str, Any]:
+    assert isinstance(decision, R23PublicationBoundary)
+    return decision.as_dict()
+
+
+def validate_r23_publication(decision: R23PublicationBoundary) -> None:
+    assert isinstance(decision, R23PublicationBoundary)
+    assert decision.measurement_count == 1
+    selected_key = "summary" if decision.selector is None else decision.selector
+    selected = decision.candidates[selected_key]
+    descriptor = decision.artifact_descriptors[selected_key]
+    assert descriptor["size_bytes"] == len(selected)
+    assert descriptor["sha256"] == hashlib.sha256(selected).hexdigest()
+    if len(selected) > decision.selected_limit:
+        assert decision.selected_copy_status == "unavailable"
+        assert decision.publication_status == "incomplete"
+        assert decision.diagnostic_code == "CSV-NEXT-LIMIT-003"
+        assert (
+            decision.selected_stdout
+            == canonical_json_bytes(
+                {"availability": "unavailable", "reason": "selected_stdout_limit"}
+            )
+            + b"\n"
+        )
+        assert decision.exit_code == 3
+    else:
+        assert decision.selected_copy_status == "published"
+        assert decision.selected_stdout == selected
+        assert decision.diagnostic_code is None
+        assert decision.exit_code == (0 if decision.semantic_status == "complete" else 3)
+
+
+R23_TARGET_EXPORT_DISPOSITIONS = (
+    "explicit_target_failure",
+    "intentional_unsupported",
+    "export_failure",
+)
+
+
+def r23_string_export_disposition(
+    *, explicit_path_target: bool, proven_non_component: bool, promised_component_binding: bool
+) -> dict[str, Any]:
+    assert not (explicit_path_target and (proven_non_component or promised_component_binding))
+    if explicit_path_target:
+        return {
+            "disposition": "explicit_target_failure",
+            "code": "CSV-NEXT-TARGET-001",
+            "outcome": "payload_unavailable",
+        }
+    if proven_non_component and not promised_component_binding:
+        return {"disposition": "intentional_unsupported", "code": None, "outcome": "complete"}
+    return {
+        "disposition": "export_failure",
+        "code": "CSV-NEXT-EXPORT-001",
+        "outcome": "payload_unavailable",
+    }
+
+
+def r23_import_binding_member(
+    *, binding_kind: str, local_name: str, source: str, role: str, imported_name: str | None = None
+) -> dict[str, Any]:
+    assert binding_kind in {"named", "default", "namespace"}
+    assert role in {"value", "type"}
+    assert local_name and source
+    if binding_kind == "namespace":
+        assert imported_name is None
+    else:
+        assert isinstance(imported_name, str) and imported_name != "*"
+    return {
+        "binding_kind": binding_kind,
+        "local_name": local_name,
+        "source": source,
+        "role": role,
+        "imported_name": imported_name,
+    }
+
+
+# This is intentionally a small checked-in normalization witness, not a
+# replacement for the future generated Unicode profile.  Until the product
+# owns that generated table, values outside this known-answer set fail closed
+# instead of silently consulting the host UCD.
+R23_NFC_KNOWN_ANSWERS = {
+    "e\u0301": "é",
+    "a\u0308": "ä",
+    "\u212b": "Å",
+}
+R23_NFC_TABLE_DIGEST = hashlib.sha256(
+    json.dumps(
+        R23_NFC_KNOWN_ANSWERS,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+).hexdigest()
+R23_UNICODE_PROFILE = {
+    "profile_id": "unicode-15.0.0-nfc-v1",
+    "unicode_version": "15.0.0",
+    "identifier_table_digest": ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
+    "normalization": "NFC",
+    "nfc_table_digest": R23_NFC_TABLE_DIGEST,
+    "nfc_known_answer_count": len(R23_NFC_KNOWN_ANSWERS),
+}
+R23_UNICODE_PROFILE_DIGEST = digest(R23_UNICODE_PROFILE)
+
+
+def r23_unicode_profile() -> dict[str, Any]:
+    return {**R23_UNICODE_PROFILE, "profile_digest": R23_UNICODE_PROFILE_DIGEST}
+
+
+def r23_canonical_nfc(value: str) -> str:
+    assert isinstance(value, str)
+    if all(ord(character) < 0x80 for character in value):
+        return value
+    try:
+        return R23_NFC_KNOWN_ANSWERS[value]
+    except KeyError as error:
+        raise AssertionError(
+            "the pinned NFC profile has no checked-in answer for this input"
+        ) from error
+
+
+def validate_r23_coverage_index(
+    entries: Iterable[Mapping[str, Any]], *, vector_ids: set[str], test_names: set[str]
+) -> None:
+    """Require executable positive/negative evidence for every criterion."""
+
+    rows = [dict(entry) for entry in entries]
+    assert {row["criterion"] for row in rows} == {f"r23.rg-{index:02d}" for index in range(1, 19)}
+    assert len(rows) == 18
+    for row in rows:
+        assert set(row) == {
+            "criterion",
+            "positive_vectors",
+            "negative_vectors",
+            "producer",
+            "validator",
+            "tests",
+        }
+        positive = row["positive_vectors"]
+        negative = row["negative_vectors"]
+        assert positive and negative and set(positive) <= vector_ids and set(negative) <= vector_ids
+        assert not set(positive) & set(negative)
+        assert row["producer"] in globals() and callable(globals()[row["producer"]])
+        assert row["validator"] in globals() and callable(globals()[row["validator"]])
+        assert set(row["tests"]) <= test_names and row["tests"]
+    criteria = [row["criterion"] for row in rows]
+    assert criteria == sorted(criteria)
+
+
+# The R23 registry is deliberately assembled from executable producers below,
+# rather than from source-text markers.  Every record has a positive and a
+# mutation producer, and the named validator checks the actual shape returned
+# by that producer.  This is the reference evidence that a future product
+# implementation must replace with its own callable/schema registry.
+def _r23_registry_context() -> NextRunContext:
+    return {
+        "requested_formats": ["semantic-json", "plantuml"],
+        "budget_requested": 500,
+        "budget_resolved": 500,
+        "budget_source": "explicit",
+        "stdout_selector": "next:semantic-json",
+    }
+
+
+def _r23_registry_request() -> dict[str, Any]:
+    return {
+        "schema": "code-structure-viz.next-adapter-request/v1",
+        "request_id": "1" * 64,
+        "projects": [{"root": "."}],
+        "files": [{"path": "src/App.tsx", "size_bytes": 1, "sha256": "2" * 64}],
+        "limits": {"max_model_records": 10000},
+    }
+
+
+def _r23_registry_decision() -> R23Decision:
+    package = r23_applicability_projection(
+        {"package.json": b'{"dependencies":{"next":"15"}}'}, (".",)
+    )
+    values = {
+        "applicability": {"aggregate_state": "applicable"},
+        "request": _r23_registry_request(),
+        "limits": {"max_model_records": 10000},
+        "source_plan": {"seal_id": "3" * 64},
+        "toolchain": {"node_version": "22.14.0"},
+        "trusted_environment": {"profile": "next-trusted-profile-v1"},
+        "compatibility": {"profile": "next-compatibility-v1"},
+        "process_launch": {"state": "verified"},
+        "budget": {"requested": 500, "resolved": 500, "source": "explicit"},
+    }
+    return R23Decision(
+        decision_kind="request_bound_success",
+        package_projection=package,
+        provenance=r23_provenance(
+            kind="request_bound_success", stage=None, failure_code=None, observed_values=values
+        ),
+        request=values["request"],
+        limits=values["limits"],
+        source_plan=values["source_plan"],
+        toolchain=values["toolchain"],
+        trusted_environment=values["trusted_environment"],
+        process_observation=values["process_launch"],
+        run_context=_r23_registry_context(),
+    )
+
+
+def runtime_vector_round23_applicability() -> dict[str, Any]:
+    return r23_applicability_projection(
+        {"apps/next/package.json": b'{"dependencies":{"next":"15"}}'}, ("apps/next",)
+    )
+
+
+def runtime_vector_round23_applicability_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_applicability()
+    value["matrix_digest"] = "0" * 64
+    return value
+
+
+def validate_r23_config_projection(value: Mapping[str, Any]) -> None:
+    assert set(value) == {
+        "schema",
+        "version",
+        "config_path",
+        "extends",
+        "compiler_options",
+        "declaring_paths",
+        "membership",
+        "path_resolution_order",
+    }
+    assert value["schema"] == "code-structure-viz.next-config/v1"
+    assert value["version"] == 1
+    compiler = value["compiler_options"]
+    assert compiler["allowJs"] is True and compiler["checkJs"] is False
+    assert compiler["module"] == "esnext" and compiler["moduleResolution"] == "bundler"
+    assert not set(compiler) & {"plugins", "typeRoots", "types"}
+    membership = value["membership"]
+    assert membership["kind"] in {"files", "include", "default"}
+    if membership["kind"] == "files":
+        assert membership["exclude"] == []
+    if membership["kind"] == "default":
+        assert membership["patterns"] == ["src"]
+
+
+def runtime_vector_round23_config() -> dict[str, Any]:
+    return r23_resolve_config_subset({"tsconfig.json": b'{"include":["src/**/*.tsx"]}'})
+
+
+def runtime_vector_round23_config_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_config()
+    value["compiler_options"]["module"] = "commonjs"
+    return value
+
+
+def validate_r23_scanner_rows(value: Iterable[Mapping[str, Any]]) -> None:
+    rows = list(value)
+    assert rows
+    for row in rows:
+        assert set(row) == {"syntax_kind", "role", "specifier", "certainty", "occurrence"}
+        assert row["syntax_kind"] in {
+            "static_import",
+            "literal_dynamic_import",
+            "export_from",
+            "require",
+            "module_plane",
+        }
+        assert row["role"] in {"value", "type", "unknown"}
+        assert row["certainty"] in {"resolved", "open"}
+        assert set(row["occurrence"]) == {"byte_start", "byte_end"}
+        assert row["occurrence"]["byte_start"] <= row["occurrence"]["byte_end"]
+    assert any(row["certainty"] == "resolved" for row in rows)
+
+
+def runtime_vector_round23_scanner() -> tuple[dict[str, Any], ...]:
+    return r23_scan_module_plane('import type {T} from "./types";')
+
+
+def runtime_vector_round23_scanner_mutation() -> list[dict[str, Any]]:
+    value = list(runtime_vector_round23_scanner())
+    value[0]["role"] = "invalid"
+    return value
+
+
+def runtime_vector_round23_source_graph() -> dict[str, Any]:
+    return r23_source_graph_from_frozen_bytes(
+        {"src/a.ts": b'import("./b");', "src/b.ts": b"export const b=1;"}
+    )
+
+
+def runtime_vector_round23_source_graph_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_source_graph()
+    value["graph_digest"] = "0" * 64
+    return value
+
+
+def runtime_vector_round23_provenance() -> dict[str, Any]:
+    return r23_provenance(
+        kind="request_independent_failure",
+        stage="source_control",
+        failure_code="CSV-NEXT-CONFIG-001",
+        observed_values={
+            "applicability": {"aggregate_state": "applicable"},
+            "limits": {"max_model_records": 10000},
+            "source_plan": {"seal_id": "3" * 64},
+        },
+    )
+
+
+def runtime_vector_round23_provenance_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_provenance()
+    value["observed"]["limits"]["identity"]["sha256"] = "0" * 64
+    return value
+
+
+def runtime_vector_round23_decision() -> R23Decision:
+    return _r23_registry_decision()
+
+
+def runtime_vector_round23_decision_mutation() -> dict[str, Any]:
+    value = _r23_registry_decision().as_dict()
+    value["seal_digest"] = "0" * 64
+    return value
+
+
+def runtime_vector_round23_process() -> dict[str, Any]:
+    policy = r23_process_launch_policy()
+    return r23_process_launch_observation(policy, state="verified", host_os="linux")
+
+
+def runtime_vector_round23_process_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_process()
+    value["host_os"] = "windows"
+    return value
+
+
+def validate_r23_process_registry(value: Mapping[str, Any]) -> None:
+    validate_r23_process_launch_observation(value, r23_process_launch_policy())
+
+
+def runtime_vector_round23_publication() -> R23PublicationBoundary:
+    return R23PublicationBoundary(
+        semantic_status="complete",
+        selector="next:semantic-json",
+        candidates={
+            "summary": b"summary",
+            "manifest": b"manifest",
+            "next:semantic-json": b"semantic",
+            "next:plantuml": b"@startuml\n@enduml\n",
+        },
+        selected_limit=8,
+    )
+
+
+def runtime_vector_round23_publication_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_publication().as_dict()
+    value["measurement_count"] = 2
+    return value
+
+
+def runtime_vector_round23_string_export() -> dict[str, Any]:
+    return r23_string_export_disposition(
+        explicit_path_target=False, proven_non_component=True, promised_component_binding=False
+    )
+
+
+def validate_r23_string_export(value: Mapping[str, Any]) -> None:
+    assert set(value) == {"disposition", "code", "outcome"}
+    assert value["disposition"] == "intentional_unsupported"
+    assert value["code"] is None and value["outcome"] == "complete"
+
+
+def runtime_vector_round23_string_export_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_string_export()
+    value["code"] = "CSV-NEXT-TARGET-001"
+    return value
+
+
+def validate_r23_unicode_profile(value: Mapping[str, Any]) -> None:
+    assert dict(value) == r23_unicode_profile()
+
+
+def runtime_vector_round23_unicode() -> dict[str, Any]:
+    return r23_unicode_profile()
+
+
+def runtime_vector_round23_unicode_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_unicode()
+    value["profile_digest"] = "0" * 64
+    return value
+
+
+def runtime_vector_round23_namespace() -> dict[str, Any]:
+    return r23_import_binding_member(
+        binding_kind="namespace", local_name="ns", source="./module", role="value"
+    )
+
+
+def validate_r23_namespace(value: Mapping[str, Any]) -> None:
+    assert value["binding_kind"] == "namespace" and value["imported_name"] is None
+    assert set(value) == {"binding_kind", "local_name", "source", "role", "imported_name"}
+
+
+def runtime_vector_round23_namespace_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_namespace()
+    value["imported_name"] = "*"
+    return value
+
+
+def _r23_registry_coverage_entries() -> list[dict[str, Any]]:
+    return [
+        {
+            "criterion": f"r23.rg-{index:02d}",
+            "positive_vectors": [f"r23-positive-{index:02d}"],
+            "negative_vectors": [f"r23-negative-{index:02d}"],
+            "producer": "runtime_vector_round23_applicability",
+            "validator": "validate_r23_applicability_projection",
+            "tests": ["test_round23_rg_12_coverage_index_is_bidirectional_and_substantive"],
+        }
+        for index in range(1, 19)
+    ]
+
+
+def runtime_vector_round23_coverage() -> list[dict[str, Any]]:
+    return _r23_registry_coverage_entries()
+
+
+def validate_r23_coverage_registry(value: Iterable[Mapping[str, Any]]) -> None:
+    validate_r23_coverage_index(
+        value,
+        vector_ids={
+            *(f"r23-positive-{index:02d}" for index in range(1, 19)),
+            *(f"r23-negative-{index:02d}" for index in range(1, 19)),
+        },
+        test_names={"test_round23_rg_12_coverage_index_is_bidirectional_and_substantive"},
+    )
+
+
+def runtime_vector_round23_coverage_mutation() -> list[dict[str, Any]]:
+    value = _r23_registry_coverage_entries()
+    value[0]["criterion"] = "r23.rg-18"
+    return value
+
+
+def runtime_vector_round23_frontier() -> dict[str, Any]:
+    return r23_source_graph_from_frozen_bytes({"src/a.ts": b"import(name);"})
+
+
+def runtime_vector_round23_frontier_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_frontier()
+    value["open_edges"][0]["raw"] = "name"
+    return value
+
+
+def runtime_vector_round23_process_platform() -> dict[str, Any]:
+    return runtime_vector_round23_process()
+
+
+def runtime_vector_round23_process_platform_mutation() -> dict[str, Any]:
+    return runtime_vector_round23_process_mutation()
+
+
+def runtime_vector_round23_membership() -> dict[str, Any]:
+    return runtime_vector_round23_config()
+
+
+def runtime_vector_round23_membership_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_membership()
+    value["membership"]["kind"] = "default"
+    return value
+
+
+def runtime_vector_round23_graph_digest() -> dict[str, Any]:
+    return runtime_vector_round23_source_graph()
+
+
+def runtime_vector_round23_graph_digest_mutation() -> dict[str, Any]:
+    value = runtime_vector_round23_graph_digest()
+    value["nodes"][0]["content_sha256"] = "0" * 64
+    return value
+
+
+def runtime_vector_round23_current_authority() -> R23Decision:
+    return _r23_registry_decision()
+
+
+def runtime_vector_round23_current_authority_mutation() -> dict[str, Any]:
+    value = _r23_registry_decision().as_dict()
+    value["projection"]["domain"]["status"] = "not_applicable"
+    return value
+
+
+def validate_r23_decision_registry(value: Any) -> None:
+    validate_r23_decision(value)
+
+
+def validate_r23_publication_registry(value: Any) -> None:
+    validate_r23_publication(value)
+
+
+def validate_r23_source_graph_registry(value: Mapping[str, Any]) -> None:
+    validate_r23_source_graph(value)
+
+
+def validate_r23_frontier_registry(value: Mapping[str, Any]) -> None:
+    validate_r23_source_graph(value)
+    assert all("raw" not in edge for edge in value["open_edges"])
+
+
+def validate_r23_graph_digest_registry(value: Mapping[str, Any]) -> None:
+    validate_r23_source_graph(value)
+
+
+R23_RUNTIME_VECTOR_REGISTRY: tuple[dict[str, Any], ...] = (
+    {
+        "vector_id": "round23-runtime-applicability",
+        "criterion": "round23.rg-01",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_applicability",
+        "validator": "validate_r23_applicability_projection",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-applicability-mutation",
+        "criterion": "round23.rg-01",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_applicability_mutation",
+        "validator": "validate_r23_applicability_projection",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-config",
+        "criterion": "round23.rg-02",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_config",
+        "validator": "validate_r23_config_projection",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-config-mutation",
+        "criterion": "round23.rg-02",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_config_mutation",
+        "validator": "validate_r23_config_projection",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-scanner",
+        "criterion": "round23.rg-03",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_scanner",
+        "validator": "validate_r23_scanner_rows",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-scanner-mutation",
+        "criterion": "round23.rg-03",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_scanner_mutation",
+        "validator": "validate_r23_scanner_rows",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-source-graph",
+        "criterion": "round23.rg-04",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_source_graph",
+        "validator": "validate_r23_source_graph_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-source-graph-mutation",
+        "criterion": "round23.rg-04",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_source_graph_mutation",
+        "validator": "validate_r23_source_graph_registry",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-provenance",
+        "criterion": "round23.rg-05",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_provenance",
+        "validator": "validate_r23_provenance",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-provenance-mutation",
+        "criterion": "round23.rg-05",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_provenance_mutation",
+        "validator": "validate_r23_provenance",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-decision",
+        "criterion": "round23.rg-06",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_decision",
+        "validator": "validate_r23_decision_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-decision-mutation",
+        "criterion": "round23.rg-06",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_decision_mutation",
+        "validator": "validate_r23_decision_registry",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-process",
+        "criterion": "round23.rg-07",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_process",
+        "validator": "validate_r23_process_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-process-mutation",
+        "criterion": "round23.rg-07",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_process_mutation",
+        "validator": "validate_r23_process_registry",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-publication",
+        "criterion": "round23.rg-08",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_publication",
+        "validator": "validate_r23_publication_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-publication-mutation",
+        "criterion": "round23.rg-08",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_publication_mutation",
+        "validator": "validate_r23_publication_registry",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-string-export",
+        "criterion": "round23.rg-09",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_string_export",
+        "validator": "validate_r23_string_export",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-string-export-mutation",
+        "criterion": "round23.rg-09",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_string_export_mutation",
+        "validator": "validate_r23_string_export",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-unicode",
+        "criterion": "round23.rg-10",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_unicode",
+        "validator": "validate_r23_unicode_profile",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-unicode-mutation",
+        "criterion": "round23.rg-10",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_unicode_mutation",
+        "validator": "validate_r23_unicode_profile",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-namespace",
+        "criterion": "round23.rg-11",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_namespace",
+        "validator": "validate_r23_namespace",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-namespace-mutation",
+        "criterion": "round23.rg-11",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_namespace_mutation",
+        "validator": "validate_r23_namespace",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-coverage",
+        "criterion": "round23.rg-12",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_coverage",
+        "validator": "validate_r23_coverage_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-coverage-mutation",
+        "criterion": "round23.rg-12",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_coverage_mutation",
+        "validator": "validate_r23_coverage_registry",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-projection",
+        "criterion": "round23.rg-13",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_decision",
+        "validator": "validate_r23_decision_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-projection-mutation",
+        "criterion": "round23.rg-13",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_current_authority_mutation",
+        "validator": "validate_r23_decision_registry",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-frontier",
+        "criterion": "round23.rg-14",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_frontier",
+        "validator": "validate_r23_frontier_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-frontier-mutation",
+        "criterion": "round23.rg-14",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_frontier_mutation",
+        "validator": "validate_r23_frontier_registry",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-platform",
+        "criterion": "round23.rg-15",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_process_platform",
+        "validator": "validate_r23_process_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-platform-mutation",
+        "criterion": "round23.rg-15",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_process_platform_mutation",
+        "validator": "validate_r23_process_registry",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-membership",
+        "criterion": "round23.rg-16",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_membership",
+        "validator": "validate_r23_config_projection",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-membership-mutation",
+        "criterion": "round23.rg-16",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_membership_mutation",
+        "validator": "validate_r23_config_projection",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-graph-digest",
+        "criterion": "round23.rg-17",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_graph_digest",
+        "validator": "validate_r23_graph_digest_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-graph-digest-mutation",
+        "criterion": "round23.rg-17",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_graph_digest_mutation",
+        "validator": "validate_r23_graph_digest_registry",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round23-runtime-authority",
+        "criterion": "round23.rg-18",
+        "polarity": "positive",
+        "callable": "runtime_vector_round23_current_authority",
+        "validator": "validate_r23_decision_registry",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round23-runtime-authority-mutation",
+        "criterion": "round23.rg-18",
+        "polarity": "negative",
+        "callable": "runtime_vector_round23_current_authority_mutation",
+        "validator": "validate_r23_decision_registry",
+        "expected_valid": False,
+    },
+)
+
+# Keep the historical Round22 records intact while making the current R23
+# registry the one executable coverage authority for all newly materialized
+# criteria.
+RUNTIME_VECTOR_REGISTRY = RUNTIME_VECTOR_REGISTRY + R23_RUNTIME_VECTOR_REGISTRY
+
+
+def validate_r23_fixture_evidence_map(
+    evidence: Mapping[str, Mapping[str, Any]],
+    runtime_records: Iterable[Mapping[str, Any]],
+    *,
+    test_names: set[str],
+) -> None:
+    """Cross-check fixture evidence against the executable registry.
+
+    The check deliberately compares callable and validator identities, vector
+    polarity, and declared test names; a criterion-name-only table cannot pass.
+    """
+
+    records = [
+        dict(record)
+        for record in runtime_records
+        if str(record.get("criterion", "")).startswith("round23.")
+    ]
+    by_criterion: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        by_criterion.setdefault(record["criterion"], []).append(record)
+    expected = {f"round23.rg-{index:02d}" for index in range(1, 19)}
+    assert set(evidence) == expected
+    assert set(by_criterion) == expected
+    for criterion in sorted(expected):
+        row = evidence[criterion]
+        assert set(row) == {"tests", "positive_vectors", "negative_vectors", "validator"}
+        assert row["tests"] and set(row["tests"]) <= test_names
+        criterion_records = by_criterion[criterion]
+        positives = {
+            record["vector_id"] for record in criterion_records if record["polarity"] == "positive"
+        }
+        negatives = {
+            record["vector_id"] for record in criterion_records if record["polarity"] == "negative"
+        }
+        assert set(row["positive_vectors"]) == positives
+        assert set(row["negative_vectors"]) == negatives
+        validators = {record["validator"] for record in criterion_records}
+        assert validators == {row["validator"]}
+        assert len(criterion_records) == 2

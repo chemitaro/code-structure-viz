@@ -1,5 +1,9 @@
 # Diagnostic v1 contract
 
+## Current v1 normative authority
+
+`next-diagnostic-catalog-v1.json`と`next-round23-authority-v1`のdecisionが、stage/code/ref/count/outcome/exitと公開JSONLの唯一のauthorityです。provenanceはrequest-independent not-applicable/failureとrequest-bound failure/successのclosed unionで、観測済み実値のschema/version/SHA-256を保持し、未観測suffixだけをnullにします。`PROJECT-001`はusage exit 2/no artifacts、control read failureはsource_control、`CSV-NEXT-SOURCE-INTEGRITY-001`はfatal exit 1、ordinary non-isolatable source failureは`SOURCE-003` manifest-only exit 3です。後続のRound節はhistorical evidence（非normative）です。
+
 `schemas/next-diagnostic-catalog-v1.json` is the single authority for the
 Next diagnostic code, fixed message, severity, recoverability, outcome, and
 safe reference permission. The public `schemas/diagnostic-v1.schema.json`

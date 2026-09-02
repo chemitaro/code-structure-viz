@@ -1,5 +1,9 @@
 # Next semantic compatibility descriptor v1
 
+## Current v1 normative authority
+
+compatibility descriptorはUnicode 15.0.0 NFC profile/table digest、TypeScript/trusted identities、portable toolchain fingerprintを含みます。Node content/versionとadapter contentはportable digestへ含め、host path、OS primitive、device/inode/FDはlocal attestationへ分離します。future Unicode profileやwheel/sdist member変更はversioned migration/known-answer contractであり、current pyprojectは変更しません。以下のRound節はhistorical evidence（非normative）です。
+
 Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
 `48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
 Round 12's data-only remediation keeps project and file identity versions in the

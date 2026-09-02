@@ -1,5 +1,9 @@
 # Next configuration and request projection v1
 
+## Current v1 normative authority
+
+この節がconfig/requestの現在の唯一の正本です。後続のRound節はhistorical evidence（非normative）であり、別のdefaultsやresolverを導入しません。package applicability後、duplicate-key rejecting JSONCがBOM、comments、trailing commaを決定的に合成します。`extends`はプロジェクト内の明示的`./...`一つだけです。`files`と`include`の同時存在は`CONFIG-001`、presentな空配列もauthority、両方が無い場合だけdefaultです。path-valued optionsはdeclaring config pathを保持し、`baseUrl`/`paths` replacementsはそのディレクトリから解決します。pathsはexactまたは一wildcard、exact→specific wildcard→declaration orderです。plugins/typeRoots/types、package/bare/absolute/parent/cycle extends、invalid module/moduleResolutionはglobal unavailableです。全surfaceが同一compiler-options schemaとrequest-independent/bound provenance unionを参照します。
+
 Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
 `48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
 The Round 12 data-only contract adds one exact request-owned run context,

@@ -1,5 +1,9 @@
 # Next semantic contract v1
 
+## Current v1 normative authority
+
+現在のsemantic outputはvalidated responseからsealされたimmutable decisionだけを受けます。package applicability、source graph、provenance、contextual Unicode 15.0.0、string-export disposition、namespace bindingを同一のclosed schema/reference validatorで検証し、resolved/openの不確実性をpartial-safeへ短絡させません。record collectionはID順、path-only rowsはNFC UTF-8 bytes、object rowsはcanonical JSON bytesです。以下のRound節はhistorical evidence（非normative）です。
+
 Status: pre-implementation normative contract for Issue #8.
 
 Round 12 review state: ChatGPT Use Strict returned `review_status: fail` with

@@ -1,5 +1,9 @@
 # Next adapter process launch descriptor v1
 
+## Current v1 normative authority
+
+現在の唯一のprocess authorityは`next-process-launch-observation-v1`です。`ProcessLaunchPolicy`はexact argv、checked-in adapter identity、private cwd、allowlist/deny set、pipe/FD、process group、timeout/capture limitsを定義し、`ProcessLaunchObservation`は実launch前はnull、実測後だけidentityを持ちます。macOS/Linuxのverified branchはNode realpath/hash/version、adapter、argv、verified-open handle、actual image、post-spawn equality、cwd/env/stdio/FD/group、TOCTOUをpolicyと相互検証し、証明不能ならunavailableです。legacy descriptorはobservationからの一方向compatibility viewに限ります。portable toolchain fingerprintはhost path/OS primitive/device/inode/FDを除外し、local attestationは別digestです。本文後半のRound節はhistorical evidence（非normative）であり、fixtureをproduction実測とは扱いません。
+
 `schemas/next-process-launch-v1.schema.json` は、Next adapter を起動する際の
 trust boundary を表す閉じた descriptor である。これは production adapter の
 実装ではなく、実装前に検証すべき契約である。descriptor は

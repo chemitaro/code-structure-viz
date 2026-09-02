@@ -1,5 +1,9 @@
 # Next PlantUML contract v1
 
+## Current v1 normative authority
+
+PlantUMLはsemantic decisionから生成するselected artifactであり、stdout/publicationのsealed bytes以外を再構成しません。resolved/open graph、external package/unresolved relative target、string export、namespace bindingはJSONと同一のredaction/order/diagnostic authorityに従います。既存の8 diagramsはこのcurrent-v1 chainを説明するための固定証拠で、以下のRound節はhistorical evidence（非normative）です。
+
 Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
 `48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
 The PlantUML grammar remains a pre-implementation data-only contract. Its

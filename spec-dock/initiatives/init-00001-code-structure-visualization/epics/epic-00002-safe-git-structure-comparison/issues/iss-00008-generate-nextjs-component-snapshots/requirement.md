@@ -13,6 +13,24 @@ package_sequence_key: "ISSUE-05"
 
 詳細: [Requirement Guide](../../../../../../docs/authoring/requirement.md)
 
+## Current v1 normative authority
+
+この節がIssue #8の現在の単一正本です。後続に現れる `Round N` の節は、検証履歴を保存するためのhistorical evidenceであり、実装の入力やfallback authorityではありません。現行の実装前契約は、`next-round23-authority-v1`、関連するNext contract schema、reference validator、fixtureの実行可能な対応だけで閉じます。
+
+因果鎖は `PackageApplicabilityMatrix` → frozen source acquisition seal → stage-dependent provenance → validated private request/response → semantic decision → final publication decision → domain/root manifest/stdout/stderr/exit です。全surfaceは同じimmutable decisionまたはfinal publication decisionを受け、別のrequest、config、status、measurement、bytesを再構成しません。
+
+現行v1で固定する判断は次のとおりです。
+
+1. applicabilityは`package.json`の`dependencies`/`devDependencies`にある直接`next`だけを観測し、全non-applicableはNode/config/sourceを読まずrequest-independent `not_applicable`、mixedはapplicable rootだけを通します。malformed packageは専用`CSV-NEXT-APPLICABILITY-002`でfail-closedです。
+2. configはBOM/comment/trailing commaを合成する閉じたJSONCとし、local `./...` extends、declaring config path、`files`/`include`の排他的membership、宣言場所相対の`baseUrl`/`paths`、exact-before-wildcardを同じresolverで決定します。
+3. source graphはfrozen bytesからprovableなresolved/open unionを導出します。type/value role、dynamic import、export-from、requireを保持し、不確実なedgeは安全なfrontierまたはbyte-span由来のopaque identityだけを公開します。
+4. processはpolicyとobserved launchを分離し、observationを唯一の測定authorityとします。macOS/Linuxの実装はNode実体、adapter、argv、cwd、env、stdio/FD、group、TOCTOUを相互拘束し、証明できなければunavailableです。
+5. provenanceはrequest-independent not-applicable/failureとrequest-bound failure/successのclosed unionです。観測行はschema/versionと実値のSHA-256を持ち、失敗stage以後だけ`unobserved/null`になります。
+6. semantic statusを維持したまま、selected stdoutのexact/+1はfinal publicationだけで一度測定します。+1ではartifact descriptorを保持し、partial bytesを出さずtyped unavailableとします。
+7. Unicode 15.0.0 NFC profile、string export disposition、namespace import memberをversioned closed contractとして固定し、将来のUnicode/table・wheel/sdist変更は別compatibility migrationとします。
+
+このIssueはproduction adapter/Node実行をまだ含みません。fresh current-SHA Strictが`P0=0 / P1=0 / review_status=pass`になるまで、readinessは未確認、production implementationは未着手です。
+
 ## 目的
 
 coding agent が first-party TypeScript adapter を通じ、Next.js repository の module、exported component、props、static relation、client boundary を JSON と PlantUML で取得できる。

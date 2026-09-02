@@ -14,6 +14,24 @@ package_sequence_key: "ISSUE-05"
 
 詳細: [Issue Plan Guide](../../../../../../docs/authoring/issue-plan.md)
 
+## Current v1 normative authority
+
+この節が唯一の現在の実装順序・受入正本です。後続の`Round N`節はhistorical evidence（非normative）として保存し、実装計画を上書きしません。新たなmaterial requirement/security/platform判断は追加せず、採択済みのIssue #8契約と実行可能なR23 registryだけをmaterializeします。
+
+```text
+package bytes
+  -> applicability matrix (Node permission)
+  -> frozen control closure + source graph seal
+  -> one provenance union + validated request/response
+  -> semantic decision
+  -> final publication decision (bytes and one measurement)
+  -> domain/root/manifest/stdout/stderr/exit
+```
+
+実装前の順序は、(1) package-only preflight、(2) project-relative controlsとJSONC/local-extends/membership、(3) source graph resolved/open/privacy、(4) process policy/observation、(5) provenance stage matrix、(6) semantic and publication projection、(7) executable coverage registryです。各段階はpositive/negative vector、schema、reference validatorを同時に追加し、caller-supplied graph/paths/roles/status/bytesを拒否します。`files`/`include`の空配列も明示値として扱い、defaultsは双方が無いときだけです。
+
+受入では、contract focused test、all contract/full pytest、mypy、ruff、SpecDock、pinned PlantUMLを順に実行します。Windows/OS process-level/将来wheel・s​​distはproductionまたは別migrationの計画契約として記録しますが、現時点で実測済みとは主張しません。fresh current-SHA Strictが`P0=0 / P1=0 / review_status=pass`になるまでproduction実装を開始せず、readinessを未確認のまま維持します。
+
 ## Planning Level
 
 - **selected level: `strict`**

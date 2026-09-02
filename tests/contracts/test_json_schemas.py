@@ -67,6 +67,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-package-applicability-v1",
         "next-applicability-decision-v1",
         "next-trusted-type-environment-v1",
+        "next-round23-authority-v1",
     }
     registry = Registry()
     for resource_name in resources:
@@ -101,6 +102,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-applicability-decision-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
+        "next-round23-authority-v1.schema.json",
         "run-manifest-v1.schema.json",
         "run-summary-v1.schema.json",
         "semantic-v1.schema.json",
@@ -191,6 +193,7 @@ def _next_source_plan(config_project: Mapping[str, object]) -> dict[str, object]
         "hard_exclusions": [".git", "node_modules", ".next", "out", "dist", "build", "coverage"],
         "limits": _next_limits(),
         "trusted_environment_digest": "7" * 64,
+        "source_graph": {"nodes": [], "edges": [], "open_edges": []},
     }
 
 

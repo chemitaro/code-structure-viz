@@ -1,5 +1,9 @@
 # Next runtime manifest v1
 
+## Current v1 normative authority
+
+runtime manifestはfinal publication decisionと同じsemantic decision、process observation、provenance、applicability、artifact descriptorを投影します。request-independent not-applicable/failure branchは未観測のrequest/config/toolchainを合成せず、applicable branchだけがNode observationを持ちます。legacy descriptorやfixtureはauthorityではありません。以下のRound節はhistorical evidence（非normative）です。
+
 Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
 `48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
 Runtime and trusted fixture attestation remain data-only pre-implementation

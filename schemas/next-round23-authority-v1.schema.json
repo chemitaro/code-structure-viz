@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-round23-authority-v1",
+  "title": "CodeStructureViz Next current-v1 authority bundle",
+  "description": "Closed data-only reference contract for the Round 23 decision, graph, process, provenance, and publication boundaries.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "decision_kind",
+    "package_projection",
+    "provenance",
+    "request",
+    "limits",
+    "source_plan",
+    "toolchain",
+    "trusted_environment",
+    "process_observation",
+    "run_context",
+    "projection",
+    "seal_digest"
+  ],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-round23-authority/v1"},
+    "version": {"const": 1},
+    "decision_kind": {"enum": ["request_independent_not_applicable", "request_independent_failure", "request_bound_failure", "request_bound_success"]},
+    "package_projection": {"$ref": "#/$defs/json_object"},
+    "provenance": {"$ref": "#/$defs/provenance"},
+    "request": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+    "limits": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+    "source_plan": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+    "toolchain": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+    "trusted_environment": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+    "process_observation": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+    "run_context": {"$ref": "#/$defs/run_context"},
+    "projection": {"$ref": "#/$defs/publication_projection"},
+    "seal_digest": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "json_object": {"type": "object"},
+    "observation_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "sha256"],
+      "properties": {
+        "schema": {"type": "string", "pattern": "^code-structure-viz\\.next-observation\\.[a-z_]+/v1$"},
+        "version": {"const": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "observed_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "value", "identity"],
+      "properties": {
+        "state": {"const": "observed"},
+        "value": {},
+        "identity": {"$ref": "#/$defs/observation_identity"}
+      }
+    },
+    "unobserved_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "value", "identity"],
+      "properties": {
+        "state": {"const": "unobserved"},
+        "value": {"const": null},
+        "identity": {"const": null}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "kind", "stage", "failure_code", "observed"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.next-provenance/v1"},
+        "version": {"const": 1},
+        "kind": {"enum": ["request_independent_not_applicable", "request_independent_failure", "request_bound_failure", "request_bound_success"]},
+        "stage": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+        "failure_code": {"anyOf": [{"type": "string", "pattern": "^CSV-NEXT-"}, {"type": "null"}]},
+        "observed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["applicability", "request", "limits", "source_plan", "toolchain", "trusted_environment", "compatibility", "process_launch", "budget"],
+          "properties": {
+            "applicability": {"oneOf": [{"$ref": "#/$defs/observed_row"}, {"$ref": "#/$defs/unobserved_row"}]},
+            "request": {"oneOf": [{"$ref": "#/$defs/observed_row"}, {"$ref": "#/$defs/unobserved_row"}]},
+            "limits": {"oneOf": [{"$ref": "#/$defs/observed_row"}, {"$ref": "#/$defs/unobserved_row"}]},
+            "source_plan": {"oneOf": [{"$ref": "#/$defs/observed_row"}, {"$ref": "#/$defs/unobserved_row"}]},
+            "toolchain": {"oneOf": [{"$ref": "#/$defs/observed_row"}, {"$ref": "#/$defs/unobserved_row"}]},
+            "trusted_environment": {"oneOf": [{"$ref": "#/$defs/observed_row"}, {"$ref": "#/$defs/unobserved_row"}]},
+            "compatibility": {"oneOf": [{"$ref": "#/$defs/observed_row"}, {"$ref": "#/$defs/unobserved_row"}]},
+            "process_launch": {"oneOf": [{"$ref": "#/$defs/observed_row"}, {"$ref": "#/$defs/unobserved_row"}]},
+            "budget": {"oneOf": [{"$ref": "#/$defs/observed_row"}, {"$ref": "#/$defs/unobserved_row"}]}
+          }
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "request_bound_success"}}}, "then": {"properties": {"stage": {"const": null}, "failure_code": {"const": null}}}},
+        {"if": {"properties": {"kind": {"const": "request_independent_not_applicable"}}}, "then": {"properties": {"stage": {"const": "applicability"}, "failure_code": {"const": "CSV-NEXT-APPLICABILITY-001"}}}}
+      ]
+    },
+    "run_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested_formats", "budget_requested", "budget_resolved", "budget_source", "stdout_selector"],
+      "properties": {
+        "requested_formats": {"type": "array", "items": {"enum": ["semantic-json", "plantuml"]}},
+        "budget_requested": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+        "budget_resolved": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+        "budget_source": {"enum": ["builtin", "repository", "explicit", "cli", "unobserved"]},
+        "stdout_selector": {"anyOf": [{"enum": ["manifest", "next:semantic-json", "next:plantuml"]}, {"type": "null"}]}
+      }
+    },
+    "publication_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "root_manifest", "stdout", "stderr_b64", "exit_code", "request", "limits", "source_plan", "toolchain", "trusted_environment", "process_observation"],
+      "properties": {
+        "domain": {"$ref": "#/$defs/json_object"},
+        "root_manifest": {"$ref": "#/$defs/json_object"},
+        "stdout": {"$ref": "#/$defs/json_object"},
+        "stderr_b64": {"type": "string"},
+        "exit_code": {"enum": [0, 1, 2, 3, 130]},
+        "request": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+        "limits": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+        "source_plan": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+        "toolchain": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+        "trusted_environment": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]},
+        "process_observation": {"anyOf": [{"$ref": "#/$defs/json_object"}, {"type": "null"}]}
+      }
+    }
+  }
+}

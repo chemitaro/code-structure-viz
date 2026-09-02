@@ -1,5 +1,9 @@
 # Stdout and stderr v1
 
+## Current v1 normative authority
+
+現在のstdout authorityは、semantic decisionを入力に一度だけsealしたfinal publication decisionです。summary、root manifest、selected artifact、typed unavailableのclosed unionをsealed bytesから投影し、callerのcandidate/status/chunk再注入、rerender、retryを許しません。selected copyのexactは全bytes、+1はpartial bytesなしの`CSV-NEXT-LIMIT-003`/publication-incomplete/exit 3で、semantic statusとartifact descriptorは保持します。canonical JSONはsort_keys、NFC、UTF-8、LFのみです。target failure rowsはtarget-related unavailableだけで、他branchに出ません。以下のRound節はhistorical evidence（非normative）です。
+
 `--stdout` は高々一回で、`manifest`、`python:semantic-json`、
 `python:plantuml`、`sqlalchemy:semantic-json`、`sqlalchemy:plantuml`、
 `next:semantic-json`、`next:plantuml` のclosed setから、選択domainと一致するものだけを受理する。

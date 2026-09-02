@@ -369,6 +369,23 @@
       <div class="callout warning">
         <strong>Round 15 状態:</strong> 三つの試行（初回connector-only、verification-only retry、content review follow-up）を別証跡として保存しています。content reviewの固定点は対象SHA <code>c3f8e4188ca715a29d60a7454a66390938bce496</code>、CI <code>33472932927</code>（7/7 green）で、判定は <code>review_status: fail</code>、P0=0、P1=13、P2=1、<code>implementation_ready: no</code>です。fresh current-SHA Strictは未実行・未確認、readinessは未確定、プロダクト実装は未着手です。三試行のSHAとfinding対応は <code>20260901t060000z-disc-strict-spec-review-round-15.md</code> に記録します。
       </div>
+      <section class="callout" aria-labelledby="current-v1-authority">
+        <h2 id="current-v1-authority">Current v1 normative authority（現在の唯一の正本）</h2>
+        <p>この章が人間向けHTMLにおける現在のauthorityです。下に続くRound 1〜22の説明はすべてhistorical evidence（非normative）であり、実装者が古い判断をfallbackとして選んではいけません。機械的な正本は <code>next-round23-authority-v1</code> schema、<code>next_reference_validation.py</code> のR23 validator、fixtureの実行可能なcriterion/vector registryです。</p>
+        <p class="flow">package.json direct dependency
+          → PackageApplicabilityMatrix（Node permission）
+          → frozen control closure + resolved/open source graph
+          → one provenance union + validated request/response
+          → semantic decision
+          → final publication decision（sealed bytes / one measurement）
+          → domain / root manifest / stdout / stderr / exit</p>
+        <div class="grid">
+          <article class="card"><h3>適用可否と設定</h3><p>直接の <code>dependencies</code>/<code>devDependencies</code> の <code>next</code> だけを package bytes から判定します。全non-applicableはconfig/source/Nodeを読まずexit 0、mixedはapplicable rootだけです。JSONCはBOM/comments/trailing commaを許可し、local <code>./...</code> extends、<code>files</code>/<code>include</code>、declaring path相対のbaseUrl/pathsを一つのresolverで閉じます。</p></article>
+          <article class="card"><h3>グラフと失敗</h3><p>frozen bytesから確実なstatic import/export、type role、literal dynamic import、supported requireだけをresolvedにします。コメント、property access、shadowed require、曖昧な構文はopenです。公開frontierはrepo-relativeまたはsource identity+byte spanのopaque identityだけで、raw unsafe specifierを出しません。</p></article>
+          <article class="card"><h3>processと公開</h3><p>ProcessLaunchPolicyと実測ProcessLaunchObservationを分離し、legacy descriptorは一方向viewです。portable fingerprintとlocal attestationを分けます。selected stdoutの+1はsemantic statusを変えず、descriptorを保持したtyped unavailableを一度だけ発行します。</p></article>
+        </div>
+        <p>provenanceはrequest-independent not-applicable/failureとrequest-bound failure/successの4 variantです。observed rowはfield schema/versionと実値SHA-256を持ち、failure後のsuffixだけがunobserved/nullです。Unicode 15.0.0 NFC、string export、namespace importもversioned closed contractとして扱います。これは実装前のdata-only契約であり、production Node/adapter、OS process-level証明、fresh current-SHA Strict passを意味しません。Strictが <code>P0=0 / P1=0 / review_status=pass</code> になるまでreadinessは未確認、production implementationは未着手です。</p>
+      </section>
     </header>
 
     <section>

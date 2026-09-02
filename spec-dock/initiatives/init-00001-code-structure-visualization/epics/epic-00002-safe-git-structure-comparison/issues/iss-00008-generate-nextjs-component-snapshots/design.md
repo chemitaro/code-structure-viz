@@ -14,6 +14,37 @@ package_sequence_key: "ISSUE-05"
 
 詳細: [Design Guide](../../../../../../docs/authoring/design.md)
 
+## Current v1 normative authority
+
+ここが現在の唯一の設計正本です。本文後半の`Round N`節はhistorical evidence（非normative）であり、後続実装が別のauthorityとして参照してはなりません。current v1の機械的な対応は`schemas/next-round23-authority-v1.schema.json`と`tests/contracts/next_reference_validation.py`のR23 validator/testです。
+
+```plantuml
+@startuml
+title Current v1: single authority chain
+left to right direction
+component "PackageApplicabilityMatrix\npackage bytes only" as A
+component "Frozen source seal\nconfig + graph" as S
+component "Provenance + validated request/response" as V
+component "Semantic decision" as D
+component "Final publication decision\nsealed bytes/measurements" as P
+component "domain / root / stdout / stderr / exit" as O
+A --> S
+S --> V
+V --> D
+D --> P
+P --> O
+note bottom of O : No external reconstruction or fallback
+@enduml
+```
+
+`PackageApplicabilityMatrix`が最初にpackage bytesから適用可否を閉じ、全non-applicableなら後続のconfig/source/Node観測は発生しません。applicable rootだけをtrusted frozen inventoryへ渡し、`SourceDiscoveryIntent`はroots、known controls、fixed rulesに限定します。seal内でJSONC、local extends、membership、compiler options、source graphを導出し、resolved/open edgeとsafe frontierをdigestへ含めます。
+
+`NextDecisionContext`/`NextPublicationContext`は全variantで同じsealed valuesを運びます。provenanceは四つのdiscriminator（request-independent not-applicable/failure、request-bound failure/success）とstage/code matrixを共有し、observed prefixの各値にfield schema/versionと実値digestを要求します。processは`ProcessLaunchPolicy`と`ProcessLaunchObservation`を分離し、legacy descriptorはobservationからの一方向compatibility viewに限ります。
+
+semantic rendererはdecisionだけを受け、publication finalizerは実際のcandidate bytesとmeasurementを一度sealします。summary/root-manifest/artifact/typed-unavailableはそのsealed bytesを返すだけで再render/retryしません。selected copy overrunはsemantic statusを変えず、persisted descriptorを保持したpublication-incomplete/exit 3です。canonical JSONはsort_keys/NFC/UTF-8/LF、path-only rowsはNFC UTF-8 bytes、object rowsはcanonical JSON bytesです。
+
+この設計はdata-only reference contractです。production adapter、OS process-level証明、Node runtimeの実測は未実施であり、fresh current-SHA Strict passまでimplementation readinessを確定しません。
+
 ## 設計目標
 
 - `next` domain の `snapshot` を、CLI から source acquisition、analysis、versioned JSON、PlantUML、manifest、diagnostic まで一つの vertical pipeline として設計する。

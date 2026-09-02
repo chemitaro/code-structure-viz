@@ -6,7 +6,7 @@ import json
 import re
 import sys
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from itertools import combinations
 from pathlib import Path
 from typing import Any, cast
@@ -30,6 +30,7 @@ from tests.contracts.next_reference_validation import (
     ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
     IDENTIFIER_CLASSIFICATION_SHA256,
     LIMIT_CONTRACTS,
+    R23_UNICODE_PROFILE_DIGEST,
     ROLE_ORDER,
     ROLE_PRECEDENCE,
     RUNTIME_PHYSICAL_TO_VIRTUAL,
@@ -55,6 +56,8 @@ from tests.contracts.next_reference_validation import (
     PartialSourceSeal,
     PreResponseFailureDecision,
     PublicationBoundaryDecision,
+    R23Decision,
+    R23PublicationBoundary,
     SourceAcquisitionError,
     SourceAcquisitionUnavailable,
     SourceDiscoveryIntent,
@@ -131,6 +134,18 @@ from tests.contracts.next_reference_validation import (
     process_launch_stable_fingerprint,
     process_observation_with_fingerprints,
     project_config_digest,
+    r23_applicability_projection,
+    r23_canonical_nfc,
+    r23_decision_projection,
+    r23_import_binding_member,
+    r23_process_launch_observation,
+    r23_process_launch_policy,
+    r23_provenance,
+    r23_resolve_config_subset,
+    r23_scan_module_plane,
+    r23_source_graph_from_frozen_bytes,
+    r23_string_export_disposition,
+    r23_unicode_profile,
     recompute_compatibility_id,
     recompute_export_graph_case,
     recompute_publication_projection_digest,
@@ -165,6 +180,14 @@ from tests.contracts.next_reference_validation import (
     validate_process_launch_observation,
     validate_proof,
     validate_published_projection,
+    validate_r23_applicability_projection,
+    validate_r23_coverage_index,
+    validate_r23_decision,
+    validate_r23_fixture_evidence_map,
+    validate_r23_process_launch_observation,
+    validate_r23_provenance,
+    validate_r23_publication,
+    validate_r23_source_graph,
     validate_request_envelope,
     validate_request_files,
     validate_response_envelope,
@@ -4994,7 +5017,7 @@ def test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift() -
     assert reader.seal_calls == 1
     assert reader.read_counts == {path: 1 for path in files}
 
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, FrozenInstanceError)):
         seal_source_acquisition(intent, InstrumentedSourceReader(files), final_plan=plan)  # type: ignore[call-arg]
 
     plan_only_intent = SourceDiscoveryIntent(
@@ -5818,7 +5841,11 @@ def test_round21_coverage_index_is_bidirectional_and_self_validating() -> None:
     }
 
     def check_index(candidate: dict[str, Any]) -> None:
-        evidence = candidate["criterion_evidence"]
+        evidence = {
+            key: value
+            for key, value in candidate["criterion_evidence"].items()
+            if key.startswith("round21.")
+        }
         assert set(evidence) == expected_criteria
         vector_owner: dict[str, str] = {}
         for criterion in sorted(expected_criteria):
@@ -10184,6 +10211,24 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round20-process-observation",
         "round20-stage-provenance",
         "round20-coverage-index",
+        "round23-applicability-authority",
+        "round23-config-grammar",
+        "round23-source-scanner",
+        "round23-source-graph",
+        "round23-provenance-union",
+        "round23-decision-authority",
+        "round23-process-observation",
+        "round23-publication-boundary",
+        "round23-string-export",
+        "round23-unicode-profile",
+        "round23-namespace-binding",
+        "round23-coverage-index",
+        "round23-projection-mutation",
+        "round23-frontier-privacy",
+        "round23-process-platform",
+        "round23-config-membership",
+        "round23-graph-digest",
+        "round23-current-authority",
     } <= set(fixture["positive"])
     assert {
         "cross-domain",
@@ -10274,6 +10319,24 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round20-process-observation-fake-identity",
         "round20-stage-provenance-mutation",
         "round20-coverage-mapping-mutation",
+        "round23-applicability-mutation",
+        "round23-config-injection",
+        "round23-source-open-edge",
+        "round23-source-graph-substitution",
+        "round23-provenance-digest-mutation",
+        "round23-decision-input-substitution",
+        "round23-process-identity-mutation",
+        "round23-publication-plus-one",
+        "round23-string-export-reason-mutation",
+        "round23-unicode-profile-mutation",
+        "round23-namespace-star-mutation",
+        "round23-coverage-swap",
+        "round23-projection-status-mutation",
+        "round23-frontier-raw-leak",
+        "round23-process-windows",
+        "round23-config-files-include",
+        "round23-graph-byte-mutation",
+        "round23-current-authority-history",
     } <= set(fixture["negative"])
 
     mapping = fixture["criterion_test_map"]
@@ -10297,6 +10360,7 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         *(f"round21.p1-{index}" for index in range(1, 6)),
         "round21.p2-1",
         *(f"round22.rg-{index:02d}" for index in range(1, 15)),
+        *(f"round23.rg-{index:02d}" for index in range(1, 19)),
     }
     assert set(mapping) == expected_criteria
     mapped_tests = {name for names in mapping.values() for name in names}
@@ -10711,3 +10775,493 @@ def test_round22_runtime_registry_executes_vectors_and_named_validators() -> Non
     wrong_criterion[0]["criterion"] = "round22.rg-99"
     with pytest.raises(AssertionError):
         validate_runtime_vector_registry(wrong_criterion, known_vector_ids=known_vector_ids)
+
+
+def _round23_context() -> NextRunContext:
+    return {
+        "requested_formats": ["semantic-json", "plantuml"],
+        "budget_requested": 500,
+        "budget_resolved": 500,
+        "budget_source": "explicit",
+        "stdout_selector": "next:semantic-json",
+    }
+
+
+def _round23_bound_request() -> dict[str, Any]:
+    return {
+        "schema": "code-structure-viz.next-adapter-request/v1",
+        "request_id": "1" * 64,
+        "projects": [{"root": "."}],
+        "files": [{"path": "src/App.tsx", "size_bytes": 1, "sha256": "2" * 64}],
+        "limits": {"max_model_records": 10000},
+    }
+
+
+def _round23_bound_values() -> dict[str, Any]:
+    return {
+        "applicability": {"aggregate_state": "applicable"},
+        "request": _round23_bound_request(),
+        "limits": {"max_model_records": 10000},
+        "source_plan": {"seal_id": "3" * 64},
+        "toolchain": {"node_version": "22.14.0"},
+        "trusted_environment": {"profile": "next-trusted-profile-v1"},
+        "compatibility": {"profile": "next-compatibility-v1"},
+        "process_launch": {"state": "verified"},
+        "budget": {"requested": 500, "resolved": 500, "source": "explicit"},
+    }
+
+
+def test_round23_rg_01_applicability_is_package_first_and_project_filtered() -> None:
+    package_bytes = {
+        "apps/next/package.json": b'{"dependencies":{"next":"15.0.0"}}',
+        "apps/plain/package.json": b'{"name":"plain"}',
+    }
+    projection = r23_applicability_projection(package_bytes, ("apps/next", "apps/plain"))
+    validate_r23_applicability_projection(projection)
+    assert projection["project_filter"] == ["apps/next"]
+    assert projection["node_probe"] == {"permission": "permitted", "performed": True}
+    malformed = r23_applicability_projection(
+        {"package.json": b'{"dependencies":{"next":false}}'}, (".",)
+    )
+    validate_r23_applicability_projection(malformed)
+    assert malformed["node_probe"]["performed"] is False
+    assert malformed["diagnostics"][0]["code"] == "CSV-NEXT-APPLICABILITY-002"
+    dual = r23_applicability_projection(
+        {
+            "apps/dual/package.json": b'{"dependencies":{"next":"14.2.0"}'
+            b',"devDependencies":{"next":"15.0.0"}}'
+        },
+        ("apps/dual",),
+    )
+    validate_r23_applicability_projection(dual)
+    assert dual["outcome"] == "complete"
+
+
+def test_round23_rg_02_config_subset_has_one_closed_jsonc_grammar() -> None:
+    configs = {
+        "tsconfig.json": (
+            b'\xef\xbb\xbf{ // root\n "extends":"./config/base.json", '
+            b'"include":["src/**/*.tsx", /* comment */],\n}'
+        ),
+        "config/base.json": b'{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]},},}',
+    }
+    resolved = r23_resolve_config_subset(configs)
+    assert resolved["membership"] == {
+        "kind": "include",
+        "patterns": ["src/**/*.tsx"],
+        "exclude": [],
+    }
+    assert resolved["compiler_options"]["allowJs"] is True
+    assert resolved["compiler_options"]["baseUrl"] == "config"
+    assert resolved["compiler_options"]["paths"]["@/*"] == ["config/src/*"]
+    for bad in (
+        {"tsconfig.json": b'{"extends":"base.json"}'},
+        {"tsconfig.json": b'{"files":[],"include":[]}'},
+        {"tsconfig.json": b'{"compilerOptions":{"plugins":[]}}'},
+        {
+            "tsconfig.json": b'{"extends":"./base.json"}',
+            "base.json": b'{"extends":"./tsconfig.json"}',
+        },
+    ):
+        with pytest.raises(SourceAcquisitionError):
+            r23_resolve_config_subset(bad)
+
+
+def test_round23_rg_03_source_scanner_preserves_role_and_open_uncertainty() -> None:
+    source = (
+        'import type {T} from "./types"; import "./side"; '
+        'const x = import("pkg"); const require = () => null; obj.require("hidden");'
+    )
+    rows = r23_scan_module_plane(source)
+    assert any(row["role"] == "type" and row["specifier"] == "./types" for row in rows)
+    assert any(row["specifier"] == "./side" and row["certainty"] == "resolved" for row in rows)
+    assert any(row["specifier"] is None and row["certainty"] == "open" for row in rows)
+    tsx_graph = r23_source_graph_from_frozen_bytes(
+        {"src/View.tsx": b"export const View = () => <span />;"}
+    )
+    validate_r23_source_graph(tsx_graph)
+    assert [node["path"] for node in tsx_graph["nodes"]] == ["src/View.tsx"]
+
+
+def test_round23_rg_04_source_graph_is_frozen_resolved_or_private_open() -> None:
+    files = {
+        "src/entry.ts": b'import type {T} from "./types"; import "./missing"; import("pkg");',
+        "src/types.ts": b"export type T = string;",
+    }
+    graph = r23_source_graph_from_frozen_bytes(files, source_identity="seal-a")
+    validate_r23_source_graph(graph)
+    assert any(edge["role"] == "type" for edge in graph["edges"])
+    frontiers = [edge["frontier"] for edge in graph["open_edges"]]
+    assert {item["kind"] for item in frontiers} >= {"unresolved_relative", "external_package"}
+    assert all("raw" not in edge and "specifier" not in edge for edge in graph["open_edges"])
+    substituted = copy.deepcopy(graph)
+    substituted["open_edges"][0]["frontier"] = {
+        "kind": "external_package",
+        "safe_specifier": "secret",
+    }
+    with pytest.raises(AssertionError):
+        validate_r23_source_graph(substituted)
+
+
+def test_round23_rg_05_provenance_is_four_kind_value_bound_union() -> None:
+    values = _round23_bound_values()
+    success = r23_provenance(
+        kind="request_bound_success", stage=None, failure_code=None, observed_values=values
+    )
+    validate_r23_provenance(success)
+    failure = r23_provenance(
+        kind="request_independent_failure",
+        stage="source_control",
+        failure_code="CSV-NEXT-CONFIG-001",
+        observed_values={key: values[key] for key in ("applicability", "limits", "source_plan")},
+    )
+    validate_r23_provenance(failure)
+    assert failure["observed"]["request"]["state"] == "unobserved"
+    mutated = copy.deepcopy(success)
+    mutated["observed"]["limits"]["value"]["max_model_records"] = 1
+    with pytest.raises(AssertionError):
+        validate_r23_provenance(mutated)
+
+
+def test_round23_rg_06_decision_projection_has_no_request_independent_defaults() -> None:
+    matrix = r23_applicability_projection({"package.json": b'{"name":"plain"}'}, (".",))
+    decision = R23Decision(
+        decision_kind="request_independent_not_applicable",
+        package_projection=matrix,
+        provenance=r23_provenance(
+            kind="request_independent_not_applicable",
+            stage="applicability",
+            failure_code="CSV-NEXT-APPLICABILITY-001",
+            observed_values={"applicability": matrix["matrix"]},
+        ),
+        request=None,
+        limits=None,
+        source_plan=None,
+        toolchain=None,
+        trusted_environment=None,
+        process_observation=None,
+        run_context={
+            "requested_formats": ["semantic-json"],
+            "budget_requested": None,
+            "budget_resolved": None,
+            "budget_source": "unobserved",
+            "stdout_selector": None,
+        },
+    )
+    validate_r23_decision(decision)
+    projection = r23_decision_projection(decision)
+    assert projection["domain"]["request_independent"] is True
+    assert projection["exit_code"] == 0
+    with pytest.raises((TypeError, FrozenInstanceError)):
+        cast(Any, decision).request = {}
+
+
+def test_round23_rg_07_process_policy_observation_separates_portable_and_local_identity() -> None:
+    policy = r23_process_launch_policy()
+    unavailable = r23_process_launch_observation(policy, state="unavailable")
+    validate_r23_process_launch_observation(unavailable, policy)
+    assert unavailable["node_realpath"] is None
+    verified = r23_process_launch_observation(policy, state="verified", host_os="linux")
+    validate_r23_process_launch_observation(verified, policy)
+    assert verified["stable_toolchain_fingerprint"] != verified["local_process_attestation_digest"]
+    mutated = copy.deepcopy(verified)
+    mutated["adapter_sha256"] = "c" * 64
+    with pytest.raises(AssertionError):
+        validate_r23_process_launch_observation(mutated, policy)
+    for version in ("21.9.0", "22.14.0-beta.1", "not-semver"):
+        invalid_version = copy.deepcopy(verified)
+        invalid_version["node_version"] = version
+        invalid_version["actual_image"]["version"] = version
+        invalid_version["post_spawn_identity"]["version"] = version
+        with pytest.raises(AssertionError):
+            validate_r23_process_launch_observation(invalid_version, policy)
+
+
+def test_round23_rg_08_publication_owns_exact_bytes_and_selected_overflow() -> None:
+    candidates = {
+        "summary": b"summary",
+        "manifest": b"manifest",
+        "next:semantic-json": b"semantic",
+        "next:plantuml": b"@startuml\n@enduml\n",
+    }
+    exact = R23PublicationBoundary(
+        semantic_status="complete",
+        selector="next:semantic-json",
+        candidates=candidates,
+        selected_limit=8,
+    )
+    validate_r23_publication(exact)
+    assert exact.selected_stdout == b"semantic"
+    overflow = R23PublicationBoundary(
+        semantic_status="complete",
+        selector="next:semantic-json",
+        candidates=candidates,
+        selected_limit=7,
+    )
+    validate_r23_publication(overflow)
+    assert overflow.selected_copy_status == "unavailable"
+    assert overflow.semantic_status == "complete"
+    assert overflow.measurement_count == 1
+    external = candidates
+    _ = R23PublicationBoundary(
+        semantic_status="complete", selector=None, candidates=external, selected_limit=99
+    )
+    external["summary"] = b"attacker"
+    assert exact.candidates["summary"] == b"summary"
+
+
+def test_round23_rg_09_string_export_uses_target_or_export_owner() -> None:
+    assert r23_string_export_disposition(
+        explicit_path_target=True,
+        proven_non_component=False,
+        promised_component_binding=False,
+    ) == {
+        "disposition": "explicit_target_failure",
+        "code": "CSV-NEXT-TARGET-001",
+        "outcome": "payload_unavailable",
+    }
+    assert (
+        r23_string_export_disposition(
+            explicit_path_target=False,
+            proven_non_component=True,
+            promised_component_binding=False,
+        )["outcome"]
+        == "complete"
+    )
+    assert (
+        r23_string_export_disposition(
+            explicit_path_target=False,
+            proven_non_component=False,
+            promised_component_binding=True,
+        )["code"]
+        == "CSV-NEXT-EXPORT-001"
+    )
+
+
+def test_round23_rg_10_unicode_profile_is_pinned_and_versioned() -> None:
+    profile = r23_unicode_profile()
+    assert profile["profile_id"] == "unicode-15.0.0-nfc-v1"
+    assert profile["unicode_version"] == "15.0.0"
+    assert profile["profile_digest"] == R23_UNICODE_PROFILE_DIGEST
+    assert r23_canonical_nfc("e\u0301") == "é"
+    assert r23_canonical_nfc("\u212b") == "Å"
+    assert r23_canonical_nfc("a\u0308") != "a\u0308"
+    with pytest.raises(AssertionError):
+        r23_canonical_nfc("\u03a9\u0301")
+
+
+def test_round23_rg_11_namespace_import_is_a_closed_binding_member() -> None:
+    namespace = r23_import_binding_member(
+        binding_kind="namespace",
+        local_name="ns",
+        source="pkg",
+        role="value",
+    )
+    assert namespace["imported_name"] is None
+    named = r23_import_binding_member(
+        binding_kind="named",
+        local_name="Button",
+        source="./Button",
+        role="value",
+        imported_name="Button",
+    )
+    assert named["imported_name"] == "Button"
+    with pytest.raises(AssertionError):
+        r23_import_binding_member(
+            binding_kind="namespace",
+            local_name="ns",
+            source="pkg",
+            role="value",
+            imported_name="*",
+        )
+
+
+def test_round23_rg_12_coverage_index_is_bidirectional_and_substantive() -> None:
+    vector_ids = {f"r23-positive-{index:02d}" for index in range(1, 19)} | {
+        f"r23-negative-{index:02d}" for index in range(1, 19)
+    }
+    entries = [
+        {
+            "criterion": f"r23.rg-{index:02d}",
+            "positive_vectors": [f"r23-positive-{index:02d}"],
+            "negative_vectors": [f"r23-negative-{index:02d}"],
+            "producer": "runtime_vector_round23_applicability",
+            "validator": "validate_r23_applicability_projection",
+            "tests": ["test_round23_rg_12_coverage_index_is_bidirectional_and_substantive"],
+        }
+        for index in range(1, 19)
+    ]
+    validate_r23_coverage_index(
+        entries,
+        vector_ids=vector_ids,
+        test_names={"test_round23_rg_12_coverage_index_is_bidirectional_and_substantive"},
+    )
+    mutated = copy.deepcopy(entries)
+    mutated[0]["criterion"] = "r23.rg-18"
+    with pytest.raises(AssertionError):
+        validate_r23_coverage_index(
+            mutated,
+            vector_ids=vector_ids,
+            test_names={"test_round23_rg_12_coverage_index_is_bidirectional_and_substantive"},
+        )
+    fixture = json.loads(
+        (ROOT / "tests" / "fixtures" / "next_contract_vectors.json").read_text(encoding="utf-8")
+    )
+    records = fixture["runtime_vector_registry"]
+    known_vector_ids = set(fixture["positive"]) | set(fixture["negative"])
+    validate_runtime_vector_registry(records, known_vector_ids=known_vector_ids)
+    assert execute_runtime_vector_registry(records, known_vector_ids=known_vector_ids) == {
+        record["vector_id"] for record in records
+    }
+    declared_tests = set(
+        re.findall(
+            r"^def (test_[A-Za-z0-9_]+)\(", Path(__file__).read_text(encoding="utf-8"), re.MULTILINE
+        )
+    )
+    round23_evidence = {
+        key: value
+        for key, value in fixture["criterion_evidence"].items()
+        if key.startswith("round23.")
+    }
+    validate_r23_fixture_evidence_map(round23_evidence, records, test_names=declared_tests)
+    evidence_mutation = copy.deepcopy(round23_evidence)
+    evidence_mutation["round23.rg-01"]["negative_vectors"] = ["round23-runtime-config-mutation"]
+    with pytest.raises(AssertionError):
+        validate_r23_fixture_evidence_map(evidence_mutation, records, test_names=declared_tests)
+
+
+def test_round23_rg_13_decision_is_the_only_publication_input() -> None:
+    package = r23_applicability_projection(
+        {"package.json": b'{"dependencies":{"next":"15"}}'}, (".",)
+    )
+    values = _round23_bound_values()
+    failure_provenance = r23_provenance(
+        kind="request_bound_failure",
+        stage="response_validation",
+        failure_code="CSV-NEXT-PROTOCOL-001",
+        observed_values=values,
+    )
+    decision = R23Decision(
+        decision_kind="request_bound_failure",
+        package_projection=package,
+        provenance=failure_provenance,
+        request=values["request"],
+        limits=values["limits"],
+        source_plan=values["source_plan"],
+        toolchain=values["toolchain"],
+        trusted_environment=values["trusted_environment"],
+        process_observation=values["process_launch"],
+        run_context=_round23_context(),
+    )
+    validate_r23_decision(decision)
+    first = r23_decision_projection(decision)
+    first["domain"]["status"] = "complete"
+    second = r23_decision_projection(decision)
+    assert second["domain"]["status"] == "payload_unavailable"
+    assert second["root_manifest"]["status"] == second["domain"]["status"]
+    assert second["exit_code"] == 3
+
+
+def test_round23_rg_14_open_frontier_has_safe_public_identity_only() -> None:
+    graph = r23_source_graph_from_frozen_bytes(
+        {"src/a.ts": b'import(name); import("external-package");'}
+    )
+    validate_r23_source_graph(graph)
+    assert all("raw" not in edge and "specifier" not in edge for edge in graph["open_edges"])
+    assert any(edge["frontier"]["kind"] == "opaque_occurrence" for edge in graph["open_edges"])
+
+
+def test_round23_rg_15_process_platform_scope_rejects_windows_and_toctou() -> None:
+    policy = r23_process_launch_policy()
+    observation = r23_process_launch_observation(policy, state="verified", host_os="linux")
+    validate_r23_process_launch_observation(observation, policy)
+    windows = copy.deepcopy(observation)
+    windows["host_os"] = "windows"
+    with pytest.raises(AssertionError):
+        validate_r23_process_launch_observation(windows, policy)
+    toctou = copy.deepcopy(observation)
+    toctou["toctou"] = "replacement"
+    with pytest.raises(AssertionError):
+        validate_r23_process_launch_observation(toctou, policy)
+
+
+def test_round23_rg_16_config_files_and_include_are_explicit_authority() -> None:
+    files = r23_resolve_config_subset({"tsconfig.json": b'{"files":[]}'})
+    assert files["membership"]["kind"] == "files"
+    assert files["membership"]["patterns"] == []
+    include = r23_resolve_config_subset({"tsconfig.json": b'{"include":[]}'})
+    assert include["membership"]["kind"] == "include"
+    assert include["membership"]["patterns"] == []
+    defaults = r23_resolve_config_subset({"tsconfig.json": b"{}"})
+    assert defaults["membership"]["kind"] == "default"
+
+
+def test_round23_rg_17_graph_digest_binds_source_bytes_and_edge_occurrence() -> None:
+    files = {"src/a.ts": b'import("./b");', "src/b.ts": b"export const b=1;"}
+    graph = r23_source_graph_from_frozen_bytes(files, source_identity="seal-1")
+    validate_r23_source_graph(graph)
+    changed = r23_source_graph_from_frozen_bytes(
+        {"src/a.ts": b'import("./b");', "src/b.ts": b"export const c=1;"}, source_identity="seal-1"
+    )
+    assert changed["graph_digest"] != graph["graph_digest"]
+    changed_identity = r23_source_graph_from_frozen_bytes(files, source_identity="seal-2")
+    assert changed_identity["graph_digest"] != graph["graph_digest"]
+
+
+def test_round23_rg_18_current_schema_and_history_contract_are_explicit() -> None:
+    schema = json.loads(
+        (ROOT / "schemas" / "next-round23-authority-v1.schema.json").read_text(encoding="utf-8")
+    )
+    assert schema["$id"].endswith("next-round23-authority-v1")
+    assert schema["additionalProperties"] is False
+    package = r23_applicability_projection(
+        {"package.json": b'{"dependencies":{"next":"15"}}'}, (".",)
+    )
+    values = _round23_bound_values()
+    decision = R23Decision(
+        decision_kind="request_bound_success",
+        package_projection=package,
+        provenance=r23_provenance(
+            kind="request_bound_success", stage=None, failure_code=None, observed_values=values
+        ),
+        request=values["request"],
+        limits=values["limits"],
+        source_plan=values["source_plan"],
+        toolchain=values["toolchain"],
+        trusted_environment=values["trusted_environment"],
+        process_observation=values["process_launch"],
+        run_context=_round23_context(),
+    )
+    _validator("next-round23-authority-v1.schema.json").validate(decision.as_dict())
+    for path in (
+        ROOT
+        / "spec-dock"
+        / "initiatives"
+        / "init-00001-code-structure-visualization"
+        / "epics"
+        / "epic-00002-safe-git-structure-comparison"
+        / "issues"
+        / "iss-00008-generate-nextjs-component-snapshots"
+        / "requirement.md",
+        ROOT
+        / "spec-dock"
+        / "initiatives"
+        / "init-00001-code-structure-visualization"
+        / "epics"
+        / "epic-00002-safe-git-structure-comparison"
+        / "issues"
+        / "iss-00008-generate-nextjs-component-snapshots"
+        / "design.md",
+        ROOT
+        / "spec-dock"
+        / "initiatives"
+        / "init-00001-code-structure-visualization"
+        / "epics"
+        / "epic-00002-safe-git-structure-comparison"
+        / "issues"
+        / "iss-00008-generate-nextjs-component-snapshots"
+        / "plan.md",
+    ):
+        text = path.read_text(encoding="utf-8")
+        assert "Current v1 normative authority" in text
+        assert "historical" in text.lower()
