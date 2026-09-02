@@ -46,6 +46,42 @@
     {
       "if": {"properties": {"kind": {"const": "request_independent"}, "stage": {"const": "trust_validation"}}},
       "then": {"properties": {"observed": {"$ref": "#/$defs/trust_observed"}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent"}, "stage": {"enum": ["target_resolution", "stdin_encode", "adapter_heap", "node_discovery", "node_spawn", "node_timeout", "node_process", "adapter_stderr_capture", "adapter_stdout_capture", "response_raw_bytes", "response_decode", "response_protocol", "response_schema", "response_validation", "model_validation", "public_stderr_capture"]}}},
+      "then": {"properties": {"observed": {"$ref": "#/$defs/late_observed"}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent"}}},
+      "then": {
+        "oneOf": [
+          {"properties": {"failure_code": {"const": "CSV-NEXT-CONFIG-001"}, "stage": {"const": "config_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-CONFIG-002"}, "stage": {"const": "config_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-PROJECT-001"}, "stage": {"const": "project_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-PROJECT-002"}, "stage": {"const": "project_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-SOURCE-001"}, "stage": {"const": "source_read"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-SOURCE-002"}, "stage": {"const": "source_integrity"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-SOURCE-003"}, "stage": {"enum": ["source_selection", "source_read", "source_integrity"]}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-TARGET-001"}, "stage": {"const": "target_resolution"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-TRUST-001"}, "stage": {"const": "trust_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-TRUST-002"}, "stage": {"const": "trust_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-TRUST-003"}, "stage": {"const": "trust_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-001"}, "stage": {"const": "node_discovery"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-002"}, "stage": {"const": "node_spawn"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-003"}, "stage": {"const": "node_timeout"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-004"}, "stage": {"const": "node_process"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-001"}, "stage": {"const": "source_read"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-002"}, "stage": {"const": "source_selection"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-003"}, "stage": {"enum": ["adapter_stdout_capture", "adapter_stderr_capture", "response_raw_bytes", "response_decode", "public_stderr_capture"]}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-004"}, "stage": {"const": "adapter_heap"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-005"}, "stage": {"const": "model_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-PROTOCOL-001"}, "stage": {"enum": ["stdin_encode", "response_decode", "response_protocol", "response_schema", "response_validation"]}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-EXPORT-001"}, "stage": {"const": "response_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-IDENTITY-001"}, "stage": {"const": "response_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-FLOW-001"}, "stage": {"const": "response_validation"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-TYPE-001"}, "stage": {"const": "response_validation"}}}
+        ]
+      }
     }
   ],
   "$defs": {
@@ -100,6 +136,20 @@
       "allOf": [
         {"$ref": "#/$defs/observation_map"},
         {"properties": {"request": {"$ref": "#/$defs/unobserved"}, "limits": {"$ref": "#/$defs/observed"}, "source_plan": {"$ref": "#/$defs/observed"}, "toolchain": {"$ref": "#/$defs/observed"}, "trusted_environment": {"$ref": "#/$defs/observed"}, "compatibility": {"$ref": "#/$defs/observed"}, "process_launch": {"$ref": "#/$defs/observed"}}}
+      ]
+    },
+    "late_observed": {
+      "allOf": [
+        {"$ref": "#/$defs/observation_map"},
+        {"properties": {
+          "request": {"$ref": "#/$defs/unobserved"},
+          "limits": {"$ref": "#/$defs/observed"},
+          "source_plan": {"$ref": "#/$defs/observed"},
+          "toolchain": {"$ref": "#/$defs/observed"},
+          "trusted_environment": {"$ref": "#/$defs/observed"},
+          "compatibility": {"$ref": "#/$defs/observed"},
+          "process_launch": {"$ref": "#/$defs/observed"}
+        }}
       ]
     }
   }

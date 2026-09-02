@@ -755,3 +755,58 @@ implementation_ready=no` を、production実装前の機械検証可能な要件
 path-only orderはNFC UTF-8 bytes、object rowsはcanonical JSON bytesとし、validatorはsubmitted order
 をsort前に検査する。Round18の各要件にはcaller authority substitution、exact/+1、schema branch、
 reason equality、逆順path、HTML validation-orderのpositive/negative testを対応付ける。
+
+### Round 20: applicability、source derivation、provenance を単一 authority にする
+
+Round 20 Strict は、reviewed SHA `aba6509ae818f8b959aa31276a6e8f5d6956680a` に対して
+`P0=0 / P1=6 / P2=1 / review_status=fail / implementation_ready=no` だった。この判定は
+historical recordとして保持し、fresh current-SHA Strictはpending、readinessは未確認、production
+implementationは未着手とする。Round 20で閉じるのは、実装前の契約・schema・reference validator・
+fixtureであり、Node/Next adapterの実装開始ではない。
+
+1. **PackageApplicabilityMatrix:** プロジェクトrootごとに凍結した `package.json` を一度だけ厳密に
+   parseし、`dependencies.next` または `devDependencies.next` が非空文字列である場合だけ
+   `applicable` とする。packageがない場合は `non_applicable/missing_package`、direct Nextがない場合は
+   `non_applicable/no_direct_next`、duplicate key、BOM/UTF-8/JSON、table型、version型の異常は
+   `malformed/malformed_package` とする。indirect dependency、lockfile、directory名、configだけでは
+   applicableにしない。全rootがnon-applicableならNodeをprobeせず閉じた `not_applicable` runとする。
+   一つでもmalformedならmatrix全体をunavailableにする。
+2. **config と membership:** control候補はknown project-root candidatesだけを先に読む。JSONCは文字列外の
+   BOM、コメント、trailing commaだけを許し、duplicate key、型異常、unsafe `..`、package extends、
+   extends array、plugins/typeRoots/types、invalid module/moduleResolutionをtyped fail-closedにする。
+   include/excludeはfnmatchではなくsegment単位の `*`、`?`、whole-segment `**` grammarで解決し、
+   control read/parse failureを空config・partial empty objectへ置換しない。source membership、source roots、
+   effective roles、local extends、final planは凍結control bytesとtrusted inventoryからseal内部で導出する。
+3. **source graph:** `SourceAcquisitionSeal`が保持するfrozen bytes、resolved relative imports、local extends、
+   project ownershipからraw graphを独立導出する。reader/requestが注入したgraphや、edgeを削除してdigestを
+   再計算したgraphはauthorityではない。SourceFailureLedgerとlocalityの判断はこのseal-owned graphだけを使う。
+4. **source integrity:** source resultは `CompleteSourceSeal | PartialSourceSeal | SourceAcquisitionUnavailable |
+   SourceIntegrityFatal` のclosed unionである。revision drift、digest/size不整合、duplicate/post-seal readは
+   `source_integrity_fatal`、controlまたは隔離不能read failureは `CSV-NEXT-SOURCE-003`/
+   `payload_unavailable`、proofされたlocal safe subsetだけは `CSV-NEXT-SOURCE-001`/`partial_safe` とする。
+   それぞれのstage、manifest有無、payload有無、stdout reason、exitを一つのdecision projectionへ写し、
+   未カバーのfatal branchを残さない。
+5. **process observation:** `next-process-launch-observation-v1` は `fixture` と `production` のclosed unionで、
+   productionはdarwin/linuxだけを対象にOS-native Node realpath、hash/version、hash時/spawn時file identity、
+   verified-open handle、OS-specific spawn primitive、post-spawn equality、FD lifecycle、process group、
+   TOCTOU failure pointを要求する。unavailable/not_applicableはidentityを捏造せず明示的nullで表す。
+   fixtureはreference evidence専用で、host executableを触らないreference testをprocess-level acceptance済み
+   と表現しない。実際のlaunch observationはtoolchain/fingerprint/manifestの単一authorityになる。
+6. **stage-dependent provenance:** request-independent contextはfailure stage/codeと同じclosed validatorを使い、
+   そのstageまでに観測したprefixだけを `observed`、後続を `unobserved` とする。request、limits、source plan、
+   toolchain、trusted environment、process、compatibility、budgetのstate/valueと、requested formats、selector、
+   budget requested/resolved/sourceの相関を同じshapeで検証する。normal/request-independentの
+   `next-config.request_independent` は必須の排他的boolean branchであり、後段の値を早期failureに注入しない。
+7. **coverage:** Round 20および過去のcriterionは、fixture存在やHTML文字列ではなく、substantive positive/negative
+   reference test名へbidirectionalに対応する。fixture indexのcriterion→test mapとtest側のmutation evidenceを
+   一緒に検証し、誤ったtest名・未実装のplaceholder・P1/P2の取り違えを受理しない。
+
+Round 20の機械的対応は `test_round20_package_applicability_matrix_is_direct_dependency_only`、
+`test_round20_explicit_config_candidates_cannot_hide_package_applicability`、
+`test_round20_source_control_uses_segment_grammar_and_fail_closed_control_reads`、
+`test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection`、
+`test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`、
+`test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_identity`、
+`test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch` および
+`test_round20_fixture_coverage_index_is_substantive` である。local contractがgreenでもStrict passや
+implementation readinessを推測せず、fresh current-SHA Strict後にのみ次の実装判断を行う。

@@ -134,6 +134,31 @@ Round 19 evidence is covered by
 schema tests for `next-provenance-v1`. Fresh current-SHA Strict is pending,
 readiness is unconfirmed, and production implementation is absent.
 
+## Round 20 source applicability and manifest authority
+
+The root manifest does not invent a Next project when acquisition has not
+observed one. `PackageApplicabilityMatrix` is derived from the frozen
+project-root package bytes and direct `dependencies.next`/
+`devDependencies.next` values. An all-non-applicable matrix selects the closed
+not-applicable branch without a Node probe. Missing/non-direct packages and
+malformed package evidence remain distinguishable; malformed evidence is not
+silently treated as an empty project.
+
+Control discovery and source membership are derived inside the sealed source
+acquisition from known root controls, strict JSONC, segment glob grammar, and
+the frozen inventory. The source graph is recomputed from frozen bytes and
+resolved ownership/import edges. A caller-provided graph, edge deletion, or
+digest recomputation cannot alter the manifest's source authority.
+
+The source result is projected once as `CompleteSourceSeal`, `PartialSourceSeal`,
+`SourceAcquisitionUnavailable`, or `SourceIntegrityFatal`. The resulting
+diagnostic code, outcome, payload/manifest availability, stdout reason, and exit
+are then copied to the root manifest. Round 20 reference evidence is
+`test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`
+and `test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection`.
+Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
+production implementation is absent.
+
 ## Round 17 observed launch and publication provenance
 
 The process-launch descriptor is an observed boundary value, not a default

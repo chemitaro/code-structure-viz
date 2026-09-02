@@ -16,7 +16,9 @@
   },
   "oneOf": [
     {"$ref": "#/$defs/fixture"},
-    {"$ref": "#/$defs/production"}
+    {"$ref": "#/$defs/production"},
+    {"$ref": "#/$defs/production_unavailable"},
+    {"$ref": "#/$defs/production_not_applicable"}
   ],
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -104,6 +106,7 @@
           "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point"],
           "properties": {
             "kind": {"const": "production"},
+            "node_status": {"const": "available"},
             "host_os": {"enum": ["darwin", "linux"]},
             "node_realpath": {"$ref": "#/$defs/absolute_path"},
             "node_sha256": {"$ref": "#/$defs/sha256"},
@@ -127,16 +130,59 @@
           "then": {"properties": {"spawn_primitive": {"const": "linux-posix-spawn-verified-fd"}}}
         },
         {
-          "if": {"properties": {"node_status": {"const": "available"}}},
-          "then": {
-            "properties": {
-              "file_identity_at_hash": {"$ref": "#/$defs/file_identity"},
-              "file_identity_at_spawn": {"$ref": "#/$defs/file_identity"}
-            }
-          }
-        },
-        {
           "not": {"properties": {"file_identity_at_hash": {"const": {}}}}
+        }
+      ]
+    },
+    "production_unavailable": {
+      "allOf": [
+        {"$ref": "#/$defs/common_process"},
+        {
+          "type": "object",
+          "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point"],
+          "properties": {
+            "kind": {"const": "production"},
+            "node_status": {"const": "unavailable"},
+            "host_os": {"enum": ["darwin", "linux", "unknown"]},
+            "argv": {"const": ["<unavailable>", "/.code-structure-viz/next-adapter.mjs"]},
+            "node_realpath": {"type": "null"},
+            "node_sha256": {"type": "null"},
+            "node_version": {"type": "null"},
+            "file_identity_at_hash": {"type": "null"},
+            "file_identity_at_spawn": {"type": "null"},
+            "verified_open_handle": {"type": "null"},
+            "spawn_primitive": {"type": "null"},
+            "post_spawn_identity_check": {"type": "null"},
+            "fd_lifecycle": {"type": "null"},
+            "toctou_failure_point": {"enum": ["node-discovery", "node-open", "node-hash", "node-spawn"]}
+          },
+          "not": {"anyOf": [{"required": ["fixture_id"]}, {"required": ["identity_token"]}]}
+        }
+      ]
+    },
+    "production_not_applicable": {
+      "allOf": [
+        {"$ref": "#/$defs/common_process"},
+        {
+          "type": "object",
+          "required": ["host_os", "node_realpath", "node_sha256", "node_version", "file_identity_at_hash", "file_identity_at_spawn", "verified_open_handle", "spawn_primitive", "post_spawn_identity_check", "fd_lifecycle", "toctou_failure_point"],
+          "properties": {
+            "kind": {"const": "production"},
+            "node_status": {"const": "not_applicable"},
+            "host_os": {"const": "unknown"},
+            "argv": {"const": ["<unavailable>", "/.code-structure-viz/next-adapter.mjs"]},
+            "node_realpath": {"type": "null"},
+            "node_sha256": {"type": "null"},
+            "node_version": {"type": "null"},
+            "file_identity_at_hash": {"type": "null"},
+            "file_identity_at_spawn": {"type": "null"},
+            "verified_open_handle": {"type": "null"},
+            "spawn_primitive": {"type": "null"},
+            "post_spawn_identity_check": {"type": "null"},
+            "fd_lifecycle": {"type": "null"},
+            "toctou_failure_point": {"const": "not-applicable"}
+          },
+          "not": {"anyOf": [{"required": ["fixture_id"]}, {"required": ["identity_token"]}]}
         }
       ]
     }

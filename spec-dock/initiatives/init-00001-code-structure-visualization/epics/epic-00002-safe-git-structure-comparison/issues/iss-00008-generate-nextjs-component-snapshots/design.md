@@ -1573,3 +1573,92 @@ Round18はdata-only remediationである。対象SHA `885352347d250cc34aef0bd52e
 `33543204992`、historical Strict `P0=0/P1=7/P2=1/fail/implementation_ready=no`、fresh Strict pending、
 readiness unconfirmed、production absentをartifactへ保存し、Strict passまでI05-PLAN-002のproduction
 実装を開始しない。
+
+## Round 20 single-authority design
+
+Round 20のレビュー固定点は SHA `aba6509ae818f8b959aa31276a6e8f5d6956680a` である。
+historical Strict verdictは `P0=0 / P1=6 / P2=1 / fail / implementation_ready=no` として
+保持する。fresh current-SHA Strictはpending、readinessは未確認、production implementationは
+未着手である。以下はIssue #8のdata-only contractを次の実装者がそのまま受け取れる粒度へ
+分解した設計であり、未観測の値や実装都合のfallbackを補うものではない。
+
+### Authority graph
+
+```text
+Frozen snapshot + known project-root controls
+  -> PackageApplicabilityMatrix + strict control observations
+  -> derived config / extends / membership / source graph
+  -> SourceAcquisitionSeal (one plan + one view + one ledger input)
+  -> ValidatedAdapterRequest / request-independent provenance
+  -> closed source or response decision
+  -> process observation + final publication decision
+  -> exact domain / root manifest / stdout / stderr / exit projections
+```
+
+`PackageApplicabilityMatrix`はpackage.jsonの直接依存だけを観測して作る。各rootを
+`applicable`、`non_applicable`、`malformed`のどれかへ一度だけ分類し、Node optionalityを
+このmatrixから決める。lockfile、indirect dependency、directory名、control fileだけを根拠に
+Nodeを起動しない。全rootがnon-applicableなら `NotApplicableDecision` として閉じる。
+
+### Acquisition and graph derivation
+
+`SourceDiscoveryIntent`はproject roots、known root control candidates、固定rulesだけを入力にする。
+trusted enumeratorはsnapshot/revisionを先に観測し、control candidateを一度だけ読み、JSONCの
+許可された字句（UTF-8 BOM、文字列外comment/trailing comma）だけを除去してduplicate keyを拒否する。
+local extendsは単一の相対path文字列だけを許し、`..` escape、package extends、array extends、
+plugins/typeRoots/types、`module != esnext`、`moduleResolution != bundler`をtyped fail-closedにする。
+include/excludeは `fnmatch` ではなく segment grammar（`*`、`?`、whole-segment `**`）で評価する。
+control read/parse failureを `{}` や空membershipに置換してはならない。
+
+control bytesからinclude/exclude/files/source roots、effective roles、local extends closure、
+final membershipをseal内部で導出し、最後のreadとrevision check後にFinalSourceAcquisitionPlanと
+SourceViewを一つのseal operationで確定する。source graphはそのsealのfrozen bytesとresolved relative
+imports/extends/project ownershipから再計算する。reader、request、inventoryがgraph/paths/rolesを
+注入することはできず、edgeを削除してdigestを再計算した証拠も拒否する。
+
+### Closed failure projections
+
+source acquisitionは次のclosed unionを持つ。
+
+| union variant | authority | projection |
+| --- | --- | --- |
+| `CompleteSourceSeal` | 全read、digest、revisionが整合 | normal request |
+| `PartialSourceSeal` | seal-owned graphがisolated safe subsetを証明 | `SOURCE-001` / `partial_safe` / exit 3 |
+| `SourceAcquisitionUnavailable` | controlまたはnon-isolatable source failure | `SOURCE-003` / `payload_unavailable` / manifest-only / exit 3 |
+| `SourceIntegrityFatal` | drift、duplicate/post-seal read、integrity mismatch | `SOURCE-003` / `fatal` / no manifest / exit 1 |
+
+これらのstage、diagnostic code、payload/manifest有無、stdout reason、exitの対応は
+`SourceAcquisitionDecisionProjection`で一度だけ確定する。request-independent provenanceも同じ
+stage/code catalogを使い、failureまでのobserved prefixと後続のunobserved/nullを同じshapeにする。
+
+### Process and publication authority
+
+process observationは `fixture | production` の閉じたunionである。fixtureはreference testの
+named evidenceに限定し、productionはdarwin/linuxのOS-native file identity、Node realpath/hash/version、
+hash時とspawn時のidentity、verified handle、OS-specific spawn primitive、post-spawn equality、
+FD lifecycle、process group、TOCTOU fail-closed pointを必須とする。host executableを触らない
+reference validatorはこのOS process-level guaranteeを証明済みとは扱わない。
+
+response/publicationでは、validated response canonical raw bytes、model digest、request identity、
+diagnostic、summary/root/artifact候補、capture/stderr/selected-copy measurementsを一つの最終
+publication boundaryへsealする。下流projectionはそのsealed decisionだけを受け取り、external bytes、
+independent status、candidate map、partial chunksを再注入しない。selectorはsummary、manifest、
+semantic artifact、PlantUML artifact、typed unavailableの閉じたunionで、exact bytesはそのまま返し、
+limit+1はpartial bytesなしでtyped unavailableへ進む。canonical output orderは既存のlexicographic
+`sort_keys=True`、NFC、UTF-8、LFであり、path-only valuesはNFC UTF-8 bytesで比較する。
+
+### Executable closure map
+
+| finding | reference evidence |
+| --- | --- |
+| R20-P1-01 Package applicability | `test_round20_package_applicability_matrix_is_direct_dependency_only`; `test_round20_package_applicability_matrix_rejects_encoding_duplicates_and_mixed_state`; `test_round20_explicit_config_candidates_cannot_hide_package_applicability` |
+| R20-P1-02 config/membership | `test_round20_source_control_uses_segment_grammar_and_fail_closed_control_reads` |
+| R20-P1-03 source graph | `test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection` |
+| R20-P1-04 source integrity | `test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection` |
+| R20-P1-05 process observation | `test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_identity` |
+| R20-P1-06 provenance | `test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch` plus the Round 19 stage matrix test |
+| R20-P2-01 coverage index | `test_round20_fixture_coverage_index_is_substantive` |
+
+この設計のローカル検証はStrict reviewの代替ではない。fresh current-SHA Strictが `P0=0` かつ
+`P1=0`、`review_status=pass`を返すまで、I05-PLAN-002以降のproduction implementationを
+開始しない。

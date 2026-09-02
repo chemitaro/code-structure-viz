@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import base64
 import copy
-import fnmatch
 import hashlib
 import json
 import re
 import unicodedata
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypedDict, TypeGuard, cast
@@ -294,45 +293,23 @@ class NextDecisionContext:
         object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
         assert self.provenance in {"request_bound", "request_independent"}
         observations = copy.deepcopy(self.provenance_observation)
-        assert set(observations) == {
-            "kind",
-            "stage",
-            "request",
-            "limits",
-            "source_plan",
-            "toolchain",
-            "trusted_environment",
-            "budget",
-        }
+        validate_stage_dependent_provenance(observations)
         assert observations["kind"] == self.provenance
-        assert observations["stage"] == self.stage
-        for key in (
-            "request",
-            "limits",
-            "source_plan",
-            "toolchain",
-            "trusted_environment",
-            "budget",
-        ):
-            row = observations[key]
-            assert set(row) == {"state", "value"}
-            assert row["state"] in {"observed", "unobserved"}
-            if row["state"] == "unobserved":
-                assert row["value"] is None
-            else:
-                assert row["value"] is not None
+        observed = observations["observed"]
+        if self.provenance == "request_bound":
+            assert observations["stage"] is None
+            assert observations["failure_code"] is None
+        else:
+            assert observations["stage"] == self.stage
+            assert observations["failure_code"] == self.diagnostic_code
         if self.provenance == "request_independent":
-            assert observations["request"] == {"state": "unobserved", "value": None}
-            assert observations["limits"] == {"state": "unobserved", "value": None}
-            assert observations["source_plan"] == {"state": "unobserved", "value": None}
-            assert observations["toolchain"] == {"state": "unobserved", "value": None}
-            assert observations["trusted_environment"] == {"state": "unobserved", "value": None}
+            assert observed["request"] == {"state": "unobserved", "value": None}
         if self.run_context["budget_source"] == "unobserved":
             assert self.run_context["budget_resolved"] is None
-            assert observations["budget"] == {"state": "unobserved", "value": None}
+            assert observed["budget"] == {"state": "unobserved", "value": None}
         else:
             assert self.run_context["budget_resolved"] is not None
-            assert observations["budget"] == {"state": "observed", "value": True}
+            assert observed["budget"] == {"state": "observed", "value": True}
         object.__setattr__(self, "provenance_observation", observations)
         if self.provenance == "request_bound":
             assert self.request_id is not None
@@ -413,6 +390,7 @@ class NextPublicationContext:
     source_failure_ledger_digest: str | None
     source_failure_ledger_evidence: dict[str, Any] | None
     observation_provenance: dict[str, Any]
+    process_launch_observation: dict[str, Any] = field(init=False)
 
     def __post_init__(self) -> None:
         for name in (
@@ -469,69 +447,16 @@ class NextPublicationContext:
             assert evidence["ledger_digest"] == ledger_digest
             assert evidence["failures"] == list(ledger)
         object.__setattr__(self, "source_failure_ledger_evidence", copy.deepcopy(evidence))
+        process_observation = process_launch_observation_from_descriptor(
+            self.process_launch_descriptor
+        )
+        validate_process_launch_observation(process_observation)
+        object.__setattr__(self, "process_launch_observation", process_observation)
         seal = self.source_acquisition_seal
         provenance = self.observation_provenance
-        assert set(provenance) == {"kind", "failure_stage", "failure_code", "observed"}
+        validate_stage_dependent_provenance(provenance)
         assert provenance["kind"] in {"request_bound", "request_independent"}
-        assert isinstance(provenance["observed"], dict)
-        observed_fields = {
-            "request",
-            "limits",
-            "source_plan",
-            "toolchain",
-            "trusted_environment",
-            "compatibility",
-            "process_launch",
-            "budget",
-        }
-        assert set(provenance["observed"]) == observed_fields
-        for _field_name, row in provenance["observed"].items():
-            assert set(row) == {"state", "value"}
-            assert row["state"] in {"observed", "unobserved"}
-            if row["state"] == "unobserved":
-                assert row["value"] is None
-            else:
-                assert row["value"] is True
-        if provenance["kind"] == "request_bound":
-            assert provenance["failure_stage"] is None
-            assert provenance["failure_code"] is None
-            assert all(
-                row == {"state": "observed", "value": True}
-                for row in provenance["observed"].values()
-            )
-        else:
-            assert isinstance(provenance["failure_stage"], str)
-            assert isinstance(provenance["failure_code"], str)
-            assert provenance["failure_stage"]
-            assert provenance["failure_code"]
-            assert provenance["observed"]["request"] == {
-                "state": "unobserved",
-                "value": None,
-            }
-            assert provenance["observed"]["limits"] == {
-                "state": "unobserved",
-                "value": None,
-            }
-            assert provenance["observed"]["source_plan"] == {
-                "state": "unobserved",
-                "value": None,
-            }
-            assert provenance["observed"]["toolchain"] == {
-                "state": "unobserved",
-                "value": None,
-            }
-            assert provenance["observed"]["trusted_environment"] == {
-                "state": "unobserved",
-                "value": None,
-            }
-            assert provenance["observed"]["compatibility"] == {
-                "state": "unobserved",
-                "value": None,
-            }
-            assert provenance["observed"]["process_launch"] == {
-                "state": "unobserved",
-                "value": None,
-            }
+        if provenance["kind"] == "request_independent":
             expected_budget = (
                 {"state": "observed", "value": True}
                 if self.run_context["budget_source"] != "unobserved"
@@ -655,6 +580,7 @@ class NextPublicationContext:
             "source_failure_ledger_seal",
             "source_failure_ledger_evidence",
             "process_launch_descriptor",
+            "process_launch_observation",
             "observation_provenance",
         }:
             return copy.deepcopy(value)
@@ -671,27 +597,40 @@ def _decision_provenance(
     toolchain: bool,
     trusted_environment: bool,
     budget: bool = True,
+    failure_code: str | None = None,
 ) -> dict[str, Any]:
     """Build the closed stage/provenance union used by every decision context."""
 
     assert kind in {"request_bound", "request_independent"}
-    flags = {
+    if kind == "request_independent":
+        assert isinstance(failure_code, str) and failure_code
+    observed_flags = {
         "request": request,
         "limits": limits,
         "source_plan": source_plan,
         "toolchain": toolchain,
         "trusted_environment": trusted_environment,
+        "compatibility": kind == "request_bound",
+        "process_launch": kind == "request_bound",
         "budget": budget,
     }
+    if kind == "request_bound":
+        observed_flags = {name: True for name in observed_flags}
+    else:
+        expected = _expected_provenance_observed(stage)
+        observed_flags = {
+            name: name in expected or (name == "budget" and budget) for name in observed_flags
+        }
     return {
         "kind": kind,
-        "stage": stage,
-        **{
+        "stage": None if kind == "request_bound" else stage,
+        "failure_code": None if kind == "request_bound" else failure_code,
+        "observed": {
             name: {
                 "state": "observed" if observed else "unobserved",
                 "value": True if observed else None,
             }
-            for name, observed in flags.items()
+            for name, observed in observed_flags.items()
         },
     }
 
@@ -726,8 +665,14 @@ def _publication_provenance(
         assert isinstance(failure_code, str) and failure_code
         observed = {
             name: {
-                "state": "observed" if name == "budget" and budget_observed else "unobserved",
-                "value": True if name == "budget" and budget_observed else None,
+                "state": "observed"
+                if name in _expected_provenance_observed(failure_stage)
+                or (name == "budget" and budget_observed)
+                else "unobserved",
+                "value": True
+                if name in _expected_provenance_observed(failure_stage)
+                or (name == "budget" and budget_observed)
+                else None,
             }
             for name in (
                 "request",
@@ -742,7 +687,7 @@ def _publication_provenance(
         }
     return {
         "kind": kind,
-        "failure_stage": failure_stage,
+        "stage": failure_stage,
         "failure_code": failure_code,
         "observed": observed,
     }
@@ -1100,6 +1045,49 @@ PROVENANCE_FIELDS = (
 )
 PROVENANCE_SOURCE_STAGES = frozenset({"source_selection", "source_read", "source_integrity"})
 PROVENANCE_TRUST_STAGES = frozenset({"trust_validation"})
+PROVENANCE_EARLY_STAGES = frozenset({"config_validation", "project_validation"})
+PROVENANCE_LATE_STAGES = (
+    DECISION_FAILURE_STAGES
+    - PROVENANCE_SOURCE_STAGES
+    - PROVENANCE_TRUST_STAGES
+    - PROVENANCE_EARLY_STAGES
+)
+
+
+def _expected_provenance_observed(stage: str) -> frozenset[str]:
+    """Return the one canonical observed prefix for a failure stage."""
+
+    assert stage in DECISION_FAILURE_STAGES
+    if stage in PROVENANCE_EARLY_STAGES:
+        return frozenset()
+    if stage in PROVENANCE_SOURCE_STAGES:
+        return frozenset({"limits", "source_plan"})
+    if stage in PROVENANCE_TRUST_STAGES:
+        return frozenset(
+            {
+                "limits",
+                "source_plan",
+                "toolchain",
+                "trusted_environment",
+                "compatibility",
+                "process_launch",
+            }
+        )
+    # Once the source and limits have been observed, later failure rows carry
+    # that prefix plus the runtime/trust observations available at the same
+    # boundary.  The request remains unobserved for a request-independent
+    # failure and budget is controlled separately by run_context.
+    assert stage in PROVENANCE_LATE_STAGES
+    return frozenset(
+        {
+            "limits",
+            "source_plan",
+            "toolchain",
+            "trusted_environment",
+            "compatibility",
+            "process_launch",
+        }
+    )
 
 
 def validate_stage_dependent_provenance(value: dict[str, Any]) -> None:
@@ -1125,20 +1113,7 @@ def validate_stage_dependent_provenance(value: dict[str, Any]) -> None:
     code = value["failure_code"]
     assert isinstance(stage, str) and isinstance(code, str)
     decision_failure_spec(code, stage)
-    expected_observed = set()
-    if stage in PROVENANCE_SOURCE_STAGES:
-        expected_observed.update({"limits", "source_plan"})
-    elif stage in PROVENANCE_TRUST_STAGES:
-        expected_observed.update(
-            {
-                "limits",
-                "source_plan",
-                "toolchain",
-                "trusted_environment",
-                "compatibility",
-                "process_launch",
-            }
-        )
+    expected_observed = _expected_provenance_observed(stage)
     assert observed["request"] == {"state": "unobserved", "value": None}
     for field_name in PROVENANCE_FIELDS:
         if field_name == "budget":
@@ -1945,6 +1920,202 @@ class SourceAcquisitionError(AssertionError):
         super().__init__(message)
 
 
+PACKAGE_APPLICABILITY_SCHEMA = "code-structure-viz.next-package-applicability/v1"
+PACKAGE_APPLICABILITY_STATES = ("applicable", "non_applicable", "malformed")
+PACKAGE_APPLICABILITY_EVIDENCE = (
+    "direct_next_dependency",
+    "no_direct_next",
+    "missing_package",
+    "malformed_package",
+)
+
+
+@dataclass(frozen=True, kw_only=True)
+class PackageApplicabilityEntry:
+    """One project-root observation used to decide whether Next is applicable."""
+
+    project_root: str
+    package_path: str
+    state: str
+    evidence: str
+
+    def __post_init__(self) -> None:
+        _assert_path(self.project_root, allow_root=True)
+        _assert_path(self.package_path)
+        assert self.state in PACKAGE_APPLICABILITY_STATES
+        assert self.evidence in PACKAGE_APPLICABILITY_EVIDENCE
+        expected = {
+            "applicable": {"direct_next_dependency"},
+            "non_applicable": {"no_direct_next", "missing_package"},
+            "malformed": {"malformed_package"},
+        }
+        assert self.evidence in expected[self.state]
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "project_root": self.project_root,
+            "package_path": self.package_path,
+            "state": self.state,
+            "evidence": self.evidence,
+        }
+
+
+@dataclass(frozen=True, kw_only=True)
+class PackageApplicabilityMatrix:
+    """Immutable matrix derived solely from frozen package.json bytes.
+
+    This is intentionally a separate authority from source import discovery:
+    a directory name, lockfile, config file, or indirect dependency cannot
+    make a project applicable.  A malformed package observation poisons the
+    whole matrix; all non-applicable projects are a closed not-applicable run.
+    """
+
+    entries: tuple[PackageApplicabilityEntry, ...]
+    aggregate_state: str
+
+    def __post_init__(self) -> None:
+        entries = tuple(self.entries)
+        assert entries == tuple(sorted(entries, key=lambda item: _path_sort_key(item.project_root)))
+        assert len({entry.project_root for entry in entries}) == len(entries)
+        assert entries
+        assert self.aggregate_state in PACKAGE_APPLICABILITY_STATES
+        expected = (
+            "malformed"
+            if any(entry.state == "malformed" for entry in entries)
+            else "applicable"
+            if any(entry.state == "applicable" for entry in entries)
+            else "non_applicable"
+        )
+        assert self.aggregate_state == expected
+        object.__setattr__(self, "entries", entries)
+
+    @property
+    def applicable_projects(self) -> tuple[str, ...]:
+        return tuple(entry.project_root for entry in self.entries if entry.state == "applicable")
+
+    @property
+    def non_applicable_projects(self) -> tuple[str, ...]:
+        return tuple(
+            entry.project_root for entry in self.entries if entry.state == "non_applicable"
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": PACKAGE_APPLICABILITY_SCHEMA,
+            "version": 1,
+            "projects": [entry.as_dict() for entry in self.entries],
+            "aggregate_state": self.aggregate_state,
+            "applicable_projects": list(self.applicable_projects),
+            "non_applicable_projects": list(self.non_applicable_projects),
+        }
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if name == "entries":
+            return tuple(copy.deepcopy(value))
+        return value
+
+
+def _package_json(payload: bytes, path: str) -> dict[str, Any]:
+    """Parse one package.json with duplicate-key and encoding rejection."""
+
+    if not isinstance(payload, bytes):
+        raise ValueError(f"package bytes are not bytes: {path}")
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"duplicate package key: {key}")
+            value[key] = item
+        return value
+
+    text = payload.decode("utf-8-sig")
+    if text.startswith("\ufeff"):
+        raise ValueError(f"multiple package BOM: {path}")
+    value = json.loads(
+        text,
+        object_pairs_hook=reject_duplicate_keys,
+        parse_constant=lambda _constant: (_ for _ in ()).throw(ValueError("non-finite")),
+    )
+    if not isinstance(value, dict):
+        raise ValueError(f"package root is not an object: {path}")
+    return value
+
+
+def derive_package_applicability_matrix(
+    package_bytes: Mapping[str, bytes], project_roots: tuple[str, ...] | list[str]
+) -> PackageApplicabilityMatrix:
+    """Derive the closed applicability matrix from observed package bytes.
+
+    ``package_bytes`` is an observation map, not a caller-supplied state map.
+    Missing package paths are a valid non-applicable observation; malformed
+    bytes/table/value are globally malformed and therefore unavailable.
+    """
+
+    roots = tuple(project_roots)
+    assert roots and len(roots) == len(set(roots))
+    for root in roots:
+        _assert_path(root, allow_root=True)
+    entries: list[PackageApplicabilityEntry] = []
+    for root in sorted(roots, key=_path_sort_key):
+        package_path = "package.json" if root == "." else f"{root.rstrip('/')}/package.json"
+        payload = package_bytes.get(package_path)
+        if payload is None:
+            entries.append(
+                PackageApplicabilityEntry(
+                    project_root=root,
+                    package_path=package_path,
+                    state="non_applicable",
+                    evidence="missing_package",
+                )
+            )
+            continue
+        try:
+            package = _package_json(payload, package_path)
+            direct_next = False
+            malformed = False
+            for table_name in ("dependencies", "devDependencies"):
+                if table_name not in package:
+                    continue
+                table = package[table_name]
+                if not isinstance(table, dict):
+                    malformed = True
+                    continue
+                if "next" not in table:
+                    continue
+                version = table["next"]
+                if not isinstance(version, str) or not version.strip():
+                    malformed = True
+                else:
+                    direct_next = True
+            state = "malformed" if malformed else "applicable" if direct_next else "non_applicable"
+            evidence = (
+                "malformed_package"
+                if malformed
+                else ("direct_next_dependency" if direct_next else "no_direct_next")
+            )
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            state = "malformed"
+            evidence = "malformed_package"
+        entries.append(
+            PackageApplicabilityEntry(
+                project_root=root,
+                package_path=package_path,
+                state=state,
+                evidence=evidence,
+            )
+        )
+    aggregate_state = (
+        "malformed"
+        if any(entry.state == "malformed" for entry in entries)
+        else "applicable"
+        if any(entry.state == "applicable" for entry in entries)
+        else "non_applicable"
+    )
+    return PackageApplicabilityMatrix(entries=tuple(entries), aggregate_state=aggregate_state)
+
+
 @dataclass(frozen=True)
 class SourceAcquisitionSeal:
     """Atomic final-plan/source-view pair produced by the two-phase reader."""
@@ -1960,12 +2131,14 @@ class SourceAcquisitionSeal:
     revision_after: str
     source_graph: dict[str, Any]
     captured_files: dict[str, bytes]
+    package_applicability: PackageApplicabilityMatrix = field(init=False)
 
     def __post_init__(self) -> None:
         graph = copy.deepcopy(self.source_graph)
         assert set(graph) == {"nodes", "edges", "open_edges"}
         assert self.plan_digest == digest(self.final_plan)
         assert self.source_view_fingerprint == digest(self.source_view)
+        assert self.source_view["source_graph_digest"] == digest(graph)
         assert self.seal_id == digest(
             {
                 "plan_digest": self.plan_digest,
@@ -1981,10 +2154,28 @@ class SourceAcquisitionSeal:
         captured = {path: bytes(payload) for path, payload in self.captured_files.items()}
         assert tuple(sorted(captured, key=_path_sort_key)) == tuple(captured)
         object.__setattr__(self, "captured_files", captured)
+        project_roots = tuple(project["root"] for project in self.final_plan.get("projects", ()))
+        if project_roots:
+            object.__setattr__(
+                self,
+                "package_applicability",
+                derive_package_applicability_matrix(captured, project_roots),
+            )
+        else:
+            # A malformed hand-built plan is rejected above by normal plan
+            # validation in production-shaped callers; keep this constructor
+            # fail-closed for legacy isolated graph fixtures as well.
+            raise AssertionError("source plan must contain project roots")
 
     def __getattribute__(self, name: str) -> Any:
         value = object.__getattribute__(self, name)
-        if name in {"final_plan", "source_view", "source_graph", "captured_files"}:
+        if name in {
+            "final_plan",
+            "source_view",
+            "source_graph",
+            "captured_files",
+            "package_applicability",
+        }:
             return copy.deepcopy(value)
         return value
 
@@ -2026,6 +2217,101 @@ def _default_source_graph(
         "nodes": sorted(nodes, key=canonical_json_bytes),
         "edges": [],
         "open_edges": [],
+    }
+
+
+_RELATIVE_IMPORT_RE = re.compile(
+    r"(?:from\s*|import\s*|export\s+[^;]*?\sfrom\s*)[\"'](\.{1,2}/[^\"']+)[\"']"
+)
+
+
+def _derive_source_graph_from_frozen_bytes(
+    files: Mapping[str, bytes],
+    project_roots: tuple[str, ...],
+    plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Derive the raw source graph from the sealed bytes, never from a caller.
+
+    The graph is intentionally lexical and conservative at this pre-
+    implementation boundary: a relative import resolves only to one exact
+    inventory candidate.  Ambiguous or missing candidates remain open edges,
+    which prevents a later locality proof from treating an unobserved edge as
+    safe.  Config ``extends`` edges come from the same frozen plan.
+    """
+
+    graph = _default_source_graph(files, project_roots)
+    nodes = list(graph["nodes"])
+    node_id_by_path = {node["path"]: node["id"] for node in nodes}
+    candidates_by_stem: dict[str, list[str]] = {}
+    suffixes = ("", ".ts", ".tsx", ".js", ".jsx", ".d.ts")
+    for path in node_id_by_path:
+        if not path.endswith(SOURCE_PLAN_PROGRAM_SUFFIXES + SOURCE_PLAN_CONTEXT_SUFFIXES):
+            continue
+        stem = path[: -len(".d.ts")] if path.endswith(".d.ts") else path.rsplit(".", 1)[0]
+        candidates_by_stem.setdefault(stem, []).append(path)
+    for values in candidates_by_stem.values():
+        values.sort(key=_path_sort_key)
+
+    edges: list[dict[str, str]] = []
+    open_edges: list[dict[str, str]] = []
+    for source_path, source_id in sorted(
+        node_id_by_path.items(), key=lambda item: _path_sort_key(item[0])
+    ):
+        if not source_path.endswith(SOURCE_PLAN_PROGRAM_SUFFIXES + SOURCE_PLAN_CONTEXT_SUFFIXES):
+            continue
+        try:
+            text = files[source_path].decode("utf-8")
+        except UnicodeDecodeError:
+            open_edges.append({"source": source_id})
+            continue
+        for specifier in _RELATIVE_IMPORT_RE.findall(text):
+            parent = str(Path(source_path).parent)
+            raw_target = f"{parent}/{specifier}" if parent != "." else specifier
+            parts: list[str] = []
+            escapes = False
+            for part in raw_target.split("/"):
+                if part in {"", "."}:
+                    continue
+                if part == "..":
+                    if not parts:
+                        escapes = True
+                        break
+                    parts.pop()
+                else:
+                    parts.append(part)
+            if escapes:
+                open_edges.append({"source": source_id})
+                continue
+            normalized = "/".join(parts)
+            possible = [
+                candidate
+                for candidate in (
+                    normalized,
+                    *(f"{normalized}{suffix}" for suffix in suffixes[1:]),
+                    *(f"{normalized}/index{suffix}" for suffix in suffixes[1:]),
+                )
+                if candidate in node_id_by_path
+            ]
+            unique = tuple(dict.fromkeys(possible))
+            if len(unique) == 1:
+                edges.append({"source": source_id, "target": node_id_by_path[unique[0]]})
+            else:
+                open_edges.append({"source": source_id})
+
+    for extension in plan.get("local_extends", ()):
+        source_path = extension["config_path"]
+        for target_path in extension["extends"]:
+            source_id = node_id_by_path.get(source_path)
+            target_id = node_id_by_path.get(target_path)
+            if source_id is None or target_id is None:
+                if source_id is not None:
+                    open_edges.append({"source": source_id})
+            else:
+                edges.append({"source": source_id, "target": target_id})
+    return {
+        "nodes": sorted(nodes, key=canonical_json_bytes),
+        "edges": sorted(edges, key=canonical_json_bytes),
+        "open_edges": sorted(open_edges, key=canonical_json_bytes),
     }
 
 
@@ -2099,7 +2385,9 @@ def _control_json(contents: dict[str, bytes], path: str) -> dict[str, Any]:
 
     payload = contents.get(path)
     if payload is None:
-        return {}
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", f"control file was not observed: {path}"
+        )
 
     def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         value: dict[str, Any] = {}
@@ -2129,8 +2417,12 @@ def _control_json(contents: dict[str, bytes], path: str) -> dict[str, Any]:
 def _normalise_control_path(value: str, *, project_root: str) -> str:
     """Resolve a config-relative path into the repository-relative form."""
 
-    if value.startswith("/"):
+    if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
         raise AssertionError("absolute control path")
+    if any(part == ".." for part in value.split("/")):
+        raise AssertionError("parent traversal is not a control path")
+    if any(part == "" for part in value.split("/") if part != "."):
+        raise AssertionError("empty control path segment")
     candidate = value
     if project_root != "." and not candidate.startswith(f"{project_root}/"):
         candidate = f"{project_root.rstrip('/')}/{candidate}"
@@ -2140,14 +2432,75 @@ def _normalise_control_path(value: str, *, project_root: str) -> str:
         if part in {"", "."}:
             continue
         if part == "..":
-            if not resolved:
-                raise AssertionError("control path escapes project root")
-            resolved.pop()
+            raise AssertionError("parent traversal is not a control path")
         else:
             resolved.append(part)
     result = "/".join(resolved) or "."
     _assert_path(result, allow_root=True)
     return result
+
+
+def _validate_segment_glob(pattern: str, *, project_root: str) -> str:
+    """Validate and normalize the intentionally small include/exclude grammar."""
+
+    normalized = _normalise_control_path(pattern, project_root=project_root)
+    segments = normalized.split("/")
+    for segment in segments:
+        if segment == "**":
+            continue
+        # A glob token is a complete path segment.  Character classes,
+        # braces, extglobs and embedded ``**`` are deliberately not part of
+        # the contract and must not accidentally acquire fnmatch semantics.
+        if "**" in segment or any(character in segment for character in "[]{}()!+"):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002",
+                "source_control",
+                f"unsupported include/exclude pattern: {pattern}",
+            )
+    return normalized
+
+
+def _segment_glob_matches(pattern: str, candidate: str) -> bool:
+    """Match only ``*``, ``?`` and whole-segment ``**`` path tokens."""
+
+    pattern_segments = tuple(pattern.split("/"))
+    candidate_segments = tuple(candidate.split("/"))
+
+    def one_segment_matches(segment_pattern: str, segment_value: str) -> bool:
+        expression = "".join(
+            ".*" if character == "*" else "." if character == "?" else re.escape(character)
+            for character in segment_pattern
+        )
+        return re.fullmatch(expression, segment_value, flags=re.DOTALL) is not None
+
+    @cache
+    def visit(pattern_index: int, candidate_index: int) -> bool:
+        if pattern_index == len(pattern_segments):
+            return candidate_index == len(candidate_segments)
+        if pattern_segments[pattern_index] == "**":
+            return visit(pattern_index + 1, candidate_index) or (
+                candidate_index < len(candidate_segments)
+                and visit(pattern_index, candidate_index + 1)
+            )
+        return (
+            candidate_index < len(candidate_segments)
+            and one_segment_matches(
+                pattern_segments[pattern_index], candidate_segments[candidate_index]
+            )
+            and visit(pattern_index + 1, candidate_index + 1)
+        )
+
+    return visit(0, 0)
+
+
+def _segment_glob_matches_path_or_descendant(pattern: str, candidate: str) -> bool:
+    """Apply a segment pattern to a path or to one of its directory prefixes."""
+
+    candidate_segments = candidate.split("/")
+    return any(
+        _segment_glob_matches(pattern, "/".join(candidate_segments[:index]))
+        for index in range(1, len(candidate_segments) + 1)
+    )
 
 
 def _derive_project_descriptors_from_control_bytes(
@@ -2274,11 +2627,55 @@ def _derive_project_descriptors_from_control_bytes(
             raise SourceAcquisitionError(
                 "CSV-NEXT-CONFIG-002", "source_control", "compilerOptions is not an object"
             )
+        forbidden_options = {"plugins", "typeRoots", "types"}
+        if forbidden_options.intersection(raw_options):
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002",
+                "source_control",
+                "package/plugin compiler options are not part of the closed contract",
+            )
+        allowed_options = {
+            "allowJs",
+            "checkJs",
+            "jsx",
+            "module",
+            "moduleResolution",
+            "baseUrl",
+            "paths",
+            "outDir",
+            "rootDir",
+            "declaration",
+            "declarationMap",
+            "sourceMap",
+            "noEmit",
+            "incremental",
+            "composite",
+            "target",
+            "lib",
+            "strict",
+            "esModuleInterop",
+            "skipLibCheck",
+            "resolveJsonModule",
+            "isolatedModules",
+            "verbatimModuleSyntax",
+        }
+        if set(raw_options) - allowed_options:
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "unsupported compiler option"
+            )
         for option_name in ("allowJs", "checkJs"):
             if option_name in raw_options and not isinstance(raw_options[option_name], bool):
                 raise SourceAcquisitionError(
                     "CSV-NEXT-CONFIG-002", "source_control", f"{option_name} must be boolean"
                 )
+        if "module" in raw_options and raw_options["module"] != "esnext":
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "module must be esnext"
+            )
+        if "moduleResolution" in raw_options and raw_options["moduleResolution"] != "bundler":
+            raise SourceAcquisitionError(
+                "CSV-NEXT-CONFIG-002", "source_control", "moduleResolution must be bundler"
+            )
         base_url_value = raw_options.get("baseUrl")
         if base_url_value is not None and not isinstance(base_url_value, str):
             raise SourceAcquisitionError(
@@ -2340,10 +2737,16 @@ def _derive_project_descriptors_from_control_bytes(
         include_values = list(include or [])
         exclude_values = list(exclude or [])
         explicit_values = list(explicit_files or [])
+        include_values = [
+            _validate_segment_glob(item, project_root=project_root) for item in include_values
+        ]
+        exclude_values = [
+            _validate_segment_glob(item, project_root=project_root) for item in exclude_values
+        ]
         source_roots: list[str] = []
         for pattern in include_values:
             normalized = _normalise_control_path(pattern, project_root=project_root)
-            static = re.split(r"[*?\[\{]", normalized, maxsplit=1)[0].rstrip("/") or project_root
+            static = re.split(r"[*?]", normalized, maxsplit=1)[0].rstrip("/") or project_root
             source_roots.append(static)
         if not source_roots and explicit_values:
             source_roots = [
@@ -2360,7 +2763,7 @@ def _derive_project_descriptors_from_control_bytes(
         source_roots = sorted(set(source_roots), key=_path_sort_key)
 
         def matches(pattern: str, candidate: str, *, _project_root: str = project_root) -> bool:
-            normalized_pattern = _normalise_control_path(pattern, project_root=_project_root)
+            normalized_pattern = _validate_segment_glob(pattern, project_root=_project_root)
             relative = (
                 candidate
                 if _project_root == "."
@@ -2371,9 +2774,7 @@ def _derive_project_descriptors_from_control_bytes(
                 if _project_root == "."
                 else normalized_pattern.removeprefix(f"{_project_root.rstrip('/')}/")
             )
-            return fnmatch.fnmatchcase(relative, relative_pattern) or fnmatch.fnmatchcase(
-                candidate, normalized_pattern
-            )
+            return _segment_glob_matches_path_or_descendant(relative_pattern, relative)
 
         membership: set[str] = set()
         for candidate in paths:
@@ -2490,8 +2891,19 @@ def seal_source_acquisition(
     # Explicit candidates narrow discovery, but never add arbitrary nested
     # config paths.  With no explicit candidates every known root candidate is
     # observed before source membership is resolved.
+    # A project-root package.json is always part of the trusted control
+    # observation: applicability must not become "missing" merely because a
+    # caller narrowed the tsconfig/jsconfig candidate list.  Explicit
+    # candidates may narrow config discovery, but cannot suppress this
+    # package-owned Node optionality fact.
+    package_control_paths = {
+        path
+        for root in project_roots
+        for path in ("package.json" if root == "." else f"{root.rstrip('/')}/package.json",)
+        if path in enumerated_set
+    }
     selected_control_paths = tuple(
-        sorted(control_candidates or root_control_paths, key=_path_sort_key)
+        sorted(set(control_candidates) | package_control_paths, key=_path_sort_key)
     )
     contents: dict[str, bytes] = {}
     failed_paths: set[str] = set()
@@ -2503,6 +2915,12 @@ def seal_source_acquisition(
         try:
             contents[path] = reader.read(path)
         except SourceAcquisitionError:
+            # Control bytes define the membership and applicability proof.
+            # A failed control read cannot be represented as an empty config
+            # or a partial project because that would change the authority
+            # used to select the rest of the snapshot.
+            if Path(path).name in SOURCE_PLAN_CONTROL_PATHS:
+                raise
             if not allow_partial:
                 raise
             failed_paths.add(path)
@@ -2579,6 +2997,13 @@ def seal_source_acquisition(
         inventory_paths=enumerated_paths,
     )
     assert project_descriptors
+    package_applicability = derive_package_applicability_matrix(contents, project_roots)
+    if package_applicability.aggregate_state == "malformed":
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002",
+            "source_control",
+            "malformed package applicability evidence",
+        )
     limits = copy.deepcopy(inventory.get("observed_limits"))
     trusted_environment_digest = inventory.get("observed_trusted_environment_digest")
     assert isinstance(limits, dict)
@@ -2657,7 +3082,10 @@ def seal_source_acquisition(
     )
     graph_files = dict(contents)
     graph_files.update({path: b"" for path in failed_paths})
-    source_graph = reader.source_graph or _default_source_graph(graph_files, project_roots)
+    # The reader may expose a fixture graph for isolated historical tests,
+    # but acquisition never accepts that graph as authority.  Re-derive the
+    # graph from exactly the frozen bytes and the sealed plan instead.
+    source_graph = _derive_source_graph_from_frozen_bytes(graph_files, project_roots, plan)
     graph_digest = digest(source_graph)
     source_view = {
         "schema": "code-structure-viz.source-view/v1",
@@ -4344,7 +4772,7 @@ def validate_process_launch_observation(value: dict[str, Any]) -> None:
         Draft202012Validator(schema).validate(value)
     except ValidationError as exc:
         raise AssertionError("invalid process launch observation") from exc
-    if value["kind"] == "production":
+    if value["kind"] == "production" and value["node_status"] == "available":
         assert value["file_identity_at_hash"] == value["file_identity_at_spawn"]
         identity = value["file_identity_at_hash"]
         assert value["node_realpath"] == identity["realpath"]
@@ -4353,6 +4781,75 @@ def validate_process_launch_observation(value: dict[str, Any]) -> None:
         expected_primitive = f"{value['host_os']}-posix-spawn-verified-fd"
         assert value["spawn_primitive"] == expected_primitive
         assert value["toctou_failure_point"] == "none"
+
+
+def process_launch_observation_from_descriptor(
+    descriptor: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Project one legacy descriptor into the canonical launch observation.
+
+    The descriptor is accepted only as a compatibility input for existing
+    reference fixtures.  A request-independent branch uses an explicit
+    production ``unknown`` observation with null identity fields; it never
+    fabricates a path, hash, version, handle, or spawn primitive.
+    """
+
+    if descriptor is None:
+        return {
+            "schema": "code-structure-viz.next-process-launch-observation/v1",
+            "version": 1,
+            "kind": "production",
+            "host_os": "unknown",
+            "node_status": "unavailable",
+            "argv": ["<unavailable>", "/.code-structure-viz/next-adapter.mjs"],
+            "shell": False,
+            "process_group": {
+                "create": True,
+                "terminate_scope": "group",
+                "wait_after_terminate": True,
+            },
+            "node_realpath": None,
+            "node_sha256": None,
+            "node_version": None,
+            "file_identity_at_hash": None,
+            "file_identity_at_spawn": None,
+            "verified_open_handle": None,
+            "spawn_primitive": None,
+            "post_spawn_identity_check": None,
+            "fd_lifecycle": None,
+            "toctou_failure_point": "node-discovery",
+        }
+    validate_process_launch_descriptor(descriptor)
+    status = descriptor["node_status"]
+    if status == "available":
+        return {
+            "schema": "code-structure-viz.next-process-launch-observation/v1",
+            "version": 1,
+            "kind": "fixture",
+            "host_os": "fixture",
+            "node_status": "available",
+            "fixture_id": "reference-process-v1",
+            "identity_token": descriptor["node_sha256"],
+            "spawn_primitive": "recorded-fixture",
+            "toctou_failure_point": "not-exercised",
+            "argv": descriptor["argv"],
+            "shell": False,
+            "process_group": descriptor["process_group"],
+        }
+    return {
+        "schema": "code-structure-viz.next-process-launch-observation/v1",
+        "version": 1,
+        "kind": "fixture",
+        "host_os": "fixture",
+        "node_status": status,
+        "fixture_id": "reference-process-v1",
+        "identity_token": "unavailable",
+        "spawn_primitive": "recorded-fixture",
+        "toctou_failure_point": "fixture-rejection",
+        "argv": descriptor["argv"],
+        "shell": False,
+        "process_group": descriptor["process_group"],
+    }
 
 
 def _compatibility_descriptor_snapshot() -> dict[str, Any]:
@@ -5982,6 +6479,117 @@ class SourceIntegrityFatal:
 SourceAcquisitionResult = (
     CompleteSourceSeal | PartialSourceSeal | SourceAcquisitionUnavailable | SourceIntegrityFatal
 )
+
+
+@dataclass(frozen=True, kw_only=True)
+class SourceAcquisitionDecisionProjection:
+    """Closed semantic projection of the source-acquisition result union."""
+
+    result_kind: str
+    outcome: str
+    payload_available: bool
+    diagnostic_code: str | None
+    stage: str | None
+    exit_code: int
+    manifest_available: bool
+    stdout_reason: str
+
+    def __post_init__(self) -> None:
+        assert self.result_kind in {
+            "complete",
+            "partial_safe",
+            "payload_unavailable",
+            "source_integrity_fatal",
+        }
+        assert self.outcome in {"complete", "partial_safe", "payload_unavailable", "fatal"}
+        assert self.diagnostic_code is None or self.diagnostic_code.startswith("CSV-NEXT-")
+        if self.result_kind == "complete":
+            assert self.outcome == "complete"
+            assert self.payload_available and self.diagnostic_code is None
+            assert self.stage is None and self.exit_code == 0
+            assert self.manifest_available and self.stdout_reason == "complete"
+        elif self.result_kind == "partial_safe":
+            assert self.outcome == "partial_safe"
+            assert self.payload_available
+            assert self.diagnostic_code == "CSV-NEXT-SOURCE-001"
+            assert self.stage == "source_read" and self.exit_code == 3
+            assert self.manifest_available and self.stdout_reason == "partial_safe"
+        elif self.result_kind == "payload_unavailable":
+            assert self.outcome == "payload_unavailable"
+            assert not self.payload_available
+            assert self.diagnostic_code == "CSV-NEXT-SOURCE-003"
+            assert self.stage in {"source_control", "source_selection", "source_read"}
+            assert self.exit_code == 3
+            assert self.manifest_available and self.stdout_reason == "domain_payload_unavailable"
+        else:
+            assert self.outcome == "fatal"
+            assert not self.payload_available
+            assert self.diagnostic_code == "CSV-NEXT-SOURCE-003"
+            assert self.stage == "source_integrity" and self.exit_code == 1
+            assert not self.manifest_available and self.stdout_reason == "run_fatal"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "result_kind": self.result_kind,
+            "outcome": self.outcome,
+            "payload_available": self.payload_available,
+            "diagnostic_code": self.diagnostic_code,
+            "stage": self.stage,
+            "exit_code": self.exit_code,
+            "manifest_available": self.manifest_available,
+            "stdout_reason": self.stdout_reason,
+        }
+
+
+def source_acquisition_result_decision(
+    result: SourceAcquisitionResult,
+) -> SourceAcquisitionDecisionProjection:
+    """Project the union once, before any manifest/stdout writer is invoked."""
+
+    if isinstance(result, CompleteSourceSeal):
+        return SourceAcquisitionDecisionProjection(
+            result_kind="complete",
+            outcome="complete",
+            payload_available=True,
+            diagnostic_code=None,
+            stage=None,
+            exit_code=0,
+            manifest_available=True,
+            stdout_reason="complete",
+        )
+    if isinstance(result, PartialSourceSeal):
+        return SourceAcquisitionDecisionProjection(
+            result_kind="partial_safe",
+            outcome="partial_safe",
+            payload_available=True,
+            diagnostic_code="CSV-NEXT-SOURCE-001",
+            stage="source_read",
+            exit_code=3,
+            manifest_available=True,
+            stdout_reason="partial_safe",
+        )
+    if isinstance(result, SourceIntegrityFatal):
+        return SourceAcquisitionDecisionProjection(
+            result_kind="source_integrity_fatal",
+            outcome="fatal",
+            payload_available=False,
+            diagnostic_code=result.diagnostic_code,
+            stage=result.stage,
+            exit_code=1,
+            manifest_available=False,
+            stdout_reason="run_fatal",
+        )
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    return SourceAcquisitionDecisionProjection(
+        result_kind="payload_unavailable",
+        outcome="payload_unavailable",
+        payload_available=False,
+        diagnostic_code=result.diagnostic_code,
+        stage=result.stage,
+        exit_code=3,
+        manifest_available=True,
+        stdout_reason="domain_payload_unavailable",
+    )
 
 
 def seal_source_acquisition_result(

@@ -125,7 +125,14 @@
     "round19-source-partial-safe-union",
     "round19-process-observation-union",
     "round19-stage-provenance",
-    "round19-target-path-byte-order"
+    "round19-target-path-byte-order",
+    "round20-package-applicability",
+    "round20-config-membership",
+    "round20-source-graph-seal",
+    "round20-source-integrity-projection",
+    "round20-process-observation",
+    "round20-stage-provenance",
+    "round20-coverage-index"
   ],
   "negative": [
     "cross-domain",
@@ -236,7 +243,14 @@
     "round19-process-observation-substitution",
     "round19-stage-provenance-injection",
     "round19-config-discriminator-omission",
-    "round19-target-quote-inverse"
+    "round19-target-quote-inverse",
+    "round20-package-applicability-mutation",
+    "round20-config-control-failure",
+    "round20-source-graph-injection",
+    "round20-source-integrity-mutation",
+    "round20-process-observation-fake-identity",
+    "round20-stage-provenance-mutation",
+    "round20-coverage-mapping-mutation"
   ],
   "criterion_test_map": {
     "round14.p1-1": ["test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exit"],
@@ -381,6 +395,30 @@
   ],
     "round19.p2-1": [
       "test_round19_target_path_order_uses_nfc_utf8_bytes_not_json_escaping"
+    ],
+    "round20.p1-1": [
+      "test_round20_package_applicability_matrix_is_direct_dependency_only",
+      "test_round20_package_applicability_matrix_rejects_encoding_duplicates_and_mixed_state",
+      "test_round20_explicit_config_candidates_cannot_hide_package_applicability"
+    ],
+    "round20.p1-2": [
+      "test_round20_source_control_uses_segment_grammar_and_fail_closed_control_reads"
+    ],
+    "round20.p1-3": [
+      "test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection"
+    ],
+    "round20.p1-4": [
+      "test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection"
+    ],
+    "round20.p1-5": [
+      "test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_identity"
+    ],
+    "round20.p1-6": [
+      "test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations",
+      "test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch"
+    ],
+    "round20.p2-1": [
+      "test_round20_fixture_coverage_index_is_substantive"
     ]
   }
 }

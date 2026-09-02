@@ -217,3 +217,47 @@ and `test_round19_source_acquisition_union_is_typed_and_fail_closed`.
 
 Round 19 remains a data-only contract. Fresh current-SHA Strict is pending,
 readiness is unconfirmed, and the production adapter/CLI is absent.
+
+## Round 20 trusted applicability and derivation
+
+`PackageApplicabilityMatrix` is a separate, seal-owned observation used before
+Node optionality is decided. For every project root, parse its frozen
+`package.json` exactly once. Only a non-empty direct
+`dependencies.next`/`devDependencies.next` string is `applicable`; a missing
+package or no direct Next is `non_applicable`; duplicate keys, invalid encoding
+or JSON, malformed dependency tables, and invalid `next` values are
+`malformed`. The matrix is sorted by root path and has a deterministic aggregate
+state. It is invalid to infer applicability from lockfiles, transitive packages,
+directory names, or arbitrary config. An all-`non_applicable` matrix terminates
+as `NotApplicableDecision` without starting Node, while any malformed root is a
+typed unavailable acquisition result.
+
+The trusted enumerator reads only known controls at project roots before it can
+derive membership. It parses the closed JSONC dialect (BOM, comments, and
+trailing commas outside strings), rejects duplicate keys and invalid value types,
+and permits only one local string `extends`. `..` escapes, package/array
+extends, `plugins`, `typeRoots`, `types`, invalid module/moduleResolution, and
+unsupported compiler options fail closed. Include/exclude patterns use the
+segment grammar `*`, `?`, and whole-segment `**`; `fnmatch` semantics are not
+part of this contract. A control read or parse failure is never represented by
+an empty config or empty membership.
+
+After control closure and final membership have been derived, the source graph
+is recomputed from the frozen bytes, resolved relative imports/extends, and
+project ownership. The reader's optional graph observation is intentionally not
+authority. The source result is one of
+`CompleteSourceSeal`, `PartialSourceSeal`, `SourceAcquisitionUnavailable`, or
+`SourceIntegrityFatal`; the corresponding `SourceAcquisitionDecisionProjection`
+fixes stage, diagnostic code, payload/manifest availability, stdout reason, and
+exit. The reference mutation test proves that an injected graph or an
+edge-deletion-plus-digest-recompute cannot change the sealed graph.
+
+Round 20 evidence is
+`test_round20_package_applicability_matrix_is_direct_dependency_only`,
+`test_round20_package_applicability_matrix_rejects_encoding_duplicates_and_mixed_state`,
+`test_round20_explicit_config_candidates_cannot_hide_package_applicability`,
+`test_round20_source_control_uses_segment_grammar_and_fail_closed_control_reads`,
+`test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection`, and
+`test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`.
+Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
+implementation is absent.

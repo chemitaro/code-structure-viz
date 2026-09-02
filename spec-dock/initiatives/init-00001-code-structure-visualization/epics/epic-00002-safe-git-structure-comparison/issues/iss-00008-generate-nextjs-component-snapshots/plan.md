@@ -659,3 +659,57 @@ Verification must include focused Round18 tests, `uv run pytest tests/contracts 
 SpecDock validation, pinned HTML PlantUML validation, `git diff --check`, and an empty `src/**` diff.
 No generated `node_modules` may remain. These checks validate the pre-implementation contract only and do
 not constitute a Strict pass or product implementation readiness.
+
+### Round 20 remediation plan and executable trace
+
+Round 20のreviewed fixed pointは SHA `aba6509ae818f8b959aa31276a6e8f5d6956680a`、historical
+Strict verdictは `P0=0 / P1=6 / P2=1 / fail / implementation_ready=no` である。fresh
+current-SHA Strictはpending、readinessは未確認、production implementationは未着手とする。
+Strict review sessionは `issue-eight-strict-round-twenty`、verification sessionは
+`required-strict-github-connector-verificati-692` である。transcript artifactは存在しないため、
+artifactのmeta/output/modelログとそのSHA-256だけをprovenanceとして記録し、未提供のCI番号や
+transcriptを推測しない。
+
+実装順序は、まずNode optionalityとsource acquisitionのauthorityを閉じ、その後にfailure projection、
+provenance、fixture index、docs/HTMLを同期する。各stepはreference validatorとJSON Schemaの
+positive/negative testで閉じる。
+
+1. `PackageApplicabilityMatrix`をfrozen `package.json` direct dependencies/devDependenciesの
+   観測から導出する。missing/no-direct-next、direct-next、malformedをclosed enumにし、duplicate
+   key、encoding、table/value/type mutationをrejectする。aggregateがall non-applicableなら
+   `NotApplicableDecision`、一件でもmalformedならunavailableとする。
+2. control候補をknown project-root pathsに限定し、一度だけstrict JSONC parseする。BOM/comments/
+   trailing comma、duplicate key、unsafe `..`、package/array extends、plugins/typeRoots/types、
+   invalid module/moduleResolutionをtyped fail-closedにする。include/excludeはsegment grammarで
+   membershipを導出し、control failureをempty configへ置換しない。
+3. `SourceAcquisitionSeal`のfrozen bytesとresolved imports/extends/ownershipからsource graphを
+   内部導出する。caller/request/reader graphを無視し、edge deletion + digest recomputationをreject
+   する。source integrity resultをComplete/Partial/Unavailable/Fatal unionへ投影し、fatalと
+   payload_unavailableのstage/code/manifest/stdout/exitを相互に検証する。
+4. process launch observationをfixture/production unionへ固定する。productionはdarwin/linuxと
+   verified Node identities、handle、spawn primitive、post-spawn equality、FD/process group、TOCTOUを
+   要求し、unavailable/not_applicableではidentityをnullにする。reference checksはhost processを
+   実行済みと主張せず、後続production acceptanceをPlanに残す。
+5. stage-dependent provenanceの同じvalidatorをNextDecisionContextとNextPublicationContextへ適用し、
+   stage/code pair、observed prefix、unobserved suffix、request/limits/source-plan/toolchain/trust/
+   process/compatibility/budgetの相関をclosed schemaで検証する。
+6. `next_contract_vectors.json`のRound20 positive/negativeとcriterion mapを、実質的なtest bodyへ
+   bidirectionalに結び付ける。fixture/HTMLの存在だけでは通さない。R/D/P、contract docs、新schema、
+   human HTML（既存8 diagramsを維持）および本artifactへ同じ語彙を反映する。
+
+#### Round 20 criterion → executable evidence
+
+| criterion | positive/negative evidence |
+| --- | --- |
+| R20-P1-01 PackageApplicabilityMatrix | `test_round20_package_applicability_matrix_is_direct_dependency_only`; `test_round20_package_applicability_matrix_rejects_encoding_duplicates_and_mixed_state`; `test_round20_explicit_config_candidates_cannot_hide_package_applicability` |
+| R20-P1-02 config/inheritance/membership | `test_round20_source_control_uses_segment_grammar_and_fail_closed_control_reads` |
+| R20-P1-03 source graph authority | `test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection` |
+| R20-P1-04 source integrity projection | `test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection` |
+| R20-P1-05 process observation | `test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_identity` |
+| R20-P1-06 provenance | `test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations`; `test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch` |
+| R20-P2-01 executable coverage index | `test_round20_fixture_coverage_index_is_substantive` |
+
+Required checks are focused Round20 tests, focused Next/schema tests, contract/full pytest, mypy, ruff
+check/format, SpecDock, pinned HTML PlantUML/browser validation, diff check, empty `src/**` diff, and no
+generated `node_modules`. Passing these checks does not change the historical Strict verdict or establish
+implementation readiness.

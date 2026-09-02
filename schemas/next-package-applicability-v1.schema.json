@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-package-applicability-v1",
+  "title": "CodeStructureViz Next package applicability matrix v1",
+  "description": "Applicability is derived only from each project's direct package.json Next dependency.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "projects", "aggregate_state", "applicable_projects", "non_applicable_projects"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-package-applicability/v1"},
+    "version": {"const": 1},
+    "projects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/project"}
+    },
+    "aggregate_state": {"enum": ["applicable", "non_applicable", "malformed"]},
+    "applicable_projects": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "non_applicable_projects": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_root", "package_path", "state", "evidence"],
+      "properties": {
+        "project_root": {"oneOf": [{"const": "."}, {"$ref": "#/$defs/path"}]},
+        "package_path": {"$ref": "#/$defs/path"},
+        "state": {"enum": ["applicable", "non_applicable", "malformed"]},
+        "evidence": {"enum": ["direct_next_dependency", "no_direct_next", "missing_package", "malformed_package"]}
+      },
+      "oneOf": [
+        {"properties": {"state": {"const": "applicable"}, "evidence": {"const": "direct_next_dependency"}}},
+        {"properties": {"state": {"const": "non_applicable"}, "evidence": {"enum": ["no_direct_next", "missing_package"]}}},
+        {"properties": {"state": {"const": "malformed"}, "evidence": {"const": "malformed_package"}}}
+      ]
+    }
+  }
+}

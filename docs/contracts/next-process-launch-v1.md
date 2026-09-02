@@ -132,3 +132,26 @@ Round 19 provenance is tied to reviewed SHA
 historical Strict result `P0=0 / P1=5 / P2=1 / fail`. Fresh current-SHA
 Strict remains pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 20 process and applicability boundary
+
+The process observation remains a closed `fixture | production` union and is
+derived once at the launch boundary. A fixture is named reference evidence
+only; it is never promoted to production. The production branch is limited to
+`darwin` and `linux` and correlates the observed Node version, absolute realpath,
+hash-time and spawn-time OS file identities, verified-open handle, concrete
+OS-specific spawn primitive, `argv[0]`, and post-spawn identity check. The
+descriptor also seals the fixed cwd, environment allowlist/denied variables,
+stdio and FD inheritance lifecycle, process-group policy, and TOCTOU failure
+point. A missing Node path, identity mismatch, symlink/mount/inode replacement,
+or unavailable OS guarantee is explicit `unavailable`/`not_applicable` with
+null identity fields; no executable name or host default fills the gap.
+
+This one observed object is the authority for toolchain, run fingerprint,
+manifest, and failure decision. A caller cannot substitute a descriptor after
+the observation or claim that a schema-only fixture is an OS process-level
+acceptance. The local test is deliberately host-free and asserts the
+unavailable branch contains no fabricated identity:
+`test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_identity`.
+Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
+implementation is absent.

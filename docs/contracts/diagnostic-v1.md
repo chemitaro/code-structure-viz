@@ -163,3 +163,32 @@ Round 19 executable evidence includes
 `test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity`.
 Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 20 closed source, applicability, and provenance projection
+
+The source result projection is closed before diagnostic routing. A malformed
+or unavailable control/package observation cannot become a partial empty config:
+it is `SourceAcquisitionUnavailable` with `CSV-NEXT-SOURCE-003`,
+`payload_unavailable`, manifest-only availability, and exit 3. A proven local
+safe subset remains the only `CSV-NEXT-SOURCE-001`/`partial_safe` path. Revision
+drift, duplicate reads, post-seal reads, and source digest/size integrity
+failures are `SourceIntegrityFatal` with fatal outcome, no manifest, and exit 1.
+These stage, code, outcome, payload/manifest flags, stdout reason, and exit
+values are one `SourceAcquisitionDecisionProjection`, not independently chosen
+surface fields.
+
+Before that projection, `PackageApplicabilityMatrix` classifies each root from
+direct package.json `dependencies.next`/`devDependencies.next` only. Missing or
+non-direct roots are non-applicable; malformed package bytes, duplicate keys,
+invalid tables, and invalid versions are malformed. An all-non-applicable
+matrix is a closed not-applicable run and does not probe Node.
+
+The source graph and control membership are derived from the frozen seal, not
+from a caller graph or fallback fixture. The same canonical provenance validator
+is used for `NextDecisionContext` and `NextPublicationContext`: stage/code is a
+closed pair, observed values form a prefix, and later values are explicit
+`unobserved`/`null`. The executable Round 20 evidence is
+`test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`,
+`test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch`, and
+the package/source acquisition tests. Fresh current-SHA Strict remains pending,
+readiness is unconfirmed, and production implementation is absent.

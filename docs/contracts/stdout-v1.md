@@ -159,3 +159,25 @@ Executable evidence is
 `test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy`.
 Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 20 source and provenance inputs
+
+The stdout projection receives source acquisition's single typed result rather
+than reconstructing a status from a missing config. An all-non-applicable
+`PackageApplicabilityMatrix` yields the closed not-applicable result without a
+Node probe. A malformed control/package or non-isolatable source failure yields
+the schema-valid manifest-only `CSV-NEXT-SOURCE-003`/`payload_unavailable`
+branch; a fatal integrity result yields the fatal/no-manifest branch. The
+source graph, applicability state, diagnostic, and exit are all owned by the
+same decision projection.
+
+The stage-dependent provenance used for this branch has exactly one
+`{kind, stage, failure_code, observed}` shape. It records only the observed
+prefix and explicit `unobserved`/`null` suffix, so stdout cannot fabricate a
+request, limits, source plan, toolchain, or budget after an early failure. The
+Round 20 executable checks are
+`test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`,
+`test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch`, and
+`test_round20_package_applicability_matrix_is_direct_dependency_only`.
+Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
+production implementation is absent.

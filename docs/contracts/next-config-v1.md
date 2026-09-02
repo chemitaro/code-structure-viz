@@ -318,3 +318,47 @@ Round 19's executable negative coverage is
 `test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations`.
 Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 20 applicability and source authority
+
+Before deciding whether Node is optional, the trusted acquisition boundary derives
+`PackageApplicabilityMatrix` from each frozen project-root `package.json`. Only a
+non-empty string in direct `dependencies.next` or `devDependencies.next` makes a
+root `applicable`. A missing package or a package without direct Next is
+`non_applicable`; duplicate keys, invalid UTF-8/BOM, invalid JSON, dependency-table
+types, or non-string/empty `next` values are `malformed`. The aggregate is
+`malformed` if any root is malformed, otherwise `applicable` if any root is
+applicable, otherwise `non_applicable`. Lockfiles, indirect dependencies,
+directory names, and config files are not applicability evidence. The all-
+non-applicable result is a closed `NotApplicableDecision` and performs no Node
+probe.
+
+Control acquisition is equally closed. Only known project-root control candidates
+are read before membership is derived. The JSONC reader permits UTF-8 BOM,
+comments, and trailing commas outside strings, but rejects duplicate keys, unsafe
+`..`, package or array `extends`, `plugins`, `typeRoots`, `types`, invalid module
+or moduleResolution, and malformed types. `include`/`exclude` use segment
+grammar (`*`, `?`, and whole-segment `**`), not `fnmatch`. A control read/parse
+failure is a typed unavailable result; it is never replaced by `{}` or an empty
+partial membership.
+
+The source graph is derived from the already sealed frozen bytes, resolved local
+imports/extends, and project ownership. A reader/request graph is not an input
+authority, and deleting edges followed by recomputing a digest cannot create a
+new valid seal. Source failures use the typed source result projection:
+`CompleteSourceSeal`, `PartialSourceSeal`, `SourceAcquisitionUnavailable`, or
+`SourceIntegrityFatal`, with the corresponding stage/code, payload and manifest
+availability, stdout reason, and exit fixed together. The executable evidence is
+`test_round20_package_applicability_matrix_is_direct_dependency_only`,
+`test_round20_explicit_config_candidates_cannot_hide_package_applicability`,
+`test_round20_source_control_uses_segment_grammar_and_fail_closed_control_reads`,
+`test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection`,
+and `test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`.
+
+Round 20's canonical stage provenance is one object shape (`kind`, `stage`,
+`failure_code`, `observed`) shared by the decision and publication contexts.
+Observed values stop at the failure stage; later values are explicit
+`unobserved`/`null` and cannot be supplied by a fixture. The process observation
+uses the same no-fake-identity rule and the closed fixture/production schema.
+Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
+production implementation is absent.

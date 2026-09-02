@@ -60,6 +60,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-root-or-path-v1",
         "next-run-context-v1",
         "next-provenance-v1",
+        "next-package-applicability-v1",
         "next-trusted-type-environment-v1",
     }
     registry = Registry()
@@ -91,6 +92,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-root-or-path-v1.schema.json",
         "next-run-context-v1.schema.json",
         "next-provenance-v1.schema.json",
+        "next-package-applicability-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
         "run-manifest-v1.schema.json",

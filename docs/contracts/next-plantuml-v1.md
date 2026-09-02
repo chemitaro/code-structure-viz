@@ -213,3 +213,20 @@ dual role requires two distinct positive closures. Target-unavailable
 PlantUML uses the same one-reason-per-target closed enum and canonical JSON
 ordering as semantic JSON. Fresh current-SHA Strict is pending and production
 implementation is absent.
+
+## Round 20 source authority
+
+PlantUML receives the same seal-owned source result as semantic JSON. Package
+applicability is derived only from direct `package.json` Next dependencies;
+all-non-applicable roots do not invoke Node. Known-root control bytes, strict
+JSONC, segment-pattern membership, local extends, and source graph edges are
+derived before the source seal. Control failure is never an empty config, and a
+caller-supplied graph cannot replace frozen-byte derivation. The typed source
+integrity projection keeps fatal and `payload_unavailable` outcomes distinct
+before either renderer is considered.
+
+Round 20 reference evidence is
+`test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection`
+and `test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`.
+Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
+production implementation is absent.

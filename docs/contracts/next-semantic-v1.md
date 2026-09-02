@@ -588,3 +588,24 @@ format, and budget correlations. Path-only ordering is NFC UTF-8 byte order
 after `path:` removal; object rows retain canonical JSON order. Fresh
 current-SHA Strict is pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 20 source authority and optional Node
+
+Semantic output is considered only after `PackageApplicabilityMatrix` and the
+sealed source result are known. Direct `dependencies.next` or
+`devDependencies.next` is the only applicability evidence; an all-
+`non_applicable` matrix produces a closed not-applicable run without a Node
+probe. Malformed package/control evidence is unavailable rather than an empty
+semantic model. The frozen-byte source graph and segment-grammar membership
+remain the only source facts used by the semantic projection.
+
+`SourceAcquisitionDecisionProjection` keeps complete, local partial-safe,
+payload-unavailable, and fatal source outcomes distinct before the semantic
+artifact is selected. The shared stage-dependent provenance validator prevents
+an early failure from acquiring synthetic limits, source plan, toolchain,
+trusted environment, or budget. Round 20 executable evidence is
+`test_round20_package_applicability_matrix_is_direct_dependency_only`,
+`test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`,
+and `test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch`.
+Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
+production implementation is absent.
