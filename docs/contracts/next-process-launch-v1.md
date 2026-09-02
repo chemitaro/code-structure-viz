@@ -111,7 +111,7 @@ The launch boundary is represented by
 (`fixture_id`, `identity_token`, and `recorded-fixture`); it must never be
 promoted to production launch evidence.
 
-The production branch is supported on `darwin`, `linux`, and `windows`. It requires
+The production branch is supported on `darwin` and `linux`; Windows is outside the v1 scope. It requires
 the absolute verified Node realpath, Node digest/version, file identity at
 hash and spawn (realpath, digest, version, device, inode), a verified open FD
 handle retained through spawn, the OS-specific verified-FD spawn primitive,
@@ -139,7 +139,7 @@ implementation is absent.
 The process observation remains a closed `fixture | production` union and is
 derived once at the launch boundary. A fixture is named reference evidence
 only; it is never promoted to production. The production branch is supported on
-`darwin`, `linux`, and `windows` and correlates the observed Node version, absolute realpath,
+`darwin`, and `linux` and correlates the observed Node version, absolute realpath,
 hash-time and spawn-time OS file identities, verified-open handle, concrete
 OS-specific spawn primitive, `argv[0]`, and post-spawn identity check. The
 descriptor also seals the fixed cwd, environment allowlist/denied variables,
@@ -161,7 +161,7 @@ implementation is absent.
 
 `next-process-launch-observation-v1` is the sole normative process authority. The older
 `process_launch_descriptor` is not an independent source of truth; when retained for compatibility it is a
-mechanically derived view of this observation. The production union supports `darwin`, `linux`, and `windows`.
+mechanically derived view of this observation. The production union supports `darwin` and `linux`; Windows is a separate scope and is not a v1 production branch.
 Each OS binds a verified-open Node executable to the concrete OS spawn primitive, compares the hash-time and
 spawn-time file identities, performs a post-spawn equality check, and fails closed on path, symlink, mount/inode,
 hash, version, handle, primitive, or TOCTOU mismatch. The observation also seals argv, cwd, allowlisted/denied
@@ -173,3 +173,19 @@ identity for fixture rows). Host-ephemeral FD number, device, and inode values r
 and are validated, but are deliberately excluded from this fingerprint. `unavailable` and `not_applicable` carry
 explicit null identity fields and never use a PATH/default executable. The reference suite validates this split
 without opening or spawning a host executable; OS process-level acceptance remains a later production gate.
+
+## Round 22 process authority
+
+The normative object is `next-process-launch-observation-v1`; `process_launch_descriptor` is only a
+mechanically derived compatibility view. For v1 production, only darwin and linux are supported. The
+observation owns private cwd, exact environment allowlist and denied names, pipe stdio, inherited-FD
+allowlist/closure, `shell=false`, process-group terminate/wait, verified-open executable identity, and
+hash-time/spawn-time plus post-spawn equality checks. Missing Node, a symlink/mount/inode replacement,
+or a TOCTOU mismatch is fail-closed with explicit unavailable/null identity fields.
+
+Stable Node policy is parseable stable SemVer major >=22; prerelease, older, or unparsable values use
+`CSV-NEXT-NODE-001`. `stable_toolchain_fingerprint` contains only portable semantic inputs (Node bytes
+hash/version, adapter identity, and portable argv semantics). `local_process_attestation_digest` retains
+the full host observation, including path, OS primitive, device/inode, and FD evidence; cross-machine
+stability is promised only for the portable fingerprint. This reference contract does not claim a live
+OS process check.

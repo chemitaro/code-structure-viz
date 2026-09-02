@@ -134,6 +134,20 @@ Round 19 evidence is covered by
 schema tests for `next-provenance-v1`. Fresh current-SHA Strict is pending,
 readiness is unconfirmed, and production implementation is absent.
 
+## Round 22 publication authority
+
+Applicability, source control, provenance, and process observations are sealed before publication. The
+final `PublicationBoundaryDecision` alone owns summary/root-manifest/domain/artifact/typed-unavailable
+bytes, diagnostic JSONL, selected descriptor, and capture/copy measurements; every projection returns
+those bytes without rerendering or accepting an external status or candidate. A selected-copy limit breach
+retains the semantic result and persisted descriptor, then seals one incomplete/exit-3 result with
+`CSV-NEXT-LIMIT-003` stderr and no partial stdout.
+
+The normative process observation supports v1 production on darwin/linux only; Windows is out of scope.
+Its portable stable fingerprint excludes host path, OS primitive, device/inode, and FD values, which remain
+in the local process attestation. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
+production implementation is absent.
+
 ## Round 20 source applicability and manifest authority
 
 The root manifest does not invent a Next project when acquisition has not
@@ -198,6 +212,6 @@ unsupported edges remain explicit and prevent `partial_safe`. Request-bound and 
 provenance use one catalog-derived stage/code union and never synthesize unobserved suffix values.
 
 The normative process object is `next-process-launch-observation-v1`; any legacy descriptor is a derived view.
-The observation binds darwin/linux/windows executable identity and spawn, while stable fingerprint excludes
+The observation binds darwin/linux executable identity and spawn, while stable fingerprint excludes
 host-ephemeral FD/device/inode values that remain security evidence. Fresh current-SHA Strict is pending,
 readiness is unconfirmed, and production implementation is absent.

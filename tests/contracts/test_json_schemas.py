@@ -1,4 +1,3 @@
-import hashlib
 import json
 import subprocess
 import sys
@@ -19,6 +18,10 @@ from code_structure_viz.adapters.sqlalchemy.model import (
 from code_structure_viz.adapters.sqlalchemy.semantic_json import render_semantic_snapshot
 from code_structure_viz.source.source_view import SourceView
 from tests.contracts.ecmascript_unicode_15_0 import TABLE_DIGEST
+from tests.contracts.next_reference_validation import (
+    process_launch_local_attestation_digest,
+    process_launch_stable_fingerprint,
+)
 from tests.helpers.acceptance import (
     initialize_fixture_repository,
     initialize_repository,
@@ -257,7 +260,7 @@ def _next_project() -> dict[str, object]:
         "config_path": "tsconfig.json",
         "config_digest": "2" * 64,
         "compiler_options": {
-            "allow_js": False,
+            "allow_js": True,
             "check_js": False,
             "jsx": "preserve",
             "module": "esnext",
@@ -929,7 +932,14 @@ def test_round19_process_observation_is_fixture_or_supported_os_production() -> 
         "argv": ["/usr/local/bin/node", "/.code-structure-viz/next-adapter.mjs"],
         "shell": False,
         "process_group": {"create": True, "terminate_scope": "group", "wait_after_terminate": True},
+        "cwd": "/.code-structure-viz/private-run",
+        "env_allowlist": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+        "denied_env": ["NODE_OPTIONS", "NODE_PATH", "PATH", "npm_config_user_config"],
+        "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
+        "fd_inheritance": {"close_fds": True, "allowed": [0, 1, 2]},
     }
+    fixture["stable_toolchain_fingerprint"] = process_launch_stable_fingerprint(fixture)
+    fixture["local_process_attestation_digest"] = process_launch_local_attestation_digest(fixture)
     validator.validate(fixture)
     identity = {
         "realpath": "/usr/local/bin/node",
@@ -971,29 +981,17 @@ def test_round19_process_observation_is_fixture_or_supported_os_production() -> 
         "argv": ["/usr/local/bin/node", "/.code-structure-viz/next-adapter.mjs"],
         "shell": False,
         "process_group": {"create": True, "terminate_scope": "group", "wait_after_terminate": True},
+        "cwd": "/.code-structure-viz/private-run",
+        "env_allowlist": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+        "denied_env": ["NODE_OPTIONS", "NODE_PATH", "PATH", "npm_config_user_config"],
+        "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
+        "fd_inheritance": {"close_fds": True, "allowed": [0, 1, 2]},
     }
-    production["stable_fingerprint"] = hashlib.sha256(
-        json.dumps(
-            {
-                "schema": production["schema"],
-                "version": production["version"],
-                "kind": production["kind"],
-                "node_status": production["node_status"],
-                "host_os": production["host_os"],
-                "argv": production["argv"],
-                "shell": production["shell"],
-                "process_group": production["process_group"],
-                "node_realpath": production["node_realpath"],
-                "node_sha256": production["node_sha256"],
-                "node_version": production["node_version"],
-                "spawn_primitive": production["spawn_primitive"],
-                "toctou_failure_point": production["toctou_failure_point"],
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()
+    production["stable_fingerprint"] = process_launch_stable_fingerprint(production)
+    production["stable_toolchain_fingerprint"] = production["stable_fingerprint"]
+    production["local_process_attestation_digest"] = process_launch_local_attestation_digest(
+        production
+    )
     validator.validate(production)
     for mutation in (
         {**production, "host_os": "windows"},
@@ -1011,7 +1009,15 @@ def test_round19_stage_provenance_is_closed_and_preserves_observed_prefix() -> N
     def row(observed: bool) -> dict[str, object]:
         return {
             "state": "observed" if observed else "unobserved",
-            "value": True if observed else None,
+            "value": (
+                {
+                    "schema": "code-structure-viz.next-observation/v1",
+                    "version": 1,
+                    "sha256": "a" * 64,
+                }
+                if observed
+                else None
+            ),
         }
 
     independent = {

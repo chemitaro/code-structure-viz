@@ -394,3 +394,19 @@ is an explicit closed stage, and its failure projects through the same decision,
 stdout, stderr, and exit path. `next-process-launch-observation-v1` is the normative process object; the old
 launch descriptor is only a derived compatibility view. Fresh current-SHA Strict is pending, readiness is
 unconfirmed, and production implementation is absent.
+
+## Round 22 configuration boundary
+
+The applicability matrix is evaluated before this boundary: only a direct non-empty Next dependency in
+the frozen `dependencies` or `devDependencies` table is applicable. Malformed package evidence uses
+`CSV-NEXT-APPLICABILITY-002`; missing/no-direct is `CSV-NEXT-APPLICABILITY-001`. An all-non-applicable
+matrix performs no config read or Node probe.
+
+Known-root control files use one duplicate-key rejecting JSONC lexer. BOM, comments outside strings, and
+trailing commas (including comma/comment/closing) are accepted. `extends` is one explicit project-local
+`./...` string; bare/package, arrays, absolute, `../`, URL-like, ambiguous, and cyclic forms are rejected.
+`plugins`, `typeRoots`, `types`, invalid module/moduleResolution, and unsafe paths are rejected. Include
+and exclude use segment `*`, `?`, and whole-segment `**` grammar. A control read or parse failure is a
+typed global-unavailable result, never an empty-object fallback. The resulting plan and source graph are
+seal-owned and cannot be replaced by request or reader injection. Fresh current-SHA Strict is pending,
+readiness is unconfirmed, and production implementation is absent.

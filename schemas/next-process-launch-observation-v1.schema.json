@@ -8,11 +8,13 @@
   "properties": {
     "schema": {}, "version": {}, "kind": {}, "node_status": {},
     "argv": {}, "shell": {}, "process_group": {}, "host_os": {},
+    "cwd": {}, "env_allowlist": {}, "denied_env": {}, "stdio": {}, "fd_inheritance": {},
     "fixture_id": {}, "identity_token": {}, "spawn_primitive": {},
     "toctou_failure_point": {}, "node_realpath": {}, "node_sha256": {},
     "node_version": {}, "file_identity_at_hash": {},
     "file_identity_at_spawn": {}, "verified_open_handle": {}, "stable_fingerprint": {},
-    "post_spawn_identity_check": {}, "fd_lifecycle": {}
+    "post_spawn_identity_check": {}, "fd_lifecycle": {},
+    "stable_toolchain_fingerprint": {}, "local_process_attestation_digest": {}
   },
   "oneOf": [
     {"$ref": "#/$defs/fixture"},
@@ -23,6 +25,9 @@
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "stable_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "stable_toolchain_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "local_process_attestation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "node_version": {"type": "string", "pattern": "^(?:2[2-9]|[3-9][0-9]|[1-9][0-9]{2,})\\.[0-9]+\\.[0-9]+(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"},
     "absolute_path": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
     "file_identity": {
       "type": "object",
@@ -31,7 +36,7 @@
       "properties": {
         "realpath": {"$ref": "#/$defs/absolute_path"},
         "sha256": {"$ref": "#/$defs/sha256"},
-        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "version": {"$ref": "#/$defs/node_version"},
         "device": {"type": "integer", "minimum": 0},
         "inode": {"type": "integer", "minimum": 0}
       }
@@ -70,7 +75,7 @@
     },
     "common_process": {
       "type": "object",
-      "required": ["schema", "version", "kind", "node_status", "argv", "shell", "process_group"],
+      "required": ["schema", "version", "kind", "node_status", "argv", "shell", "process_group", "cwd", "env_allowlist", "denied_env", "stdio", "fd_inheritance", "stable_toolchain_fingerprint", "local_process_attestation_digest"],
       "properties": {
         "schema": {"const": "code-structure-viz.next-process-launch-observation/v1"},
         "version": {"const": 1},
@@ -78,7 +83,12 @@
         "node_status": {"enum": ["available", "unavailable", "not_applicable"]},
         "argv": {"type": "array", "minItems": 2, "items": {"type": "string", "minLength": 1}},
         "shell": {"const": false},
-        "process_group": {"const": {"create": true, "terminate_scope": "group", "wait_after_terminate": true}}
+        "process_group": {"const": {"create": true, "terminate_scope": "group", "wait_after_terminate": true}},
+        "cwd": {"$ref": "#/$defs/absolute_path"},
+        "env_allowlist": {"const": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"}},
+        "denied_env": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "stdio": {"const": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"}},
+        "fd_inheritance": {"const": {"close_fds": true, "allowed": [0, 1, 2]}}
       }
     },
     "fixture": {
@@ -108,14 +118,14 @@
           "properties": {
             "kind": {"const": "production"},
             "node_status": {"const": "available"},
-            "host_os": {"enum": ["darwin", "linux", "windows"]},
+            "host_os": {"enum": ["darwin", "linux"]},
             "node_realpath": {"$ref": "#/$defs/absolute_path"},
             "node_sha256": {"$ref": "#/$defs/sha256"},
-            "node_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+            "node_version": {"$ref": "#/$defs/node_version"},
             "file_identity_at_hash": {"$ref": "#/$defs/file_identity"},
             "file_identity_at_spawn": {"$ref": "#/$defs/file_identity"},
             "verified_open_handle": {"$ref": "#/$defs/verified_handle"},
-            "spawn_primitive": {"enum": ["darwin-posix-spawn-verified-fd", "linux-posix-spawn-verified-fd", "windows-create-process-verified-handle"]},
+            "spawn_primitive": {"enum": ["darwin-posix-spawn-verified-fd", "linux-posix-spawn-verified-fd"]},
             "post_spawn_identity_check": {"$ref": "#/$defs/identity_check"},
             "fd_lifecycle": {"$ref": "#/$defs/fd_lifecycle"},
             "toctou_failure_point": {"enum": ["none", "open", "hash", "spawn_bind", "post_spawn_check"]}
@@ -131,10 +141,6 @@
           "then": {"properties": {"spawn_primitive": {"const": "linux-posix-spawn-verified-fd"}}}
         },
         {
-          "if": {"properties": {"host_os": {"const": "windows"}}},
-          "then": {"properties": {"spawn_primitive": {"const": "windows-create-process-verified-handle"}}}
-        },
-        {
           "not": {"properties": {"file_identity_at_hash": {"const": {}}}}
         }
       ]
@@ -148,7 +154,7 @@
           "properties": {
             "kind": {"const": "production"},
             "node_status": {"const": "unavailable"},
-            "host_os": {"enum": ["darwin", "linux", "windows", "unknown"]},
+            "host_os": {"enum": ["darwin", "linux", "unknown"]},
             "argv": {"const": ["<unavailable>", "/.code-structure-viz/next-adapter.mjs"]},
             "node_realpath": {"type": "null"},
             "node_sha256": {"type": "null"},

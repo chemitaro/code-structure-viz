@@ -11,9 +11,9 @@
     "node_status": {"enum": ["available", "unavailable", "not_applicable"]},
     "node_realpath": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
     "node_sha256": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{64}$"}, {"type": "null"}]},
-    "node_version": {"anyOf": [{"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}, {"type": "null"}]},
+    "node_version": {"anyOf": [{"$ref": "#/$defs/node_version"}, {"type": "null"}]},
     "spawn_executable": {"anyOf": [{"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"}, {"type": "null"}]},
-    "host_os": {"enum": ["posix-fixture", "posix", "windows"]},
+    "host_os": {"enum": ["posix-fixture", "darwin", "linux", "unknown"]},
     "file_identity_at_hash": {"anyOf": [{"$ref": "#/$defs/file_identity"}, {"type": "null"}]},
     "file_identity_at_spawn": {"anyOf": [{"$ref": "#/$defs/file_identity"}, {"type": "null"}]},
     "spawn_handle": {"anyOf": [{"type": "string", "minLength": 1, "pattern": "^[^\\u0000-\\u001f\\u007f]+$"}, {"type": "null"}]},
@@ -36,7 +36,7 @@
         "properties": {
           "node_realpath": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
           "node_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "node_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+          "node_version": {"$ref": "#/$defs/node_version"},
           "spawn_executable": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
           "file_identity_at_hash": {"$ref": "#/$defs/file_identity"},
           "file_identity_at_spawn": {"$ref": "#/$defs/file_identity"},
@@ -56,8 +56,9 @@
       "properties": {
         "realpath": {"type": "string", "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+        "version": {"$ref": "#/$defs/node_version"}
       }
-    }
+    },
+    "node_version": {"type": "string", "pattern": "^(?:2[2-9]|[3-9][0-9]|[1-9][0-9]{2,})\\.[0-9]+\\.[0-9]+(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"}
   }
 }

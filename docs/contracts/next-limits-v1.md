@@ -300,3 +300,17 @@ proof failures retain their catalog-defined protocol code. The reference
 capture runner consumes faithful `Iterable[bytes]` chunks and explicitly does
 not claim OS process-level coverage. Fresh current-SHA Strict is pending,
 readiness is unconfirmed, and production implementation is absent.
+
+## Round 22 measurement authority
+
+The three limits remain distinct: `max_adapter_stdout_capture_bytes` counts child bytes before retention,
+`max_adapter_response_bytes` counts the complete private response before decode, and
+`max_selected_stdout_bytes` counts the public selected stream before publication. `max_stdout_bytes` is
+only the selected-output compatibility alias. The closed order is raw capture -> bounded decode/aggregate
+-> schema -> base/path/reference/proof -> actual model+proof-only count -> model gate -> entity gate ->
+selected copy. Exact limits are accepted and limit+1 is rejected without partial publication.
+
+All counters and retained bytes are sealed in the final publication decision. A selected-copy breach keeps
+the semantic result and artifact descriptor, then creates one incomplete/exit-3 publication with canonical
+`CSV-NEXT-LIMIT-003` stderr and no partial stdout; it is not remeasured, rerendered, or recopied. Fresh
+current-SHA Strict is pending, readiness is unconfirmed, and production implementation is absent.

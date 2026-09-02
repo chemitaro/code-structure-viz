@@ -284,5 +284,35 @@ observation-only, and edge deletion followed by digest recomputation is rejected
 Applicability, graph, source failure, and provenance are propagated as one decision-owned chain. The
 request-independent branch records only the observed prefix; later request/limits/toolchain/trusted
 environment/process/budget values are `unobserved`/`null`. The production process authority is
-`next-process-launch-observation-v1`, including its darwin/linux/windows identity and stable-fingerprint
+`next-process-launch-observation-v1`, including its darwin/linux identity and stable-fingerprint
 split. Fresh current-SHA Strict is pending, readiness is unconfirmed, and production implementation is absent.
+
+## Round 22 source-plan authority
+
+Round 22 fixes the reviewed source-plan contract at SHA
+`e63c5d411cedc40c85f396cccbf12ca141b1938f` (CI `33586646010`, 7/7). The historical
+Strict verdict remains `P0=0 / P1=20 / P2=0 / fail / implementation_ready=no`; fresh
+current-SHA Strict is pending and production implementation is absent.
+
+`PackageApplicabilityMatrix` is evaluated before control or source acquisition. A known
+root's frozen `package.json` direct non-empty `dependencies.next` or `devDependencies.next`
+is applicable, missing/no-direct is non-applicable, and malformed bytes/tables/values are
+malformed. `CSV-NEXT-APPLICABILITY-002` is the malformed, Node-prohibited global-unavailable
+branch; `CSV-NEXT-APPLICABILITY-001` is non-applicable only. Mixed roots retain applicable
+roots; all non-applicable roots stop before config/source/Node reads.
+
+The seal owns control parsing, membership, and graph derivation. JSONC accepts BOM, comments,
+and trailing commas (including comma/comment/closing), while duplicate keys, unsafe or external
+`extends`, forbidden compiler options, and invalid module settings fail closed. Include/exclude
+uses segment grammar, not `fnmatch`. The graph is a closed `resolved | open` union: resolved
+edges carry normalized identity; open edges carry a redacted reason and safe frontier or keyed
+specifier digest. Unsupported, ambiguous, unresolved, or external edges remain open and cannot
+be dropped to claim locality. Caller graphs and recomputed digests are not authority.
+
+`next-process-launch-observation-v1` is the sole process object for v1 production on darwin/linux;
+Windows is out of scope. Its portable toolchain fingerprint excludes host path, OS primitive,
+device/inode, and FD values; the local process attestation retains and validates those values.
+The complete validation order is raw capture -> bounded decode/aggregate -> closed schema ->
+base/path/reference/proof -> actual model count -> model gate -> entity gate -> selected copy.
+The final publication boundary owns all exact public bytes and a selected-copy overrun is one
+`CSV-NEXT-LIMIT-003` incomplete/exit-3 result with canonical stderr and no partial stdout.

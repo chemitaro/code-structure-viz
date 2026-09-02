@@ -104,8 +104,20 @@ pending and the historical verdict remains fail.
 ## Round 21 process fingerprint split
 
 The process observation is the only process authority. Its security fields retain OS-native file identity,
-verified-open handle, and spawn/TOCTOU evidence for darwin, linux, and windows. The stable run-fingerprint
+verified-open handle, and spawn/TOCTOU evidence for darwin and linux. Windows is outside the v1 production scope. The stable run-fingerprint
 projection excludes host-ephemeral FD number, device, and inode values, so equivalent observations remain
 cross-machine stable while identity substitutions still fail validation. The legacy launch descriptor is only a
 derived compatibility view. Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
 implementation is absent.
+
+## Round 22 compatibility boundary
+
+The portable `stable_toolchain_fingerprint` is derived from Node bytes hash/version, adapter identity, and
+portable argv semantics; it excludes host path, OS primitive, device/inode, and FD/HANDLE values. The full
+verified host observation is retained only in `local_process_attestation_digest`. Stable parseable Node
+SemVer major >=22 is required; prerelease, older, or unparsable versions use `CSV-NEXT-NODE-001`.
+
+The final publication decision, not a compatibility helper, owns exact public bytes and publication status.
+Selected-copy overflow is one `CSV-NEXT-LIMIT-003` incomplete/exit-3 result with canonical stderr and no
+partial stdout. v1 production process observation is darwin/linux only; Windows is outside this scope.
+Fresh current-SHA Strict is pending, readiness is unconfirmed, and production implementation is absent.

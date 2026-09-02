@@ -138,7 +138,15 @@
     "round21-source-graph-module-plane",
     "round21-provenance-stage-union",
     "round21-process-observation-fingerprint",
-    "round21-coverage-index"
+    "round21-coverage-index",
+    "round22-runtime-applicability",
+    "round22-runtime-config-provenance",
+    "round22-runtime-source-graph",
+    "round22-runtime-process-observation",
+    "round22-runtime-provenance-value",
+    "round22-runtime-integrity",
+    "round22-runtime-project-overlap",
+    "round22-runtime-selected-copy"
   ],
   "negative": [
     "cross-domain",
@@ -262,7 +270,15 @@
     "round21-source-open-edge",
     "round21-provenance-stage-mismatch",
     "round21-process-identity-substitution",
-    "round21-coverage-mapping-mutation"
+    "round21-coverage-mapping-mutation",
+    "round22-runtime-applicability-mutation",
+    "round22-runtime-config-provenance-mutation",
+    "round22-runtime-source-graph-mutation",
+    "round22-runtime-process-observation-mutation",
+    "round22-runtime-provenance-value-mutation",
+    "round22-runtime-integrity-mutation",
+    "round22-runtime-project-overlap-mutation",
+    "round22-runtime-selected-copy-mutation"
   ],
   "criterion_test_map": {
     "round14.p1-1": ["test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exit"],
@@ -450,6 +466,48 @@
     ],
     "round21.p2-1": [
       "test_round21_coverage_index_is_bidirectional_and_self_validating"
+    ],
+    "round22.rg-01": [
+      "test_round22_applicability_dual_valid_and_malformed_projection"
+    ],
+    "round22.rg-02": [
+      "test_round22_config_codes_and_jsonc_composition_are_closed"
+    ],
+    "round22.rg-03": [
+      "test_round22_source_graph_is_a_redacted_resolved_or_open_union"
+    ],
+    "round22.rg-04": [
+      "test_round22_process_observation_rejects_prerelease_and_windows"
+    ],
+    "round22.rg-05": [
+      "test_round22_provenance_observed_rows_have_typed_identity"
+    ],
+    "round22.rg-06": [
+      "test_round22_source_integrity_has_distinct_fatal_diagnostic"
+    ],
+    "round22.rg-07": [
+      "test_round22_project_root_overlap_is_usage_before_source_acquisition"
+    ],
+    "round22.rg-08": [
+      "test_round22_source_locality_scans_executable_template_jsx_and_runtime_suffixes"
+    ],
+    "round22.rg-09": [
+      "test_round22_process_observation_rejects_prerelease_and_windows"
+    ],
+    "round22.rg-10": [
+      "test_round22_provenance_observed_rows_have_typed_identity"
+    ],
+    "round22.rg-11": [
+      "test_round22_runtime_registry_executes_vectors_and_named_validators"
+    ],
+    "round22.rg-12": [
+      "test_round22_source_integrity_has_distinct_fatal_diagnostic"
+    ],
+    "round22.rg-13": [
+      "test_round22_source_graph_is_a_redacted_resolved_or_open_union"
+    ],
+    "round22.rg-14": [
+      "test_round22_runtime_registry_executes_vectors_and_named_validators"
     ]
   },
   "criterion_evidence": {
@@ -492,5 +550,135 @@
       "negative_vectors": ["round21-coverage-mapping-mutation"],
       "validator": "next-contract-vectors/v1"
     }
-  }
+  },
+  "runtime_vector_registry": [
+    {
+      "vector_id": "round22-runtime-applicability",
+      "criterion": "round22.rg-01",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_applicability",
+      "validator": "validate_package_applicability_projection",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-applicability-mutation",
+      "criterion": "round22.rg-01",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_applicability_mutation",
+      "validator": "validate_package_applicability_projection",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-config-provenance",
+      "criterion": "round22.rg-02",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_config_provenance",
+      "validator": "validate_stage_dependent_provenance",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-config-provenance-mutation",
+      "criterion": "round22.rg-02",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_config_provenance_mutation",
+      "validator": "validate_stage_dependent_provenance",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-source-graph",
+      "criterion": "round22.rg-03",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_source_graph",
+      "validator": "validate_source_graph_projection",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-source-graph-mutation",
+      "criterion": "round22.rg-03",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_source_graph_mutation",
+      "validator": "validate_source_graph_projection",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-process-observation",
+      "criterion": "round22.rg-04",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_process_observation",
+      "validator": "validate_process_launch_observation",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-process-observation-mutation",
+      "criterion": "round22.rg-04",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_process_observation_mutation",
+      "validator": "validate_process_launch_observation",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-provenance-value",
+      "criterion": "round22.rg-05",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_provenance_value",
+      "validator": "validate_stage_dependent_provenance",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-provenance-value-mutation",
+      "criterion": "round22.rg-05",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_provenance_value_mutation",
+      "validator": "validate_stage_dependent_provenance",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-integrity",
+      "criterion": "round22.rg-06",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_integrity",
+      "validator": "validate_source_acquisition_result_projection",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-integrity-mutation",
+      "criterion": "round22.rg-06",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_integrity_mutation",
+      "validator": "validate_source_acquisition_result_projection",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-project-overlap",
+      "criterion": "round22.rg-07",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_project_overlap",
+      "validator": "validate_source_acquisition_result_projection",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-project-overlap-mutation",
+      "criterion": "round22.rg-07",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_project_overlap_mutation",
+      "validator": "validate_source_acquisition_result_projection",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-selected-copy",
+      "criterion": "round22.rg-14",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_selected_copy",
+      "validator": "validate_selected_stdout_measurement",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-selected-copy-mutation",
+      "criterion": "round22.rg-14",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_selected_copy_mutation",
+      "validator": "validate_selected_stdout_measurement",
+      "expected_valid": false
+    }
+  ]
 }

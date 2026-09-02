@@ -129,6 +129,22 @@ negative discriminator/reason cases, schema-valid bytes, and canonical path
 ordering. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
 production implementation is absent.
 
+## Round 22 diagnostic authority
+
+`PackageApplicabilityMatrix` is the first diagnostic authority. Direct non-empty Next declarations are
+applicable, missing/no-direct roots are non-applicable, and malformed package bytes/tables/values use
+`CSV-NEXT-APPLICABILITY-002` (global `payload_unavailable`, Node prohibited); the non-applicable branch
+uses `CSV-NEXT-APPLICABILITY-001`. Ordinary control grammar failures use `CSV-NEXT-CONFIG-001`, while
+external/bare `extends` resolution uses `CSV-NEXT-CONFIG-002`. Control failures are not replaced with `{}`.
+
+The sealed graph retains unsupported, ambiguous, unresolved, and external `open_edge` records, and the
+catalog-derived provenance union keeps observed typed values plus an unobserved/null suffix. Source
+integrity substitution/drift is `CSV-NEXT-SOURCE-INTEGRITY-001` fatal exit 1 with no manifest; ordinary
+non-isolatable source failure is `CSV-NEXT-SOURCE-003` manifest-only exit 3. A selected stdout-copy breach
+is one final `CSV-NEXT-LIMIT-003` publication diagnostic, incomplete exit 3, with no partial stdout.
+The final publication decision owns diagnostic bytes for every public surface. Fresh current-SHA Strict is
+pending, readiness is unconfirmed, and production implementation is absent.
+
 ## Round 19 closed stage provenance and source outcomes
 
 The stage-dependent provenance schema is a closed `oneOf`. A
@@ -208,3 +224,11 @@ unobserved suffix values cannot be injected. Source graph open edges (unsupporte
 external) prevent a locality claim. `next-process-launch-observation-v1` is the process authority, while any
 legacy descriptor is derived only. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
 production implementation is absent.
+
+Round 22 binds all diagnostics to the final publication decision. Malformed package evidence is
+`CSV-NEXT-APPLICABILITY-002`, ordinary control errors are `CSV-NEXT-CONFIG-001`, and external extends is
+`CSV-NEXT-CONFIG-002`; these branches cannot synthesize an empty config. Source-integrity substitution is
+`CSV-NEXT-SOURCE-INTEGRITY-001` fatal/exit 1 without a manifest, while ordinary non-isolatable source
+failure is `CSV-NEXT-SOURCE-003` manifest-only/exit 3. Selected-copy overflow is one canonical
+`CSV-NEXT-LIMIT-003` incomplete/exit-3 publication with no partial stdout. Fresh current-SHA Strict is
+pending, readiness is unconfirmed, and production implementation is absent.

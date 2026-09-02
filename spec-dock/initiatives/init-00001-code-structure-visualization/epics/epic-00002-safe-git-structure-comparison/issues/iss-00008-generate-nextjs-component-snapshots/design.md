@@ -77,7 +77,7 @@ SHA-256もdecisionへopaqueに保持する。最終化はsemantic decisionと実
 sealed bytesだけを返し、候補、status、measurement、selected payloadを外から差し替えられない。
 
 process observationは`schemas/next-process-launch-observation-v1.schema.json`でfixture/productionを分離する。
-productionはdarwin/linux/windowsのOS-native identity、verified-open handle、hash/version、actual spawn primitive、
+productionはdarwin/linuxのOS-native identity、verified-open handle、hash/version、actual spawn primitive、
 post-spawn identity equality、FD lifecycle、process group、TOCTOU failure pointを必須にする。fixtureはreference
 testの証人であってproduction evidenceではない。host executableに触れないreference validationをprocess-level
 acceptanceと誤認せず、後続production planへ引き継ぐ。
@@ -1636,7 +1636,7 @@ stage/code catalogを使い、failureまでのobserved prefixと後続のunobser
 ### Process and publication authority
 
 process observationは `fixture | production` の閉じたunionである。fixtureはreference testの
-named evidenceに限定し、productionはdarwin/linux/windowsのOS-native file identity、Node realpath/hash/version、
+named evidenceに限定し、productionはdarwin/linuxのOS-native file identity、Node realpath/hash/version、
 hash時とspawn時のidentity、verified handle、OS-specific spawn primitive、post-spawn equality、
 FD lifecycle、process group、TOCTOU fail-closed pointを必須とする。host executableを触らない
 reference validatorはこのOS process-level guaranteeを証明済みとは扱わない。
@@ -1725,7 +1725,7 @@ closed pairと observed prefix/value、budget requested/resolved/source correlat
 検査する。未観測suffixは `unobserved`/`null` とし、project/control failureが後段のlimits、toolchain、
 trust、process、budgetを合成することを禁止する。
 
-`next-process-launch-observation-v1` が process authorityである。productionは darwin/linux/windows
+`next-process-launch-observation-v1` が process authorityである。productionは darwin/linux
 それぞれの native verified-open/execution bindingを必要とし、realpath、hash/version、hash/spawn
 identity、verified handle、spawn primitive、post-spawn equality、argv/cwd/env/FD/process group、
 TOCTOUを一つの observationへ束ねる。unavailable/not_applicableでは identityをnullにする。
@@ -1754,3 +1754,113 @@ status、candidate、graph、diagnostic、measurementを引数に受けない。
 双方向に参照し、coverage自身のmutationも拒否する。これはHTMLやfixtureの存在確認ではなく、
 実行可能な契約である。production implementation開始条件は、上記local checksに加えて同一SHAの
 fresh Strictが `review_status=pass`、P0=0、P1=0を返すことであり、現在は未達である。
+
+## Round 22 adopted authority design
+
+Round 22のsource reviewは reviewed SHA `e63c5d411cedc40c85f396cccbf12ca141b1938f`、CI
+`33586646010`（7/7 success）で、historical Strict verdictは
+`P0=0 / P1=20 / P2=0 / fail / implementation_ready=no`である。review sessionは
+`required-strict-github-connector-verificati-713`（output.log SHA-256
+`d3e8c835608a41e02ac8d33080be8cda97c81f18541776b3ab3f6a92deb0ea8d`）、verification-onlyは
+`issue-eight-strict-round-twenty-4`である。Verdictは上書きせず、fresh current-SHA Strictはpending、
+readinessは未確認、production implementationは未着手とする。
+
+### Authority graph and closed decisions
+
+```text
+Frozen snapshot
+  -> PackageApplicabilityMatrix
+  -> control JSONC / membership / source graph (resolved | open)
+  -> SourceAcquisitionSeal + source-failure ledger
+  -> ValidatedAdapterRequest + opaque canonical response
+  -> NextRunDecision (request-bound | request-independent)
+  -> next-process-launch-observation-v1
+  -> PublicationBoundaryDecision
+  -> sealed domain / root manifest / stdout / stderr / artifact / exit bytes
+```
+
+Package applicabilityはknown project-rootの凍結`package.json` direct dependencyだけから最初に導出する。
+両tableのvalid non-empty `next`は値の一致を比較せずapplicable、missing/no-directはnon-applicable、
+duplicate/encoding/JSON/table/value異常はmalformedである。malformed専用コードは
+`CSV-NEXT-APPLICABILITY-002`（stage applicability、payload_unavailable、recoverable false、ref none、
+Node prohibited）、non-applicable専用は`CSV-NEXT-APPLICABILITY-001`である。all non-applicableでは
+config/source/Node readをせず`NotApplicableDecision`、mixedではapplicable rootsだけを下流へ渡す。
+
+controlの閉じたgrammarは、BOM・文字列外comment・trailing comma（comma→comment→closingを含む）を
+許すduplicate-key rejecting JSONCである。`extends`はproject内の一つのexplicit `./...`だけとし、
+bare/package、array、absolute、`../`、URL-like、ambiguity、cycleをrejectする。plugins/typeRoots/types、
+invalid module/moduleResolutionもrejectし、include/excludeはsegment `*`/`?`/whole-segment `**`で導出する。
+control read/parse failureは空objectへの置換を許さない。
+
+source graphのownerは`next-source-plan-v1` boundaryとSourceAcquisitionSealである。resolved edgeは
+`source,target,syntax_kind,role,normalized_specifier,specifier_identity`、open edgeは
+`source,syntax_kind,reason,safe_frontier`またはkeyed specifier digestだけを持つ。raw specifierはredactし、
+unsupported/ambiguous/unresolved/externalをedge omissionで隠さない。graph、ledger locality、membership、
+rolesはfrozen bytesから内部導出し、caller/request/readerのgraphやedge deletion後のrecomputed digestは
+authorityではない。
+
+Processのnormative objectは`next-process-launch-observation-v1`であり、v1 productionはdarwin/linuxだけ。
+private cwd、exact env allowlist/denied set、pipe stdio、inherited FD allowlist/closure、shell=false、
+process-group terminate/wait、verified-open executable、hash/spawn identity、post-spawn equalityを一つの
+observationへbindする。旧`process_launch_descriptor`はこのobservationからのcompatibility viewに限る。
+`stable_toolchain_fingerprint`はportable Node bytes hash/version、adapter identity、portable argv semantics
+だけを含み、host path/OS primitive/device/inode/FDを含めない。完全なhost evidenceは
+`local_process_attestation_digest`へ保持する。stable SemVerはmajor>=22のみ許可し、prerelease/<22/parse不能は
+`CSV-NEXT-NODE-001` unavailable、build metadataはorderingに影響させず観測へ保持する。
+
+Provenanceはrequest-bound/request-independentで同じstage-dependent unionを使う。observed rowのvalueは
+schema/version/canonical digestを持つtyped identity、unobserved rowのvalueはnullである。failure stageより
+後だけをunobservedにし、budget requested/resolved/sourceとselector/formatsを同じvalidatorで相関させる。
+source integrityのrevision drift、duplicate/post-seal read、seal mismatch、substitutionは
+`CSV-NEXT-SOURCE-INTEGRITY-001` fatal/exit1/no semantic or failure manifest、通常の非隔離source failureは
+`CSV-NEXT-SOURCE-003` payload_unavailable/manifest-onlyとする。
+
+Publicationはsemantic decisionを再解釈せず、実captureから得たcanonical response、response/model digest、
+artifact exact-byte map、summary/root manifest/typed unavailable、diagnostic JSONL、capture/stderr/selected-copy
+measurementを`PublicationBoundaryDecision`へ一度sealする。selected copy超過は成功semantic/artifact descriptorを
+保持し、failure status incomplete、exit3、`CSV-NEXT-LIMIT-003` canonical stderr、partial stdoutなしとする。
+failure manifestを保存した後に再measure・rerender・recopyしない。全public projectionはfinal boundaryのsealed
+bytesだけを返し、独立status/candidate/payload/measurement引数を受けない。
+
+Coverageはsource-string markerではなく、registryのcallable producer→validatorをpositive/negativeともに実行する。
+criterion、vector、validator、mutation、mappingのmissing/duplicate/wrong criterionはrejectする。project-root
+ancestor/descendant overlapは`SourceProjectUsage`（P001、exit2、stdout empty、artifactなし、reader未実行）であり、
+domain failureではない。以上の14 RG（RG-01～RG-14）と20 source findingの一対一対応、9 adopted decision、
+First Red/Green、実行結果はRound 22 artifactに保存する。
+
+### Round 22 implementation handoff contract
+
+実装者は上記graphの左から右へ順に進み、次の順序を変更してはならない。
+
+```text
+raw capture cap -> bounded decode/aggregate -> closed schema
+-> base/path/reference/proof -> actual model+proof-only count
+-> model gate -> entity gate -> selected copy
+```
+
+最初にfocused testで、(a) selected-copy overrunがcanonical LIMIT-003 stderrを出さない旧挙動、
+(b) fixture indexへruntime registryがない状態、(c) config code混同、(d) overlapをdomain failureにする状態を
+First Redとして記録する。その後、reference validator/schema/fixtureを同期し、`test_round22_*`のpositive/negative
+をGreenにする。production `src/**`、Node実行、依存追加はこの段階の対象外である。
+
+Round 22 criterion mappingは次のとおりである。
+
+| RG | executable evidence |
+| --- | --- |
+| RG-01 | `test_round22_applicability_dual_valid_and_malformed_projection`; `test_round22_config_codes_and_jsonc_composition_are_closed` |
+| RG-02 | `test_round22_applicability_dual_valid_and_malformed_projection` |
+| RG-03 | `test_round22_source_graph_is_a_redacted_resolved_or_open_union`; `test_round22_source_locality_scans_executable_template_jsx_and_runtime_suffixes` |
+| RG-04 | `test_round22_source_graph_is_a_redacted_resolved_or_open_union` |
+| RG-05 | `test_round22_process_observation_rejects_prerelease_and_windows` |
+| RG-06 | `test_round22_process_observation_rejects_prerelease_and_windows` |
+| RG-07 | `test_round22_process_observation_rejects_prerelease_and_windows` |
+| RG-08 | `test_round22_process_observation_rejects_prerelease_and_windows` |
+| RG-09 | `test_round22_process_observation_rejects_prerelease_and_windows` |
+| RG-10 | `test_round22_provenance_observed_rows_have_typed_identity` |
+| RG-11 | `test_round22_runtime_registry_executes_vectors_and_named_validators` |
+| RG-12 | `test_round22_source_integrity_has_distinct_fatal_diagnostic` |
+| RG-13 | `test_round22_project_root_overlap_is_usage_before_source_acquisition` |
+| RG-14 | `test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy`; `test_round22_runtime_registry_executes_vectors_and_named_validators` |
+
+この設計はpre-implementation contractであり、local test/CI greenだけではStrict passやreadinessを意味しない。
+同一current SHAに対するfresh Strictが`P0=0 / P1=0 / review_status=pass`を返すまで、production実装へ進まない。

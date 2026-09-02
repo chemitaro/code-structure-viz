@@ -60,6 +60,7 @@ from tests.contracts.next_reference_validation import (
     SourceDiscoveryIntent,
     SourceFailureLedger,
     SourceIntegrityFatal,
+    SourceProjectUsage,
     _assert_file_path,
     _assert_path,
     _canonical_json_line,
@@ -100,6 +101,7 @@ from tests.contracts.next_reference_validation import (
     encoded_request_bytes,
     entity_budget_allowed,
     entity_budget_gate,
+    execute_runtime_vector_registry,
     expected_export_coverage_counts,
     expected_export_observations,
     expected_export_reexport_witness,
@@ -124,8 +126,10 @@ from tests.contracts.next_reference_validation import (
     package_applicability_projection,
     pre_response_failure_decision,
     process_launch_descriptor,
+    process_launch_local_attestation_digest,
     process_launch_observation_from_descriptor,
     process_launch_stable_fingerprint,
+    process_observation_with_fingerprints,
     project_config_digest,
     recompute_compatibility_id,
     recompute_export_graph_case,
@@ -139,6 +143,7 @@ from tests.contracts.next_reference_validation import (
     request_from_partial_source_seal,
     resolve_target_resolutions,
     response_boundary_decision,
+    runtime_vector_registry,
     scan_export_syntax_census,
     seal_source_acquisition,
     seal_source_acquisition_result,
@@ -166,6 +171,7 @@ from tests.contracts.next_reference_validation import (
     validate_run_manifest,
     validate_run_status_vector,
     validate_runtime_manifest,
+    validate_runtime_vector_registry,
     validate_semantic_snapshot,
     validate_stage_dependent_provenance,
     validate_trusted_environment,
@@ -1124,6 +1130,49 @@ def _empty_model() -> dict[str, Any]:
     return model
 
 
+def _model_with_applicability_control_files(model: dict[str, Any]) -> dict[str, Any]:
+    """Add the observed package controls required by acquisition fixtures.
+
+    Semantic model builders intentionally omit package metadata.  The
+    adapter request/response fixture, however, represents the complete frozen
+    source view, so it carries one control file per project to make the
+    package applicability matrix an observed, first-stage fact.
+    """
+
+    candidate = copy.deepcopy(model)
+    for project in candidate["projects"]:
+        root = project["root"]
+        package_path = "package.json" if root == "." else f"{root.rstrip('/')}/package.json"
+        if any(record["path"] == package_path for record in candidate["files"]):
+            continue
+        payload = b'{"dependencies":{"next":"15.0.0"}}'
+        package_record: dict[str, Any] = {
+            "kind": "file",
+            "id": "",
+            "path": package_path,
+            "project_id": project["id"],
+            "roles": ["control"],
+            "effective_role": "control",
+            "size_bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        package_record["id"] = recompute_record_id(package_record)
+        candidate["files"].append(package_record)
+        project["file_ids"] = sorted([*project["file_ids"], package_record["id"]])
+    candidate["files"].sort(key=lambda record: record["id"])
+    counts = candidate["coverage"]["counts"]
+    previous_published = counts["published"]
+    previous_discovered = counts["discovered"]
+    added_files = len(candidate["files"]) - len(model["files"])
+    for collection in COLLECTIONS:
+        counts[collection] = len(candidate[collection])
+    counts["published"] = sum(len(candidate[collection]) for collection in COLLECTIONS)
+    counts["discovered"] = previous_discovered + added_files
+    assert counts["published"] == previous_published + added_files
+    counts["internal_entities"] = len(candidate["modules"]) + len(candidate["components"])
+    return candidate
+
+
 def _semantic(
     model: dict[str, Any],
     status: str = "complete",
@@ -1235,7 +1284,7 @@ def _request(
     run_context: NextRunContext | None = None,
     default_content: bytes | None = None,
 ) -> dict[str, Any]:
-    model = model or _model()
+    model = _model_with_applicability_control_files(model or _model())
     trusted_environment_digest = _trusted_environment()["sha256"]
     contents = {
         "src/Button.tsx": (
@@ -1247,6 +1296,13 @@ def _request(
         "src/Card.tsx": b"const Card = 1;\n",
         "src/types.d.ts": b"export interface Props {}\n",
     }
+    for project in model["projects"]:
+        package_path = (
+            "package.json"
+            if project["root"] == "."
+            else f"{project['root'].rstrip('/')}/package.json"
+        )
+        contents[package_path] = b'{"dependencies":{"next":"15.0.0"}}'
     files = []
     census_contents = {item["path"]: item["content"] for item in load_export_census_fixture()}
     for file_record in model["files"]:
@@ -1326,6 +1382,12 @@ def _source_seal_for_graph(graph: dict[str, Any], *, project_roots: tuple[str, .
         "open_edges": tuple(sorted(copy.deepcopy(graph["open_edges"]), key=canonical_json_bytes)),
     }
     files = {node["path"]: b"" for node in normalized_graph["nodes"]}
+    # Applicability is the first acquisition observation.  Graph-only
+    # counterexamples still represent an applicable Next project explicitly;
+    # otherwise the matrix correctly short-circuits before source discovery.
+    for root in project_roots:
+        package_path = "package.json" if root == "." else f"{root.rstrip('/')}/package.json"
+        files.setdefault(package_path, b'{"dependencies":{"next":"15"}}')
     base = seal_source_acquisition(
         SourceDiscoveryIntent(project_roots=project_roots, control_candidates=()),
         # The graph is deliberately installed only in this isolated fixture
@@ -1338,12 +1400,15 @@ def _source_seal_for_graph(graph: dict[str, Any], *, project_roots: tuple[str, .
         },
     )
     graph_digest = digest(normalized_graph)
+    final_plan = copy.deepcopy(base.final_plan)
+    final_plan["source_graph"] = copy.deepcopy(normalized_graph)
+    plan_digest = digest(final_plan)
     source_view = copy.deepcopy(base.source_view)
     source_view["source_graph_digest"] = graph_digest
     source_view_fingerprint = digest(source_view)
     seal_id = digest(
         {
-            "plan_digest": base.plan_digest,
+            "plan_digest": plan_digest,
             "source_view_fingerprint": source_view_fingerprint,
             "seal_operation": base.seal_operation,
             "snapshot_id": base.snapshot_id,
@@ -1354,6 +1419,8 @@ def _source_seal_for_graph(graph: dict[str, Any], *, project_roots: tuple[str, .
     )
     return replace(
         base,
+        final_plan=final_plan,
+        plan_digest=plan_digest,
         source_graph=normalized_graph,
         source_view=source_view,
         source_view_fingerprint=source_view_fingerprint,
@@ -1517,6 +1584,7 @@ def _response(
     request: dict[str, Any] | None = None,
     run_context: NextRunContext | None = None,
 ) -> dict[str, Any]:
+    model = _model_with_applicability_control_files(model)
     descriptor = _descriptor()
     trusted_environment_digest = _trusted_environment()["sha256"]
     request_value = request or _request()
@@ -1526,7 +1594,7 @@ def _response(
     else:
         context = canonical_run_context(**run_context)
         assert context == request_context
-    response_proof = proof
+    response_proof = None if proof is None else copy.deepcopy(proof)
     if response_proof is None:
         target_failure = target_completeness_failure(model, request_value["targets"])
         if target_failure is not None:
@@ -1550,6 +1618,17 @@ def _response(
             response_proof["target_resolutions"] = target_rows
         else:
             response_proof = _complete_proof(model)
+    else:
+        discovered_keys = {
+            (item.get("collection"), item.get("record_id"))
+            for item in response_proof["discovered_records"]
+        }
+        for record in model["files"]:
+            key = ("files", record["id"])
+            if record["path"].endswith("package.json") and key not in discovered_keys:
+                response_proof["discovered_records"].append(
+                    {"collection": "files", "record_id": record["id"], "taints": []}
+                )
     return {
         "schema": "code-structure-viz.next-adapter-response/v1",
         "protocol": "code-structure-viz.next-adapter/v1",
@@ -1788,7 +1867,12 @@ def _legacy_domain_fixture(
             formats = list(context["requested_formats"])
         else:
             raise AssertionError("downstream publication requires NextValidatedDecision")
-    model = model or _model()
+    # The legacy status-vector helper still creates a validated decision so
+    # downstream assertions can exercise the real authority chain.  Include
+    # the package control file in that fixture as well; otherwise the sealed
+    # source plan and the model's file membership would disagree before the
+    # projection is even rendered.
+    model = _model_with_applicability_control_files(model or _model())
     if response_decision is not None and validated_decision is None:
         assert model is not None
     if validated_decision is not None:
@@ -2238,56 +2322,108 @@ def _legacy_domain_fixture(
                 trusted_environment=_trusted_environment(),
                 projects_for_fingerprint=copy.deepcopy(model["projects"]),
                 source_failure_ledger=(),
-                process_launch_descriptor=process_launch_descriptor(
-                    node_status=(
-                        "not_applicable"
-                        if status == "not_applicable"
-                        else "unavailable"
-                        if runtime_unavailable
-                        else "available"
-                    ),
-                    node_realpath=(
-                        None
-                        if status == "not_applicable" or runtime_unavailable
-                        else "/usr/local/bin/node"
-                    ),
-                    node_sha256=(
-                        None if status == "not_applicable" or runtime_unavailable else "1" * 64
-                    ),
-                    node_version=(
-                        None if status == "not_applicable" or runtime_unavailable else "22.14.0"
-                    ),
-                    spawn_executable=(
-                        None
-                        if status == "not_applicable" or runtime_unavailable
-                        else "/usr/local/bin/node"
-                    ),
-                    file_identity_at_hash=(
-                        None
-                        if status == "not_applicable" or runtime_unavailable
-                        else {
-                            "realpath": "/usr/local/bin/node",
-                            "sha256": "1" * 64,
-                            "version": "22.14.0",
-                        }
-                    ),
-                    file_identity_at_spawn=(
-                        None
-                        if status == "not_applicable" or runtime_unavailable
-                        else {
-                            "realpath": "/usr/local/bin/node",
-                            "sha256": "1" * 64,
-                            "version": "22.14.0",
-                        }
-                    ),
-                    spawn_handle=(
-                        None
-                        if status == "not_applicable" or runtime_unavailable
-                        else "fixture-process-group"
-                    ),
+                process_launch_observation=process_launch_observation_from_descriptor(
+                    process_launch_descriptor(
+                        node_status=(
+                            "not_applicable"
+                            if status == "not_applicable"
+                            else "unavailable"
+                            if runtime_unavailable
+                            else "available"
+                        ),
+                        node_realpath=(
+                            None
+                            if status == "not_applicable" or runtime_unavailable
+                            else "/usr/local/bin/node"
+                        ),
+                        node_sha256=(
+                            None if status == "not_applicable" or runtime_unavailable else "1" * 64
+                        ),
+                        node_version=(
+                            None if status == "not_applicable" or runtime_unavailable else "22.14.0"
+                        ),
+                        spawn_executable=(
+                            None
+                            if status == "not_applicable" or runtime_unavailable
+                            else "/usr/local/bin/node"
+                        ),
+                        file_identity_at_hash=(
+                            None
+                            if status == "not_applicable" or runtime_unavailable
+                            else {
+                                "realpath": "/usr/local/bin/node",
+                                "sha256": "1" * 64,
+                                "version": "22.14.0",
+                            }
+                        ),
+                        file_identity_at_spawn=(
+                            None
+                            if status == "not_applicable" or runtime_unavailable
+                            else {
+                                "realpath": "/usr/local/bin/node",
+                                "sha256": "1" * 64,
+                                "version": "22.14.0",
+                            }
+                        ),
+                        spawn_handle=(
+                            None
+                            if status == "not_applicable" or runtime_unavailable
+                            else "fixture-process-group"
+                        ),
+                    )
                 ),
             ),
         )
+    # Once the compatibility fixture has sealed a decision, refresh every
+    # authority-bearing projection field from its publication context.  The
+    # status-vector options above only select the historical scenario; they
+    # must not leave a second source/config/toolchain/fingerprint authority
+    # beside the decision-owned values.
+    if validated_decision is not None:
+        sealed_context = validated_decision.publication_context
+        assert sealed_context is not None
+        value["run_context"] = copy.deepcopy(sealed_context.run_context)
+        value["projects"] = copy.deepcopy(model["projects"])
+        value["targets"] = list(sealed_context.public_next_config["targets"])
+        value["formats"] = list(sealed_context.public_next_config["formats"])
+        value["limits"] = copy.deepcopy(sealed_context.public_next_config["limits"])
+        value["config"] = copy.deepcopy(sealed_context.public_next_config)
+        value["request"] = copy.deepcopy(sealed_context.public_next_request)
+        if sealed_context.source_view_descriptor is not None:
+            value["source"] = {
+                "schema": "code-structure-viz.source-view/v1",
+                "kind": sealed_context.source_view_descriptor["kind"],
+                "head_commit": sealed_context.source_view_descriptor["head_commit"],
+                "fingerprint": sealed_context.source_view_fingerprint,
+                "file_count": sealed_context.source_view_descriptor["file_count"],
+            }
+        else:
+            value["source"] = {
+                "schema": "code-structure-viz.source-view/v1",
+                "kind": "unavailable",
+                "head_commit": None,
+                "fingerprint": None,
+                "file_count": 0,
+            }
+        value["toolchain"] = copy.deepcopy(sealed_context.toolchain)
+        value["trusted_environment"] = copy.deepcopy(sealed_context.trusted_environment)
+        value["semantic_compatibility_id"] = (
+            sealed_context.compatibility_descriptor["compatibility_id"]
+            if sealed_context.compatibility_descriptor is not None
+            else None
+        )
+        value["compatibility_descriptor"] = copy.deepcopy(sealed_context.compatibility_descriptor)
+        value["identity_versions"] = (
+            copy.deepcopy(sealed_context.compatibility_descriptor["identity_versions"])
+            if sealed_context.compatibility_descriptor is not None
+            else None
+        )
+        value["source_plan_digest"] = sealed_context.source_plan_digest
+        value["domain_config_digest"] = sealed_context.public_next_config["domain_config_digest"]
+        value["run_fingerprint"] = digest(sealed_context.run_fingerprint_preimage)
+        if value["request"] is not None:
+            value["request"]["run_fingerprint"] = value["run_fingerprint"]
+
     return _DomainProjection(
         value,
         validated_model=model,
@@ -4777,7 +4913,7 @@ def test_source_plan_descriptor_hashes_every_resolved_field_and_known_mutations(
 def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None:
     config = _config_projection()
     files = {
-        "package.json": b'{"name":"fixture"}',
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": b'{"compilerOptions":{}}',
         "src/Button.tsx": b"export default Button;\n",
         "src/types.d.ts": b"export interface Props {}\n",
@@ -4838,7 +4974,7 @@ def test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift() -
     config = _config_projection()
     plan = config["source_plan"]
     files = {
-        "package.json": b'{"name":"fixture"}',
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": b'{"compilerOptions":{}}',
         "src/Button.tsx": b"export default Button;\n",
         "src/types.d.ts": b"export interface Props {}\n",
@@ -4918,7 +5054,7 @@ def test_round17_source_inventory_accepts_observations_only() -> None:
     """Resolved plan fields cannot be injected through the inventory."""
 
     files = {
-        "package.json": b'{"name":"fixture"}',
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": b'{"compilerOptions":{}}',
         "src/Button.tsx": b"export default Button;\n",
     }
@@ -4970,30 +5106,32 @@ def test_round17_request_owned_derived_source_claims_cannot_override_control_byt
             },
             trusted_environment=_trusted_environment(),
             source_failure_ledger=(),
-            process_launch_descriptor=process_launch_descriptor(
-                node_status="available",
-                node_realpath="/usr/local/bin/node",
-                node_sha256="1" * 64,
-                node_version="22.14.0",
-                spawn_executable="/usr/local/bin/node",
-                file_identity_at_hash={
-                    "realpath": "/usr/local/bin/node",
-                    "sha256": "1" * 64,
-                    "version": "22.14.0",
-                },
-                file_identity_at_spawn={
-                    "realpath": "/usr/local/bin/node",
-                    "sha256": "1" * 64,
-                    "version": "22.14.0",
-                },
-                spawn_handle="fixture-process-group",
+            process_launch_observation=process_launch_observation_from_descriptor(
+                process_launch_descriptor(
+                    node_status="available",
+                    node_realpath="/usr/local/bin/node",
+                    node_sha256="1" * 64,
+                    node_version="22.14.0",
+                    spawn_executable="/usr/local/bin/node",
+                    file_identity_at_hash={
+                        "realpath": "/usr/local/bin/node",
+                        "sha256": "1" * 64,
+                        "version": "22.14.0",
+                    },
+                    file_identity_at_spawn={
+                        "realpath": "/usr/local/bin/node",
+                        "sha256": "1" * 64,
+                        "version": "22.14.0",
+                    },
+                    spawn_handle="fixture-process-group",
+                )
             ),
         )
 
 
 def test_round18_source_seal_rejects_caller_membership_and_typed_drift() -> None:
     files = {
-        "package.json": b'{"name":"fixture"}',
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": b'{"compilerOptions":{}}',
         "src/Button.tsx": b"export default Button;\n",
     }
@@ -5016,7 +5154,7 @@ def test_round18_source_seal_rejects_caller_membership_and_typed_drift() -> None
             InstrumentedSourceReader({**files, "tsconfig.json": b"[]"}),
             observed,
         )
-    assert malformed.value.code == "CSV-NEXT-CONFIG-002"
+    assert malformed.value.code == "CSV-NEXT-CONFIG-001"
     with pytest.raises(SourceAcquisitionError) as drift:
         seal_source_acquisition(
             intent,
@@ -5085,7 +5223,15 @@ def test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutati
     def row(observed: bool) -> dict[str, Any]:
         return {
             "state": "observed" if observed else "unobserved",
-            "value": True if observed else None,
+            "value": (
+                {
+                    "schema": "code-structure-viz.next-observation/v1",
+                    "version": 1,
+                    "sha256": digest({"field": "provenance"}),
+                }
+                if observed
+                else None
+            ),
         }
 
     value = {
@@ -5199,7 +5345,10 @@ def test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity
 
 
 def test_round19_source_acquisition_union_is_typed_and_fail_closed() -> None:
-    files = {"src/Button.tsx": b"export default Button;\n"}
+    files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "src/Button.tsx": b"export default Button;\n",
+    }
     base = {
         "observed_limits": copy.deepcopy(_next_limits()),
         "observed_trusted_environment_digest": _trusted_environment()["sha256"],
@@ -5212,7 +5361,12 @@ def test_round19_source_acquisition_union_is_typed_and_fail_closed() -> None:
     assert isinstance(complete, CompleteSourceSeal)
     malformed = seal_source_acquisition_result(
         SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
-        InstrumentedSourceReader({"tsconfig.json": b"[]"}),
+        InstrumentedSourceReader(
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b"[]",
+            }
+        ),
         base,
     )
     assert isinstance(malformed, SourceAcquisitionUnavailable)
@@ -5233,8 +5387,8 @@ def test_round19_source_acquisition_union_is_typed_and_fail_closed() -> None:
         (b'{"devDependencies":{"next":"^15"}}', "applicable", "direct_next_dependency"),
         (
             b'{"dependencies":{"next":"14"},"devDependencies":{"next":"15"}}',
-            "malformed",
-            "malformed_package",
+            "applicable",
+            "direct_next_dependency",
         ),
         (b'{"dependencies":{"next":""}}', "malformed", "malformed_package"),
         (b'{"dependencies":{"next":false}}', "malformed", "malformed_package"),
@@ -5325,19 +5479,24 @@ def test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces(
     assert malformed["root_manifest"]["exit_code"] == 3
     assert malformed["stdout_result"]["branch"] == "typed_unavailable"
 
-    # Conflicting direct declarations are malformed before any probe can be
-    # permitted; equal declarations remain one applicable fact.
+    # Both direct declaration tables are observations of applicability; a
+    # differing range does not create a precedence ambiguity.
     conflicting = derive_package_applicability_matrix(
         {"package.json": b'{"dependencies":{"next":"14"},"devDependencies":{"next":"15"}}'},
         (".",),
     )
-    assert conflicting.aggregate_state == "malformed"
-    assert package_applicability_projection(conflicting)["node_probe"]["performed"] is False
+    assert conflicting.aggregate_state == "applicable"
+    assert (
+        package_applicability_projection(conflicting, node_status="available")["node_probe"][
+            "performed"
+        ]
+        is True
+    )
     duplicate_direct = derive_package_applicability_matrix(
         {"package.json": b'{"dependencies":{"next":"15"},"devDependencies":{"next":"15"}}'},
         (".",),
     )
-    assert duplicate_direct.aggregate_state == "malformed"
+    assert duplicate_direct.aggregate_state == "applicable"
 
 
 def test_round21_applicability_source_observation_precedes_node_and_is_read_once() -> None:
@@ -5361,7 +5520,7 @@ def test_round21_applicability_source_observation_precedes_node_and_is_read_once
     projection = package_applicability_projection(seal.package_applicability)
     validate_package_applicability_projection(projection)
     assert projection["node_probe"]["performed"] is False
-    assert reader.read_counts == {"package.json": 1, "src/App.tsx": 1, "tsconfig.json": 1}
+    assert reader.read_counts == {"package.json": 1}
 
 
 def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_deterministic() -> None:
@@ -5369,6 +5528,7 @@ def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_determi
     assert "round21-config-extends-injection"
     assert "next-reference-validation"
     base = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": (
             b'\xef\xbb\xbf{\n // root control\n "extends": "./base.json",\n '
             b'"include": ["src/**/*.tsx", /* trailing comment */],\n}'
@@ -5391,17 +5551,22 @@ def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_determi
     assert "src/App.tsx" in seal.captured_files
 
     invalid_extends = (
-        "base.json",
-        "@scope/base",
-        ["./base.json"],
-        "/base.json",
-        "../base.json",
-        "https://example/base.json",
+        ("base.json", "CSV-NEXT-CONFIG-002"),
+        ("@scope/base", "CSV-NEXT-CONFIG-002"),
+        (["./base.json"], "CSV-NEXT-CONFIG-001"),
+        ("/base.json", "CSV-NEXT-CONFIG-001"),
+        ("../base.json", "CSV-NEXT-CONFIG-001"),
+        ("https://example/base.json", "CSV-NEXT-CONFIG-002"),
     )
-    for specifier in invalid_extends:
+    for specifier, expected_code in invalid_extends:
         raw = json.dumps({"extends": specifier}).encode()
         reader = InstrumentedSourceReader(
-            {"tsconfig.json": raw, "base.json": b"{}", "src/App.tsx": b"export const App=1;"}
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": raw,
+                "base.json": b"{}",
+                "src/App.tsx": b"export const App=1;",
+            }
         )
         with pytest.raises(SourceAcquisitionError) as error:
             seal_source_acquisition(
@@ -5412,10 +5577,11 @@ def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_determi
                     "observed_trusted_environment_digest": _trusted_environment()["sha256"],
                 },
             )
-        assert error.value.code == "CSV-NEXT-CONFIG-002"
+        assert error.value.code == expected_code
         assert error.value.stage == "source_control"
 
     cyclic = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": b'{"extends":"./base.json"}',
         "base.json": b'{"extends":"./tsconfig.json"}',
         "src/App.tsx": b"export const App=1;",
@@ -5429,16 +5595,17 @@ def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_determi
                 "observed_trusted_environment_digest": _trusted_environment()["sha256"],
             },
         )
-    assert error.value.code == "CSV-NEXT-CONFIG-002"
+    assert error.value.code == "CSV-NEXT-CONFIG-001"
 
-    for option_name, option_value in (
-        ("plugins", []),
-        ("typeRoots", ["types"]),
-        ("types", ["node"]),
-        ("module", "commonjs"),
-        ("moduleResolution", "node"),
+    for option_name, option_value, expected_code in (
+        ("plugins", [], "CSV-NEXT-CONFIG-002"),
+        ("typeRoots", ["types"], "CSV-NEXT-CONFIG-002"),
+        ("types", ["node"], "CSV-NEXT-CONFIG-002"),
+        ("module", "commonjs", "CSV-NEXT-CONFIG-001"),
+        ("moduleResolution", "node", "CSV-NEXT-CONFIG-001"),
     ):
         invalid = {
+            "package.json": b'{"dependencies":{"next":"15"}}',
             "tsconfig.json": json.dumps(
                 {"compilerOptions": {option_name: option_value}, "include": ["src/**/*.tsx"]}
             ).encode(),
@@ -5453,7 +5620,7 @@ def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_determi
                     "observed_trusted_environment_digest": _trusted_environment()["sha256"],
                 },
             )
-        assert option_error.value.code == "CSV-NEXT-CONFIG-002"
+        assert option_error.value.code == expected_code
         assert option_error.value.stage == "source_control"
 
 
@@ -5497,6 +5664,7 @@ def test_round21_source_graph_scanner_closes_supported_import_planes_and_open_ed
     assert "regex-false" not in {row["specifier"] for row in observations}
 
     files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": json.dumps(
             {
                 "include": ["src/**/*.ts"],
@@ -5556,7 +5724,15 @@ def test_round21_provenance_catalog_has_single_request_independent_source_contro
     def row(observed: bool) -> dict[str, Any]:
         return {
             "state": "observed" if observed else "unobserved",
-            "value": True if observed else None,
+            "value": (
+                {
+                    "schema": "code-structure-viz.next-observation/v1",
+                    "version": 1,
+                    "sha256": digest({"field": "provenance"}),
+                }
+                if observed
+                else None
+            ),
         }
 
     value: dict[str, Any] = {
@@ -5598,7 +5774,7 @@ def test_round21_provenance_catalog_has_single_request_independent_source_contro
     # validator; no parallel stage field may introduce an orphan combination.
     pairs = (
         ("applicability", "CSV-NEXT-APPLICABILITY-001"),
-        ("project_validation", "CSV-NEXT-PROJECT-001"),
+        ("project_validation", "CSV-NEXT-PROJECT-002"),
         ("node_discovery", "CSV-NEXT-NODE-001"),
         ("response_schema", "CSV-NEXT-PROTOCOL-001"),
         ("model_validation", "CSV-NEXT-LIMIT-005"),
@@ -5706,6 +5882,7 @@ def test_round20_source_control_uses_segment_grammar_and_fail_closed_control_rea
         "observed_trusted_environment_digest": _trusted_environment()["sha256"],
     }
     files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": b'{"include":["src/**/*.tsx"],"exclude":["src/**/ignored"]}',
         "src/A.tsx": b"export const A = 1;\n",
         "src/deep/B.tsx": b"export const B = 1;\n",
@@ -5741,6 +5918,7 @@ def test_round20_source_control_uses_segment_grammar_and_fail_closed_control_rea
 
 def test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection() -> None:
     files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "src/A.tsx": b'import B from "./B"; export default B;\n',
         "src/B.tsx": b"export default function B() { return null; }\n",
     }
@@ -5762,8 +5940,19 @@ def test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection(
     assert seal.source_graph != injected
     assert seal.source_graph["edges"] == [
         {
+            "kind": "resolved",
             "source": digest({"kind": "source_node", "path": "src/A.tsx"}),
             "target": digest({"kind": "source_node", "path": "src/B.tsx"}),
+            "syntax_kind": "static_import",
+            "role": "value",
+            "normalized_specifier": "src/B.tsx",
+            "specifier_identity": digest(
+                {
+                    "source": digest({"kind": "source_node", "path": "src/A.tsx"}),
+                    "syntax_kind": "static_import",
+                    "normalized_specifier": "src/B.tsx",
+                }
+            ),
         }
     ]
     with pytest.raises(AssertionError):
@@ -5880,8 +6069,17 @@ def test_round21_process_observation_is_normative_and_fingerprint_excludes_ephem
             "terminate_scope": "group",
             "wait_after_terminate": True,
         },
+        "cwd": "/.code-structure-viz/private-run",
+        "env_allowlist": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+        "denied_env": ["NODE_OPTIONS", "NODE_PATH", "PATH", "npm_config_user_config"],
+        "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
+        "fd_inheritance": {"close_fds": True, "allowed": [0, 1, 2]},
     }
     production["stable_fingerprint"] = process_launch_stable_fingerprint(production)
+    production["stable_toolchain_fingerprint"] = production["stable_fingerprint"]
+    production["local_process_attestation_digest"] = process_launch_local_attestation_digest(
+        production
+    )
     validate_process_launch_observation(production)
     _validator("next-process-launch-observation-v1.schema.json").validate(production)
     ephemeral: dict[str, Any] = copy.deepcopy(production)
@@ -5899,19 +6097,25 @@ def test_round21_process_observation_is_normative_and_fingerprint_excludes_ephem
     windows["host_os"] = "windows"
     windows["spawn_primitive"] = "windows-create-process-verified-handle"
     windows["stable_fingerprint"] = process_launch_stable_fingerprint(windows)
-    validate_process_launch_observation(windows)
-    _validator("next-process-launch-observation-v1.schema.json").validate(windows)
+    windows["stable_toolchain_fingerprint"] = windows["stable_fingerprint"]
+    windows["local_process_attestation_digest"] = process_launch_local_attestation_digest(windows)
+    with pytest.raises((AssertionError, ValidationError)):
+        validate_process_launch_observation(windows)
+    with pytest.raises(ValidationError):
+        _validator("next-process-launch-observation-v1.schema.json").validate(windows)
 
 
 def test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection() -> None:
     fatal = source_acquisition_result_decision(
-        SourceIntegrityFatal(diagnostic_code="CSV-NEXT-SOURCE-003", stage="source_integrity")
+        SourceIntegrityFatal(
+            diagnostic_code="CSV-NEXT-SOURCE-INTEGRITY-001", stage="source_integrity"
+        )
     )
     assert fatal.as_dict() == {
         "result_kind": "source_integrity_fatal",
         "outcome": "fatal",
         "payload_available": False,
-        "diagnostic_code": "CSV-NEXT-SOURCE-003",
+        "diagnostic_code": "CSV-NEXT-SOURCE-INTEGRITY-001",
         "stage": "source_integrity",
         "exit_code": 1,
         "manifest_available": False,
@@ -5925,7 +6129,9 @@ def test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projectio
     assert unavailable.exit_code == 3
     with pytest.raises(AssertionError):
         source_acquisition_result_decision(
-            SourceIntegrityFatal(diagnostic_code="CSV-NEXT-SOURCE-003", stage="source_read")
+            SourceIntegrityFatal(
+                diagnostic_code="CSV-NEXT-SOURCE-INTEGRITY-001", stage="source_read"
+            )
         )
 
 
@@ -5933,7 +6139,15 @@ def test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch() 
     def row(observed: bool) -> dict[str, Any]:
         return {
             "state": "observed" if observed else "unobserved",
-            "value": True if observed else None,
+            "value": (
+                {
+                    "schema": "code-structure-viz.next-observation/v1",
+                    "version": 1,
+                    "sha256": digest({"field": "provenance"}),
+                }
+                if observed
+                else None
+            ),
         }
 
     value = {
@@ -6061,7 +6275,7 @@ def test_round18_path_only_order_is_nfc_utf8_and_object_rows_are_canonical_json(
     assert [project["root"] for project in config["projects"]] == ['a"', "aA"]
 
     files = {
-        "package.json": b'{"name":"fixture"}',
+        "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": b'{"compilerOptions":{}}',
         'a"': b"opaque-a\n",
         "aA": b"opaque-b\n",
@@ -6622,7 +6836,7 @@ def test_model_proof_wire_budget_and_response_precedence() -> None:
 def test_schema_valid_model_record_limit_is_reachable_on_generated_wire() -> None:
     limit = _next_limits()["max_model_records"]
 
-    exact_model = _generated_context_model(limit - 1)
+    exact_model = _generated_context_model(limit - 2)
     exact_request = _request(exact_model, default_content=b"")
     exact_response = _response(exact_model, request=exact_request)
     _validator("next-adapter-response-v1.schema.json").validate(exact_response)
@@ -6638,7 +6852,7 @@ def test_schema_valid_model_record_limit_is_reachable_on_generated_wire() -> Non
     )
     assert isinstance(exact_decision, NextValidatedDecision)
 
-    over_model = _generated_context_model(limit)
+    over_model = _generated_context_model(limit - 1)
     over_request = _request(over_model, default_content=b"")
     over_response = _response(over_model, request=over_request)
     _validator("next-adapter-response-v1.schema.json").validate(over_response)
@@ -6829,7 +7043,7 @@ def test_next_diagnostic_catalog_is_the_public_and_manifest_authority() -> None:
     catalog = _schema("next-diagnostic-catalog-v1.json")
     assert catalog["domain"] == "next"
     entries = cast(list[dict[str, Any]], catalog["entries"])
-    assert len(entries) == 27
+    assert len(entries) == 29
     assert len({entry["code"] for entry in entries}) == len(entries)
     validator = _validator("diagnostic-v1.schema.json")
     for entry in entries:
@@ -7876,7 +8090,8 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     assert selected_stream["stable_reason"] == "selected_artifact_unavailable"
     assert selected_stream["artifact"] == selected_manifest["artifacts"][0]
     assert selected_artifacts["next.snapshot.semantic.json"] == selected_payload
-    assert selected_stderr == b""
+    assert selected_stderr == _diagnostic_jsonl([_public_diagnostic("CSV-NEXT-LIMIT-003")])
+    assert selected_overrun.public_stderr["payload"] == selected_stderr
 
     capture_overrun = finalize_publication_decision(
         decision,
@@ -8155,20 +8370,27 @@ def test_round16_process_launch_descriptor_is_closed_and_security_deterministic(
     validate_process_launch_descriptor(descriptor)
     _validator("next-process-launch-v1.schema.json").validate(descriptor)
     validate_process_launch_observation(
-        {
-            "schema": "code-structure-viz.next-process-launch-observation/v1",
-            "version": 1,
-            "kind": "fixture",
-            "host_os": "fixture",
-            "node_status": "available",
-            "fixture_id": "reference-process-v1",
-            "identity_token": "fixture-node-identity",
-            "spawn_primitive": "recorded-fixture",
-            "toctou_failure_point": "not-exercised",
-            "argv": descriptor["argv"],
-            "shell": False,
-            "process_group": descriptor["process_group"],
-        }
+        process_observation_with_fingerprints(
+            {
+                "schema": "code-structure-viz.next-process-launch-observation/v1",
+                "version": 1,
+                "kind": "fixture",
+                "host_os": "fixture",
+                "node_status": "available",
+                "fixture_id": "reference-process-v1",
+                "identity_token": "fixture-node-identity",
+                "spawn_primitive": "recorded-fixture",
+                "toctou_failure_point": "not-exercised",
+                "argv": descriptor["argv"],
+                "shell": False,
+                "process_group": descriptor["process_group"],
+                "cwd": descriptor["cwd"],
+                "env_allowlist": descriptor["env_allowlist"],
+                "denied_env": descriptor["denied_env"],
+                "stdio": descriptor["stdio"],
+                "fd_inheritance": descriptor["fd_inheritance"],
+            }
+        )
     )
     assert descriptor["node_realpath"].startswith("/")
     assert descriptor["shell"] is False
@@ -8241,7 +8463,7 @@ def test_round16_publication_context_requires_explicit_launch_and_decision_conte
     )
 
     assert (
-        inspect.signature(NextPublicationContext).parameters["process_launch_descriptor"].default
+        inspect.signature(NextPublicationContext).parameters["process_launch_observation"].default
         is inspect.Parameter.empty
     )
     assert (
@@ -8259,7 +8481,7 @@ def test_round16_publication_context_requires_explicit_launch_and_decision_conte
         name: getattr(context, name)
         for name in inspect.signature(NextPublicationContext).parameters
     }
-    del constructor_values["process_launch_descriptor"]
+    del constructor_values["process_launch_observation"]
     with pytest.raises(TypeError):
         NextPublicationContext(**constructor_values)
 
@@ -8289,33 +8511,35 @@ def test_round16_publication_context_requires_explicit_launch_and_decision_conte
         with pytest.raises(AssertionError):
             replace(
                 publication_context,
-                process_launch_descriptor=process_launch_descriptor(
-                    node_status=mismatched_status,
-                    node_realpath=None
-                    if mismatched_status != "available"
-                    else "/usr/local/bin/node",
-                    node_sha256=None if mismatched_status != "available" else "1" * 64,
-                    node_version=None if mismatched_status != "available" else "22.14.0",
-                    spawn_executable=None
-                    if mismatched_status != "available"
-                    else "/usr/local/bin/node",
-                    file_identity_at_hash=None
-                    if mismatched_status != "available"
-                    else {
-                        "realpath": "/usr/local/bin/node",
-                        "sha256": "1" * 64,
-                        "version": "22.14.0",
-                    },
-                    file_identity_at_spawn=None
-                    if mismatched_status != "available"
-                    else {
-                        "realpath": "/usr/local/bin/node",
-                        "sha256": "1" * 64,
-                        "version": "22.14.0",
-                    },
-                    spawn_handle=None
-                    if mismatched_status != "available"
-                    else "fixture-process-group",
+                process_launch_observation=process_launch_observation_from_descriptor(
+                    process_launch_descriptor(
+                        node_status=mismatched_status,
+                        node_realpath=None
+                        if mismatched_status != "available"
+                        else "/usr/local/bin/node",
+                        node_sha256=None if mismatched_status != "available" else "1" * 64,
+                        node_version=None if mismatched_status != "available" else "22.14.0",
+                        spawn_executable=None
+                        if mismatched_status != "available"
+                        else "/usr/local/bin/node",
+                        file_identity_at_hash=None
+                        if mismatched_status != "available"
+                        else {
+                            "realpath": "/usr/local/bin/node",
+                            "sha256": "1" * 64,
+                            "version": "22.14.0",
+                        },
+                        file_identity_at_spawn=None
+                        if mismatched_status != "available"
+                        else {
+                            "realpath": "/usr/local/bin/node",
+                            "sha256": "1" * 64,
+                            "version": "22.14.0",
+                        },
+                        spawn_handle=None
+                        if mismatched_status != "available"
+                        else "fixture-process-group",
+                    )
                 ),
             )
 
@@ -9079,8 +9303,19 @@ def test_round16_failure_matrix_is_catalog_derived_and_rejects_cross_product() -
             resolved = decision_failure_spec(code, stage)
             assert resolved["diagnostic_code"] == code
             assert resolved["failure_kind"] == decision_failure_kind(code)
-            assert resolved["outcome"] in {"not_applicable", "partial_safe", "payload_unavailable"}
-            assert resolved["exit_code"] == (3 if resolved["outcome"] != "not_applicable" else 0)
+            assert resolved["outcome"] in {
+                "not_applicable",
+                "partial_safe",
+                "payload_unavailable",
+                "fatal",
+            }
+            assert resolved["exit_code"] == (
+                0
+                if resolved["outcome"] == "not_applicable"
+                else 1
+                if resolved["outcome"] == "fatal"
+                else 3
+            )
             assert resolved["ref_permission"] in {"none", "path", "symbol", "path_or_symbol"}
         invalid_stage = next(stage for stage in all_stages if stage not in row["allowed_stages"])
         with pytest.raises(AssertionError):
@@ -10061,6 +10296,7 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         "round20.p2-1",
         *(f"round21.p1-{index}" for index in range(1, 6)),
         "round21.p2-1",
+        *(f"round22.rg-{index:02d}" for index in range(1, 15)),
     }
     assert set(mapping) == expected_criteria
     mapped_tests = {name for names in mapping.values() for name in names}
@@ -10074,3 +10310,404 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
         for name in names:
             reverse[name].append(criterion)
     assert all(reverse.values())
+
+
+def test_round22_applicability_dual_valid_and_malformed_projection() -> None:
+    """Round 22 red: applicability owns the malformed package branch."""
+
+    equal_dual = derive_package_applicability_matrix(
+        {
+            "package.json": (
+                b'{"dependencies":{"next":"15.0.0"},"devDependencies":{"next":"15.0.0"}}'
+            )
+        },
+        (".",),
+    )
+    assert equal_dual.aggregate_state == "applicable"
+    malformed = derive_package_applicability_matrix(
+        {"package.json": b'{"dependencies":{"next":false}}'}, (".",)
+    )
+    projection = package_applicability_projection(malformed)
+    assert projection["domain"]["diagnostics"][0]["code"] == "CSV-NEXT-APPLICABILITY-002"
+    validate_package_applicability_projection(projection)
+    _validator("next-applicability-decision-v1.schema.json").validate(projection)
+    malformed_provenance = _decision_provenance(
+        kind="request_independent",
+        stage="applicability",
+        failure_code="CSV-NEXT-APPLICABILITY-002",
+        request=False,
+        limits=False,
+        source_plan=False,
+        toolchain=False,
+        trusted_environment=False,
+        budget=False,
+    )
+    validate_stage_dependent_provenance(malformed_provenance)
+    _validator("next-provenance-v1.schema.json").validate(malformed_provenance)
+
+
+def test_round22_all_non_applicable_short_circuits_config_and_source_reads() -> None:
+    """The matrix must decide Node/config eligibility before other reads."""
+
+    reader = InstrumentedSourceReader(
+        {
+            "package.json": b'{"name":"plain"}',
+            "tsconfig.json": b'{"compilerOptions":{"module":"not-valid"}}',
+            "src/App.tsx": b"export const App = 1;",
+        }
+    )
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    assert seal.package_applicability.aggregate_state == "non_applicable"
+    assert reader.read_counts == {"package.json": 1}
+
+
+def test_round22_source_graph_is_a_redacted_resolved_or_open_union() -> None:
+    """Unsafe raw specifiers must not be the public source graph authority."""
+
+    files = {
+        "tsconfig.json": b'{"include":["src/**/*.ts"]}',
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "src/entry.ts": b'import("./missing"); import(name);',
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    graph = seal.source_graph
+    assert all(set(edge) >= {"source", "syntax_kind", "reason"} for edge in graph["open_edges"])
+    assert all("specifier" not in edge and "raw" not in edge for edge in graph["open_edges"])
+    assert seal.final_plan["source_graph"] == graph
+    _validator("next-source-plan-v1.schema.json").validate(seal.final_plan)
+    substituted = copy.deepcopy(seal.final_plan)
+    substituted["source_graph"]["open_edges"][0]["raw"] = "./unsafe"
+    with pytest.raises(ValidationError):
+        _validator("next-source-plan-v1.schema.json").validate(substituted)
+
+
+def test_round22_source_locality_scans_executable_template_jsx_and_runtime_suffixes() -> None:
+    """Template/JSX lexical closures and TypeScript runtime suffixes stay sound."""
+
+    source = """
+      const template = `${import(\"./template-target\")}`;
+      const view = <Panel>import(\"./text-false\")</Panel>;
+      const nested = <Panel>{import(\"./jsx-target\")}</Panel>;
+      import(\"./runtime.js\");
+    """
+    observations, open_dependency = _scan_module_specifiers(source)
+    assert open_dependency is False
+    observed = {(row["kind"], row["specifier"]) for row in observations}
+    assert ("literal_dynamic_import", "./template-target") in observed
+    assert ("literal_dynamic_import", "./jsx-target") in observed
+    assert ("literal_dynamic_import", "./runtime.js") in observed
+    assert "./text-false" not in {row["specifier"] for row in observations}
+
+    files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "tsconfig.json": b'{"include":["src/**/*.ts"]}',
+        "src/entry.ts": source.encode(),
+        "src/template-target.ts": b"export const template = 1;",
+        "src/jsx-target.ts": b"export const jsx = 1;",
+        "src/runtime.ts": b"export const runtime = 1;",
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    entry_id = digest({"kind": "source_node", "path": "src/entry.ts"})
+    target_ids = {
+        digest({"kind": "source_node", "path": path})
+        for path in ("src/template-target.ts", "src/jsx-target.ts", "src/runtime.ts")
+    }
+    assert target_ids <= {
+        edge["target"] for edge in seal.source_graph["edges"] if edge["source"] == entry_id
+    }
+
+    failure = SourceFailureLedger.from_seal(
+        seal,
+        failures=({"path": "src/template-target.ts", "stage": "source_read"},),
+        targets=("path:src/entry.ts",),
+        proof_roots=({"id": "failure-root", "path_ref": "src/template-target.ts"},),
+    )
+    assert failure.safe_subset_proven is False
+    assert "src/entry.ts" in failure.failure_closure_paths
+    assert "src/entry.ts" not in failure.safe_file_set
+
+
+def test_round22_process_observation_rejects_prerelease_and_windows() -> None:
+    """The v1 production contract is stable Node on macOS/Linux only."""
+
+    with pytest.raises(AssertionError):
+        process_launch_descriptor(
+            node_status="available",
+            node_realpath="/usr/local/bin/node",
+            node_sha256="1" * 64,
+            node_version="22.0.0-beta.1",
+            spawn_executable="/usr/local/bin/node",
+            file_identity_at_hash={
+                "realpath": "/usr/local/bin/node",
+                "sha256": "1" * 64,
+                "version": "22.0.0-beta.1",
+            },
+            file_identity_at_spawn={
+                "realpath": "/usr/local/bin/node",
+                "sha256": "1" * 64,
+                "version": "22.0.0-beta.1",
+            },
+            spawn_handle="fixture-process-group",
+        )
+    observation = process_launch_observation_from_descriptor(
+        process_launch_descriptor(
+            node_status="available",
+            node_realpath="/usr/local/bin/node",
+            node_sha256="1" * 64,
+            node_version="22.14.0",
+            spawn_executable="/usr/local/bin/node",
+            file_identity_at_hash={
+                "realpath": "/usr/local/bin/node",
+                "sha256": "1" * 64,
+                "version": "22.14.0",
+            },
+            file_identity_at_spawn={
+                "realpath": "/usr/local/bin/node",
+                "sha256": "1" * 64,
+                "version": "22.14.0",
+            },
+            spawn_handle="fixture-process-group",
+        )
+    )
+    assert observation["host_os"] in {"darwin", "linux", "fixture"}
+    assert observation["kind"] in {"fixture", "production"}
+
+
+def test_round22_provenance_observed_rows_have_typed_identity() -> None:
+    marker = {
+        "schema": "code-structure-viz.next-observation/v1",
+        "version": 1,
+        "sha256": "a" * 64,
+    }
+    row = {"state": "observed", "value": marker}
+    value = {
+        "kind": "request_independent",
+        "stage": "source_selection",
+        "failure_code": "CSV-NEXT-SOURCE-003",
+        "observed": {
+            field: (
+                row
+                if field in {"limits", "source_plan"}
+                else {"state": "unobserved", "value": None}
+            )
+            for field in (
+                "request",
+                "limits",
+                "source_plan",
+                "toolchain",
+                "trusted_environment",
+                "compatibility",
+                "process_launch",
+                "budget",
+            )
+        },
+    }
+    validate_stage_dependent_provenance(value)
+    _validator("next-provenance-v1.schema.json").validate(value)
+
+
+def test_round22_source_integrity_has_distinct_fatal_diagnostic() -> None:
+    result = SourceIntegrityFatal(
+        diagnostic_code="CSV-NEXT-SOURCE-INTEGRITY-001", stage="source_integrity"
+    )
+    projection = source_acquisition_result_decision(result)
+    assert projection.diagnostic_code == "CSV-NEXT-SOURCE-INTEGRITY-001"
+    assert projection.outcome == "fatal"
+    assert projection.exit_code == 1
+
+
+def test_round22_config_codes_and_jsonc_composition_are_closed() -> None:
+    """Ordinary config faults use CONFIG-001; external resolution is CONFIG-002."""
+
+    package = b'{"dependencies":{"next":"15"}}'
+    with pytest.raises(SourceAcquisitionError) as invalid_option:
+        seal_source_acquisition(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+            InstrumentedSourceReader(
+                {
+                    "package.json": package,
+                    "tsconfig.json": b'{"compilerOptions":{"module":"commonjs"}}',
+                }
+            ),
+            {
+                "observed_limits": _next_limits(),
+                "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+            },
+        )
+    assert invalid_option.value.code == "CSV-NEXT-CONFIG-001"
+
+    with pytest.raises(SourceAcquisitionError) as external_extends:
+        seal_source_acquisition(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+            InstrumentedSourceReader(
+                {"package.json": package, "tsconfig.json": b'{"extends":"shared/tsconfig.json"}'}
+            ),
+            {
+                "observed_limits": _next_limits(),
+                "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+            },
+        )
+    assert external_extends.value.code == "CSV-NEXT-CONFIG-002"
+
+    jsonc = (
+        b"\xef\xbb\xbf{\n  // the lexical pass must retain the value\n"
+        b'  "compilerOptions": {"module": "esnext",},\n}'
+    )
+    reader = InstrumentedSourceReader({"package.json": package, "tsconfig.json": jsonc})
+    seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    assert reader.read_counts["tsconfig.json"] == 1
+
+
+def test_round22_dynamic_extends_read_failure_is_global_control_failure() -> None:
+    """A discovered local extends file cannot be downgraded to partial source."""
+
+    reader = InstrumentedSourceReader(
+        {
+            "package.json": b'{"dependencies":{"next":"15"}}',
+            "tsconfig.json": b'{"extends":"./tsconfig.base.json"}',
+            "tsconfig.base.json": b'{"compilerOptions":{"module":"esnext"}}',
+        },
+        read_failures={"tsconfig.base.json": "CSV-NEXT-CONFIG-001"},
+    )
+    with pytest.raises(SourceAcquisitionError) as failure:
+        seal_source_acquisition(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+            reader,
+            {
+                "observed_limits": _next_limits(),
+                "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+            },
+            allow_partial=True,
+        )
+    assert failure.value.code == "CSV-NEXT-CONFIG-001"
+    assert reader.read_counts["tsconfig.base.json"] == 1
+
+
+def test_round22_project_root_overlap_is_usage_before_source_acquisition() -> None:
+    """Overlapping roots are usage, so no source/domain publication is created."""
+
+    reader = InstrumentedSourceReader(
+        {
+            "apps/web/package.json": b'{"dependencies":{"next":"15"}}',
+            "apps/web/src/App.tsx": b"export const App = 1;",
+        }
+    )
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(
+            project_roots=("apps", "apps/web"),
+            control_candidates=(),
+        ),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    assert isinstance(result, SourceProjectUsage)
+    projection = source_acquisition_result_decision(result)
+    assert projection.as_dict() == {
+        "result_kind": "usage",
+        "outcome": "usage",
+        "payload_available": False,
+        "diagnostic_code": "CSV-NEXT-PROJECT-001",
+        "stage": "project_validation",
+        "exit_code": 2,
+        "manifest_available": False,
+        "stdout_reason": "empty",
+    }
+    assert reader.enumeration_calls == 0
+    assert reader.read_counts == {}
+    with pytest.raises(AssertionError):
+        decision_failure_spec("CSV-NEXT-PROJECT-001", "project_validation")
+    provenance = _decision_provenance(
+        kind="request_independent",
+        stage="project_validation",
+        failure_code="CSV-NEXT-PROJECT-002",
+        request=False,
+        limits=False,
+        source_plan=False,
+        toolchain=False,
+        trusted_environment=False,
+        budget=False,
+    )
+    _validator("next-provenance-v1.schema.json").validate(provenance)
+
+
+def test_round22_project_usage_code_is_not_a_domain_failure_pair() -> None:
+    """The overlap diagnostic remains a CLI usage result, not a domain row."""
+
+    independent = _decision_provenance(
+        kind="request_independent",
+        stage="project_validation",
+        failure_code="CSV-NEXT-PROJECT-002",
+        request=False,
+        limits=False,
+        source_plan=False,
+        toolchain=False,
+        trusted_environment=False,
+        budget=False,
+    )
+    mutated = {**independent, "failure_code": "CSV-NEXT-PROJECT-001"}
+    with pytest.raises((AssertionError, ValidationError)):
+        validate_stage_dependent_provenance(mutated)
+    with pytest.raises(ValidationError):
+        _validator("next-provenance-v1.schema.json").validate(mutated)
+
+
+def test_round22_runtime_registry_executes_vectors_and_named_validators() -> None:
+    """Coverage is executable: every vector producer and validator is resolved."""
+
+    fixture = json.loads(
+        (ROOT / "tests" / "fixtures" / "next_contract_vectors.json").read_text(encoding="utf-8")
+    )
+    records = fixture["runtime_vector_registry"]
+    assert records == runtime_vector_registry()
+    known_vector_ids = set(fixture["positive"]) | set(fixture["negative"])
+    validate_runtime_vector_registry(records, known_vector_ids=known_vector_ids)
+    assert execute_runtime_vector_registry(records, known_vector_ids=known_vector_ids) == {
+        record["vector_id"] for record in records
+    }
+
+    missing = records[:-1]
+    with pytest.raises(AssertionError):
+        validate_runtime_vector_registry(missing, known_vector_ids=known_vector_ids)
+    duplicate = copy.deepcopy(records)
+    duplicate[-1] = copy.deepcopy(duplicate[0])
+    with pytest.raises(AssertionError):
+        validate_runtime_vector_registry(duplicate, known_vector_ids=known_vector_ids)
+    unknown_callable = copy.deepcopy(records)
+    unknown_callable[0]["callable"] = "runtime_vector_missing"
+    with pytest.raises(AssertionError):
+        validate_runtime_vector_registry(unknown_callable, known_vector_ids=known_vector_ids)
+    wrong_criterion = copy.deepcopy(records)
+    wrong_criterion[0]["criterion"] = "round22.rg-99"
+    with pytest.raises(AssertionError):
+        validate_runtime_vector_registry(wrong_criterion, known_vector_ids=known_vector_ids)

@@ -200,3 +200,17 @@ The executable evidence is `test_round21_applicability_matrix_owns_filter_probe_
 `test_round21_provenance_catalog_has_single_request_independent_source_control_union`, and
 `test_round21_coverage_index_is_bidirectional_and_self_validating`. Fresh current-SHA Strict is pending,
 readiness is unconfirmed, and production implementation is absent.
+
+## Round 22 closed stdout publication
+
+The stdout result is never reconstructed from an independent status or candidate. The final
+`PublicationBoundaryDecision` owns the exact summary, manifest, domain artifact, typed-unavailable bytes,
+diagnostic JSONL, selected descriptor, and measurements. Its selected-copy overrun retains the semantic
+result and persisted artifact descriptor, then emits one incomplete/exit-3 publication with canonical
+`CSV-NEXT-LIMIT-003` stderr and no partial stdout; it does not remeasure, rerender, or recopy.
+
+Upstream applicability, config, source graph, and provenance remain decision-owned: malformed package uses
+`CSV-NEXT-APPLICABILITY-002`, non-applicable uses `CSV-NEXT-APPLICABILITY-001`, source-integrity
+substitution is fatal `CSV-NEXT-SOURCE-INTEGRITY-001`, and ordinary non-isolatable source failure is
+`CSV-NEXT-SOURCE-003`. Canonical JSON is sorted lexicographically, NFC, UTF-8, and LF. Fresh current-SHA
+Strict is pending, readiness is unconfirmed, and production implementation is absent.

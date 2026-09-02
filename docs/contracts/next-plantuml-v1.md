@@ -215,6 +215,18 @@ PlantUML uses the same one-reason-per-target closed enum and canonical JSON
 ordering as semantic JSON. Fresh current-SHA Strict is pending and production
 implementation is absent.
 
+## Round 22 renderer boundary
+
+PlantUML and semantic JSON consume the same final publication decision and exact sealed bytes. Applicability,
+config, source graph, provenance, and process observation are never reconstructed by the renderer. Open graph
+edges remain explicit, malformed package uses `CSV-NEXT-APPLICABILITY-002`, and source-integrity substitution
+uses fatal `CSV-NEXT-SOURCE-INTEGRITY-001` rather than a domain-unavailable row. Selected-copy overflow is
+one `CSV-NEXT-LIMIT-003` incomplete/exit-3 publication with canonical stderr and no partial stdout.
+
+The normative v1 production process observation covers darwin/linux only; Windows is outside this scope. Its
+stable fingerprint excludes host-ephemeral identity values, which remain in local attestation evidence. Fresh
+current-SHA Strict is pending, readiness is unconfirmed, and production implementation is absent.
+
 ## Round 20 source authority
 
 PlantUML receives the same seal-owned source result as semantic JSON. Package
@@ -241,7 +253,7 @@ is global unavailable. Source graph edges are derived from frozen bytes using th
 ambiguous, unresolved, and unsupported edges remain visible evidence and cannot be dropped for `partial_safe`.
 
 The renderer uses the catalog-derived stage/code provenance union and the normative
-`next-process-launch-observation-v1` object. Darwin, Linux, and Windows process identity is bound to spawn;
+`next-process-launch-observation-v1` object. Darwin and Linux process identity is bound to spawn; Windows is outside the v1 production scope;
 host-ephemeral FD/device/inode values are checked in the security observation but excluded from the stable
 fingerprint. The old launch descriptor, if exposed, is a mechanically derived compatibility view. PlantUML
 bytes are emitted from the decision-owned sealed model and cannot be supplied independently. Fresh current-SHA

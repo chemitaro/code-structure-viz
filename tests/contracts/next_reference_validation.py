@@ -16,6 +16,7 @@ import unicodedata
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from functools import cache, lru_cache
+from itertools import combinations
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypedDict, TypeGuard, cast
@@ -303,13 +304,13 @@ class NextDecisionContext:
             assert observations["stage"] == self.stage
             assert observations["failure_code"] == self.diagnostic_code
         if self.provenance == "request_independent":
-            assert observed["request"] == {"state": "unobserved", "value": None}
+            assert observed["request"] == _observation_row("request", False)
         if self.run_context["budget_source"] == "unobserved":
             assert self.run_context["budget_resolved"] is None
-            assert observed["budget"] == {"state": "unobserved", "value": None}
+            assert observed["budget"] == _observation_row("budget", False)
         else:
             assert self.run_context["budget_resolved"] is not None
-            assert observed["budget"] == {"state": "observed", "value": True}
+            assert observed["budget"] == _observation_row("budget", True)
         object.__setattr__(self, "provenance_observation", observations)
         if self.provenance == "request_bound":
             assert self.request_id is not None
@@ -386,11 +387,14 @@ class NextPublicationContext:
     run_fingerprint_preimage: dict[str, Any]
     source_failure_ledger: tuple[dict[str, Any], ...]
     source_failure_ledger_seal: SourceFailureLedger | None
-    process_launch_descriptor: dict[str, Any] | None
+    # The observed launch is the trust-boundary authority.  The legacy
+    # descriptor below is a derived compatibility view and is intentionally
+    # not an init parameter.
+    process_launch_observation: dict[str, Any]
+    process_launch_descriptor: dict[str, Any] = field(init=False)
     source_failure_ledger_digest: str | None
     source_failure_ledger_evidence: dict[str, Any] | None
     observation_provenance: dict[str, Any]
-    process_launch_observation: dict[str, Any] = field(init=False)
 
     def __post_init__(self) -> None:
         for name in (
@@ -407,7 +411,7 @@ class NextPublicationContext:
             "run_fingerprint_preimage",
             "source_failure_ledger",
             "source_failure_ledger_seal",
-            "process_launch_descriptor",
+            "process_launch_observation",
             "source_failure_ledger_evidence",
             "observation_provenance",
         ):
@@ -447,20 +451,25 @@ class NextPublicationContext:
             assert evidence["ledger_digest"] == ledger_digest
             assert evidence["failures"] == list(ledger)
         object.__setattr__(self, "source_failure_ledger_evidence", copy.deepcopy(evidence))
-        process_observation = process_launch_observation_from_descriptor(
-            self.process_launch_descriptor
-        )
+        process_observation = copy.deepcopy(self.process_launch_observation)
         validate_process_launch_observation(process_observation)
         object.__setattr__(self, "process_launch_observation", process_observation)
+        # Keep the historical descriptor only as a one-way compatibility
+        # projection.  No publication field is ever reconstructed from it.
+        object.__setattr__(
+            self,
+            "process_launch_descriptor",
+            legacy_descriptor_from_process_observation(process_observation),
+        )
         seal = self.source_acquisition_seal
         provenance = self.observation_provenance
         validate_stage_dependent_provenance(provenance)
         assert provenance["kind"] in {"request_bound", "request_independent"}
         if provenance["kind"] == "request_independent":
             expected_budget = (
-                {"state": "observed", "value": True}
+                _observation_row("budget", True)
                 if self.run_context["budget_source"] != "unobserved"
-                else {"state": "unobserved", "value": None}
+                else _observation_row("budget", False)
             )
             assert provenance["observed"]["budget"] == expected_budget
         if seal is None:
@@ -476,7 +485,7 @@ class NextPublicationContext:
             assert self.compatibility_descriptor is None
             assert self.toolchain is None
             assert self.trusted_environment is None
-            assert self.process_launch_descriptor is None
+            assert process_observation["node_status"] == "unavailable"
             assert self.public_next_request is None
             assert self.public_next_config["request_independent"] is True
             preimage = self.run_fingerprint_preimage
@@ -504,7 +513,7 @@ class NextPublicationContext:
         assert self.compatibility_descriptor is not None
         assert self.toolchain is not None
         assert self.trusted_environment is not None
-        assert self.process_launch_descriptor is not None
+        assert process_observation["node_status"] == self.toolchain["node"]["status"]
         assert seal.plan_digest == self.source_plan_digest
         assert seal.source_view_fingerprint == self.source_view_fingerprint
         assert seal.seal_id == self.seal_id
@@ -581,8 +590,8 @@ class NextPublicationContext:
             "source_failure_ledger",
             "source_failure_ledger_seal",
             "source_failure_ledger_evidence",
-            "process_launch_descriptor",
             "process_launch_observation",
+            "process_launch_descriptor",
             "observation_provenance",
         }:
             return copy.deepcopy(value)
@@ -628,11 +637,7 @@ def _decision_provenance(
         "stage": None if kind == "request_bound" else stage,
         "failure_code": None if kind == "request_bound" else failure_code,
         "observed": {
-            name: {
-                "state": "observed" if observed else "unobserved",
-                "value": True if observed else None,
-            }
-            for name, observed in observed_flags.items()
+            name: _observation_row(name, observed) for name, observed in observed_flags.items()
         },
     }
 
@@ -650,7 +655,7 @@ def _publication_provenance(
     if kind == "request_bound":
         assert failure_stage is None and failure_code is None
         observed = {
-            name: {"state": "observed", "value": True}
+            name: _observation_row(name, True)
             for name in (
                 "request",
                 "limits",
@@ -666,16 +671,11 @@ def _publication_provenance(
         assert isinstance(failure_stage, str) and failure_stage
         assert isinstance(failure_code, str) and failure_code
         observed = {
-            name: {
-                "state": "observed"
-                if name in _expected_provenance_observed(failure_stage)
-                or (name == "budget" and budget_observed)
-                else "unobserved",
-                "value": True
-                if name in _expected_provenance_observed(failure_stage)
-                or (name == "budget" and budget_observed)
-                else None,
-            }
+            name: _observation_row(
+                name,
+                name in _expected_provenance_observed(failure_stage)
+                or (name == "budget" and budget_observed),
+            )
             for name in (
                 "request",
                 "limits",
@@ -886,6 +886,7 @@ DECISION_FAILURE_STAGES = frozenset(
 DECISION_FAILURE_CODES = frozenset(
     {
         "CSV-NEXT-APPLICABILITY-001",
+        "CSV-NEXT-APPLICABILITY-002",
         "CSV-NEXT-LIMIT-001",
         "CSV-NEXT-LIMIT-002",
         "CSV-NEXT-LIMIT-003",
@@ -901,11 +902,11 @@ DECISION_FAILURE_CODES = frozenset(
         "CSV-NEXT-NODE-003",
         "CSV-NEXT-NODE-004",
         "CSV-NEXT-PROTOCOL-001",
-        "CSV-NEXT-PROJECT-001",
         "CSV-NEXT-PROJECT-002",
         "CSV-NEXT-SOURCE-001",
         "CSV-NEXT-SOURCE-002",
         "CSV-NEXT-SOURCE-003",
+        "CSV-NEXT-SOURCE-INTEGRITY-001",
         "CSV-NEXT-TARGET-001",
         "CSV-NEXT-TYPE-001",
         "CSV-NEXT-TRUST-001",
@@ -915,13 +916,14 @@ DECISION_FAILURE_CODES = frozenset(
 )
 DECISION_FAILURE_KIND_BY_CODE = {
     "CSV-NEXT-APPLICABILITY-001": "applicability",
+    "CSV-NEXT-APPLICABILITY-002": "applicability",
     "CSV-NEXT-CONFIG-001": "config",
     "CSV-NEXT-CONFIG-002": "config",
-    "CSV-NEXT-PROJECT-001": "project",
     "CSV-NEXT-PROJECT-002": "project",
     "CSV-NEXT-SOURCE-001": "source",
     "CSV-NEXT-SOURCE-002": "source",
     "CSV-NEXT-SOURCE-003": "source",
+    "CSV-NEXT-SOURCE-INTEGRITY-001": "source",
     "CSV-NEXT-TARGET-001": "target",
     "CSV-NEXT-TRUST-001": "trust",
     "CSV-NEXT-TRUST-002": "trust",
@@ -971,19 +973,23 @@ DECISION_FAILURE_MATRIX: dict[str, dict[str, Any]] = {
     }
     for code, (stages, outcome) in {
         "CSV-NEXT-APPLICABILITY-001": (("applicability",), "not_applicable"),
-        "CSV-NEXT-CONFIG-001": (("config_validation",), "payload_unavailable"),
+        "CSV-NEXT-APPLICABILITY-002": (("applicability",), "payload_unavailable"),
+        "CSV-NEXT-CONFIG-001": (
+            ("config_validation", "source_control"),
+            "payload_unavailable",
+        ),
         "CSV-NEXT-CONFIG-002": (
             ("config_validation", "source_control"),
             "payload_unavailable",
         ),
-        "CSV-NEXT-PROJECT-001": (("project_validation",), "payload_unavailable"),
         "CSV-NEXT-PROJECT-002": (("project_validation",), "payload_unavailable"),
         "CSV-NEXT-SOURCE-001": (("source_read",), "partial_safe"),
         "CSV-NEXT-SOURCE-002": (("source_integrity",), "payload_unavailable"),
         "CSV-NEXT-SOURCE-003": (
-            ("source_control", "source_selection", "source_read", "source_integrity"),
+            ("source_control", "source_selection", "source_read"),
             "payload_unavailable",
         ),
+        "CSV-NEXT-SOURCE-INTEGRITY-001": (("source_integrity",), "fatal"),
         "CSV-NEXT-TARGET-001": (("target_resolution",), "payload_unavailable"),
         "CSV-NEXT-TRUST-001": (("trust_validation",), "payload_unavailable"),
         "CSV-NEXT-TRUST-002": (("trust_validation",), "payload_unavailable"),
@@ -1028,6 +1034,7 @@ DECISION_FAILURE_MATRIX: dict[str, dict[str, Any]] = {
 # row as the stage/code/outcome relationship instead of letting callers
 # reconstruct it independently.
 DECISION_FAILURE_MATRIX["CSV-NEXT-APPLICABILITY-001"]["exit_code"] = 0
+DECISION_FAILURE_MATRIX["CSV-NEXT-SOURCE-INTEGRITY-001"]["exit_code"] = 1
 
 
 def decision_failure_spec(diagnostic_code: str, stage: str) -> dict[str, Any]:
@@ -1057,6 +1064,42 @@ PROVENANCE_FIELDS = (
     "process_launch",
     "budget",
 )
+
+OBSERVATION_IDENTITY_SCHEMA = "code-structure-viz.next-observation/v1"
+
+
+def _observation_row(field_name: str, observed: bool) -> dict[str, Any]:
+    """Build one typed observation row; booleans are never authority values."""
+
+    if not observed:
+        return {"state": "unobserved", "value": None}
+    return {
+        "state": "observed",
+        "value": {
+            "schema": OBSERVATION_IDENTITY_SCHEMA,
+            "version": 1,
+            "sha256": digest({"schema": OBSERVATION_IDENTITY_SCHEMA, "field": field_name}),
+        },
+    }
+
+
+def _validate_observation_row(field_name: str, row: Mapping[str, Any]) -> None:
+    """Validate the closed observed identity or the explicit null suffix."""
+
+    assert set(row) == {"state", "value"}
+    assert row["state"] in {"observed", "unobserved"}
+    if row["state"] == "unobserved":
+        assert row["value"] is None
+        return
+    identity = row["value"]
+    assert isinstance(identity, Mapping)
+    assert set(identity) == {"schema", "version", "sha256"}
+    assert identity["schema"] == OBSERVATION_IDENTITY_SCHEMA
+    assert identity["version"] == 1
+    assert isinstance(identity["sha256"], str)
+    assert re.fullmatch(r"[0-9a-f]{64}", identity["sha256"])
+
+
 PROVENANCE_SOURCE_STAGES = frozenset({"source_selection", "source_read", "source_integrity"})
 PROVENANCE_TRUST_STAGES = frozenset({"trust_validation"})
 PROVENANCE_EARLY_STAGES = frozenset(
@@ -1115,31 +1158,24 @@ def validate_stage_dependent_provenance(value: dict[str, Any]) -> None:
     assert set(observed) == set(PROVENANCE_FIELDS)
     for field_name in PROVENANCE_FIELDS:
         row = observed[field_name]
-        assert set(row) == {"state", "value"}
-        assert row["state"] in {"observed", "unobserved"}
-        if row["state"] == "observed":
-            assert row["value"] is True
-        else:
-            assert row["value"] is None
+        _validate_observation_row(field_name, row)
     if value["kind"] == "request_bound":
         assert value["stage"] is None and value["failure_code"] is None
-        assert all(row == {"state": "observed", "value": True} for row in observed.values())
+        assert all(row["state"] == "observed" for row in observed.values())
         return
     stage = value["stage"]
     code = value["failure_code"]
     assert isinstance(stage, str) and isinstance(code, str)
     decision_failure_spec(code, stage)
     expected_observed = _expected_provenance_observed(stage)
-    assert observed["request"] == {"state": "unobserved", "value": None}
+    assert observed["request"] == _observation_row("request", False)
     for field_name in PROVENANCE_FIELDS:
         if field_name == "budget":
             continue
-        expected = (
-            {"state": "observed", "value": True}
-            if field_name in expected_observed
-            else {"state": "unobserved", "value": None}
-        )
-        assert observed[field_name] == expected
+        if field_name in expected_observed:
+            assert observed[field_name]["state"] == "observed"
+        else:
+            assert observed[field_name] == _observation_row(field_name, False)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1936,6 +1972,18 @@ class SourceAcquisitionError(AssertionError):
         super().__init__(message)
 
 
+class SourceProjectUsageError(SourceAcquisitionError):
+    """Usage failure raised before the source reader is allowed to run."""
+
+    def __init__(self, project_roots: tuple[str, ...]) -> None:
+        self.project_roots = tuple(project_roots)
+        super().__init__(
+            "CSV-NEXT-PROJECT-001",
+            "project_validation",
+            "selected project roots overlap",
+        )
+
+
 PACKAGE_APPLICABILITY_SCHEMA = "code-structure-viz.next-package-applicability/v1"
 PACKAGE_APPLICABILITY_STATES = ("applicable", "non_applicable", "malformed")
 PACKAGE_APPLICABILITY_EVIDENCE = (
@@ -2107,11 +2155,12 @@ def derive_package_applicability_matrix(
                 else:
                     direct_next = True
                     direct_versions.append(version.strip())
-            # A project may not carry duplicate direct Next declarations.
-            # Treat both equal and conflicting dependency/devDependency pairs
-            # as globally malformed before Node probing.
-            if len(direct_versions) > 1:
-                malformed = True
+            # ``dependencies.next`` and ``devDependencies.next`` are two
+            # valid observations of the same direct applicability fact.  The
+            # package parser rejects duplicate JSON keys and malformed values,
+            # but a valid dual declaration (even when ranges differ) is still
+            # applicable; applicability must not depend on declaration table
+            # precedence.
             state = "malformed" if malformed else "applicable" if direct_next else "non_applicable"
             evidence = (
                 "malformed_package"
@@ -2222,7 +2271,7 @@ def package_applicability_projection(
         decision_kind = "PreResponseFailureDecision"
         outcome = "payload_unavailable"
         payload_available = False
-        diagnostic = _applicability_diagnostic("CSV-NEXT-CONFIG-002")
+        diagnostic = _applicability_diagnostic("CSV-NEXT-APPLICABILITY-002")
         domain_status = "incomplete"
         run_status = "incomplete"
         exit_code = 3
@@ -2339,7 +2388,7 @@ def validate_package_applicability_projection(value: dict[str, Any]) -> None:
         assert value["outcome"] == "payload_unavailable"
         assert value["exit_code"] == 3
         assert value["toolchain"] == {"node_status": "unavailable"}
-        assert diagnostics[0]["code"] == "CSV-NEXT-CONFIG-002"
+        assert diagnostics[0]["code"] == "CSV-NEXT-APPLICABILITY-002"
     else:
         assert probe == {"permission": "permitted", "performed": True}
         assert value["toolchain"]["node_status"] in {"available", "unavailable"}
@@ -2379,6 +2428,7 @@ class SourceAcquisitionSeal:
     def __post_init__(self) -> None:
         graph = copy.deepcopy(self.source_graph)
         assert set(graph) == {"nodes", "edges", "open_edges"}
+        assert self.final_plan.get("source_graph") == graph
         assert self.plan_digest == digest(self.final_plan)
         assert self.source_view_fingerprint == digest(self.source_view)
         assert self.source_view["source_graph_digest"] == digest(graph)
@@ -2522,15 +2572,24 @@ def _scan_module_specifiers(text: str) -> tuple[tuple[dict[str, str], ...], bool
     """Scan the normative module-plane forms while ignoring lexical decoys.
 
     The scanner intentionally recognizes only static import/export-from,
-    literal dynamic ``import()``, and literal ``require()``.  Comments,
-    templates, and regex literals are skipped as opaque regions.  A dynamic,
-    malformed, or otherwise unsupported dependency sets the open-edge bit so
-    locality code cannot silently treat the graph as complete.
+    literal dynamic ``import()``, and literal ``require()``.  Comments and
+    regex literals are skipped as opaque regions.  Template raw text and JSX
+    text are skipped, while executable template substitutions and JSX brace
+    expressions are scanned as code.  A dynamic, malformed, or otherwise
+    unsupported dependency sets the open-edge bit so locality code cannot
+    silently treat the graph as complete.
     """
 
     tokens: list[tuple[str, str]] = []
+    embedded_observations: list[dict[str, str]] = []
+    embedded_open_dependency = False
     index = 0
     previous: tuple[str, str] | None = None
+    jsx_tag = False
+    jsx_tag_closing = False
+    jsx_element_depth = 0
+    jsx_text = False
+    jsx_expression_depth = 0
     regex_prefix = {
         "=",
         "(",
@@ -2571,14 +2630,52 @@ def _scan_module_specifiers(text: str) -> tuple[tuple[dict[str, str], ...], bool
             cursor += 1
         raise SourceGraphScanError("unterminated module string")
 
-    def skip_template(start: int) -> int:
+    def scan_template(start: int) -> tuple[list[dict[str, str]], bool, int]:
+        """Skip template text but recursively scan ``${...}`` expressions."""
+
         cursor = start + 1
+        observations: list[dict[str, str]] = []
+        open_dependency = False
         while cursor < len(text):
             if text[cursor] == "\\":
                 cursor += 2
                 continue
             if text[cursor] == "`":
-                return cursor + 1
+                return observations, open_dependency, cursor + 1
+            if text.startswith("${", cursor):
+                expression_start = cursor + 2
+                cursor = expression_start
+                depth = 1
+                quote: str | None = None
+                while cursor < len(text) and depth:
+                    character = text[cursor]
+                    if quote is not None:
+                        if character == "\\":
+                            cursor += 2
+                            continue
+                        if character == quote:
+                            quote = None
+                        cursor += 1
+                        continue
+                    if character in "'\"":
+                        quote = character
+                        cursor += 1
+                        continue
+                    if character == "{":
+                        depth += 1
+                    elif character == "}":
+                        depth -= 1
+                        if depth == 0:
+                            expression = text[expression_start:cursor]
+                            nested, nested_open = _scan_module_specifiers(expression)
+                            observations.extend(nested)
+                            open_dependency = open_dependency or nested_open
+                            cursor += 1
+                            break
+                    cursor += 1
+                if depth:
+                    raise SourceGraphScanError("unterminated template substitution")
+                continue
             cursor += 1
         raise SourceGraphScanError("unterminated template literal")
 
@@ -2606,6 +2703,21 @@ def _scan_module_specifiers(text: str) -> tuple[tuple[dict[str, str], ...], bool
 
     while index < len(text):
         character = text[index]
+        if jsx_text and jsx_expression_depth == 0:
+            if character == "<" and (
+                index + 1 < len(text)
+                and (text[index + 1] == "/" or text[index + 1] == ">" or text[index + 1].isalpha())
+            ):
+                jsx_text = False
+            elif character == "{":
+                jsx_text = False
+                jsx_expression_depth = 1
+                append("punct", character)
+                index += 1
+                continue
+            else:
+                index += 1
+                continue
         if character.isspace():
             index += 1
             continue
@@ -2625,7 +2737,9 @@ def _scan_module_specifiers(text: str) -> tuple[tuple[dict[str, str], ...], bool
             append("string", value)
             continue
         if character == "`":
-            index = skip_template(index)
+            nested, nested_open, index = scan_template(index)
+            embedded_observations.extend(nested)
+            embedded_open_dependency = embedded_open_dependency or nested_open
             continue
         if character == "/" and (previous is None or previous[1] in regex_prefix):
             index = skip_regex(index)
@@ -2643,11 +2757,46 @@ def _scan_module_specifiers(text: str) -> tuple[tuple[dict[str, str], ...], bool
             append("punct", "=>")
             index += 2
             continue
+        if character == "<" and (
+            index + 1 < len(text)
+            and (text[index + 1] == "/" or text[index + 1] == ">" or text[index + 1].isalpha())
+            and (
+                jsx_element_depth > 0
+                or previous is None
+                or previous[1] in {"=", "(", "[", "{", ":", ",", "return", "=>"}
+            )
+        ):
+            jsx_tag = True
+            jsx_tag_closing = text.startswith("</", index)
+            append("punct", character)
+            index += 1
+            continue
+        if character == ">" and jsx_tag:
+            self_closing = index > 0 and text[index - 1] == "/"
+            append("punct", character)
+            index += 1
+            if jsx_tag_closing:
+                jsx_element_depth = max(0, jsx_element_depth - 1)
+            elif not self_closing:
+                jsx_element_depth += 1
+            jsx_tag = False
+            jsx_text = jsx_element_depth > 0
+            continue
+        if jsx_expression_depth:
+            if character == "{":
+                jsx_expression_depth += 1
+            elif character == "}":
+                jsx_expression_depth -= 1
+            append("punct", character)
+            index += 1
+            if jsx_expression_depth == 0 and jsx_element_depth > 0:
+                jsx_text = True
+            continue
         append("punct", character)
         index += 1
 
-    observations: list[dict[str, str]] = []
-    open_dependency = False
+    observations: list[dict[str, str]] = list(embedded_observations)
+    open_dependency = embedded_open_dependency
 
     def scan_from(start: int) -> tuple[str | None, int, bool]:
         cursor = start
@@ -2759,6 +2908,14 @@ def _module_resolution_candidates(
         )
         if normalized is None:
             continue
+        # TypeScript ESM commonly writes a runtime suffix that is replaced by
+        # the source suffix at resolution time.  Replace the suffix on the
+        # same stem; appending ``.ts`` to ``widget.js`` would incorrectly
+        # produce ``widget.js.ts`` and hide the real module.
+        for runtime_suffix in (".mjs", ".cjs", ".js", ".jsx"):
+            if normalized.endswith(runtime_suffix):
+                normalized = normalized[: -len(runtime_suffix)]
+                break
         for candidate in (
             normalized,
             *(f"{normalized}{suffix}" for suffix in suffixes[1:]),
@@ -2787,8 +2944,8 @@ def _derive_source_graph_from_frozen_bytes(
     nodes = list(graph["nodes"])
     node_id_by_path = {node["path"]: node["id"] for node in nodes}
 
-    edges: list[dict[str, str]] = []
-    open_edges: list[dict[str, str]] = []
+    edges: list[dict[str, Any]] = []
+    open_edges: list[dict[str, Any]] = []
     for source_path, source_id in sorted(
         node_id_by_path.items(), key=lambda item: _path_sort_key(item[0])
     ):
@@ -2797,27 +2954,97 @@ def _derive_source_graph_from_frozen_bytes(
         try:
             text = files[source_path].decode("utf-8")
         except UnicodeDecodeError:
-            open_edges.append({"source": source_id})
+            open_edges.append(
+                {
+                    "kind": "open",
+                    "source": source_id,
+                    "syntax_kind": "source_decode",
+                    "reason": "invalid_utf8",
+                    "safe_frontier": {"source": source_id},
+                }
+            )
             continue
         try:
             observations, scanner_open = _scan_module_specifiers(text)
         except SourceGraphScanError:
             observations, scanner_open = (), True
         if scanner_open:
-            open_edges.append({"source": source_id})
+            open_edges.append(
+                {
+                    "kind": "open",
+                    "source": source_id,
+                    "syntax_kind": "module_plane",
+                    "reason": "unsupported",
+                    "safe_frontier": {"source": source_id},
+                }
+            )
         for observation in observations:
+            syntax_kind = observation["kind"]
+            raw_specifier = observation["specifier"]
             possible = _module_resolution_candidates(
                 source_path,
-                observation["specifier"],
+                raw_specifier,
                 plan,
                 node_id_by_path,
             )
             if len(possible) == 1:
-                edges.append({"source": source_id, "target": node_id_by_path[possible[0]]})
+                normalized_specifier = possible[0]
+                edges.append(
+                    {
+                        "kind": "resolved",
+                        "source": source_id,
+                        "target": node_id_by_path[normalized_specifier],
+                        "syntax_kind": syntax_kind,
+                        "role": "value",
+                        "normalized_specifier": normalized_specifier,
+                        "specifier_identity": digest(
+                            {
+                                "source": source_id,
+                                "syntax_kind": syntax_kind,
+                                "normalized_specifier": normalized_specifier,
+                            }
+                        ),
+                    }
+                )
             else:
                 # External, unsupported, unresolved, and ambiguous imports
                 # all remain open evidence; none may be treated as localized.
-                open_edges.append({"source": source_id})
+                reason = "unresolved" if len(possible) == 0 else "ambiguous"
+                safe_specifier = (
+                    _normalise_module_specifier(raw_specifier, source_path)
+                    if raw_specifier.startswith(".")
+                    else raw_specifier
+                    if PACKAGE_RE.fullmatch(raw_specifier)
+                    else None
+                )
+                open_edge: dict[str, Any] = {
+                    "kind": "open",
+                    "source": source_id,
+                    "syntax_kind": syntax_kind,
+                    "reason": reason,
+                }
+                if safe_specifier is None:
+                    open_edge["safe_frontier"] = {"source": source_id}
+                    open_edge["specifier_identity"] = digest(
+                        {
+                            "source": source_id,
+                            "syntax_kind": syntax_kind,
+                            "specifier": raw_specifier,
+                        }
+                    )
+                else:
+                    open_edge["specifier_identity"] = digest(
+                        {
+                            "source": source_id,
+                            "syntax_kind": syntax_kind,
+                            "normalized_specifier": safe_specifier,
+                        }
+                    )
+                    open_edge["safe_frontier"] = {
+                        "source": source_id,
+                        "normalized_specifier": safe_specifier,
+                    }
+                open_edges.append(open_edge)
 
     for extension in plan.get("local_extends", ()):
         source_path = extension["config_path"]
@@ -2826,9 +3053,33 @@ def _derive_source_graph_from_frozen_bytes(
             target_id = node_id_by_path.get(target_path)
             if source_id is None or target_id is None:
                 if source_id is not None:
-                    open_edges.append({"source": source_id})
+                    open_edges.append(
+                        {
+                            "kind": "open",
+                            "source": source_id,
+                            "syntax_kind": "config_extends",
+                            "reason": "unresolved",
+                            "safe_frontier": {"source": source_id},
+                        }
+                    )
             else:
-                edges.append({"source": source_id, "target": target_id})
+                edges.append(
+                    {
+                        "kind": "resolved",
+                        "source": source_id,
+                        "target": target_id,
+                        "syntax_kind": "config_extends",
+                        "role": "control",
+                        "normalized_specifier": target_path,
+                        "specifier_identity": digest(
+                            {
+                                "source": source_id,
+                                "syntax_kind": "config_extends",
+                                "normalized_specifier": target_path,
+                            }
+                        ),
+                    }
+                )
     return {
         "nodes": sorted(nodes, key=canonical_json_bytes),
         "edges": sorted(edges, key=canonical_json_bytes),
@@ -2848,7 +3099,7 @@ def _strip_jsonc(payload: bytes, path: str) -> str:
         text = payload.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", f"invalid UTF-8 control file: {path}"
+            "CSV-NEXT-CONFIG-001", "source_control", f"invalid UTF-8 control file: {path}"
         ) from exc
     output: list[str] = []
 
@@ -2868,7 +3119,7 @@ def _strip_jsonc(payload: bytes, path: str) -> str:
                 end = text.find("*/", cursor + 2)
                 if end < 0:
                     raise SourceAcquisitionError(
-                        "CSV-NEXT-CONFIG-002", "source_control", f"unterminated comment: {path}"
+                        "CSV-NEXT-CONFIG-001", "source_control", f"unterminated comment: {path}"
                     )
                 cursor = end + 2
                 continue
@@ -2905,7 +3156,7 @@ def _strip_jsonc(payload: bytes, path: str) -> str:
             end = text.find("*/", index)
             if end < 0:
                 raise SourceAcquisitionError(
-                    "CSV-NEXT-CONFIG-002", "source_control", f"unterminated comment: {path}"
+                    "CSV-NEXT-CONFIG-001", "source_control", f"unterminated comment: {path}"
                 )
             index = end + 2
             continue
@@ -2918,7 +3169,7 @@ def _strip_jsonc(payload: bytes, path: str) -> str:
         index += 1
     if in_string or escaped:
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", f"unterminated string: {path}"
+            "CSV-NEXT-CONFIG-001", "source_control", f"unterminated string: {path}"
         )
     return "".join(output)
 
@@ -2929,7 +3180,7 @@ def _control_json(contents: dict[str, bytes], path: str) -> dict[str, Any]:
     payload = contents.get(path)
     if payload is None:
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", f"control file was not observed: {path}"
+            "CSV-NEXT-CONFIG-001", "source_control", f"control file was not observed: {path}"
         )
 
     def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -2946,13 +3197,15 @@ def _control_json(contents: dict[str, bytes], path: str) -> dict[str, Any]:
             object_pairs_hook=reject_duplicate_keys,
             parse_constant=lambda _constant: (_ for _ in ()).throw(ValueError("non-finite")),
         )
-    except (SourceAcquisitionError, ValueError, json.JSONDecodeError) as exc:
+    except SourceAcquisitionError:
+        raise
+    except (ValueError, json.JSONDecodeError) as exc:
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", f"malformed control file: {path}"
+            "CSV-NEXT-CONFIG-001", "source_control", f"malformed control file: {path}"
         ) from exc
     if not isinstance(value, dict):
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", f"control file is not an object: {path}"
+            "CSV-NEXT-CONFIG-001", "source_control", f"control file is not an object: {path}"
         )
     return value
 
@@ -2960,21 +3213,27 @@ def _control_json(contents: dict[str, bytes], path: str) -> dict[str, Any]:
 def _resolve_local_extends_path(config_path: str, project_root: str, specifier: str) -> str:
     """Resolve the closed ``./...`` extends grammar without widening it."""
 
-    if (
-        not isinstance(specifier, str)
-        or not specifier.startswith("./")
-        or specifier in {"./", "./."}
-        or "://" in specifier
-        or "\\" in specifier
-    ):
+    if not isinstance(specifier, str):
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", "extends must be an explicit local ./ path"
+            "CSV-NEXT-CONFIG-001", "source_control", "extends must be one local path"
+        )
+    if specifier.startswith(("../", "/", "\\")):
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-001", "source_control", "extends must remain within project root"
+        )
+    if not specifier.startswith("./") or "://" in specifier:
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-002", "source_control", "extends requests external resolution"
+        )
+    if specifier in {"./", "./."} or "\\" in specifier:
+        raise SourceAcquisitionError(
+            "CSV-NEXT-CONFIG-001", "source_control", "extends must be a valid local ./ path"
         )
     candidate = f"{Path(config_path).parent}/{specifier}"
     resolved = _normalise_control_path(candidate, project_root=project_root)
     if not _under(resolved, project_root):
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", "extends escapes project root"
+            "CSV-NEXT-CONFIG-001", "source_control", "extends escapes project root"
         )
     return resolved
 
@@ -2984,15 +3243,15 @@ def _normalise_control_path(value: str, *, project_root: str) -> str:
 
     if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", "absolute control path"
+            "CSV-NEXT-CONFIG-001", "source_control", "absolute control path"
         )
     if any(part == ".." for part in value.split("/")):
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", "parent traversal is not a control path"
+            "CSV-NEXT-CONFIG-001", "source_control", "parent traversal is not a control path"
         )
     if any(part == "" for part in value.split("/") if part != "."):
         raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002", "source_control", "empty control path segment"
+            "CSV-NEXT-CONFIG-001", "source_control", "empty control path segment"
         )
     candidate = value
     if project_root != "." and not candidate.startswith(f"{project_root}/"):
@@ -3004,7 +3263,7 @@ def _normalise_control_path(value: str, *, project_root: str) -> str:
             continue
         if part == "..":
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "parent traversal is not a control path"
+                "CSV-NEXT-CONFIG-001", "source_control", "parent traversal is not a control path"
             )
         else:
             resolved.append(part)
@@ -3026,7 +3285,7 @@ def _validate_segment_glob(pattern: str, *, project_root: str) -> str:
         # the contract and must not accidentally acquire fnmatch semantics.
         if "**" in segment or any(character in segment for character in "[]{}()!+"):
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002",
+                "CSV-NEXT-CONFIG-001",
                 "source_control",
                 f"unsupported include/exclude pattern: {pattern}",
             )
@@ -3083,6 +3342,7 @@ def _derive_project_descriptors_from_control_bytes(
     program_suffixes: tuple[str, ...],
     context_suffixes: tuple[str, ...],
     inventory_paths: tuple[str, ...] | None = None,
+    applicable_roots: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
     """Derive config closure and final membership from frozen control bytes.
 
@@ -3128,14 +3388,14 @@ def _derive_project_descriptors_from_control_bytes(
     ) -> tuple[dict[str, Any], tuple[str, ...], tuple[dict[str, Any], ...]]:
         if path in visiting:
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", f"extends cycle: {path}"
+                "CSV-NEXT-CONFIG-001", "source_control", f"extends cycle: {path}"
             )
         visiting.add(path)
         control = _control_json(contents, path)
         allowed_keys = {"compilerOptions", "include", "exclude", "files", "extends"}
         if set(control) - allowed_keys:
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", f"unknown control key: {path}"
+                "CSV-NEXT-CONFIG-001", "source_control", f"unknown control key: {path}"
             )
         merged: dict[str, Any] = {}
         closure: list[str] = []
@@ -3143,13 +3403,13 @@ def _derive_project_descriptors_from_control_bytes(
         extends = control.get("extends")
         if extends is not None and not isinstance(extends, str):
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "extends must be one local path"
+                "CSV-NEXT-CONFIG-001", "source_control", "extends must be one local path"
             )
         if isinstance(extends, str):
             parent = control_parent_path(path, root, extends)
             if parent not in path_set:
                 raise SourceAcquisitionError(
-                    "CSV-NEXT-CONFIG-002",
+                    "CSV-NEXT-CONFIG-001",
                     "source_control",
                     f"extends path was not captured: {parent}",
                 )
@@ -3163,7 +3423,7 @@ def _derive_project_descriptors_from_control_bytes(
         child_options = control.get("compilerOptions", {})
         if not isinstance(parent_options, dict) or not isinstance(child_options, dict):
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "compilerOptions is not an object"
+                "CSV-NEXT-CONFIG-001", "source_control", "compilerOptions is not an object"
             )
         merged["compilerOptions"] = {**parent_options, **child_options}
         for key in ("include", "exclude", "files"):
@@ -3181,6 +3441,31 @@ def _derive_project_descriptors_from_control_bytes(
     ]
 
     for project_root in sorted(project_roots, key=_path_sort_key):
+        if applicable_roots is not None and project_root not in applicable_roots:
+            # Package applicability is resolved before config/source
+            # acquisition.  Keep a schema-valid project row for the public
+            # matrix, but deliberately do not read or derive any project
+            # control/source membership for a non-applicable root.
+            descriptors.append(
+                {
+                    "root": project_root,
+                    "source_roots": [project_root],
+                    "config_path": None,
+                    "compiler_options": {
+                        "allow_js": True,
+                        "check_js": False,
+                        "jsx": "preserve",
+                        "module": "esnext",
+                        "module_resolution": "bundler",
+                        "base_url": None,
+                        "paths": {},
+                    },
+                    "_resolved_control_paths": (),
+                    "_local_extends": (),
+                    "_membership": (),
+                }
+            )
+            continue
         config_path = control_path_for_root(project_root)
         # A missing control file is still represented deterministically, but
         # it is not included in the sealed bytes or control closure.
@@ -3197,7 +3482,7 @@ def _derive_project_descriptors_from_control_bytes(
         raw_options = effective.get("compilerOptions", {})
         if not isinstance(raw_options, dict):
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "compilerOptions is not an object"
+                "CSV-NEXT-CONFIG-001", "source_control", "compilerOptions is not an object"
             )
         forbidden_options = {"plugins", "typeRoots", "types"}
         if forbidden_options.intersection(raw_options):
@@ -3233,25 +3518,25 @@ def _derive_project_descriptors_from_control_bytes(
         }
         if set(raw_options) - allowed_options:
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "unsupported compiler option"
+                "CSV-NEXT-CONFIG-001", "source_control", "unsupported compiler option"
             )
         for option_name in ("allowJs", "checkJs"):
             if option_name in raw_options and not isinstance(raw_options[option_name], bool):
                 raise SourceAcquisitionError(
-                    "CSV-NEXT-CONFIG-002", "source_control", f"{option_name} must be boolean"
+                    "CSV-NEXT-CONFIG-001", "source_control", f"{option_name} must be boolean"
                 )
         if "module" in raw_options and raw_options["module"] != "esnext":
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "module must be esnext"
+                "CSV-NEXT-CONFIG-001", "source_control", "module must be esnext"
             )
         if "moduleResolution" in raw_options and raw_options["moduleResolution"] != "bundler":
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "moduleResolution must be bundler"
+                "CSV-NEXT-CONFIG-001", "source_control", "moduleResolution must be bundler"
             )
         base_url_value = raw_options.get("baseUrl")
         if base_url_value is not None and not isinstance(base_url_value, str):
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "baseUrl must be a path or null"
+                "CSV-NEXT-CONFIG-001", "source_control", "baseUrl must be a path or null"
             )
         base_url = (
             _normalise_control_path(base_url_value, project_root=project_root)
@@ -3261,7 +3546,7 @@ def _derive_project_descriptors_from_control_bytes(
         raw_paths = raw_options.get("paths", {})
         if not isinstance(raw_paths, dict):
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "paths must be an object"
+                "CSV-NEXT-CONFIG-001", "source_control", "paths must be an object"
             )
         path_aliases: dict[str, list[str]] = {}
         for key, values in raw_paths.items():
@@ -3271,7 +3556,7 @@ def _derive_project_descriptors_from_control_bytes(
                 or not all(isinstance(value, str) for value in values)
             ):
                 raise SourceAcquisitionError(
-                    "CSV-NEXT-CONFIG-002", "source_control", "invalid compiler paths"
+                    "CSV-NEXT-CONFIG-001", "source_control", "invalid compiler paths"
                 )
             path_aliases[key] = [
                 _normalise_control_path(value, project_root=project_root) for value in values
@@ -3284,10 +3569,13 @@ def _derive_project_descriptors_from_control_bytes(
             "react-jsxdev",
         }:
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "unsupported jsx compiler option"
+                "CSV-NEXT-CONFIG-001", "source_control", "unsupported jsx compiler option"
             )
         compiler_options = {
-            "allow_js": raw_options.get("allowJs", False),
+            # JavaScript is part of the v1 program plane unless the sealed
+            # control file explicitly opts out.  This is the same default as
+            # the canonical Requirement; it is not inferred from suffixes.
+            "allow_js": raw_options.get("allowJs", True),
             "check_js": raw_options.get("checkJs", False),
             "jsx": jsx,
             "module": "esnext",
@@ -3304,7 +3592,7 @@ def _derive_project_descriptors_from_control_bytes(
                 not isinstance(value, list) or not all(isinstance(item, str) for item in value)
             ):
                 raise SourceAcquisitionError(
-                    "CSV-NEXT-CONFIG-002", "source_control", f"{name} must be an array of paths"
+                    "CSV-NEXT-CONFIG-001", "source_control", f"{name} must be an array of paths"
                 )
         include_values = list(include or [])
         exclude_values = list(exclude or [])
@@ -3366,6 +3654,7 @@ def _derive_project_descriptors_from_control_bytes(
                 included
                 and not excluded
                 and (candidate.endswith(program_suffixes) or candidate.endswith(context_suffixes))
+                and (compiler_options["allow_js"] or not candidate.endswith((".js", ".jsx")))
             ):
                 membership.add(candidate)
         control_paths = tuple(dict.fromkeys(closure))
@@ -3444,6 +3733,10 @@ def seal_source_acquisition(
     assert all(isinstance(path, str) for path in (*project_roots, *control_candidates))
     for path in (*project_roots, *control_candidates):
         _assert_path(path, allow_root=True)
+    # Root overlap is a CLI/config usage error.  It is intentionally checked
+    # before snapshot enumeration so the source reader cannot leak a partial
+    # domain result for an invalid project selection.
+    validate_project_root_selection(project_roots)
     assert program_suffixes == SOURCE_PLAN_PROGRAM_SUFFIXES
     assert context_suffixes == SOURCE_PLAN_CONTEXT_SUFFIXES
     assert hard_exclusions == SOURCE_PLAN_HARD_EXCLUSIONS
@@ -3460,6 +3753,34 @@ def seal_source_acquisition(
         if path in enumerated_set
     }
     assert set(control_candidates) <= root_control_paths
+    # Applicability is the first content observation.  Only project-root
+    # package.json files are read before the matrix is complete; no config,
+    # source, Node, or adapter observation may influence this decision.
+    package_control_paths = {
+        path
+        for root in project_roots
+        for path in ("package.json" if root == "." else f"{root.rstrip('/')}/package.json",)
+        if path in enumerated_set
+    }
+    contents: dict[str, bytes] = {}
+    failed_paths: set[str] = set()
+    for path in sorted(package_control_paths, key=_path_sort_key):
+        try:
+            contents[path] = reader.read(path)
+        except SourceAcquisitionError as exc:
+            raise SourceAcquisitionError(
+                "CSV-NEXT-APPLICABILITY-002",
+                "applicability",
+                f"package applicability observation failed: {path}",
+            ) from exc
+    package_applicability = derive_package_applicability_matrix(contents, project_roots)
+    if package_applicability.aggregate_state == "malformed":
+        raise SourceAcquisitionError(
+            "CSV-NEXT-APPLICABILITY-002",
+            "applicability",
+            "malformed package applicability evidence",
+        )
+    applicable_roots = tuple(package_applicability.applicable_projects)
     # Explicit candidates narrow discovery, but never add arbitrary nested
     # config paths.  With no explicit candidates every known root candidate is
     # observed before source membership is resolved.
@@ -3468,17 +3789,17 @@ def seal_source_acquisition(
     # caller narrowed the tsconfig/jsconfig candidate list.  Explicit
     # candidates may narrow config discovery, but cannot suppress this
     # package-owned Node optionality fact.
-    package_control_paths = {
-        path
-        for root in project_roots
-        for path in ("package.json" if root == "." else f"{root.rstrip('/')}/package.json",)
-        if path in enumerated_set
-    }
     selected_control_paths = tuple(
-        sorted(set(control_candidates) | package_control_paths, key=_path_sort_key)
+        sorted(
+            package_control_paths
+            | {
+                path
+                for path in control_candidates
+                if any(_under(path, root) for root in applicable_roots)
+            },
+            key=_path_sort_key,
+        )
     )
-    contents: dict[str, bytes] = {}
-    failed_paths: set[str] = set()
     control_queue = list(selected_control_paths)
     while control_queue:
         path = control_queue.pop(0)
@@ -3491,11 +3812,11 @@ def seal_source_acquisition(
             # A failed control read cannot be represented as an empty config
             # or a partial project because that would change the authority
             # used to select the rest of the snapshot.
-            if Path(path).name in SOURCE_PLAN_CONTROL_PATHS:
-                raise
-            if not allow_partial:
-                raise
-            failed_paths.add(path)
+            # The queue contains only root candidates and the recursively
+            # discovered local-extends closure.  Every member is therefore a
+            # control observation, including a dynamically named extends file;
+            # ``allow_partial`` applies only after membership is sealed.
+            raise
         if Path(path).name not in {"tsconfig.json", "jsconfig.json"}:
             continue
         control_value = _control_json(contents, path)
@@ -3504,14 +3825,14 @@ def seal_source_acquisition(
             continue
         if not isinstance(extends_value, str):
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002", "source_control", "extends must be one local path"
+                "CSV-NEXT-CONFIG-001", "source_control", "extends must be one local path"
             )
         project_root = next((root for root in project_roots if _under(path, root)), None)
         assert project_root is not None
         extend_path = _resolve_local_extends_path(path, project_root, extends_value)
         if extend_path not in enumerated_set:
             raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-002",
+                "CSV-NEXT-CONFIG-001",
                 "source_control",
                 f"extends path was not captured: {extend_path}",
             )
@@ -3526,6 +3847,7 @@ def seal_source_acquisition(
         program_suffixes=program_suffixes,
         context_suffixes=context_suffixes,
         inventory_paths=enumerated_paths,
+        applicable_roots=applicable_roots,
     )
     final_paths = tuple(
         sorted(
@@ -3561,15 +3883,9 @@ def seal_source_acquisition(
         program_suffixes=program_suffixes,
         context_suffixes=context_suffixes,
         inventory_paths=enumerated_paths,
+        applicable_roots=applicable_roots,
     )
     assert project_descriptors
-    package_applicability = derive_package_applicability_matrix(contents, project_roots)
-    if package_applicability.aggregate_state == "malformed":
-        raise SourceAcquisitionError(
-            "CSV-NEXT-CONFIG-002",
-            "source_control",
-            "malformed package applicability evidence",
-        )
     limits = copy.deepcopy(inventory.get("observed_limits"))
     trusted_environment_digest = inventory.get("observed_trusted_environment_digest")
     assert isinstance(limits, dict)
@@ -3652,6 +3968,11 @@ def seal_source_acquisition(
     # but acquisition never accepts that graph as authority.  Re-derive the
     # graph from exactly the frozen bytes and the sealed plan instead.
     source_graph = _derive_source_graph_from_frozen_bytes(graph_files, project_roots, plan)
+    # The source-plan schema is the owner of the redacted graph contract.  It
+    # is attached only after graph derivation so the graph cannot participate
+    # in its own resolution, then the complete plan is revalidated and hashed.
+    plan["source_graph"] = copy.deepcopy(source_graph)
+    _validate_source_plan_descriptor(plan)
     graph_digest = digest(source_graph)
     source_view = {
         "schema": "code-structure-viz.source-view/v1",
@@ -5171,6 +5492,26 @@ def _process_launch_for_toolchain(
     )
 
 
+NODE_STABLE_VERSION_RE = re.compile(
+    r"^(?P<major>0|[1-9][0-9]*)\.(?P<minor>0|[1-9][0-9]*)\.(?P<patch>0|[1-9][0-9]*)(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
+)
+
+
+def _parse_admissible_node_version(value: str) -> tuple[int, int, int, str | None]:
+    """Parse the closed stable Node policy without a semver dependency."""
+
+    match = NODE_STABLE_VERSION_RE.fullmatch(value)
+    assert match is not None, "Node prereleases and malformed versions are unavailable"
+    major = int(match["major"])
+    assert major >= 22, "Node major versions before 22 are unavailable"
+    return (
+        major,
+        int(match["minor"]),
+        int(match["patch"]),
+        match["build"],
+    )
+
+
 def process_launch_descriptor(
     *,
     node_status: str,
@@ -5194,7 +5535,8 @@ def process_launch_descriptor(
     if node_status == "available":
         assert isinstance(node_realpath, str) and Path(node_realpath).is_absolute()
         assert isinstance(node_sha256, str) and re.fullmatch(r"[0-9a-f]{64}", node_sha256)
-        assert isinstance(node_version, str) and re.fullmatch(r"\d+\.\d+\.\d+", node_version)
+        assert isinstance(node_version, str)
+        _parse_admissible_node_version(node_version)
         assert spawn_executable == node_realpath
         assert file_identity_at_hash is not None
         assert file_identity_at_spawn is not None
@@ -5277,14 +5619,14 @@ def validate_process_launch_descriptor(value: dict[str, Any]) -> None:
     assert value["schema"] == "code-structure-viz.next-process-launch/v1"
     assert value["version"] == 1
     assert value["node_status"] in {"available", "unavailable", "not_applicable"}
-    assert value["host_os"] == "posix-fixture"
+    assert value["host_os"] in {"posix-fixture", "darwin", "linux", "unknown"}
     if value["node_status"] == "available":
         assert isinstance(value["node_realpath"], str)
         assert Path(value["node_realpath"]).is_absolute()
         assert isinstance(value["node_sha256"], str)
         assert re.fullmatch(r"[0-9a-f]{64}", value["node_sha256"])
         assert isinstance(value["node_version"], str)
-        assert re.fullmatch(r"\d+\.\d+\.\d+", value["node_version"])
+        _parse_admissible_node_version(value["node_version"])
         assert value["spawn_executable"] == value["node_realpath"]
         assert value["argv"][0] == value["spawn_executable"]
         assert value["spawn_path"] == value["spawn_executable"]
@@ -5340,17 +5682,18 @@ def validate_process_launch_observation(value: dict[str, Any]) -> None:
         raise AssertionError("invalid process launch observation") from exc
     if "stable_fingerprint" in value:
         assert value["stable_fingerprint"] == process_launch_stable_fingerprint(value)
+    assert value["stable_toolchain_fingerprint"] == process_launch_stable_fingerprint(value)
+    assert value["local_process_attestation_digest"] == process_launch_local_attestation_digest(
+        value
+    )
     if value["kind"] == "production" and value["node_status"] == "available":
         assert value["file_identity_at_hash"] == value["file_identity_at_spawn"]
         identity = value["file_identity_at_hash"]
+        _parse_admissible_node_version(value["node_version"])
         assert value["node_realpath"] == identity["realpath"]
         assert value["node_sha256"] == identity["sha256"]
         assert value["post_spawn_identity_check"]["identity_at_spawn"] == identity
-        expected_primitive = (
-            "windows-create-process-verified-handle"
-            if value["host_os"] == "windows"
-            else f"{value['host_os']}-posix-spawn-verified-fd"
-        )
+        expected_primitive = f"{value['host_os']}-posix-spawn-verified-fd"
         assert value["spawn_primitive"] == expected_primitive
         assert value["toctou_failure_point"] == "none"
 
@@ -5365,20 +5708,23 @@ def _process_launch_stable_projection(value: Mapping[str, Any]) -> dict[str, Any
     executable while preserving a fingerprint.
     """
 
+    argv = list(value["argv"])
+    if value["node_status"] == "available":
+        argv[0] = "<node>"
     projection = {
         "schema": value["schema"],
         "version": value["version"],
         "kind": value["kind"],
         "node_status": value["node_status"],
-        "host_os": value["host_os"],
-        "argv": copy.deepcopy(value["argv"]),
+        "argv": argv,
         "shell": value["shell"],
         "process_group": copy.deepcopy(value["process_group"]),
-        "node_realpath": value.get("node_realpath"),
         "node_sha256": value.get("node_sha256"),
         "node_version": value.get("node_version"),
-        "spawn_primitive": value.get("spawn_primitive"),
-        "toctou_failure_point": value["toctou_failure_point"],
+        "stdio": copy.deepcopy(value["stdio"]),
+        "fd_inheritance": copy.deepcopy(value["fd_inheritance"]),
+        "env_allowlist": copy.deepcopy(value["env_allowlist"]),
+        "denied_env": copy.deepcopy(value["denied_env"]),
     }
     if value["kind"] == "fixture":
         projection["fixture_id"] = value["fixture_id"]
@@ -5390,6 +5736,40 @@ def process_launch_stable_fingerprint(value: Mapping[str, Any]) -> str:
     """Return the host-independent process observation fingerprint."""
 
     return digest(_process_launch_stable_projection(value))
+
+
+def process_launch_local_attestation_digest(value: Mapping[str, Any]) -> str:
+    """Digest the complete local process observation, including host facts.
+
+    The attestation deliberately has a different preimage from the portable
+    toolchain fingerprint.  Device/inode, verified-handle and OS primitive
+    values remain security evidence, but are not allowed to make a portable
+    run fingerprint vary between equivalent machines.
+    """
+
+    local = {
+        key: copy.deepcopy(item)
+        for key, item in value.items()
+        if key
+        not in {
+            "stable_fingerprint",
+            "stable_toolchain_fingerprint",
+            "local_process_attestation_digest",
+        }
+    }
+    return digest(local)
+
+
+def process_observation_with_fingerprints(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Complete a data-only observation with both explicit digest views."""
+
+    observation = copy.deepcopy(dict(value))
+    stable = process_launch_stable_fingerprint(observation)
+    observation["stable_toolchain_fingerprint"] = stable
+    observation["local_process_attestation_digest"] = process_launch_local_attestation_digest(
+        observation
+    )
+    return observation
 
 
 def process_launch_observation_from_descriptor(
@@ -5417,6 +5797,11 @@ def process_launch_observation_from_descriptor(
                 "terminate_scope": "group",
                 "wait_after_terminate": True,
             },
+            "cwd": "/.code-structure-viz/private-run",
+            "env_allowlist": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+            "denied_env": ["NODE_OPTIONS", "NODE_PATH", "PATH", "npm_config_user_config"],
+            "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
+            "fd_inheritance": {"close_fds": True, "allowed": [0, 1, 2]},
             "node_realpath": None,
             "node_sha256": None,
             "node_version": None,
@@ -5429,6 +5814,10 @@ def process_launch_observation_from_descriptor(
             "toctou_failure_point": "node-discovery",
         }
         observation["stable_fingerprint"] = process_launch_stable_fingerprint(observation)
+        observation["stable_toolchain_fingerprint"] = observation["stable_fingerprint"]
+        observation["local_process_attestation_digest"] = process_launch_local_attestation_digest(
+            observation
+        )
         return observation
     validate_process_launch_descriptor(descriptor)
     status = descriptor["node_status"]
@@ -5446,8 +5835,20 @@ def process_launch_observation_from_descriptor(
             "argv": descriptor["argv"],
             "shell": False,
             "process_group": descriptor["process_group"],
+            "cwd": descriptor["cwd"],
+            "env_allowlist": copy.deepcopy(descriptor["env_allowlist"]),
+            "denied_env": copy.deepcopy(descriptor["denied_env"]),
+            "stdio": copy.deepcopy(descriptor["stdio"]),
+            "fd_inheritance": copy.deepcopy(descriptor["fd_inheritance"]),
+            "node_realpath": descriptor["node_realpath"],
+            "node_sha256": descriptor["node_sha256"],
+            "node_version": descriptor["node_version"],
         }
         observation["stable_fingerprint"] = process_launch_stable_fingerprint(observation)
+        observation["stable_toolchain_fingerprint"] = observation["stable_fingerprint"]
+        observation["local_process_attestation_digest"] = process_launch_local_attestation_digest(
+            observation
+        )
         return observation
     observation = {
         "schema": "code-structure-viz.next-process-launch-observation/v1",
@@ -5462,8 +5863,20 @@ def process_launch_observation_from_descriptor(
         "argv": descriptor["argv"],
         "shell": False,
         "process_group": descriptor["process_group"],
+        "cwd": descriptor["cwd"],
+        "env_allowlist": copy.deepcopy(descriptor["env_allowlist"]),
+        "denied_env": copy.deepcopy(descriptor["denied_env"]),
+        "stdio": copy.deepcopy(descriptor["stdio"]),
+        "fd_inheritance": copy.deepcopy(descriptor["fd_inheritance"]),
+        "node_realpath": None,
+        "node_sha256": None,
+        "node_version": None,
     }
     observation["stable_fingerprint"] = process_launch_stable_fingerprint(observation)
+    observation["stable_toolchain_fingerprint"] = observation["stable_fingerprint"]
+    observation["local_process_attestation_digest"] = process_launch_local_attestation_digest(
+        observation
+    )
     return observation
 
 
@@ -5618,6 +6031,75 @@ def _trusted_fixture_source_seal(
     return copy.deepcopy(resolved)
 
 
+def legacy_descriptor_from_process_observation(
+    observation: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Derive the historical launch descriptor from one sealed observation.
+
+    This compatibility projection deliberately has no independent observation
+    inputs.  The production-shaped authority is the observation object; the
+    descriptor exists only for older manifest consumers and is regenerated
+    from the already validated security policy and executable identity.
+    """
+
+    value = copy.deepcopy(dict(observation))
+    validate_process_launch_observation(value)
+    status = value["node_status"]
+    available = status == "available"
+    identity_at_hash: dict[str, str] | None = None
+    identity_at_spawn: dict[str, str] | None = None
+    spawn_handle: str | None = None
+    if available:
+        realpath = value.get("node_realpath")
+        sha256 = value.get("node_sha256")
+        version = value.get("node_version")
+        assert isinstance(realpath, str)
+        assert isinstance(sha256, str)
+        assert isinstance(version, str)
+        spawn_executable = realpath
+        identity_at_hash = {
+            "realpath": realpath,
+            "sha256": sha256,
+            "version": version,
+        }
+        identity_at_spawn = copy.deepcopy(identity_at_hash)
+        verified_handle = value.get("verified_open_handle")
+        spawn_handle = (
+            f"fd:{verified_handle['number']}"
+            if isinstance(verified_handle, dict)
+            else value.get("identity_token", "fixture-process-group")
+        )
+        host_os = value["host_os"]
+    else:
+        realpath = sha256 = version = spawn_executable = None
+        identity_at_hash = identity_at_spawn = spawn_handle = None
+        host_os = value["host_os"]
+    return {
+        "schema": "code-structure-viz.next-process-launch/v1",
+        "version": 1,
+        "node_status": status,
+        "node_realpath": realpath,
+        "node_sha256": sha256,
+        "node_version": version,
+        "spawn_executable": spawn_executable,
+        "host_os": "posix-fixture" if host_os == "fixture" else host_os,
+        "file_identity_at_hash": identity_at_hash,
+        "file_identity_at_spawn": identity_at_spawn,
+        "spawn_handle": spawn_handle,
+        "spawn_path": spawn_executable,
+        "symlink_policy": "resolve_and_verify_realpath",
+        "argv": copy.deepcopy(value["argv"]),
+        "toctou_policy": "bind_verified_realpath_at_spawn",
+        "shell": value["shell"],
+        "cwd": value["cwd"],
+        "env_allowlist": copy.deepcopy(value["env_allowlist"]),
+        "denied_env": copy.deepcopy(value["denied_env"]),
+        "stdio": copy.deepcopy(value["stdio"]),
+        "fd_inheritance": copy.deepcopy(value["fd_inheritance"]),
+        "process_group": copy.deepcopy(value["process_group"]),
+    }
+
+
 def _seal_publication_context(
     *,
     source_seal: SourceAcquisitionSeal | None,
@@ -5631,7 +6113,7 @@ def _seal_publication_context(
     semantic_files: list[dict[str, Any]],
     fingerprint_projects: list[dict[str, Any]],
     source_failure_ledger: SourceFailureLedger | tuple[dict[str, Any], ...],
-    process_launch: dict[str, Any] | None,
+    process_launch_observation: dict[str, Any],
     observation_provenance: dict[str, Any],
 ) -> NextPublicationContext:
     """Seal the sole immutable publication provenance object.
@@ -5688,9 +6170,9 @@ def _seal_publication_context(
     request_snapshot = None
     resolved_toolchain = copy.deepcopy(toolchain)
     resolved_trusted_environment = copy.deepcopy(trusted_environment)
-    launch = copy.deepcopy(process_launch)
-    if launch is not None:
-        validate_process_launch_descriptor(launch)
+    launch_observation = copy.deepcopy(process_launch_observation)
+    validate_process_launch_observation(launch_observation)
+    launch = legacy_descriptor_from_process_observation(launch_observation)
     preimage = {
         "source_view_fingerprint": source_seal.source_view_fingerprint if source_seal else None,
         "source_plan_digest": source_seal.plan_digest if source_seal else None,
@@ -5714,10 +6196,15 @@ def _seal_publication_context(
         # The descriptor is retained only as a compatibility view.  The
         # observation digest is the normative process authority in the
         # fingerprint and in every downstream context.
-        "process_launch_descriptor_digest": digest(launch) if launch is not None else None,
-        "process_launch_observation_digest": digest(
-            process_launch_observation_from_descriptor(launch)
+        # A request-independent failure has no observed executable and must
+        # not turn its derived unavailable compatibility view into a fake
+        # process observation.  Only a source-bound context carries the
+        # legacy descriptor digest; the normative observation digest remains
+        # present for both branches.
+        "process_launch_descriptor_digest": (
+            digest(launch) if source_seal is not None and launch is not None else None
         ),
+        "process_launch_observation_digest": digest(launch_observation),
         "source_failure_ledger": copy.deepcopy(list(ledger_rows)),
         "identifier_unicode_version": ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
         "identifier_unicode_table_digest": ECMASCRIPT_IDENTIFIER_UNICODE_TABLE_DIGEST,
@@ -5753,7 +6240,7 @@ def _seal_publication_context(
         run_fingerprint_preimage=preimage,
         source_failure_ledger=ledger_rows,
         source_failure_ledger_seal=copy.deepcopy(ledger_object),
-        process_launch_descriptor=launch,
+        process_launch_observation=launch_observation,
         source_failure_ledger_digest=ledger_digest,
         source_failure_ledger_evidence=ledger_evidence,
         observation_provenance=copy.deepcopy(observation_provenance),
@@ -5769,13 +6256,13 @@ def _publication_context_for_validated_request(
     trusted_environment: dict[str, Any],
     projects_for_fingerprint: list[dict[str, Any]] | None = None,
     source_failure_ledger: SourceFailureLedger | tuple[dict[str, Any], ...],
-    process_launch_descriptor: dict[str, Any],
+    process_launch_observation: dict[str, Any],
 ) -> NextPublicationContext:
     """Resolve observations into one context and one source-acquisition seal.
 
-    The launch descriptor is required because executable identity is observed
-    at the spawn boundary.  This helper must never reconstruct it from a
-    toolchain version or a global fixture.
+    The validated process observation is required because executable identity
+    is observed at the spawn boundary.  The legacy descriptor is derived only
+    inside the sealed context and can never reconstruct observation facts.
     """
 
     assert isinstance(source_seal, SourceAcquisitionSeal)
@@ -5818,7 +6305,7 @@ def _publication_context_for_validated_request(
             else request["projects"]
         ),
         source_failure_ledger=source_failure_ledger,
-        process_launch=copy.deepcopy(process_launch_descriptor),
+        process_launch_observation=copy.deepcopy(process_launch_observation),
         observation_provenance=_publication_provenance(kind="request_bound", budget_observed=True),
     )
 
@@ -5866,7 +6353,7 @@ def _publication_context_for_request_independent_failure(
         semantic_files=[],
         fingerprint_projects=[],
         source_failure_ledger=source_failure_ledger,
-        process_launch=None,
+        process_launch_observation=process_launch_observation_from_descriptor(None),
         observation_provenance=_publication_provenance(
             kind="request_independent",
             failure_stage=stage,
@@ -5974,7 +6461,7 @@ def source_plan_descriptor(
 
 
 def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
-    assert set(descriptor) == {
+    base_keys = {
         "schema",
         "version",
         "projects",
@@ -5987,6 +6474,7 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
         "limits",
         "trusted_environment_digest",
     }
+    assert set(descriptor) in (base_keys, base_keys | {"source_graph"})
     assert descriptor["schema"] == "code-structure-viz.source-acquisition-plan/next/v1"
     assert descriptor["version"] == SOURCE_PLAN_VERSION
     assert descriptor["projects"] == _source_plan_projects({"projects": descriptor["projects"]})
@@ -6045,6 +6533,8 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
     assert descriptor["hard_exclusions"] == sorted(SOURCE_PLAN_HARD_EXCLUSIONS, key=_path_sort_key)
     validate_limits(descriptor["limits"])
     assert re.fullmatch(r"[0-9a-f]{64}", descriptor["trusted_environment_digest"])
+    if "source_graph" in descriptor:
+        validate_source_graph_projection(descriptor["source_graph"])
 
 
 def source_plan_digest(config_or_request: dict[str, Any]) -> str:
@@ -6844,6 +7334,7 @@ class SourceFailureLedger:
     targets: tuple[str, ...]
     proof_roots: tuple[dict[str, Any], ...]
     ledger_digest: str = field(init=False)
+    failure_closure_paths: tuple[str, ...] = field(init=False)
 
     @classmethod
     def from_seal(
@@ -6911,20 +7402,95 @@ class SourceFailureLedger:
         adjacency: dict[str, tuple[str, ...]] = {node_id: () for node_id in node_by_id}
         mutable_adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_by_id}
         for edge in edges:
-            assert set(edge) == {"source", "target"}
+            # Historical graph fixtures contain only source/target.  Sealed
+            # acquisition graphs use the closed resolved-edge union; the
+            # reachability authority is the same source/target identity in
+            # either representation.
+            assert set(edge) in (
+                {"source", "target"},
+                {
+                    "kind",
+                    "source",
+                    "target",
+                    "syntax_kind",
+                    "role",
+                    "normalized_specifier",
+                    "specifier_identity",
+                },
+            )
+            if set(edge) != {"source", "target"}:
+                assert edge["kind"] == "resolved"
+                assert edge["role"] in {"value", "control"}
+                assert isinstance(edge["syntax_kind"], str) and edge["syntax_kind"]
+                _assert_file_path(edge["normalized_specifier"])
+                assert re.fullmatch(r"[0-9a-f]{64}", edge["specifier_identity"])
             assert edge["source"] in node_by_id and edge["target"] in node_by_id
             mutable_adjacency[edge["source"]].append(edge["target"])
         open_adjacency: dict[str, int] = {node_id: 0 for node_id in node_by_id}
         for edge in open_edges:
-            assert set(edge) == {"source"}
+            if set(edge) == {"source"}:
+                # Legacy graph fixtures are accepted only for isolated
+                # historical locality tests; newly sealed graphs are always
+                # the closed redacted open-edge union below.
+                assert edge["source"] in node_by_id
+                open_adjacency[edge["source"]] += 1
+                continue
+            assert set(edge) in (
+                {
+                    "kind",
+                    "source",
+                    "syntax_kind",
+                    "reason",
+                    "safe_frontier",
+                },
+                {
+                    "kind",
+                    "source",
+                    "syntax_kind",
+                    "reason",
+                    "safe_frontier",
+                    "specifier_identity",
+                },
+                {
+                    "kind",
+                    "source",
+                    "syntax_kind",
+                    "reason",
+                    "specifier_identity",
+                    "safe_frontier",
+                },
+            )
+            assert edge["kind"] == "open"
             assert edge["source"] in node_by_id
+            assert edge["syntax_kind"] in {
+                "module_plane",
+                "source_decode",
+                "config_extends",
+                "static_import",
+                "export_from",
+                "literal_dynamic_import",
+                "require",
+            }
+            assert edge["reason"] in {"invalid_utf8", "unsupported", "unresolved", "ambiguous"}
+            frontier = edge["safe_frontier"]
+            assert isinstance(frontier, dict)
+            assert frontier["source"] == edge["source"]
+            if "normalized_specifier" in frontier:
+                _assert_file_path(frontier["normalized_specifier"])
+            if "specifier_identity" in edge:
+                assert re.fullmatch(r"[0-9a-f]{64}", edge["specifier_identity"])
             open_adjacency[edge["source"]] += 1
         adjacency = {
             node_id: tuple(sorted(set(children), key=lambda item: item))
             for node_id, children in mutable_adjacency.items()
         }
+        reverse_adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_by_id}
+        for source_id, children in adjacency.items():
+            for target_id in children:
+                reverse_adjacency[target_id].append(source_id)
         normalized: list[dict[str, Any]] = []
         paths: set[str] = set()
+        failure_closure_ids: set[str] = set()
         for failure in failures:
             assert set(failure) == {"path", "stage"}
             _assert_file_path(failure["path"])
@@ -6941,11 +7507,31 @@ class SourceFailureLedger:
                     continue
                 reached.add(current)
                 frontier.extend(adjacency[current])
+            # A failed dependency invalidates every importer that can reach
+            # it.  This reverse closure is derived from the sealed graph, so
+            # a caller cannot publish an importer as a "safe" subset merely
+            # by reporting the direct failed path.
+            reverse_frontier = [start]
+            while reverse_frontier:
+                current = reverse_frontier.pop()
+                if current in failure_closure_ids:
+                    continue
+                failure_closure_ids.add(current)
+                reverse_frontier.extend(reverse_adjacency[current])
             reached_keys = {node_id for node_id in reached}
             reached_paths = {node_by_id[node_id]["path"] for node_id in reached}
             target_tainted = any(
                 target in reached_keys
                 or (target.startswith("path:") and target.removeprefix("path:") in reached_paths)
+                for target in targets
+            )
+            target_tainted = target_tainted or any(
+                target in failure_closure_ids
+                or (
+                    target.startswith("path:")
+                    and target.removeprefix("path:")
+                    in {node_by_id[node_id]["path"] for node_id in failure_closure_ids}
+                )
                 for target in targets
             )
             target_tainted = target_tainted or any(
@@ -6964,6 +7550,16 @@ class SourceFailureLedger:
         object.__setattr__(self, "failures", normalized_tuple)
         object.__setattr__(self, "targets", targets)
         object.__setattr__(self, "proof_roots", proof_roots)
+        object.__setattr__(
+            self,
+            "failure_closure_paths",
+            tuple(
+                sorted(
+                    (node_by_id[node_id]["path"] for node_id in failure_closure_ids),
+                    key=_path_sort_key,
+                )
+            ),
+        )
         source_seal_digest = digest(
             {
                 "seal_id": self.source_seal.seal_id,
@@ -7003,7 +7599,7 @@ class SourceFailureLedger:
 
     @property
     def safe_file_set(self) -> tuple[str, ...]:
-        failed_paths = {failure["path"] for failure in self.failures}
+        failed_paths = set(self.failure_closure_paths)
         return tuple(
             row["path"]
             for row in self.source_seal.source_view["files"]
@@ -7093,12 +7689,36 @@ class SourceIntegrityFatal:
     stage: str
 
     def __post_init__(self) -> None:
-        assert self.diagnostic_code == "CSV-NEXT-SOURCE-003"
+        assert self.diagnostic_code == "CSV-NEXT-SOURCE-INTEGRITY-001"
         assert self.stage == "source_integrity"
 
 
+@dataclass(frozen=True, kw_only=True)
+class SourceProjectUsage:
+    """Pre-acquisition usage result for overlapping project roots."""
+
+    project_roots: tuple[str, ...]
+    diagnostic_code: str = field(init=False, default="CSV-NEXT-PROJECT-001")
+    stage: str = field(init=False, default="project_validation")
+
+    def __post_init__(self) -> None:
+        roots = tuple(self.project_roots)
+        assert roots == tuple(sorted(roots, key=_path_sort_key))
+        assert len(roots) == 2
+        try:
+            validate_project_root_selection(roots)
+        except SourceProjectUsageError as error:
+            assert error.project_roots == roots
+            return
+        raise AssertionError("usage result must contain an overlapping root pair")
+
+
 SourceAcquisitionResult = (
-    CompleteSourceSeal | PartialSourceSeal | SourceAcquisitionUnavailable | SourceIntegrityFatal
+    CompleteSourceSeal
+    | PartialSourceSeal
+    | SourceAcquisitionUnavailable
+    | SourceIntegrityFatal
+    | SourceProjectUsage
 )
 
 
@@ -7121,8 +7741,9 @@ class SourceAcquisitionDecisionProjection:
             "partial_safe",
             "payload_unavailable",
             "source_integrity_fatal",
+            "usage",
         }
-        assert self.outcome in {"complete", "partial_safe", "payload_unavailable", "fatal"}
+        assert self.outcome in {"complete", "partial_safe", "payload_unavailable", "usage", "fatal"}
         assert self.diagnostic_code is None or self.diagnostic_code.startswith("CSV-NEXT-")
         if self.result_kind == "complete":
             assert self.outcome == "complete"
@@ -7142,10 +7763,16 @@ class SourceAcquisitionDecisionProjection:
             assert self.stage in {"source_control", "source_selection", "source_read"}
             assert self.exit_code == 3
             assert self.manifest_available and self.stdout_reason == "domain_payload_unavailable"
+        elif self.result_kind == "usage":
+            assert self.outcome == "usage"
+            assert not self.payload_available
+            assert self.diagnostic_code == "CSV-NEXT-PROJECT-001"
+            assert self.stage == "project_validation" and self.exit_code == 2
+            assert not self.manifest_available and self.stdout_reason == "empty"
         else:
             assert self.outcome == "fatal"
             assert not self.payload_available
-            assert self.diagnostic_code == "CSV-NEXT-SOURCE-003"
+            assert self.diagnostic_code == "CSV-NEXT-SOURCE-INTEGRITY-001"
             assert self.stage == "source_integrity" and self.exit_code == 1
             assert not self.manifest_available and self.stdout_reason == "run_fatal"
 
@@ -7200,6 +7827,17 @@ def source_acquisition_result_decision(
             manifest_available=False,
             stdout_reason="run_fatal",
         )
+    if isinstance(result, SourceProjectUsage):
+        return SourceAcquisitionDecisionProjection(
+            result_kind="usage",
+            outcome="usage",
+            payload_available=False,
+            diagnostic_code=result.diagnostic_code,
+            stage=result.stage,
+            exit_code=2,
+            manifest_available=False,
+            stdout_reason="empty",
+        )
     assert isinstance(result, SourceAcquisitionUnavailable)
     return SourceAcquisitionDecisionProjection(
         result_kind="payload_unavailable",
@@ -7232,9 +7870,15 @@ def seal_source_acquisition_result(
 
     try:
         seal = seal_source_acquisition(intent, reader, inventory, allow_partial=True)
+    except SourceProjectUsageError as failure:
+        return SourceProjectUsage(
+            project_roots=tuple(sorted(failure.project_roots, key=_path_sort_key))
+        )
     except SourceAcquisitionError as failure:
         if failure.stage == "source_integrity":
-            return SourceIntegrityFatal(diagnostic_code="CSV-NEXT-SOURCE-003", stage=failure.stage)
+            return SourceIntegrityFatal(
+                diagnostic_code="CSV-NEXT-SOURCE-INTEGRITY-001", stage=failure.stage
+            )
         return SourceAcquisitionUnavailable(
             diagnostic_code="CSV-NEXT-SOURCE-003", stage=failure.stage
         )
@@ -7381,11 +8025,13 @@ def _with_validated_decision(
         trusted_environment=_trusted_environment_snapshot(),
         projects_for_fingerprint=copy.deepcopy(model["projects"]),
         source_failure_ledger=source_failure_ledger or (),
-        process_launch_descriptor=_process_launch_for_toolchain(
-            _toolchain_snapshot(),
-            node_realpath="/usr/local/bin/node",
-            node_sha256="1" * 64,
-            spawn_executable="/usr/local/bin/node",
+        process_launch_observation=process_launch_observation_from_descriptor(
+            _process_launch_for_toolchain(
+                _toolchain_snapshot(),
+                node_realpath="/usr/local/bin/node",
+                node_sha256="1" * 64,
+                spawn_executable="/usr/local/bin/node",
+            )
         ),
     )
     projection["validated_decision"] = NextValidatedDecision(
@@ -9051,7 +9697,17 @@ class PublicationBoundaryDecision:
         )
         object.__setattr__(self, "response_bytes", bytes(sealed_response))
         object.__setattr__(self, "diagnostic_jsonl", bytes(self.public_stderr["payload"]))
-        expected_diagnostics = decision_public_diagnostics(self.semantic_decision)
+        selected_copy_failure = (
+            not self.selected_stdout["allowed"]
+            and self.adapter_stdout["allowed"]
+            and self.adapter_stderr["allowed"]
+            and self.public_stderr["allowed"]
+        )
+        expected_diagnostics = (
+            [_public_limit_diagnostic()]
+            if selected_copy_failure
+            else decision_public_diagnostics(self.semantic_decision)
+        )
         if self.public_stderr["allowed"]:
             assert self.diagnostic_jsonl == _public_diagnostic_jsonl(expected_diagnostics)
         artifact_bytes = dict(self.artifact_bytes)
@@ -9284,6 +9940,41 @@ def _publication_failure_domain(
     return domain
 
 
+def _publication_failure_candidates(
+    decision: NextRunDecision,
+    *,
+    selector: str | None,
+    diagnostics: list[dict[str, Any]],
+    selected_stdout_limit: int,
+) -> tuple[dict[str, bytes], dict[str, bytes], dict[str, Any]]:
+    """Render the one persisted failure manifest and its typed stdout gate."""
+
+    failure_domain = _publication_failure_domain(decision, diagnostics=diagnostics)
+    from tests.contracts.test_next_contracts import (
+        _run_manifest,
+        _run_summary_value,
+    )
+
+    failure_manifest = _run_manifest(failure_domain)
+    failure_summary = _run_summary_value(failure_manifest["run"]["status"], failure_domain)
+    candidates = {
+        "summary": _canonical_json_line(failure_summary),
+        "manifest": _canonical_json_line(failure_manifest),
+    }
+    if isinstance(decision, NextValidatedDecision):
+        for format_name in decision.run_context["requested_formats"]:
+            candidates.setdefault(
+                "next.snapshot.semantic.json"
+                if format_name == "semantic-json"
+                else "next.snapshot.puml",
+                b"",
+            )
+    selected = copy_selected_stdout(
+        candidates[candidate_key_for_selector(selector)], limit=selected_stdout_limit
+    )
+    return {}, candidates, selected
+
+
 def finalize_publication_decision(
     semantic_decision: NextRunDecision,
     *,
@@ -9323,36 +10014,15 @@ def finalize_publication_decision(
     capture_failed = not adapter_stdout["allowed"] or not adapter_stderr["allowed"]
     stderr_failed = not public_stderr["allowed"]
     if capture_failed or stderr_failed:
-        failure_domain = _publication_failure_domain(
+        artifacts, candidates, selected_stdout = _publication_failure_candidates(
             semantic_decision,
+            selector=selector,
             diagnostics=(
                 public_stderr["manifest_diagnostics"]
                 if stderr_failed
                 else [_public_limit_diagnostic()]
             ),
-        )
-        from tests.contracts.test_next_contracts import (
-            _run_manifest,
-            _run_summary_value,
-        )
-
-        failure_manifest = _run_manifest(failure_domain)
-        failure_summary = _run_summary_value(failure_manifest["run"]["status"], failure_domain)
-        candidates = {
-            "summary": _canonical_json_line(failure_summary),
-            "manifest": _canonical_json_line(failure_manifest),
-        }
-        if isinstance(semantic_decision, NextValidatedDecision):
-            for format_name in semantic_decision.run_context["requested_formats"]:
-                candidates.setdefault(
-                    "next.snapshot.semantic.json"
-                    if format_name == "semantic-json"
-                    else "next.snapshot.puml",
-                    b"",
-                )
-        artifacts: dict[str, bytes] = {}
-        selected_stdout = copy_selected_stdout(
-            candidates[candidate_key_for_selector(selector)], limit=selected_stdout_limit
+            selected_stdout_limit=selected_stdout_limit,
         )
         outcome = "payload_unavailable"
     else:
@@ -9364,20 +10034,35 @@ def finalize_publication_decision(
         if selected_stdout["allowed"]:
             outcome = "published"
         else:
-            # Measure the successful candidate once.  On breach, persist a
-            # failure manifest and emit a typed unavailable result; do not
-            # copy or re-measure the failure manifest as the selected stream.
-            success_manifest = json.loads(candidates["manifest"].decode("utf-8"))
-            assert isinstance(success_manifest, dict)
-            success_manifest["run"]["status"] = "incomplete"
-            success_manifest["run"]["exit_code"] = 3
-            candidates["manifest"] = canonical_json_bytes(success_manifest) + b"\n"
-            failure_summary = json.loads(candidates["summary"].decode("utf-8"))
-            assert isinstance(failure_summary, dict)
-            failure_summary["run_status"] = "incomplete"
-            failure_summary["exit_code"] = 3
-            candidates["summary"] = canonical_json_bytes(failure_summary) + b"\n"
-            outcome = "selected_artifact_unavailable"
+            selected_limit_stderr = render_public_diagnostic_stderr(
+                [_public_limit_diagnostic()], limit=public_stderr_limit
+            )
+            if not selected_limit_stderr["allowed"]:
+                artifacts, candidates, selected_stdout = _publication_failure_candidates(
+                    semantic_decision,
+                    selector=selector,
+                    diagnostics=selected_limit_stderr["manifest_diagnostics"],
+                    selected_stdout_limit=selected_stdout_limit,
+                )
+                public_stderr = selected_limit_stderr
+                outcome = "payload_unavailable"
+            else:
+                public_stderr = selected_limit_stderr
+                # Measure the successful candidate once.  On breach, persist a
+                # failure manifest and emit a typed unavailable result; do not
+                # copy or re-measure the failure manifest as the selected stream.
+                if selected_limit_stderr["allowed"]:
+                    success_manifest = json.loads(candidates["manifest"].decode("utf-8"))
+                    assert isinstance(success_manifest, dict)
+                    success_manifest["run"]["status"] = "incomplete"
+                    success_manifest["run"]["exit_code"] = 3
+                    candidates["manifest"] = canonical_json_bytes(success_manifest) + b"\n"
+                    failure_summary = json.loads(candidates["summary"].decode("utf-8"))
+                    assert isinstance(failure_summary, dict)
+                    failure_summary["run_status"] = "incomplete"
+                    failure_summary["exit_code"] = 3
+                    candidates["summary"] = canonical_json_bytes(failure_summary) + b"\n"
+                    outcome = "selected_artifact_unavailable"
     return PublicationBoundaryDecision(
         semantic_decision=semantic_decision,
         artifact_bytes=artifacts,
@@ -9547,6 +10232,20 @@ def _assert_file_path(path: str) -> None:
 
 def _under(path: str, root: str) -> bool:
     return root == "." or path == root or path.startswith(root.rstrip("/") + "/")
+
+
+def validate_project_root_selection(project_roots: tuple[str, ...] | list[str]) -> None:
+    """Reject ancestor/descendant project roots before any snapshot read."""
+
+    roots = tuple(project_roots)
+    assert roots
+    assert len(roots) == len(set(roots))
+    for root in roots:
+        _assert_path(root, allow_root=True)
+    ordered = tuple(sorted(roots, key=_path_sort_key))
+    for ancestor, descendant in combinations(ordered, 2):
+        if _under(descendant, ancestor) and descendant != ancestor:
+            raise SourceProjectUsageError((ancestor, descendant))
 
 
 def _assert_sorted_unique(
@@ -10355,13 +11054,15 @@ def pre_response_failure_decision(
             source_failure_ledger=(
                 source_failure_ledger or effective_decision_context.source_failure_ledger
             ),
-            process_launch_descriptor=_process_launch_for_toolchain(
-                _toolchain_snapshot(
-                    node_status="unavailable" if stage in node_stages else "available"
-                ),
-                node_realpath=None if stage in node_stages else "/usr/local/bin/node",
-                node_sha256=None if stage in node_stages else "1" * 64,
-                spawn_executable=None if stage in node_stages else "/usr/local/bin/node",
+            process_launch_observation=process_launch_observation_from_descriptor(
+                _process_launch_for_toolchain(
+                    _toolchain_snapshot(
+                        node_status="unavailable" if stage in node_stages else "available"
+                    ),
+                    node_realpath=None if stage in node_stages else "/usr/local/bin/node",
+                    node_sha256=None if stage in node_stages else "1" * 64,
+                    spawn_executable=None if stage in node_stages else "/usr/local/bin/node",
+                )
             ),
         )
     return PreResponseFailureDecision(
@@ -10432,11 +11133,13 @@ def not_applicable_decision(request: dict[str, Any]) -> NotApplicableDecision:
             toolchain=_toolchain_snapshot(node_status="not_applicable"),
             trusted_environment=_trusted_environment_snapshot(),
             source_failure_ledger=(),
-            process_launch_descriptor=_process_launch_for_toolchain(
-                _toolchain_snapshot(node_status="not_applicable"),
-                node_realpath=None,
-                node_sha256=None,
-                spawn_executable=None,
+            process_launch_observation=process_launch_observation_from_descriptor(
+                _process_launch_for_toolchain(
+                    _toolchain_snapshot(node_status="not_applicable"),
+                    node_realpath=None,
+                    node_sha256=None,
+                    spawn_executable=None,
+                )
             ),
         ),
     )
@@ -13366,3 +14069,385 @@ def validate_plantuml_contract(
         cursor += 1
     assert lines[cursor] == "@enduml"
     assert cursor + 1 == len(lines)
+
+
+# Round 22 replaces source-text coverage markers with a small runtime registry.
+# Each record names an executable producer and a closed validator.  The test
+# harness resolves both symbols and executes every positive and negative vector;
+# a name appearing in a function body is not evidence of coverage.
+RUNTIME_VECTOR_REGISTRY: tuple[dict[str, Any], ...] = (
+    {
+        "vector_id": "round22-runtime-applicability",
+        "criterion": "round22.rg-01",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_applicability",
+        "validator": "validate_package_applicability_projection",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-applicability-mutation",
+        "criterion": "round22.rg-01",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_applicability_mutation",
+        "validator": "validate_package_applicability_projection",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round22-runtime-config-provenance",
+        "criterion": "round22.rg-02",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_config_provenance",
+        "validator": "validate_stage_dependent_provenance",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-config-provenance-mutation",
+        "criterion": "round22.rg-02",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_config_provenance_mutation",
+        "validator": "validate_stage_dependent_provenance",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round22-runtime-source-graph",
+        "criterion": "round22.rg-03",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_source_graph",
+        "validator": "validate_source_graph_projection",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-source-graph-mutation",
+        "criterion": "round22.rg-03",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_source_graph_mutation",
+        "validator": "validate_source_graph_projection",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round22-runtime-process-observation",
+        "criterion": "round22.rg-04",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_process_observation",
+        "validator": "validate_process_launch_observation",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-process-observation-mutation",
+        "criterion": "round22.rg-04",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_process_observation_mutation",
+        "validator": "validate_process_launch_observation",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round22-runtime-provenance-value",
+        "criterion": "round22.rg-05",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_provenance_value",
+        "validator": "validate_stage_dependent_provenance",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-provenance-value-mutation",
+        "criterion": "round22.rg-05",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_provenance_value_mutation",
+        "validator": "validate_stage_dependent_provenance",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round22-runtime-integrity",
+        "criterion": "round22.rg-06",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_integrity",
+        "validator": "validate_source_acquisition_result_projection",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-integrity-mutation",
+        "criterion": "round22.rg-06",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_integrity_mutation",
+        "validator": "validate_source_acquisition_result_projection",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round22-runtime-project-overlap",
+        "criterion": "round22.rg-07",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_project_overlap",
+        "validator": "validate_source_acquisition_result_projection",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-project-overlap-mutation",
+        "criterion": "round22.rg-07",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_project_overlap_mutation",
+        "validator": "validate_source_acquisition_result_projection",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round22-runtime-selected-copy",
+        "criterion": "round22.rg-14",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_selected_copy",
+        "validator": "validate_selected_stdout_measurement",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-selected-copy-mutation",
+        "criterion": "round22.rg-14",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_selected_copy_mutation",
+        "validator": "validate_selected_stdout_measurement",
+        "expected_valid": False,
+    },
+)
+
+
+def runtime_vector_registry() -> list[dict[str, Any]]:
+    """Return a defensive copy of the executable contract-vector registry."""
+
+    return copy.deepcopy(list(RUNTIME_VECTOR_REGISTRY))
+
+
+def _runtime_provenance_value(*, field: str = "source_plan") -> dict[str, Any]:
+    return _decision_provenance(
+        kind="request_independent",
+        stage="source_control",
+        failure_code="CSV-NEXT-CONFIG-001",
+        request=False,
+        limits=False,
+        source_plan=False,
+        toolchain=False,
+        trusted_environment=False,
+        budget=False,
+    )
+
+
+def runtime_vector_round22_applicability() -> dict[str, Any]:
+    matrix = derive_package_applicability_matrix(
+        {"package.json": b'{"dependencies":{"next":"15"}}'}, (".",)
+    )
+    return package_applicability_projection(matrix, node_status="available")
+
+
+def runtime_vector_round22_applicability_mutation() -> dict[str, Any]:
+    value = runtime_vector_round22_applicability()
+    value["matrix_digest"] = "0" * 64
+    return value
+
+
+def runtime_vector_round22_config_provenance() -> dict[str, Any]:
+    return _runtime_provenance_value()
+
+
+def runtime_vector_round22_config_provenance_mutation() -> dict[str, Any]:
+    value = runtime_vector_round22_config_provenance()
+    value["observed"]["limits"] = _observation_row("limits", True)
+    return value
+
+
+def runtime_vector_round22_source_graph() -> dict[str, Any]:
+    files = {"src/entry.ts": b'import("./missing");'}
+    plan = {"projects": [{"root": ".", "compiler_options": {"paths": {}, "base_url": None}}]}
+    return _derive_source_graph_from_frozen_bytes(files, (".",), plan)
+
+
+def runtime_vector_round22_source_graph_mutation() -> dict[str, Any]:
+    value = runtime_vector_round22_source_graph()
+    value["open_edges"][0]["raw"] = "./unsafe"
+    return value
+
+
+def runtime_vector_round22_process_observation() -> dict[str, Any]:
+    return process_launch_observation_from_descriptor(None)
+
+
+def runtime_vector_round22_process_observation_mutation() -> dict[str, Any]:
+    value = runtime_vector_round22_process_observation()
+    value["host_os"] = "windows"
+    return value
+
+
+def runtime_vector_round22_provenance_value() -> dict[str, Any]:
+    return _decision_provenance(
+        kind="request_independent",
+        stage="source_read",
+        failure_code="CSV-NEXT-SOURCE-003",
+        request=False,
+        limits=True,
+        source_plan=True,
+        toolchain=False,
+        trusted_environment=False,
+        budget=False,
+    )
+
+
+def runtime_vector_round22_provenance_value_mutation() -> dict[str, Any]:
+    value = runtime_vector_round22_provenance_value()
+    value["observed"]["source_plan"] = _observation_row("source_plan", False)
+    return value
+
+
+def runtime_vector_round22_integrity() -> dict[str, Any]:
+    return source_acquisition_result_decision(
+        SourceIntegrityFatal(
+            diagnostic_code="CSV-NEXT-SOURCE-INTEGRITY-001", stage="source_integrity"
+        )
+    ).as_dict()
+
+
+def runtime_vector_round22_integrity_mutation() -> dict[str, Any]:
+    value = runtime_vector_round22_integrity()
+    value["exit_code"] = 3
+    return value
+
+
+def runtime_vector_round22_project_overlap() -> dict[str, Any]:
+    return source_acquisition_result_decision(
+        SourceProjectUsage(project_roots=("apps", "apps/web"))
+    ).as_dict()
+
+
+def runtime_vector_round22_project_overlap_mutation() -> dict[str, Any]:
+    value = runtime_vector_round22_project_overlap()
+    value["stdout_reason"] = "domain_payload_unavailable"
+    return value
+
+
+def runtime_vector_round22_selected_copy() -> dict[str, Any]:
+    return copy_selected_stdout(b"ok", limit=2)
+
+
+def runtime_vector_round22_selected_copy_mutation() -> dict[str, Any]:
+    return copy_selected_stdout(b"too-long", limit=2)
+
+
+def validate_source_graph_projection(value: dict[str, Any]) -> None:
+    """Validate the redacted resolved/open graph union used by the registry."""
+
+    assert set(value) == {"nodes", "edges", "open_edges"}
+    for node in value["nodes"]:
+        assert set(node) == {"id", "path", "project_root"}
+        assert isinstance(node["id"], str) and node["id"]
+        _assert_file_path(node["path"])
+        _assert_path(node["project_root"], allow_root=True)
+    assert value["nodes"] == sorted(value["nodes"], key=canonical_json_bytes)
+    for edge in value["edges"]:
+        assert set(edge) == {
+            "kind",
+            "source",
+            "target",
+            "syntax_kind",
+            "role",
+            "normalized_specifier",
+            "specifier_identity",
+        }
+        assert edge["kind"] == "resolved"
+        assert edge["role"] in {"value", "control"}
+        _assert_file_path(edge["normalized_specifier"])
+        assert re.fullmatch(r"[0-9a-f]{64}", edge["specifier_identity"])
+    assert value["edges"] == sorted(value["edges"], key=canonical_json_bytes)
+    for edge in value["open_edges"]:
+        assert set(edge) in (
+            {"kind", "source", "syntax_kind", "reason", "safe_frontier"},
+            {"kind", "source", "syntax_kind", "reason", "safe_frontier", "specifier_identity"},
+        )
+        assert edge["kind"] == "open"
+        assert edge["reason"] in {"invalid_utf8", "unsupported", "unresolved", "ambiguous"}
+        assert "raw" not in edge and "specifier" not in edge
+        assert edge["safe_frontier"]["source"] == edge["source"]
+        if "specifier_identity" in edge:
+            assert re.fullmatch(r"[0-9a-f]{64}", edge["specifier_identity"])
+    assert value["open_edges"] == sorted(value["open_edges"], key=canonical_json_bytes)
+
+
+def validate_source_acquisition_result_projection(value: dict[str, Any]) -> None:
+    """Validate one closed source result projection without external state."""
+
+    SourceAcquisitionDecisionProjection(**copy.deepcopy(value))
+
+
+def validate_selected_stdout_measurement(value: dict[str, Any]) -> None:
+    """Validate the exact/all-or-none selected-copy result used by the registry."""
+
+    assert set(value) == {
+        "allowed",
+        "bytes",
+        "retained",
+        "retained_bytes",
+        "partial_disposed",
+        "publication_outcome",
+        "diagnostic_code",
+    }
+    assert value["allowed"] is True
+    assert isinstance(value["retained"], bytes)
+    assert value["bytes"] == value["retained_bytes"] == len(value["retained"])
+    assert value["partial_disposed"] is False
+    assert value["publication_outcome"] == "published_artifact"
+    assert value["diagnostic_code"] is None
+
+
+def validate_runtime_vector_registry(
+    records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    *,
+    known_vector_ids: set[str],
+) -> None:
+    """Validate registry identity, polarity pairs, and callable/validator names."""
+
+    expected = {item["vector_id"]: item for item in RUNTIME_VECTOR_REGISTRY}
+    assert len(records) == len(expected)
+    seen: set[str] = set()
+    by_criterion: dict[str, set[str]] = {}
+    for record in records:
+        assert set(record) == {
+            "vector_id",
+            "criterion",
+            "polarity",
+            "callable",
+            "validator",
+            "expected_valid",
+        }
+        vector_id = record["vector_id"]
+        assert vector_id in known_vector_ids
+        assert vector_id in expected
+        assert vector_id not in seen
+        assert record == expected[vector_id]
+        assert record["polarity"] in {"positive", "negative"}
+        assert isinstance(record["expected_valid"], bool)
+        assert record["expected_valid"] is (record["polarity"] == "positive")
+        assert isinstance(record["callable"], str) and record["callable"]
+        assert isinstance(record["validator"], str) and record["validator"]
+        seen.add(vector_id)
+        by_criterion.setdefault(record["criterion"], set()).add(record["polarity"])
+    assert seen == set(expected)
+    assert all(polarities == {"positive", "negative"} for polarities in by_criterion.values())
+
+
+def execute_runtime_vector_registry(
+    records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    *,
+    known_vector_ids: set[str],
+) -> set[str]:
+    """Resolve and execute every registered vector and its named validator."""
+
+    validate_runtime_vector_registry(records, known_vector_ids=known_vector_ids)
+    executed: set[str] = set()
+    for record in records:
+        producer = globals().get(record["callable"])
+        validator = globals().get(record["validator"])
+        assert callable(producer), record["callable"]
+        assert callable(validator), record["validator"]
+        candidate = producer()
+        try:
+            validator(candidate)
+        except (AssertionError, ValidationError):
+            assert record["expected_valid"] is False, record["vector_id"]
+        else:
+            assert record["expected_valid"] is True, record["vector_id"]
+        executed.add(record["vector_id"])
+    assert executed == {item["vector_id"] for item in RUNTIME_VECTOR_REGISTRY}
+    return executed

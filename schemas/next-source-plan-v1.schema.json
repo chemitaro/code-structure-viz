@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:code-structure-viz:schema:next-source-plan-v1",
   "title": "CodeStructureViz closed Next SourceAcquisitionPlan v1",
+  "description": "A sealed plan may carry the source-plan-owned redacted resolved/open graph. The graph is never caller-supplied authority and unsafe raw specifiers are not serialized.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -28,7 +29,8 @@
     "context_suffixes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^\\.[a-z0-9.]+$"}},
     "hard_exclusions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"}},
     "limits": {"$ref": "urn:code-structure-viz:schema:next-limits-v1"},
-    "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    "trusted_environment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_graph": {"$ref": "#/$defs/source_graph"}
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -83,6 +85,61 @@
         "path": {"$ref": "#/$defs/path"},
         "roles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["control", "context", "program"]}},
         "effective_role": {"enum": ["control", "context", "program"]}
+      }
+    },
+    "source_graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodes", "edges", "open_edges"],
+      "properties": {
+        "nodes": {"type": "array", "items": {"$ref": "#/$defs/source_node"}},
+        "edges": {"type": "array", "items": {"$ref": "#/$defs/resolved_edge"}},
+        "open_edges": {"type": "array", "items": {"$ref": "#/$defs/open_edge"}}
+      }
+    },
+    "source_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "project_root"],
+      "properties": {
+        "id": {"$ref": "#/$defs/digest"},
+        "path": {"$ref": "#/$defs/path"},
+        "project_root": {"$ref": "#/$defs/root_path"}
+      }
+    },
+    "resolved_edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source", "target", "syntax_kind", "role", "normalized_specifier", "specifier_identity"],
+      "properties": {
+        "kind": {"const": "resolved"},
+        "source": {"$ref": "#/$defs/digest"},
+        "target": {"$ref": "#/$defs/digest"},
+        "syntax_kind": {"enum": ["static_import", "literal_dynamic_import", "export_from", "require", "config_extends"]},
+        "role": {"enum": ["value", "control"]},
+        "normalized_specifier": {"$ref": "#/$defs/path"},
+        "specifier_identity": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "open_edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source", "syntax_kind", "reason", "safe_frontier"],
+      "properties": {
+        "kind": {"const": "open"},
+        "source": {"$ref": "#/$defs/digest"},
+        "syntax_kind": {"enum": ["source_decode", "module_plane", "static_import", "literal_dynamic_import", "export_from", "require", "config_extends"]},
+        "reason": {"enum": ["invalid_utf8", "unsupported", "unresolved", "ambiguous"]},
+        "safe_frontier": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source"],
+          "properties": {
+            "source": {"$ref": "#/$defs/digest"},
+            "normalized_specifier": {"$ref": "#/$defs/path"}
+          }
+        },
+        "specifier_identity": {"$ref": "#/$defs/digest"}
       }
     }
   }

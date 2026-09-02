@@ -57,7 +57,7 @@ fresh current-SHA Strictはpending、readinessは未確認、production implemen
    Evidence: `test_round16_final_publication_decision_seals_capture_stderr_and_selected_copy`、
    `test_round18_publication_projections_return_sealed_candidate_bytes`。
 5. **process identity:** `next-process-launch-observation-v1`のfixture/production unionを検証する。productionは
-   darwin/linux/windowsを対象にし、OS-native file identity、verified handle、hash/version、actual spawn primitive、
+   darwin/linuxを対象にし、OS-native file identity、verified handle、hash/version、actual spawn primitive、
    post-spawn equality、FD lifecycle、process group、TOCTOU pointを必須にする。referenceではhostを操作せず、
    faithful harnessをprocess-level acceptanceと主張しない。Evidence: `test_round19_process_observation_is_fixture_or_supported_os_production`。
 6. **provenance and schema:** `next-provenance-v1`のstage/code/observed prefixをclosed oneOfにし、normal/
@@ -686,7 +686,7 @@ positive/negative testで閉じる。
    内部導出する。caller/request/reader graphを無視し、edge deletion + digest recomputationをreject
    する。source integrity resultをComplete/Partial/Unavailable/Fatal unionへ投影し、fatalと
    payload_unavailableのstage/code/manifest/stdout/exitを相互に検証する。
-4. process launch observationをfixture/production unionへ固定する。productionはdarwin/linux/windowsと
+4. process launch observationをfixture/production unionへ固定する。productionはdarwin/linuxと
    verified Node identities、handle、spawn primitive、post-spawn equality、FD/process group、TOCTOUを
    要求し、unavailable/not_applicableではidentityをnullにする。reference checksはhost processを
    実行済みと主張せず、後続production acceptanceをPlanに残す。
@@ -740,7 +740,7 @@ contract testとSchemaで閉じる。
    prefix/value、budget correlationを保持する。project_validation、source_control、Node/process、
    response、modelのcatalog pairをSchema/reference validatorで検査し、後続未観測値をnull/unobserved
    とする。control failureをdomain/root/stdout/exitへ通す。
-5. **Process:** `next-process-launch-observation-v1`を唯一の正本とする。darwin/linux/windowsの
+5. **Process:** `next-process-launch-observation-v1`を唯一の正本とする。darwin/linuxの
    OS-native verified-open/execution、realpath/hash/version、hash/spawn identity、spawn primitive、
    post-spawn equality、argv/cwd/env/FD/group、TOCTOUを束ね、旧descriptorはcompatibility viewに限定する。
    ephemeral device/inode/FDはsecurity observationに残すがstable fingerprintから除外する。fixture-only
@@ -763,3 +763,78 @@ contract testとSchemaで閉じる。
 Focused tests must run before the complete contract suite. Completion also requires full pytest, mypy, ruff,
 SpecDock, pinned HTML validation, diff cleanliness, empty `src/**` diff, and no `node_modules`. Even with all
 local checks green, only a fresh Strict `review_status=pass` with P0=0/P1=0 can authorize I05 production work.
+
+### Round 22 remediation plan
+
+Round 22 is a data-only remediation of reviewed SHA
+`e63c5d411cedc40c85f396cccbf12ca141b1938f` (CI `33586646010`, 7/7 success).
+The historical Strict result is `P0=0 / P1=20 / P2=0 / fail / implementation_ready=no`.
+The review session is `required-strict-github-connector-verificati-713` (output.log
+SHA-256 `d3e8c835608a41e02ac8d33080be8cda97c81f18541776b3ab3f6a92deb0ea8d`); the
+verification-only session is `issue-eight-strict-round-twenty-4`. Fresh current-SHA
+Strict remains pending, readiness is unconfirmed, and production implementation is absent.
+
+The implementation order and authority are fixed:
+
+```text
+frozen package/control/source bytes
+  -> PackageApplicabilityMatrix (applicable | non_applicable | malformed)
+  -> JSONC control and segment membership
+  -> SourceAcquisitionSeal and resolved | open source graph
+  -> request-bound/request-independent provenance
+  -> ValidatedAdapterRequest and opaque canonical response bytes
+  -> NextRunDecision
+  -> next-process-launch-observation-v1
+  -> PublicationBoundaryDecision
+  -> sealed domain/root manifest/stdout/stderr/artifact/exit bytes
+```
+
+1. Derive `PackageApplicabilityMatrix` first from one trusted frozen
+   `package.json` observation per known root. Direct non-empty `dependencies.next` or
+   `devDependencies.next` is applicable; missing/no-direct is non-applicable; duplicate,
+   conflicting, encoding, JSON, table, or value errors are malformed. Malformed uses
+   `CSV-NEXT-APPLICABILITY-002` and is globally unavailable with Node prohibited;
+   `CSV-NEXT-APPLICABILITY-001` is reserved for non-applicable. Mixed matrices retain
+   applicable roots only; all-non-applicable is `NotApplicableDecision` and reads no
+   config, source, or Node.
+2. Parse known-root controls once with duplicate-key rejecting JSONC. Accept BOM,
+   comments outside strings, and trailing commas including comma/comment/closing. A
+   single local `extends` string must be explicit `./...` and stay within the project;
+   reject bare/package, array, absolute, `../`, URL-like, ambiguous, and cyclic values,
+   forbidden `plugins`/`typeRoots`/`types`, invalid module/moduleResolution, and unsafe
+   paths. Derive include/exclude using segment `*`, `?`, and whole-segment `**`; any
+   control read/parse failure is global unavailable, never `{}`.
+3. Let the seal-owned source planner derive a redacted module-plane graph from frozen
+   bytes: static and side-effect imports, export-from, literal dynamic `import()`,
+   literal `require()`, and `baseUrl`/`paths`. Comments/templates/regexes are not edges.
+   Unsupported, ambiguous, unresolved, and external dependencies remain `open_edge`;
+   no caller graph or recomputed digest may remove them or establish locality.
+4. Use one catalog-derived provenance union for request-bound and request-independent
+   outcomes. Every row is an observed typed `{schema, version, sha256}` identity or an
+   `unobserved`/`null` suffix; no boolean-only or synthetic fixture values are allowed.
+   The stage/code pair, outcome, manifest/publication, and exit projection are closed.
+5. Make `next-process-launch-observation-v1` the sole process authority. v1 production
+   covers macOS (`darwin`) and Linux (`linux`) only; Windows is a separate scope. The
+   observation owns private cwd, exact env allowlist/denied set, pipe stdio, inherited FD
+   closure, `shell=false`, process-group terminate/wait, verified executable identity,
+   post-spawn equality, and TOCTOU fail-closed evidence. Split portable
+   `stable_toolchain_fingerprint` from host `local_process_attestation_digest`; the
+   latter retains host-ephemeral evidence while the former excludes it. Stable Node
+   SemVer major >=22 is required; prerelease, older, or unparsable versions are
+   `CSV-NEXT-NODE-001` unavailable.
+6. Seal selected-copy publication once. A selected-output limit breach retains the
+   semantic result and persisted artifact descriptor, but produces incomplete/exit 3,
+   canonical `CSV-NEXT-LIMIT-003` stderr, and no partial stdout. Do not remeasure,
+   rerender, or recopy a candidate; all public surfaces return final sealed bytes only.
+7. Replace source-text coverage markers with an executable registry. Each Round 22 RG
+   has a positive and negative vector, a callable producer, a validator, and a real
+   mutation assertion. The fixture, reference validator, and focused tests must agree
+   bidirectionally; missing, duplicate, unknown, unexecuted, or misassigned entries fail.
+
+The complete acceptance map and First Red/Green evidence are recorded in
+`artifacts/20260902t063000z-disc-round-22-strict-and-analysis-remediation.md`.
+Focused tests run before the full contract suite, followed by full pytest, mypy, ruff,
+SpecDock, pinned eight-diagram HTML validation, diff checks, an empty `src/**` diff, and
+the no-`node_modules` check. Green local checks do not change the historical Strict
+verdict or authorize production implementation; only a fresh same-SHA Strict pass with
+`P0=0 / P1=0 / review_status=pass` can do so.

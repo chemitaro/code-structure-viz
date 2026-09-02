@@ -70,6 +70,7 @@
         "CSV-SA-012",
         "CSV-SA-013",
         "CSV-NEXT-APPLICABILITY-001",
+        "CSV-NEXT-APPLICABILITY-002",
         "CSV-NEXT-CONFIG-001",
         "CSV-NEXT-CONFIG-002",
         "CSV-NEXT-EXPORT-001",
@@ -90,6 +91,7 @@
         "CSV-NEXT-SOURCE-001",
         "CSV-NEXT-SOURCE-002",
         "CSV-NEXT-SOURCE-003",
+        "CSV-NEXT-SOURCE-INTEGRITY-001",
         "CSV-NEXT-TARGET-001",
         "CSV-NEXT-TRUST-001",
         "CSV-NEXT-TRUST-002",
@@ -494,6 +496,12 @@
         },
         {
           "properties": {
+            "code": {"const": "CSV-NEXT-APPLICABILITY-002"},
+            "message": {"const": "The selected project's package applicability evidence is malformed."}
+          }
+        },
+        {
+          "properties": {
             "code": {"const": "CSV-NEXT-CONFIG-001"},
             "message": {"const": "The Next.js configuration is invalid or unsupported."}
           }
@@ -614,6 +622,12 @@
         },
         {
           "properties": {
+            "code": {"const": "CSV-NEXT-SOURCE-INTEGRITY-001"},
+            "message": {"const": "The sealed Next.js source snapshot failed its integrity check."}
+          }
+        },
+        {
+          "properties": {
             "code": {"const": "CSV-NEXT-TARGET-001"},
             "message": {"const": "An explicit Next.js target cannot be resolved uniquely."}
           }
@@ -716,6 +730,7 @@
                 "CSV-SA-011",
                 "CSV-SA-012",
                 "CSV-SA-013",
+                "CSV-NEXT-APPLICABILITY-002",
                 "CSV-NEXT-CONFIG-001",
                 "CSV-NEXT-CONFIG-002",
                 "CSV-NEXT-EXPORT-001",
@@ -734,6 +749,7 @@
                 "CSV-NEXT-PROTOCOL-001",
                 "CSV-NEXT-SOURCE-002",
                 "CSV-NEXT-SOURCE-003",
+                "CSV-NEXT-SOURCE-INTEGRITY-001",
                 "CSV-NEXT-TARGET-001",
                 "CSV-NEXT-TRUST-001",
                 "CSV-NEXT-TRUST-002",
@@ -997,12 +1013,12 @@
           "properties": {
             "code": {
               "enum": [
-                "CSV-NEXT-APPLICABILITY-001", "CSV-NEXT-CONFIG-001", "CSV-NEXT-CONFIG-002",
+                "CSV-NEXT-APPLICABILITY-001", "CSV-NEXT-APPLICABILITY-002", "CSV-NEXT-CONFIG-001", "CSV-NEXT-CONFIG-002",
                 "CSV-NEXT-EXPORT-001", "CSV-NEXT-FLOW-001", "CSV-NEXT-IDENTITY-001",
                 "CSV-NEXT-LIMIT-001", "CSV-NEXT-LIMIT-002", "CSV-NEXT-LIMIT-003", "CSV-NEXT-LIMIT-004",
                 "CSV-NEXT-LIMIT-005", "CSV-NEXT-NODE-001", "CSV-NEXT-NODE-002", "CSV-NEXT-NODE-003",
                 "CSV-NEXT-NODE-004", "CSV-NEXT-PROJECT-001", "CSV-NEXT-PROJECT-002", "CSV-NEXT-PROTOCOL-001",
-                "CSV-NEXT-SOURCE-001", "CSV-NEXT-SOURCE-002", "CSV-NEXT-SOURCE-003", "CSV-NEXT-TARGET-001", "CSV-NEXT-TRUST-001",
+                "CSV-NEXT-SOURCE-001", "CSV-NEXT-SOURCE-002", "CSV-NEXT-SOURCE-003", "CSV-NEXT-SOURCE-INTEGRITY-001", "CSV-NEXT-TARGET-001", "CSV-NEXT-TRUST-001",
                 "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003", "CSV-NEXT-TYPE-001", "CSV-NEXT-UNSUPPORTED-001"
               ]
             },
@@ -1023,6 +1039,13 @@
               "code": {"const": "CSV-NEXT-APPLICABILITY-001"},
               "severity": {"const": "info"}, "recoverable": {"const": true},
               "outcome": {"const": "not_applicable"}, "ref_permission": {"const": "none"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"const": "CSV-NEXT-APPLICABILITY-002"},
+              "severity": {"const": "error"}, "recoverable": {"const": false},
+              "outcome": {"const": "payload_unavailable"}, "ref_permission": {"const": "none"}
             }
           },
           {
@@ -1065,6 +1088,13 @@
               "code": {"const": "CSV-NEXT-SOURCE-001"},
               "severity": {"const": "error"}, "recoverable": {"const": true},
               "outcome": {"const": "partial_safe"}, "ref_permission": {"const": "path"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"const": "CSV-NEXT-SOURCE-INTEGRITY-001"},
+              "severity": {"const": "error"}, "recoverable": {"const": false},
+              "outcome": {"const": "fatal"}, "ref_permission": {"const": "none"}
             }
           },
           {

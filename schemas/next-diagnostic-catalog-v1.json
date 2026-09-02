@@ -3,6 +3,7 @@
   "domain": "next",
   "entries": [
     {"code":"CSV-NEXT-APPLICABILITY-001","severity":"info","recoverable":true,"message":"Next.js is not directly declared by the selected project.","ref_permission":"none","outcome":"not_applicable"},
+    {"code":"CSV-NEXT-APPLICABILITY-002","severity":"error","recoverable":false,"message":"The selected project's package applicability evidence is malformed.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-CONFIG-001","severity":"error","recoverable":false,"message":"The Next.js configuration is invalid or unsupported.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-CONFIG-002","severity":"error","recoverable":false,"message":"The Next.js configuration requests external or executable type resolution.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-EXPORT-001","severity":"error","recoverable":false,"message":"A component export cannot be resolved uniquely.","ref_permission":"symbol","outcome":"payload_unavailable"},
@@ -23,6 +24,7 @@
     {"code":"CSV-NEXT-SOURCE-001","severity":"error","recoverable":true,"message":"A source file could not be analyzed safely.","ref_permission":"path","outcome":"partial_safe"},
     {"code":"CSV-NEXT-SOURCE-002","severity":"error","recoverable":false,"message":"A selected Next.js source path is a symbolic link.","ref_permission":"path","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-SOURCE-003","severity":"error","recoverable":false,"message":"A Next.js source failure cannot be isolated to a safe subset.","ref_permission":"path","outcome":"payload_unavailable"},
+    {"code":"CSV-NEXT-SOURCE-INTEGRITY-001","severity":"error","recoverable":false,"message":"The sealed Next.js source snapshot failed its integrity check.","ref_permission":"none","outcome":"fatal"},
     {"code":"CSV-NEXT-TARGET-001","severity":"error","recoverable":false,"message":"An explicit Next.js target cannot be resolved uniquely.","ref_permission":"path_or_symbol","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-TRUST-001","severity":"error","recoverable":false,"message":"The trusted type environment digest does not match.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-TRUST-002","severity":"error","recoverable":false,"message":"Target declarations shadow or augment the trusted type environment.","ref_permission":"path","outcome":"payload_unavailable"},

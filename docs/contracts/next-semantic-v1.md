@@ -576,7 +576,7 @@ it. The semantic outcome is not silently rewritten.
 
 Process launch observation is the closed fixture/production union in
 `next-process-launch-observation-v1.schema.json`. Production records
-darwin/linux/windows OS identity, verified handle, hash/version, actual spawn
+darwin/linux OS identity, verified handle, hash/version, actual spawn
 primitive, post-spawn equality, FD lifecycle, process group, and TOCTOU
 failure point. Reference validation does not exercise a host process and is
 not an OS process-level acceptance claim.
@@ -625,7 +625,22 @@ proof. Config control uses the explicit project-local `./...` extends grammar an
 grammar, with malformed control as typed global unavailable.
 
 Semantic request-bound and request-independent outcomes share the catalog-derived stage/code provenance union.
-The normative process evidence is `next-process-launch-observation-v1`; its darwin/linux/windows security
+The normative process evidence is `next-process-launch-observation-v1`; its darwin/linux security
 identity includes ephemeral values, while the stable fingerprint intentionally excludes FD/device/inode. All
 downstream semantic bytes come from the decision-owned sealed model. Fresh current-SHA Strict is pending,
 readiness is unconfirmed, and production implementation is absent.
+
+## Round 22 semantic closure
+
+The semantic model starts only after the frozen `PackageApplicabilityMatrix` and sealed source graph have
+passed their closed validators. Malformed package evidence is `CSV-NEXT-APPLICABILITY-002`; source-integrity
+substitution is fatal `CSV-NEXT-SOURCE-INTEGRITY-001`/exit 1 without a manifest, while ordinary non-isolatable
+source failure is `CSV-NEXT-SOURCE-003`/manifest-only/exit 3. Open source edges cannot be discarded for a
+locality claim. Request-bound and request-independent provenance retain the observed prefix and typed values;
+the unobserved suffix remains null.
+
+The final publication decision owns canonical semantic/public bytes. A selected stdout-copy overrun keeps the
+semantic result and artifact descriptor, then records one incomplete/exit-3 `CSV-NEXT-LIMIT-003` publication
+with canonical stderr and no partial stdout. v1 process production is darwin/linux only and uses the normative
+observation, not a legacy descriptor. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
+production implementation is absent.
