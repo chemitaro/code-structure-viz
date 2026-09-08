@@ -330,10 +330,12 @@ prefix.pathとresult.pathの同時交換（実failed_readsは変更しない）�
 prefix.path/result.pathの協調偽装・直接不正prefixを拒否、constructor/getter両側のalias隔離、
 呼出元/返却matrixの変更後も封印済みNAと公開bytesが不変、4selectorのschema/privacyを確認した。
 dirty candidateの限定閉鎖であり、R21・後段source・G09・全体固定SHA認定は対象外である。
-最終候補の全repositoryテストは`1441 passed, 1 skipped`（201.45秒）で完了した。ruff check、ruff format --check（163 files）、
-mypy（139 files）、SpecDock validate（nodes=10）、`git diff --cached --check`も通過した。製品adapter、CLI、依存関係は変更していない。
+R19/R20候補時点の基礎全repositoryテストは`1441 passed, 1 skipped`（201.45秒）で完了した。
+R21追加後の最終候補ではNext/schema全体が`573 passed`、全repositoryが`1459 passed, 1 skipped`
+（177.17秒）となった。ruff check、ruff format --check（163 files）、mypy（139 files）、
+SpecDock validate（nodes=10）、`git diff --cached --check`も通過した。製品adapter、CLI、依存関係は変更していない。
 
-### R21の独立設計助言（未修正）
+### R21の独立設計助言（参照seam実装済み／製品未実装）
 
 同じGPT-6 Max reviewerが、既存`src/code_structure_viz/core/outcomes.py`の`RunOutcome`と
 `artifacts/streams.py`の`StdoutEmitter`を使う最小経路を確認した。terminal結果をNext semantic
@@ -349,11 +351,20 @@ referenceに小さい`next_terminal_run_publication(cause, selector)`を置き�
 stdout/stderr bytesを返す案。Next diagnosticは現時点のcore enumに押し込まず、既存reference catalogと
 JSONL rendererで構築・schema照合する。interruptは既存core stderrを利用できる。
 
-残る具体的修正点: PROJECT-001のcatalog/schemaがpayload_unavailableのままでusageと矛盾すること、
-`validate_run_status_vector`が余計なpublished bytesを受理し正しいselectorなしsummaryを拒否すること。
-独立probeは既存emitterの3原因×4selectorの12セルがschema-valid、artifact read 0を確認した。
-これは実現可能性の証拠で、R21実修正やOS signal/cleanup/実プロセスの証明ではない。
+参照seamでは`CSV-NEXT-PROJECT-001`のcatalog/schema outcomeをusageへ修正し、
+`next_terminal_run_publication(cause, selector)`を追加した。root overlapは`RunOutcome.usage`/exit 2、
+source-integrityは`RunOutcome.fatal`/exit 1、捕捉済みPublicationInterrupted/KeyboardInterruptは
+`RunOutcome.interrupted`/exit 130へ分岐し、既存`StdoutEmitter`とcore interrupt `StderrEmitter`を再利用する。
+terminal branchはdecoder/finalizer/artifact readを呼ばず、fatal/interruptのselector省略はsummary、
+指定selectorはtyped unavailable、usageは全selectorでstdout空を返す。`validate_run_status_vector`は
+terminalの余計なpublished bytesを拒否し、emitterのfield orderとcore/Next stderr JSONLを区別して検証する。
+初回の独立レビューはP1=1だった。PublicationInterruptedに付属するDiagnosticのmessage/pathを
+そのまま公開できるalias漏れを、canonical core `CSV-INTERRUPT-001`の再構築へ修正し、secret path/message
+のnegative回帰を追加した。修正後の独立再レビューはP0/P1=0。R21関連回帰は18 passed（4原因×4selector、
+artifact注入拒否、Diagnostic各欄の差し替え耐性）である。これはreference seamの契約証拠であり、OS
+signal/process-group/cleanup/実プロセスおよび製品adapterの実装・証明ではない。
 
-R19/R20の限定独立判定はP0/P1=0で閉じたが、これはdirty candidateの限定preflightである。次はR21、G09の証拠対応、
-G10のcanonical R/D/P統合、G11の将来package計画、ならびに全体の固定SHA認定である。
+R19/R20の限定独立判定はP0/P1=0で閉じ、R21は参照seamの限定回帰まで実装したが、これはdirty candidateの
+限定preflightである。次はOS/process境界を含むR21後段、G09の証拠対応、G10のcanonical R/D/P統合、
+G11の将来package計画、ならびに全体の固定SHA認定である。
 このcheckpointで全体P0/P1=0、外部Strict pass、implementation readiness、Issue完了を宣言しない。

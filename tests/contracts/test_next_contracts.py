@@ -15,8 +15,11 @@ import pytest
 from jsonschema import ValidationError  # type: ignore[import-untyped]
 
 from code_structure_viz.artifacts.streams import StdoutEmitter
+from code_structure_viz.artifacts.writer import PublicationInterrupted
 from code_structure_viz.cli.parser import DomainFormatSelector, ManifestSelector
+from code_structure_viz.core.diagnostics import DiagnosticCode, diagnostic
 from code_structure_viz.core.outcomes import RunOutcome
+from code_structure_viz.semantic.canonical_json import encode_canonical_json
 from tests.contracts.ecmascript_unicode_15_0 import (
     TABLE_DIGEST as ECMASCRIPT_UNICODE_TABLE_DIGEST,
 )
@@ -135,6 +138,7 @@ from tests.contracts.next_reference_validation import (
     model_wire_record_count,
     next_publication_decision_projection,
     next_run_decision_projection,
+    next_terminal_run_publication,
     package_applicability_projection,
     pre_response_failure_decision,
     process_launch_descriptor,
@@ -7792,7 +7796,7 @@ def test_next_stdout_matrix_has_exact_bytes_for_core_outcomes(
     _validator("run-manifest-v1.schema.json").validate(manifest)
 
     if selector is None:
-        stdout = canonical_json_bytes(summary) + b"\n"
+        stdout = encode_canonical_json(summary)
     elif selector == "manifest":
         stdout = canonical_json_bytes(manifest) + b"\n"
     else:
@@ -7833,7 +7837,7 @@ def test_next_stdout_matrix_is_manifest_free_for_fatal_and_interrupt(
     summary = _run_summary_value(run_status)
     _validator("run-summary-v1.schema.json").validate(summary)
     if selector is None:
-        stdout = canonical_json_bytes(summary) + b"\n"
+        stdout = encode_canonical_json(summary)
     else:
         stable_reason = (
             "run_interrupted"
@@ -7852,7 +7856,7 @@ def test_next_stdout_matrix_is_manifest_free_for_fatal_and_interrupt(
             "artifact": None,
         }
         _validator("stdout-result-v1.schema.json").validate(stream)
-        stdout = canonical_json_bytes(stream) + b"\n"
+        stdout = encode_canonical_json(stream)
         validate_run_status_vector(None, summary, stream, {}, stdout, [], stderr_bytes=b"")
     assert stdout.endswith(b"\n")
 
@@ -7876,6 +7880,147 @@ def test_next_stdout_matrix_usage_is_empty_and_manifest_free(selector: str | Non
     )
     assert StdoutEmitter().render(RunOutcome.usage(), selected, ROOT) == b""
     validate_run_status_vector(None, summary, None, {}, b"", [], stderr_bytes=b"")
+
+
+@pytest.mark.parametrize(
+    "cause_kind",
+    ["usage", "fatal", "publication_interrupted", "keyboard_interrupt"],
+)
+@pytest.mark.parametrize(
+    "selector",
+    [None, "manifest", "next:semantic-json", "next:plantuml"],
+)
+def test_round21_terminal_run_publication_is_manifest_free_and_selector_exact(
+    cause_kind: str, selector: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run-level failures publish through the existing core outcome/emitter seam."""
+
+    cause: SourceProjectUsage | SourceIntegrityFatal | PublicationInterrupted | KeyboardInterrupt
+    if cause_kind == "usage":
+        cause = SourceProjectUsage(project_roots=("apps", "apps/web"))
+        expected_status = "usage"
+        expected_code = "CSV-NEXT-PROJECT-001"
+    elif cause_kind == "fatal":
+        cause = SourceIntegrityFatal(
+            diagnostic_code="CSV-NEXT-SOURCE-INTEGRITY-001", stage="source_integrity"
+        )
+        expected_status = "fatal"
+        expected_code = "CSV-NEXT-SOURCE-INTEGRITY-001"
+    elif cause_kind == "publication_interrupted":
+        cause = PublicationInterrupted(diagnostic(DiagnosticCode.INTERRUPTED))
+        expected_status = "interrupted"
+        expected_code = "CSV-INTERRUPT-001"
+    else:
+        cause = KeyboardInterrupt()
+        expected_status = "interrupted"
+        expected_code = "CSV-INTERRUPT-001"
+
+    selected = (
+        None
+        if selector is None
+        else ManifestSelector()
+        if selector == "manifest"
+        else DomainFormatSelector(domain="next", format=selector.removeprefix("next:"))  # type: ignore[arg-type]
+    )
+
+    def fail_if_called(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("terminal branch must not decode, finalize, or read artifacts")
+
+    monkeypatch.setattr(
+        "tests.contracts.next_reference_validation.bounded_decode_json", fail_if_called
+    )
+    monkeypatch.setattr(
+        "tests.contracts.next_reference_validation.finalize_publication_decision", fail_if_called
+    )
+    monkeypatch.setattr(Path, "read_bytes", fail_if_called)
+
+    outcome, stdout_bytes, stderr_bytes = next_terminal_run_publication(cause, selected)
+    assert outcome.status.value == expected_status
+    assert outcome.exit_code == {"usage": 2, "fatal": 1, "interrupted": 130}[expected_status]
+    summary = _run_summary_value(expected_status)
+    _validator("run-summary-v1.schema.json").validate(summary)
+
+    stderr_rows = [json.loads(line) for line in stderr_bytes.splitlines()]
+    assert len(stderr_rows) == 1
+    assert stderr_rows[0]["code"] == expected_code
+    _validator("diagnostic-v1.schema.json").validate(stderr_rows[0])
+
+    if expected_status == "usage":
+        stdout_result = None
+        expected_stdout = b""
+    elif selector is None:
+        stdout_result = None
+        expected_stdout = encode_canonical_json(summary)
+    else:
+        stdout_result = json.loads(stdout_bytes)
+        _validator("stdout-result-v1.schema.json").validate(stdout_result)
+        expected_stdout = stdout_bytes
+    assert stdout_bytes == expected_stdout
+    validate_run_status_vector(
+        None,
+        summary,
+        stdout_result,
+        {},
+        stdout_bytes,
+        [],
+        stderr_bytes=stderr_bytes,
+        public_stderr_diagnostics=stderr_rows,
+    )
+
+
+def test_round21_terminal_status_rejects_published_artifacts() -> None:
+    """Terminal statuses cannot be upgraded by an injected artifact map."""
+
+    summary = _run_summary_value("fatal")
+    stream = {
+        "type": "stdout_result",
+        "schema": "code-structure-viz.stdout-result/v1",
+        "selector": "next:semantic-json",
+        "availability": False,
+        "run_status": "fatal",
+        "stable_reason": "run_fatal",
+        "artifact": None,
+    }
+    stdout = _canonical_json_line(stream)
+    with pytest.raises(AssertionError):
+        validate_run_status_vector(
+            None,
+            summary,
+            stream,
+            {"next.snapshot.semantic.json": b"unexpected"},
+            stdout,
+            [],
+            stderr_bytes=b"",
+        )
+
+
+def test_round21_publication_interrupt_rebuilds_safe_core_diagnostic() -> None:
+    """A forged attached Diagnostic cannot leak through the interrupt seam."""
+
+    forged = replace(
+        diagnostic(DiagnosticCode.INTERRUPTED),
+        domain="next",
+        path="/private/secret.tsx",
+        message="PRIVATE_SOURCE_BODY_DO_NOT_PUBLISH",
+    )
+    cause = PublicationInterrupted(forged)
+    outcome, stdout, stderr = next_terminal_run_publication(cause, ManifestSelector())
+    assert outcome.status.value == "interrupted"
+    row = json.loads(stderr)
+    expected = diagnostic(DiagnosticCode.INTERRUPTED).to_json_value()
+    assert row == expected
+    _validator("diagnostic-v1.schema.json").validate(row)
+    assert stdout == encode_canonical_json(
+        {
+            "type": "stdout_result",
+            "schema": "code-structure-viz.stdout-result/v1",
+            "selector": "manifest",
+            "availability": False,
+            "run_status": "interrupted",
+            "stable_reason": "run_interrupted",
+            "artifact": None,
+        }
+    )
 
 
 def test_entity_budget_overrun_is_payload_unavailable_without_artifacts() -> None:
@@ -9837,7 +9982,7 @@ def test_fatal_and_interrupt_status_vectors_are_manifest_free(
         summary,
         stream,
         {},
-        canonical_json_bytes(stream) + b"\n",
+        encode_canonical_json(stream),
         [],
         stderr_bytes=b"",
     )

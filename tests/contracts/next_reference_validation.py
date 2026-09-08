@@ -24,6 +24,13 @@ from urllib.parse import urlparse
 from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 from referencing import Registry, Resource
 
+from code_structure_viz.artifacts.streams import StderrEmitter, StdoutEmitter
+from code_structure_viz.artifacts.writer import PublicationInterrupted
+from code_structure_viz.cli.parser import StdoutSelector
+from code_structure_viz.core.diagnostics import DiagnosticCode
+from code_structure_viz.core.diagnostics import diagnostic as core_diagnostic
+from code_structure_viz.core.outcomes import RunOutcome
+from code_structure_viz.semantic.canonical_json import encode_canonical_json
 from tests.contracts.ecmascript_unicode_15_0 import (
     ALGORITHM_VERSION as _ECMASCRIPT_IDENTIFIER_UNICODE_VERSION,
 )
@@ -1663,6 +1670,15 @@ def _public_diagnostic_jsonl(diagnostics: list[dict[str, Any]]) -> bytes:
     """Encode decision-owned public diagnostics using canonical JSONL."""
 
     return b"".join(canonical_json_bytes(item) + b"\n" for item in diagnostics)
+
+
+def _terminal_diagnostic_jsonl(diagnostics: list[dict[str, Any]]) -> bytes:
+    """Encode terminal diagnostics using the emitter owned by their route."""
+
+    if any("outcome" in item for item in diagnostics):
+        assert all("outcome" in item and "ref_permission" in item for item in diagnostics)
+        return _public_diagnostic_jsonl(diagnostics)
+    return b"".join(encode_canonical_json(item) for item in diagnostics)
 
 
 def _decision_exit_code(decision: NextRunDecision) -> int:
@@ -8874,6 +8890,78 @@ SourceAcquisitionResult = (
 )
 
 
+def _next_terminal_diagnostic(code: str, *, path: str | None = None) -> dict[str, Any]:
+    """Build one catalog-backed Next diagnostic for a terminal run result."""
+
+    entry = _diagnostic_catalog()[code]
+    assert entry["outcome"] in {"usage", "fatal"}
+    permission = entry["ref_permission"]
+    if permission == "path":
+        assert path is not None
+        _assert_file_path(path)
+    else:
+        assert permission == "none"
+        assert path is None
+    return {
+        "type": "diagnostic",
+        "schema": "code-structure-viz.diagnostic/v1",
+        "code": code,
+        "severity": entry["severity"],
+        "domain": "next",
+        "path": path,
+        "symbol": None,
+        "line": None,
+        "recoverable": entry["recoverable"],
+        "message": entry["message"],
+        "outcome": entry["outcome"],
+        "ref_permission": permission,
+    }
+
+
+def next_terminal_run_publication(
+    cause: SourceProjectUsage | SourceIntegrityFatal | PublicationInterrupted | KeyboardInterrupt,
+    selector: StdoutSelector | None,
+) -> tuple[RunOutcome, bytes, bytes]:
+    """Publish a run-level terminal result before the Next finalizer.
+
+    Usage and source-integrity failures have no domain or manifest.  Their
+    Next-specific diagnostics are rendered from the closed catalog, while an
+    interrupt reuses the core diagnostic/emitter path.  The terminal branch
+    deliberately performs no adapter decode, semantic finalization, or
+    artifact read.
+    """
+
+    if isinstance(cause, SourceProjectUsage):
+        outcome = RunOutcome.usage()
+        stdout = StdoutEmitter().render(outcome, selector, REPO_ROOT)
+        path = next((root for root in reversed(cause.project_roots) if root != "."), None)
+        assert path is not None
+        stderr = _public_diagnostic_jsonl(
+            [_next_terminal_diagnostic(cause.diagnostic_code, path=path)]
+        )
+        return outcome, stdout, stderr
+    if isinstance(cause, SourceIntegrityFatal):
+        outcome = RunOutcome.fatal()
+        stdout = StdoutEmitter().render(outcome, selector, REPO_ROOT)
+        stderr = _public_diagnostic_jsonl([_next_terminal_diagnostic(cause.diagnostic_code)])
+        return outcome, stdout, stderr
+
+    if isinstance(cause, PublicationInterrupted):
+        assert cause.diagnostic.code is DiagnosticCode.INTERRUPTED
+        # The exception may cross an untrusted publication boundary.  Rebuild
+        # the closed core diagnostic instead of exposing mutable/forged fields.
+        interrupted_diagnostic = core_diagnostic(DiagnosticCode.INTERRUPTED)
+    else:
+        assert isinstance(cause, KeyboardInterrupt)
+        interrupted_diagnostic = core_diagnostic(DiagnosticCode.INTERRUPTED)
+    outcome = RunOutcome.interrupted((interrupted_diagnostic,))
+    return (
+        outcome,
+        StdoutEmitter().render(outcome, selector, REPO_ROOT),
+        StderrEmitter().render(outcome),
+    )
+
+
 @dataclass(frozen=True, kw_only=True)
 class SourceAcquisitionDecisionProjection:
     """Closed semantic projection of the source-acquisition result union."""
@@ -15409,9 +15497,13 @@ def validate_run_status_vector(
 
     if public_stderr_diagnostics is None:
         public_stderr_diagnostics = manifest_diagnostics
-    assert stderr_bytes == _public_diagnostic_jsonl(public_stderr_diagnostics)
-
     run_status = summary["run_status"]
+    expected_stderr = (
+        _terminal_diagnostic_jsonl(public_stderr_diagnostics)
+        if run_status in {"usage", "fatal", "interrupted"}
+        else _public_diagnostic_jsonl(public_stderr_diagnostics)
+    )
+    assert stderr_bytes == expected_stderr
     expected_exit = {
         "complete": 0,
         "not_applicable": 0,
@@ -15427,17 +15519,23 @@ def validate_run_status_vector(
         assert summary["manifest"] is None
         assert stdout_result is None
         assert stdout_bytes == b""
+        assert published_bytes == {}
         assert manifest_diagnostics == []
         return
     if run_status in {"fatal", "interrupted"}:
         assert manifest is None
         assert summary["domains"] == []
         assert summary["manifest"] is None
+        assert published_bytes == {}
+        if stdout_result is None:
+            assert stdout_bytes == encode_canonical_json(summary)
+            assert manifest_diagnostics == []
+            return
         assert stdout_result is not None
         assert stdout_result["availability"] is False
         assert stdout_result["run_status"] == run_status
         assert stdout_result["artifact"] is None
-        assert stdout_bytes == canonical_json_bytes(stdout_result) + b"\n"
+        assert stdout_bytes == encode_canonical_json(stdout_result)
         assert manifest_diagnostics == []
         return
 

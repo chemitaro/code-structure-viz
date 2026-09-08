@@ -38,8 +38,22 @@ The following outcome mapping is normative:
 - flow, source, and type-local failures are `partial_safe` when the proof
   contract succeeds;
 - unsupported runtime patterns are `complete` with an informational record;
-- configuration, project, target, trust, process, protocol, identity, and
-  resource-limit failures are `payload_unavailable`.
+- configuration, target, trust, process, protocol, identity, and resource-limit
+  failures are `payload_unavailable`; a source-file project collision remains
+  `payload_unavailable`, while selected project-root overlap is the separate
+  `CSV-NEXT-PROJECT-001` usage result (exit 2, no manifest or artifacts).
+
+The run-level terminal seam is fixed before the Next semantic finalizer. It
+maps root overlap to `RunOutcome.usage`, source snapshot integrity failure to
+`RunOutcome.fatal`, and caught `PublicationInterrupted`/`KeyboardInterrupt`
+to `RunOutcome.interrupted` (exit codes 2/1/130). Usage and fatal use the
+Next catalog JSONL diagnostic; interrupt reuses the core
+`CSV-INTERRUPT-001` diagnostic. None of these branches may create a domain,
+manifest, artifact, adapter decode, or semantic finalization result. Selector
+omission emits the core run summary for fatal/interrupt and empty stdout for
+usage; a specified selector emits only the corresponding typed unavailable
+record. This is a reference contract for the future adapter seam, not a claim
+that the production Next adapter is implemented.
 
 ## Round 15 closed failure routing
 

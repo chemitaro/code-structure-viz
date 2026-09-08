@@ -18,7 +18,7 @@
     {"code":"CSV-NEXT-NODE-002","severity":"error","recoverable":false,"message":"The Next.js adapter process could not be started.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-NODE-003","severity":"error","recoverable":false,"message":"The Next.js adapter process timed out.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-NODE-004","severity":"error","recoverable":false,"message":"The Next.js adapter process failed.","ref_permission":"none","outcome":"payload_unavailable"},
-    {"code":"CSV-NEXT-PROJECT-001","severity":"error","recoverable":false,"message":"Selected Next.js project roots overlap.","ref_permission":"path","outcome":"payload_unavailable"},
+    {"code":"CSV-NEXT-PROJECT-001","severity":"error","recoverable":false,"message":"Selected Next.js project roots overlap.","ref_permission":"path","outcome":"usage"},
     {"code":"CSV-NEXT-PROJECT-002","severity":"error","recoverable":false,"message":"A source file belongs to more than one selected project.","ref_permission":"path","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-PROTOCOL-001","severity":"error","recoverable":false,"message":"The Next.js adapter response violates the private protocol.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-SOURCE-001","severity":"error","recoverable":true,"message":"A source file could not be analyzed safely.","ref_permission":"path","outcome":"partial_safe"},

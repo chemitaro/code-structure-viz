@@ -1076,7 +1076,14 @@
           },
           {
             "properties": {
-              "code": {"enum": ["CSV-NEXT-PROJECT-001", "CSV-NEXT-PROJECT-002", "CSV-NEXT-SOURCE-002", "CSV-NEXT-SOURCE-003", "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003"]},
+              "code": {"const": "CSV-NEXT-PROJECT-001"},
+              "severity": {"const": "error"}, "recoverable": {"const": false},
+              "outcome": {"const": "usage"}, "ref_permission": {"const": "path"}
+            }
+          },
+          {
+            "properties": {
+              "code": {"enum": ["CSV-NEXT-PROJECT-002", "CSV-NEXT-SOURCE-002", "CSV-NEXT-SOURCE-003", "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003"]},
               "severity": {"const": "error"}, "recoverable": {"const": false},
               "outcome": {"const": "payload_unavailable"}, "ref_permission": {"const": "path"}
             }

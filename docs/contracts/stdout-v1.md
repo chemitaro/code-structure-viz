@@ -2,7 +2,7 @@
 
 ## Current v1 normative authority
 
-現在のstdout authorityは、semantic decisionを入力に一度だけsealしたfinal publication decisionです。summary、root manifest、selected artifact、typed unavailableのclosed unionをsealed bytesから投影し、callerのcandidate/status/chunk再注入、rerender、retryを許しません。selected copyのexactは全bytes、+1はpartial bytesなしの`CSV-NEXT-LIMIT-003`/publication-incomplete/exit 3で、semantic statusとartifact descriptorは保持します。canonical JSONはsort_keys、NFC、UTF-8、LFのみです。target failure rowsはtarget-related unavailableだけで、他branchに出ません。以下のRound節はhistorical evidence（非normative）です。
+現在のstdout authorityは、semantic decisionを入力に一度だけsealしたfinal publication decisionです。summary、root manifest、selected artifact、typed unavailableのclosed unionをsealed bytesから投影し、callerのcandidate/status/chunk再注入、rerender、retryを許しません。selected copyのexactは全bytes、+1はpartial bytesなしの`CSV-NEXT-LIMIT-003`/publication-incomplete/exit 3で、semantic statusとartifact descriptorは保持します。通常のNext semantic/publication JSONはsort_keys、NFC、UTF-8、LFのみです。target failure rowsはtarget-related unavailableだけで、他branchに出ません。以下のRound節はhistorical evidence（非normative）です。
 
 `--stdout` は高々一回で、`manifest`、`python:semantic-json`、
 `python:plantuml`、`sqlalchemy:semantic-json`、`sqlalchemy:plantuml`、
@@ -20,6 +20,20 @@ selector省略時、stdoutは `code-structure-viz.run-summary/v1` のcanonical J
 利用可能なselectorは、selectorなしならsummary、`manifest`ならroot manifest、
 domain selectorなら公開fileを、選択されたstreamのexact bytesとしてstdoutへ複製する。
 利用不能なselectorは `code-structure-viz.stdout-result/v1` 一行を返す。
+
+Nextのsemantic finalizerより前に確定するrun-level terminal branchは、同じcoreの`RunOutcome`と
+`StdoutEmitter`へ一度だけ渡す。root overlap（`CSV-NEXT-PROJECT-001`）はusage/exit 2であり、
+domain、manifest、artifactを作らず、selectorの有無にかかわらずstdoutは空、stderrはcatalogの
+path参照付きdiagnostic一行とする。sealed sourceのintegrity failureはfatal/exit 1で、domain、
+manifest、artifactなし。selector省略時はrun summary、指定時は`run_fatal`または
+`final_manifest_unavailable`のtyped unavailableを返す。`PublicationInterrupted`または
+`KeyboardInterrupt`はinterrupted/exit 130で、selector省略時はsummary、指定時は
+`run_interrupted`を返し、stderrはcoreの`CSV-INTERRUPT-001`を再利用する。これらのbranchは
+Next adapterの実プロセス実装を意味せず、terminal publication seamを固定する契約である。
+
+terminal branchのsummary／typed unavailableは既存core encoderが定めるclosed field orderで、
+NFC、UTF-8、LFを満たす。Next側で再ソート・再レンダーせず、usage/fatalのcatalog JSONLと
+interruptのcore JSONLをそれぞれの既存emitterからそのまま公開する。
 
 diagnosticは `code-structure-viz.diagnostic/v1` のcanonical JSON Linesだけをstderrへ
 出す。stdoutへdiagnosticを混在させず、stderrへsource body、literal、secret、
