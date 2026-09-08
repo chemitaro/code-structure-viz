@@ -444,3 +444,17 @@ Round22 focused regressionはresolver呼出し回数が1であることを固定
 ruff check/format、mypy 139 files、SpecDock validate nodes=10、diff hygiene pass。修復候補は
 次の固定SHAで独立レビューを再実施する。P0/P1の未解決、production adapter、実OS/process、
 G10/G11、Issue完了は主張しない。
+
+### G09 final independent review (2026-09-08)
+
+固定SHA `18084874777ac7c62640c9e53697cba847a53294` に対する独立GPT-6 Maxレビューは
+`P0=0 / P1=0 / P2=0`、Standards/Spec指摘なしで閉じた。HEADとconfigured upstreamは一致し、
+開始・終了ともcleanだった。current 16件とhistorical 36件の双方でauthority resolverとprivate
+snapshot validatorは各1回、同一snapshotをproducer実行と最終集合比較まで共有する。
+不正authority、旧iterable、surrogate協調差替え、catalog重複/交差/空/欠落/polarity誤配置は
+78拒否、producer呼出し0、historical全producer遮断下でもcurrentは通過した。reviewer回帰は
+19 passed。
+
+これはG09 executable coverage authority境界の限定閉鎖である。R21実OS/process、production
+Next adapter、G10 canonical R/D/P、G11 package計画、全体fixed-SHA Strict、Issue完了は
+未認定のまま保持する。
