@@ -343,877 +343,360 @@
 </head>
 <body>
   <main>
-    <header>
-      <p class="eyebrow">Issue #8 · Design candidate · 2026-08-31</p>
-      <h1>Next.js Component Snapshot<br>ベストプラクティス設計ガイド</h1>
-      <p class="lede">Next.js のコードを実行せず、coding agent が component 構造を安全・決定的に理解するための推奨設計です。実装方法だけでなく、identity、失敗、セキュリティ、Issue #9 の diff への引き継ぎまで一続きで説明します。</p>
-      <div class="pill-row">
-        <span class="pill">snapshot-only</span>
-        <span class="pill">static analysis</span>
-        <span class="pill">immutable input</span>
-        <span class="pill">Node optional</span>
-        <span class="pill">提案・契約整理（実装前）</span>
-      </div>
-      <div id="plantuml-status" class="plantuml-status" role="status" aria-live="polite">
-        図を読み込んでいます。
-      </div>
-      <div class="callout warning">
-        <strong>現在の状態:</strong> これは Issue #8 のベストプラクティス提案と実装前契約を説明する資料です。プロダクトの Next 実装はまだ開始していません。ChatGPT Use Strict Round 6 は <code>review_status: fail</code>、P0=0、P1=9、P2=2、Round 7 は P0=0、P1=6、P2=0、Round 8 は P0=0、P1=4、P2=0、Round 9 は P0=0、P1=7、P2=1、Round 10 は P0=0、P1=8、P2=0でした。Round 11（対象SHA <code>75ac0e0b34347b825c0bec2e6fbf9ff2068d9a1b</code>、CI 7/7 success）も <code>review_status: fail</code>、P0=0、P1=8、P2=0です。Round 12は対象SHA <code>48266f813353a7fd78e4e15d72ff6d33c4142827</code>、CI <code>33435802167</code>（7/7 success）に対し、<code>review_status: fail</code>、P0=0、P1=8、P2=0でした。Round 12の8件はdata-only contracts、reference validator、schemas、fixtures、canonical R/D/Pへ局所反映した状態ですが、fresh exact-SHA Strictはまだ未通過です。したがって readiness は未確定であり、実装開始やStrict passを宣言しません。詳細な証拠は <code>20260901t020000z-disc-strict-spec-review-round-12.md</code> に保存しています。
-      </div>
-      <div class="callout warning">
-        <strong>Round 13 状態:</strong> 対象SHA <code>991516bf730f4f2ddb3d15067702dcfae95ec6b1</code>、CI <code>33446911714</code>（7/7 success）の Strict 結果は <code>review_status: fail</code>、P0=0、P1=9、P2=1です。これは履歴として保持し、ローカルのdata-only修復でpassへ書き換えません。fresh exact-SHA Strictは未実行・未通過、readinessは未確定、プロダクト実装は未着手です。Round 13の修復内容と受入条件はこのページ後半および <code>20260901t040000z-disc-strict-spec-review-round-13.md</code> に記録しています。
-      </div>
-      <div class="callout warning">
-        <strong>Round 14 状態:</strong> 初回connector検証失敗と成功した再試行を別Artifactへ保存しています。再試行が確認した対象SHAは <code>cf5da416e25e76068ed99caf0d450d0e2d5b28df</code>、CI <code>33457932686</code>（7/7 success）で、結果は <code>review_status: fail</code>、P0=0、P1=5、P2=2、<code>implementation_ready: no</code>です。fresh current-SHA Strictは未実行・未確認、readinessは未確定、プロダクトのNext adapter/CLI実装は未着手です。詳細は <code>20260901t031000z-disc-strict-spec-review-round-14.md</code> を参照してください。
-      </div>
-      <div class="callout warning">
-        <strong>Round 15 状態:</strong> 三つの試行（初回connector-only、verification-only retry、content review follow-up）を別証跡として保存しています。content reviewの固定点は対象SHA <code>c3f8e4188ca715a29d60a7454a66390938bce496</code>、CI <code>33472932927</code>（7/7 green）で、判定は <code>review_status: fail</code>、P0=0、P1=13、P2=1、<code>implementation_ready: no</code>です。fresh current-SHA Strictは未実行・未確認、readinessは未確定、プロダクト実装は未着手です。三試行のSHAとfinding対応は <code>20260901t060000z-disc-strict-spec-review-round-15.md</code> に記録します。
-      </div>
-      <section class="callout" aria-labelledby="current-v1-authority">
-        <h2 id="current-v1-authority">Current v1 normative authority（現在の唯一の正本）</h2>
-        <p>この章が人間向けHTMLにおける現在のauthorityです。下に続くRound 1〜22の説明はすべてhistorical evidence（非normative）であり、実装者が古い判断をfallbackとして選んではいけません。機械的な正本は <code>next-round23-authority-v1</code> schema、<code>next_reference_validation.py</code> のR23 validator、fixtureの実行可能なcriterion/vector registryです。</p>
-        <p class="flow">package.json direct dependency
-          → PackageApplicabilityMatrix（Node permission）
-          → frozen control closure + resolved/open source graph
-          → one provenance union + validated request/response
-          → semantic decision
-          → final publication decision（sealed bytes / one measurement）
-          → domain / root manifest / stdout / stderr / exit</p>
-        <div class="grid">
-          <article class="card"><h3>適用可否と設定</h3><p>直接の <code>dependencies</code>/<code>devDependencies</code> の <code>next</code> だけを package bytes から判定します。全non-applicableはconfig/source/Nodeを読まずexit 0、mixedはapplicable rootだけです。JSONCはBOM/comments/trailing commaを許可し、local <code>./...</code> extends、<code>files</code>/<code>include</code>、declaring path相対のbaseUrl/pathsを一つのresolverで閉じます。</p></article>
-          <article class="card"><h3>グラフと失敗</h3><p>frozen bytesから確実なstatic import/export、type role、literal dynamic import、supported requireだけをresolvedにします。コメント、property access、shadowed require、曖昧な構文はopenです。公開frontierはrepo-relativeまたはsource identity+byte spanのopaque identityだけで、raw unsafe specifierを出しません。</p></article>
-          <article class="card"><h3>processと公開</h3><p>ProcessLaunchPolicyと実測ProcessLaunchObservationを分離し、legacy descriptorは一方向viewです。portable fingerprintとlocal attestationを分けます。selected stdoutの+1はsemantic statusを変えず、descriptorを保持したtyped unavailableを一度だけ発行します。</p></article>
-        </div>
-        <p>provenanceはrequest-independent not-applicable/failureとrequest-bound failure/successの4 variantです。observed rowはfield schema/versionと実値SHA-256を持ち、failure後のsuffixだけがunobserved/nullです。Unicode 15.0.0 NFC、string export、namespace importもversioned closed contractとして扱います。これは実装前のdata-only契約であり、production Node/adapter、OS process-level証明、fresh current-SHA Strict passを意味しません。Strictが <code>P0=0 / P1=0 / review_status=pass</code> になるまでreadinessは未確認、production implementationは未着手です。</p>
-      </section>
-    </header>
+<header>
+<p class="eyebrow">Issue #8 · 実装前の設計提案 · 2026-09-08</p>
+<h1>Next.js Component Snapshot<br>ベストプラクティス設計ガイド</h1>
+<p class="lede">コードを実行せず、ファイル・コンポーネント・props・依存関係を読み取り、AIが追跡できる静的スナップショットを作ります。何を保証し、どこで判断し、失敗をどう伝えるかまで説明します。</p>
+<div class="pill-row"><span class="pill">静的解析</span><span class="pill">凍結した入力</span><span class="pill">再現可能な出力</span><span class="pill">Next以外ではNode不要</span></div>
+<div class="callout"><strong>位置づけ:</strong> このHTMLは人間向けの説明資料です。実装の規則は<a href="../requirement.md">Requirement</a>・<a href="../design.md">Design</a>・<a href="../plan.md">Plan</a>と、そこから参照する契約にあります。HTMLを第二の仕様とは扱いません。</div>
+<div class="callout warning"><strong>現在の状態:</strong> 要件・設計・参照テストを整備中です。製品のNext adapterは未実装で、実装開始可能性の最終判定も未完了です。2026-09-08の指示により、外部ChatGPT系スキルに代えてGPT-6・推論Maxで独立レビューします。</div>
+<div id="plantuml-status" class="plantuml-status" role="status" aria-live="polite">図を読み込んでいます。</div>
+<p class="muted">8つの図はクリック・Enter・Spaceで拡大できます。初回描画には固定版ライブラリの取得が必要です。図のソースはブラウザ内で処理し、外部の描画サービスへ送りません。</p>
+<nav aria-label="目次"><a href="#value">目的</a> · <a href="#architecture">構成</a> · <a href="#model">モデル</a> · <a href="#acquisition">入力</a> · <a href="#relations">解析</a> · <a href="#failure">失敗</a> · <a href="#process">実行境界</a> · <a href="#publication">公開</a> · <a href="#implementation">実装計画</a></nav>
+</header>
 
-    <section>
-      <h2>先に結論</h2>
-      <div class="callout success">
-        <strong>推奨:</strong> Python が Git から source bytes を一度だけ凍結し、その bytes だけを one-shot Node worker に渡します。Node は bundled TypeScript と version/digest/license 固定の TrustedTypeEnvironment で意味解析し、Python が返却 JSON を不信入力として検証してから JSON・PlantUML・manifest を公開します。
-      </div>
-      <p>設計の中心は「Node を使うか」ではありません。<strong>誰が入力と公開結果を信頼するか</strong>です。Python core が source acquisition と publication を所有し、Node は閉じた解析 engine に限定します。</p>
-      <div class="grid">
-        <article class="card">
-          <h3>安全性</h3>
-          <p>対象 repository の build、config、plugin、package script、application module、<code>node_modules</code> を実行・参照しません。</p>
-        </article>
-        <article class="card">
-          <h3>意味の正しさ</h3>
-          <p>字面の AST scan ではなく TypeChecker と限定的な output-flow を使い、証明できない関係は unknown にします。</p>
-        </article>
-        <article class="card">
-          <h3>diff の安定性</h3>
-          <p>Component 本体と export binding を分け、barrel や alias の変更を Component の消滅・新規作成にしません。</p>
-        </article>
-      </div>
-      <div class="callout warning">
-        <strong>位置づけ:</strong> この資料はゼロベース分析から得た設計候補です。2026-08-31に中心判断が承認され、canonical Requirement / Design / Planへ反映されました。最終authorityはcanonical文書であり、このHTML自体は説明用Artifactです。
-      </div>
-      <div class="callout">
-        <strong>契約の具体化:</strong> trusted declarationのshadowing拒否、有限なComponent認定とdefault/export規則、project別config/module resolution、control bytesを再読しないtwo-phase freeze、digest preimage、完全なProps型表現、partial-safeのtaint証明、公開schemaとoffline package contractまで正本で固定しました。Round 6〜12の残存指摘も data-only 契約へ反映した状態です。Round 12の8件では、入力から公開まで同じ二project modelを使うこと、4種類のstdout selectorを一つのrun contextで運ぶこと、raw responseのbounded validation、Unicode JSX字句境界、export-nameだけのre-export解決、owner Module付きwitness、全path面の <code>#</code> 拒否、missing/component_only/duplicateの三分類を固定します。fresh Strictの判定は未実施です。後続の差分Issueでは、domain不在だけをempty-sideにし、target解析失敗をadded/removedへ誤変換しません。
-      </div>
-    </section>
+<section id="value">
+<h2>1. 何を分かるようにするのか</h2>
+<p>AIが「Buttonのpropsを変えると、どこを調べる必要があるか」を判断する場面を考えます。単なるファイル一覧では、別名export、barrel経由の参照、JSXでの利用を区別できません。そこで宣言された実体と、その実体を公開・参照する名前を分けて記録します。</p>
+<div class="grid">
+<article class="card"><h3>構造を読む</h3><p>Module、Component、export/import binding、props、静的な関係をJSONとPlantUMLで取得します。</p></article>
+<article class="card"><h3>分からない範囲を知る</h3><p>非リテラルのdynamic importなど、確定できない対象をunknownや診断として残します。</p></article>
+<article class="card"><h3>後の比較へつなぐ</h3><p>同じ宣言には同じIDを与え、別名変更を本体の削除・追加と混同しません。時点間diffはIssue #9の担当です。</p></article>
+</div>
+<p>対象は明示したNext.js projectのTS/TSXと安全に扱えるJS/JSX、App RouterとPages Routerです。Next build、React描画、RSC Flight、hydrationは実行しません。図が表すのは証明できた静的関係であり、実行時の画面ツリーではありません。</p>
+<h3>実装完了後に提供するCLIの例</h3>
+<pre><code>code-structure-viz snapshot --repo . --domain next \
+  --project apps/web --target path:apps/web/components \
+  --format semantic-json --stdout next:semantic-json \
+  --output-dir /tmp/csv-next-snapshot</code></pre>
+<p><code>--repo</code>はGit root、<code>--project</code>はその下のNext project、<code>--target path:...</code>は探索の起点です。projectを自動探索しません。snapshotに差分専用の<code>--from</code>や<code>--to</code>を渡すとusage errorになります。</p>
+</section>
 
-    <section>
-      <h2>何を作るのか</h2>
-      <p>達成すべき結果は、coding agent が Next.js project の構造を、対象コードを実行せずに比較・追跡できる一つの静的 snapshot として受け取れることです。snapshot には module、component の宣言、公開 export binding、props、静的 relation、client boundary の根拠を含めます。runtime の結果を再現することではなく、証明できた静的事実と証明できない範囲を分離して渡すことが目的です。</p>
-      <p>そのために static analysis を採用します。TypeScript の AST と TypeChecker から得られる宣言・型・解決結果だけを使えば、build、render、plugin、application module の副作用を起こさずに、同じ入力から同じモデルを作れます。Python が immutable <code>SourceView</code> を一度だけ作ることで、解析中の source drift と再読による非決定性を防ぎます。Node は一回だけ起動する one-shot bridge として frozen bytes を受け取り、解析後に終了します。Node を任意の repository path に接続し続けるより、信頼境界と再現性を小さく保てます。</p>
-      <div class="flow">CLI request
-  → safe source acquisition
-  → TypeScript semantic analysis
-  → validated semantic model
-  → next.snapshot.semantic.json + next.snapshot.puml
-  → run-manifest / stdout / exit code</div>
-      <h3>対象</h3>
-      <ul>
-        <li>App Router と Pages Router の TS/TSX、safe JS/JSX subset</li>
-        <li>direct export、default export、barrel re-export、alias</li>
-        <li>TypeChecker で得られる effective props signature</li>
-        <li>static import、literal dynamic import、証明可能な JSX render</li>
-        <li><code>"use client"</code> という正の証拠と、そこから導ける境界 role</li>
-      </ul>
-      <h3>対象外</h3>
-      <ul>
-        <li>Next build、React rendering、RSC Flight、hydration、browser 実行</li>
-        <li>runtime component tree、実行時 conditional branch、custom HOC の一般推論</li>
-        <li>workspace/package manager の自動探索、route selector、temporal diff</li>
-        <li>source snippet、comment、literal default value、secret-like value の出力</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>全体アーキテクチャと trust boundary</h2>
-      <p>対象 repository の path を Node に渡すと、解析時点の source drift、symlink、package resolution、target <code>node_modules</code> への暗黙依存が増えます。そこで、Python が必要な bytes を先に固定し、Node には virtual filesystem だけを見せます。</p>
-      <p>責務の境界は明確です。Python core が applicability、freeze、入力検証、ID/count/digest の再計算、JSON・PlantUMLの生成、manifestの公開を所有します。bundled Node/TypeScript は、Pythonから渡された virtual files と trusted declarations の意味抽出だけを所有します。対象 repository の code、build、config、plugin、package script、application module、<code>node_modules</code>、network は、どの層からも実行・参照しません。</p>
-
-      <script type="text/plain"
-              class="plantuml-source"
-              id="source-trust-flow"
-              data-target="diagram-trust-flow">
+<section id="architecture">
+<h2>2. 推奨構成：Pythonが入力と公開を所有する</h2>
+<p>Pythonが必要なバイト列を一度だけ読み、変更できない入力として確定します。Nodeは同梱されたTypeScriptと信頼済みの宣言だけで解析します。Pythonは返却値を検証し、ID・件数・ハッシュを再計算してから公開します。</p>
+<script type="text/plain" class="plantuml-source" id="source-architecture" data-target="diagram-architecture">
 @startuml
-title 推奨 trust boundary と処理の流れ
+title 入力から公開までの責務
 left to right direction
-
-actor "coding agent" as User
-component "Python CLI / config" as CLI
-component "Applicability +\nSourceAcquisitionPlan" as Plan
-database "immutable SourceView\nGit-tracked bytes" as View
-component "one-shot Node worker\nbundled TypeScript + TrustedTypeEnvironment" as Node
-component "Python strict validator\nschema / ID / redaction" as Validator
-component "Semantic renderer\nJSON + PlantUML" as Renderer
-component "OutputTransaction\nbudget + no-replace" as Tx
-
-User --> CLI : snapshot --domain next
-CLI --> Plan : project / target を確定
-Plan --> View : source を一度だけ凍結
-View --> Node : stdin JSON\nbase64 bytes only
-Node --> Validator : untrusted adapter/v1 JSON
-Validator --> Renderer : validated model
-Renderer --> Tx : requested payloads
-Tx --> User : Artifact + manifest
-
+skinparam componentStyle rectangle
+database "対象Gitリポジトリ" as Repo
+component "Python\n適用判定・取得" as Read
+artifact "凍結した入力\nバイト列・設定・グラフ" as Frozen
+component "Node / TypeScript\n静的な意味解析" as Node
+component "Python\n検証・出力生成" as Validate
+artifact "JSON・PlantUML\nmanifest・診断" as Output
+Repo --> Read : 一度だけ読む
+Read --> Frozen : 内容と由来を確定
+Frozen --> Node : 仮想ファイルとして渡す
+Node --> Validate : 未信頼の応答JSON
+Frozen --> Validate : 元の入力と照合
+Validate --> Output : 検証済み判断から生成
 note bottom of Node
-target repository path/cwd、node_modules、
-npm、network は利用しない
-end note
-note bottom of Tx
-source drift と既存 path 衝突を検査し、
-全 format を atomic に公開する
+対象のbuild・plugin・moduleを実行しない
+対象node_modules・ネットワークを参照しない
 end note
 @enduml
-      </script>
+</script>
+<div id="diagram-architecture" class="plantuml-diagram">図を描画しています。</div>
+<details><summary>図のPlantUMLソース</summary><pre data-source-copy="source-architecture"></pre></details>
+<div class="table-wrap"><table><thead><tr><th>担当</th><th>責務</th><th>受け渡すもの</th></tr></thead><tbody>
+<tr><td>Pythonの取得層</td><td>適用判定、設定解決、ファイル選択、凍結</td><td>SourceView、SourceAcquisitionPlan、source graph</td></tr>
+<tr><td>Node adapter</td><td>AST・TypeCheckerによる意味抽出と証拠の報告</td><td>requestに結び付いたmodelとproof</td></tr>
+<tr><td>Pythonの検証層</td><td>schema、path、参照、ID、順序、件数、proof、制限を検査</td><td>変更できないsemantic/run decision</td></tr>
+<tr><td>Pythonの公開層</td><td>出力候補を作り、実bytesを一度測定</td><td>artifact、stdout、stderr、終了コード</td></tr>
+</tbody></table></div>
+<p>同じ入力を解析したか、同じ判断から出力したかを追跡するための境界です。Nodeが自己申告したハッシュの一致だけでは、意味の正しさを証明できません。</p>
+</section>
 
-      <div id="diagram-trust-flow" class="plantuml-diagram">
-        trust boundary 図を描画しています。
-      </div>
-
-      <details>
-        <summary>PlantUMLソースを確認する</summary>
-        <pre data-source-copy="source-trust-flow"></pre>
-      </details>
-
-      <h3>責務の分け方</h3>
-      <div class="decision"><strong>Python core</strong><span>applicability、project/target、Git read-only acquisition、immutable SourceView、process 制御、strict validation、ID/count/digest 再計算、rendering、publication を所有します。adapterの自己申告をそのまま信頼しません。</span></div>
-      <div class="decision"><strong>Node adapter</strong><span>bundled TypeScript、固定済み TrustedTypeEnvironment、in-memory <code>CompilerHost</code> を使い、request virtual files と同梱 declarations だけを semantic analysis します。入力外の path、cwd、network、package を知りません。</span></div>
-      <div class="decision"><strong>Public Artifact</strong><span>Python が検証済みの semantic model から生成します。Node の raw stdout / stderr、source body、literal value をそのまま公開しません。</span></div>
-    </section>
-
-    <section>
-      <h2>project をどう選ぶか</h2>
-      <p><code>--repo</code> は引き続き正確な Git root を指します。monorepo 内の Next project は、曖昧な自動探索ではなく <code>--project</code> または config で明示します。</p>
-      <pre><code>code-structure-viz snapshot \
-  --repo . \
-  --domain next \
-  --project apps/web \
-  --target path:apps/web/components/index.ts \
-  --downstream-depth 2 \
-  --output-dir /tmp/next-snapshot</code></pre>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>判断</th><th>推奨 contract</th><th>理由</th></tr></thead>
-          <tbody>
-            <tr><td>default</td><td><code>[next].projects=[{root="."}]</code></td><td>単一 project は追加指定なしで扱える。</td></tr>
-            <tr><td>monorepo</td><td><code>--project apps/web</code> を repeatable に指定</td><td>unrelated package を誤って拾わない。</td></tr>
-            <tr><td>applicable</td><td>project root 直下 <code>package.json</code> が <code>dependencies.next</code> または <code>devDependencies.next</code> を直接持つ</td><td>config や directory 名を実行・推測しない。</td></tr>
-            <tr><td>source root</td><td>各 <code>[next].projects[]</code> descriptor 内で明示</td><td>project root 配下に限定し、複数 project ownership を拒否する。</td></tr>
-            <tr><td>config</td><td><code>tsconfig.json</code> → <code>jsconfig.json</code> → built-in safe config</td><td>決定的な優先順を持つ。</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <h3>projectごとの compiler context</h3>
-      <p>複数 project を扱うときは、各 project descriptor が <code>root</code>、<code>source_roots</code>、<code>config_path</code>、<code>compiler_options</code>、所属する <code>file_ids</code> を持ちます。各 file も一つの <code>project_id</code> と <code>roles</code> を持つため、同じ物理 file を複数 project の入力として重複させません。<code>tsconfig.json</code>、<code>jsconfig.json</code>、built-in safe config から得る compiler context は project 単位で凍結し、別 project の設定や target の <code>node_modules</code> を暗黙に混ぜません。</p>
-      <p>一つの path が複数の役割を持つ場合の優先順位も固定します。<code>control &gt; context &gt; program</code> です。<code>control</code> は package/config、<code>context</code> は <code>.d.ts</code> と trusted compiler context、<code>program</code> は解析対象の TS/TSX/JS/JSX を表します。優先順位はroleを捨てるためではなく、同一 record の <code>effective_role</code> と digest を決定するために使います。</p>
-      <p><code>next.config.*</code>、<code>app/</code> directory、import の字面、lockfile の間接 entry は applicability evidence にしません。Next project がないと証明できた場合は Node を探さず <code>not_applicable</code>、Next project はあるが Component が 0 件なら <code>complete empty</code> です。</p>
-    </section>
-
-    <section>
-      <h2>identity：Component と export を分ける</h2>
-      <p>ここが設計上もっとも重要な判断です。export 名を Component 本体の identity にすると、barrel の移動や alias 変更だけで Component が「削除＋追加」されたように見えます。</p>
-      <div class="callout">
-        <strong>推奨:</strong> Component は宣言 module と declaration key で識別し、どの module から何という名前で公開されるかは <code>ExportBindingMember</code> として別に表現します。
-      </div>
-
-      <script type="text/plain"
-              class="plantuml-source"
-              id="source-domain-model"
-              data-target="diagram-domain-model">
+<section id="model">
+<h2>3. 宣言・公開名・関係を分ける</h2>
+<p><code>src/Button.tsx</code>の<code>Button</code>を、<code>src/index.ts</code>から<code>PrimaryButton</code>という別名で公開しても、本体は一つです。宣言の所属Moduleとdeclaration keyを本体のIDに使い、公開名はExportBindingMemberへ記録します。</p>
+<script type="text/plain" class="plantuml-source" id="source-model" data-target="diagram-model">
 @startuml
-title Next snapshot の identity と ownership
-hide empty members
-
-class ProjectDescriptor <<descriptor>> {
-  project_root
-  config_path
-  coverage
-}
-class ModuleEntity <<entity>> {
-  id = hash(physical_path)
-  router_context
-  boundary_roles
-}
-class ComponentEntity <<entity>> {
-  id = hash(module_id, declaration_key)
-  declaration_key
-  exposure
-}
-class ExportBindingMember <<member>> {
-  exported_name
-  target_id
-}
-class ImportBindingMember <<member>> {
-  imported_name
-  role
-}
-class PropMember <<member>> {
-  name
-  optional
-  normalized_type
-}
-class StaticImport <<relation>>
-class JsxRender <<relation>>
-
-ProjectDescriptor "1" o-- "*" ModuleEntity
-ModuleEntity "1" *-- "*" ComponentEntity
-ModuleEntity "1" *-- "*" ExportBindingMember
-ModuleEntity "1" *-- "*" ImportBindingMember
-ComponentEntity "1" *-- "*" PropMember
-ModuleEntity --> StaticImport
-ComponentEntity --> JsxRender
-ExportBindingMember --> ComponentEntity : declaration を参照
-
-note right of ComponentEntity
-export alias、barrel、route、range、props は
-Component identity に含めない
+title スナップショットの基本モデル
+top to bottom direction
+hide methods
+class Project
+class File
+class Module
+class Component
+class ExportBindingMember
+class ImportBindingMember
+class PropMember
+class Relation
+class Fact
+Project "1" *-- "0..*" File : 所有する
+File "1" -- "0..1" Module : 解析の単位になる
+Module "1" *-- "0..*" Component : 宣言を所有する
+Module "1" *-- "0..*" ExportBindingMember : 公開名を持つ
+ExportBindingMember --> Component : 同じ宣言を参照
+Module "1" *-- "0..*" ImportBindingMember : 取り込む名前
+Component "1" *-- "0..*" PropMember : 引数の型
+Relation --> Module : モジュール間の関係
+Relation --> Component : コンポーネント間の関係
+Fact --> Module : 指令・配置の証拠
+note bottom of File
+program fileにはModuleがちょうど一つ
+control/context fileは役割を分ける
 end note
 @enduml
-      </script>
+</script>
+<div id="diagram-model" class="plantuml-diagram">図を描画しています。</div>
+<details><summary>図のPlantUMLソース</summary><pre data-source-copy="source-model"></pre></details>
+<h3>Componentと認める範囲</h3>
+<p>exportされた関数・class・許可したwrapperを有限の規則で認定します。匿名default宣言にはmodule内で一つの<code>@anonymous-default</code> slotを使います。任意のHOCや実行時に返る値を推測してComponentへ昇格させません。</p>
+<h3>propsの表現</h3>
+<p>propsをprimitive、object、array、tuple、union、intersection、function、referenceなどの閉じた型表現へ変換します。optionalとreadonlyを分け、unionは重複を除いて固定順にします。再帰型・未解決の外部型・制限超過には理由付きopaqueを使います。ソース本文、文字列リテラル、既定値そのものは出力しません。</p>
+<h3>import/exportの名前</h3>
+<p>import bindingはnamed / default / namespaceを区別します。<code>import * as UI from "./ui"</code>ではnamespace bindingと<code>UI.Button</code>の利用関係を分けます。文字列名exportは構文の観測証拠を保持し、target不達、意図した未対応、export解決失敗を別々に診断します。raw spellingをそのまま公開名へ流しません。</p>
+</section>
 
-      <div id="diagram-domain-model" class="plantuml-diagram">
-        domain model 図を描画しています。
-      </div>
-
-      <details>
-        <summary>PlantUMLソースを確認する</summary>
-        <pre data-source-copy="source-domain-model"></pre>
-      </details>
-
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>概念</th><th>identity に入れる</th><th>identity に入れない</th></tr></thead>
-          <tbody>
-            <tr><td>Module</td><td>repository-relative physical module path</td><td>route、router kind、<code>use client</code>、range</td></tr>
-            <tr><td>Component</td><td>Module ID + binding name、または <code>@anonymous-default</code></td><td>exported name、barrel path、wrapper、props、range</td></tr>
-            <tr><td>Export binding</td><td>owner Module + exported name</td><td>source order、range、quote style</td></tr>
-            <tr><td>Prop</td><td>Component ID + prop name</td><td>type、optional、default evidence、range</td></tr>
-            <tr><td>Relation</td><td>source、kind、target、semantic role</td><td>occurrence order、local alias、syntax spelling</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <h3>閉じたモデルと typed identity</h3>
-      <p>公開モデルは、許可した種類だけを持つ閉じたモデルです。<code>Project</code> は入力と provenance のまとまり、<code>Module</code> は物理ファイル、<code>Component</code> は宣言、<code>ExportBinding</code>・<code>ImportBinding</code>・<code>Prop</code> はそれぞれの所有者に属する member です。関係は <code>static_import</code>、<code>literal_dynamic_import</code>、<code>jsx_render</code>、<code>component_wrap</code> の primitive relation に限定します。直接観測した <code>client_entry</code> や <code>router_context</code> は <code>Fact</code> として持ち、導出された role を Fact と偽って追加しません。</p>
-      <p>各IDは「kind + canonical identity tuple」の組み合わせです。したがって、同じ文字列でも Module ID を Component の参照として使うような kind 違いは受理しません。export alias、barrel、re-export は公開場所を表す member を増やすだけで、宣言本体である Component を複製しません。これが alias の変更を Component の削除・追加と誤認しない理由です。</p>
-    </section>
-
-    <section>
-      <h2>barrel、render、client boundary の見え方</h2>
-      <p>module dependency と component render は別の graph plane にします。Module が Component を所有する関係は zero-hop であり、import relation から全 Component へ暗黙に fan-out しません。</p>
-
-      <script type="text/plain"
-              class="plantuml-source"
-              id="source-static-graph"
-              data-target="diagram-static-graph">
+<section id="acquisition">
+<h2>4. 適用可否を決め、同じ入力を一度だけ読む</h2>
+<p>各project直下の<code>package.json</code>で、<code>dependencies.next</code>または<code>devDependencies.next</code>に空でない文字列がある場合だけNext対象です。lockfileの間接依存やフォルダ名は判定根拠にしません。</p>
+<script type="text/plain" class="plantuml-source" id="source-acquisition" data-target="diagram-acquisition">
 @startuml
-title barrel と client boundary を分離した静的 graph
-left to right direction
-
-component "app/page.tsx\nserver_candidate" as Page
-component "components/index.ts\nbarrel" as Barrel
-component "components/button.tsx\nclient_entry" as ButtonModule
-rectangle "Page component" as PageComponent
-rectangle "Button component" as ButtonComponent
-
-Page --> Barrel : static_import
-Barrel --> ButtonModule : static re-export
-PageComponent --> ButtonComponent : jsx_render
-Page -[#d97706,dashed]-> ButtonModule : boundary_effect facet
-Page *-- PageComponent
-ButtonModule *-- ButtonComponent
-
-note bottom of Barrel
-barrel は export binding を持つが
-Button component を複製しない
-end note
-note bottom of ButtonModule
-client_entry は exact use client directive
-から得る正の証拠
-end note
-@enduml
-      </script>
-
-      <div id="diagram-static-graph" class="plantuml-diagram">
-        static graph 図を描画しています。
-      </div>
-
-      <details>
-        <summary>PlantUMLソースを確認する</summary>
-        <pre data-source-copy="source-static-graph"></pre>
-      </details>
-
-      <h3>relation の閉じた vocabulary</h3>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>relation</th><th>source → target</th><th>成立条件</th></tr></thead>
-          <tbody>
-            <tr><td><code>static_import</code></td><td>Module → Module / external</td><td>静的な value import と type import、および <code>export ... from</code> / <code>export *</code> の re-export を含む。payload の <code>role</code> と <code>reexport</code> で区別し、valueだけを client role の伝播に使う。</td></tr>
-            <tr><td><code>literal_dynamic_import</code></td><td>Module → Module / external</td><td>specifier が literal で一意に解決できる value-only の import。re-export にはならず、client role の伝播にも使わない。</td></tr>
-            <tr><td><code>jsx_render</code></td><td>Component → Component / external</td><td>Component の return output-flow に入り symbol が解決可能。</td></tr>
-            <tr><td><code>component_wrap</code></td><td>Component → Component</td><td><code>memo</code>、<code>forwardRef</code>、<code>lazy</code>、限定的 <code>next/dynamic</code>。</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p>event handler、render prop の未実行 body、任意 helper、non-literal import、ambiguous symbol から relation を作りません。Component return、concise arrow、class <code>render()</code>、single-assignment const、conditional、array、safe <code>map</code>/<code>flatMap</code>、exact React <code>createElement</code> だけを bounded に追います。<code>static_import</code> の type-only edge は存在を記録できますが、実行時の value graph や client boundary を意味しません。<code>literal_dynamic_import</code> は static re-export と混同しない独立の value relation です。</p>
-      <p>解決できない外部の JSX 先は、対象コードを読み込まず、redacted cloud の <code>X_&lt;64hex&gt;</code> として表します。これは import だけでなく <code>jsx_render</code> にも同じ規則を適用します。外部 JSX の正常例と改変例を exact golden で検査し、実在しないローカル target を作りません。</p>
-    </section>
-
-    <section>
-      <h2>props を安全に正規化する</h2>
-      <p>props は TypeChecker の effective call / construct signature を起点にします。ただし <code>typeToString()</code> や source の型表記をそのまま public contract にすると、compiler version、alias、format、literal value に引きずられます。</p>
-      <h3>閉じた type IR</h3>
-      <p><code>primitive</code>、ordinal 化した <code>type_parameter</code>、value を隠した <code>redacted_literals</code>、repository/external reference、array、tuple、union、intersection、parameter name を持たない function、object、<code>opaque</code> だけに正規化します。</p>
-      <ul>
-        <li>Unicode NFC、canonical sort、deduplicate、generic parameter の alpha-normalize を行います。</li>
-        <li><code>children</code> と <code>ref</code> は effective public signature に実在するときだけ出します。</li>
-        <li>default value は出さず、必要なら <code>default_evidence = none|parameter_initializer|destructuring_initializer|class_default_props|jsdoc_default</code> のいずれかだけを記録します。値や元の式は保持しません。</li>
-        <li>候補上限は depth 16、1 prop 512 nodes、union/intersection 64 members、nested properties 256、component signatures 16 です。</li>
-        <li>上限到達時は途中で切らず、該当 subtree を <code>opaque(type_complexity_limit)</code> にして coverage を partial にします。</li>
-        <li><code>any</code> は open-world なので partial。正確な <code>unknown</code> / <code>never</code> は complete にできます。</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>client/server は二値ではない</h2>
-      <p><code>"use client"</code> がないだけで server と断定してはいけません。静的 snapshot では、正の証拠と到達可能性を複数 role として表現します。</p>
-      <div class="decision"><strong>client_entry</strong><span>directive prologue に exact <code>"use client"</code> / <code>'use client'</code> がある直接 fact。</span></div>
-      <div class="decision"><strong>client_dependency</strong><span><code>client_entry</code> から internal static value import / re-export で到達可能。</span></div>
-      <div class="decision"><strong>server_candidate</strong><span>closed App Router UI entry seed から client entry の直前まで static value edge で到達可能。runtime server の断定ではありません。</span></div>
-      <div class="decision"><strong>unknown</strong><span>上記の正の証拠がない状態。Pages Router も自動 server 扱いしません。</span></div>
-      <p><code>BoundaryRolePropagation/v1</code>だけが role の正本です。client entry の seed 自身は <code>client_dependency</code> ではなく、static value closure の target だけがそうなります。client app seed は <code>server_candidate</code> ではなく、server traversal は client entry の直前で止めます。異なる closure の証拠がそろう場合だけ同じ Module の dual role を許します。type-only import、dynamic import、JSX relation、external/unresolved edge は role propagation に使いません。境界 crossing は underlying import edge の <code>boundary_effect</code> facet であり、重複 relation ではありません。Python は facts/router/static value edges から再計算し、submitted model と完全一致させます。</p>
-    </section>
-
-    <section>
-      <h2>失敗を「安全に成功」に見せない</h2>
-      <p>diagnostic があるかどうかではなく、v1 が約束した意味を欠落させたかで結果を分類します。intentional unsupported を unknown として完全に表現できる場合は、diagnostic があっても complete です。</p>
-
-      <h3><code>partial_safe</code> は独立した証明で決める</h3>
-      <p>adapter が「partial」と自己申告しただけでは、payload を公開する根拠になりません。Node response は untrusted input として扱い、Python が全 discovered record、failure root、taint の伝播、causal edge、explicit target witness、collection count を受け取って独立に再計算します。さらに records・roots・closed rule/ownership table から必須 causal edge と taint closure を独立導出し、submitted edge と完全一致させます。frontier は集合として重複を除き、edge omission・shared frontier・boundary role under-taint は拒否します。</p>
-      <p>Python はその証明から安全な subset を一つ作り、JSON と PlantUML の両方へ同じ projection を渡します。したがって、adapter の <code>coverage</code> や <code>status</code> の値だけを転記して成功扱いにはしません。証明材料が不足する、global failureである、または budget を超えた場合は <code>payload_unavailable</code> とし、safe manifestだけを残します。explicit target は canonical key を model から独立解決し、proof の key・status・published ID と一行ずつ完全一致させます。missing、extra、substitution、<code>failed</code> as resolved はすべて拒否します。</p>
-
-      <script type="text/plain"
-              class="plantuml-source"
-              id="source-outcomes"
-              data-target="diagram-outcomes">
-@startuml
-title Next snapshot outcome と publication
-[*] --> Preflight
-Preflight --> UsageError : CLI/config invalid
-Preflight --> NotApplicable : Next project 不在を証明
-Preflight --> Acquire : applicable
-Acquire --> Fatal : Git/SourceView integrity
-Acquire --> Analyze : frozen input 完成
-Analyze --> PayloadUnavailable : global/protocol/security/target/budget failure
-Analyze --> PartialSafe : 局所欠落と安全 subset を証明
-Analyze --> Complete : promised semantics をすべて表現
-
-state "not_applicable\nexit 0\nmanifest" as NotApplicable
-state "complete / empty\nexit 0\npayload + manifest" as Complete
-state "partial_safe\nexit 3\npayload + manifest" as PartialSafe
-state "payload_unavailable\nexit 3\nmanifest only" as PayloadUnavailable
-state "usage error\nexit 2\nArtifact 0" as UsageError
-state "fatal\nexit 1\nArtifact 0" as Fatal
-
-NotApplicable --> [*]
-Complete --> [*]
-PartialSafe --> [*]
-PayloadUnavailable --> [*]
-UsageError --> [*]
-Fatal --> [*]
-@enduml
-      </script>
-
-      <div id="diagram-outcomes" class="plantuml-diagram">
-        outcome state 図を描画しています。
-      </div>
-
-      <details>
-        <summary>PlantUMLソースを確認する</summary>
-        <pre data-source-copy="source-outcomes"></pre>
-      </details>
-
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>条件</th><th>結果</th><th>公開</th><th>exit</th></tr></thead>
-          <tbody>
-            <tr><td>Next project がないと証明</td><td><code>not_applicable</code></td><td>manifest</td><td>0</td></tr>
-            <tr><td>applicable、Component 0、解析完了</td><td><code>complete empty</code></td><td>empty JSON / PlantUML + manifest</td><td>0</td></tr>
-            <tr><td>closed v1 の intentional unsupported を unknown として完全表現</td><td><code>complete</code> + diagnostic</td><td>payload + manifest</td><td>0</td></tr>
-            <tr><td>局所欠落、安全 subset と coverage を全 format で証明</td><td><code>partial_safe</code></td><td>JSON + PlantUML + manifest</td><td>3</td></tr>
-            <tr><td>explicit target、config、Program、Node、protocol、schema、security、identity、budget failure</td><td><code>payload_unavailable</code></td><td>safe manifest only</td><td>3</td></tr>
-            <tr><td>CLI grammar、unknown config key、invalid value</td><td>usage error</td><td>なし</td><td>2</td></tr>
-            <tr><td>Git/SourceView、source drift、serializer/transaction invariant</td><td>fatal</td><td>なし</td><td>1</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <h3>status と Node の optionality</h3>
-      <p>Node.js は Next が applicable と判定された project の解析時だけ必要です。全 project で direct <code>next</code> dependency がないことをPythonが証明できる場合、Nodeの探索・起動を行わず <code>not_applicable</code> とします。applicable なのに Component が0件なら解析完了として <code>complete empty</code> です。</p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>status</th><th>意味</th><th>公開</th><th>Node</th></tr></thead>
-          <tbody>
-            <tr><td><code>complete</code></td><td>約束した意味を表現済み。0件のときは <code>complete empty</code>。</td><td>semantic JSON・PlantUML・manifest</td><td>applicable時だけ起動</td></tr>
-            <tr><td><code>not_applicable</code></td><td>Next project不在を証明済み。</td><td>safe manifest</td><td>探索・起動しない</td></tr>
-            <tr><td><code>partial_safe</code></td><td>局所欠落と安全subsetを独立に証明済み。</td><td>同一subsetのJSON・PlantUML・manifest</td><td>applicable時に起動</td></tr>
-            <tr><td><code>payload_unavailable</code></td><td>安全subsetを証明できない、またはglobal/target/budget failure。</td><td>safe manifestのみ</td><td>必要に応じて起動失敗を記録</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p>explicit target は all-or-nothing です。一つでも missing、ambiguous、out-of-scope なら全 project へ fallback せず、domain payload を公開しません。entity budget 500 の場合、selected internal Module + Component が 501 なら切り捨てず manifest-only にします。</p>
-    </section>
-
-    <section>
-      <h2>公開するファイルと provenance</h2>
-      <div class="grid">
-        <article class="card"><h3><code>next.snapshot.semantic.json</code></h3><p><code>code-structure-viz.semantic/v1</code> envelope 内の validated semantic facts。</p></article>
-        <article class="card"><h3><code>next.snapshot.puml</code></h3><p><code>code-structure-viz.plantuml/next/v1</code> の domain-specific visual vocabulary。</p></article>
-        <article class="card"><h3>run manifest</h3><p>status、coverage、safe diagnostic、toolchain/config/source-plan version と digest、Artifact SHA-256。</p></article>
-      </div>
-      <p>manifest には Node、TypeScript、TrustedTypeEnvironment、adapter、protocol の exact version/digest/license、project root と config の repository-relative path、source acquisition plan digest、target/depth/budget の requested/resolved 値を残します。source content 自体は残しません。</p>
-      <p>stdout の selector は、未指定の <code>None</code>（canonical run summary）、<code>manifest</code>（確定した manifest bytes）、<code>next:semantic-json</code>、<code>next:plantuml</code> の四つを固定します。complete、not_applicable、partial_safe、payload_unavailable、fatal、interrupt、usage の全 status について、公開物・exit code・stderr・stdout の exact bytes を matrix で検証します。available selector は公開 file と完全に同じ bytes を出し、unavailable status は typed result、fatal/interrupt は manifestなし、usage は exit 2 かつ空 stdout です。diagnostic は stderr だけで、requested formats は一つの transaction で all-or-none に公開し、既存 path は上書きしません。</p>
-
-      <h3>schema-driven limits、entity budget、diagnostic、provenance は一つの契約から投影する</h3>
-      <p>resource limits の固定値・項目数はこのHTMLに重複して埋め込まず、<code>schemas/next-limits-v1.schema.json</code> と canonical contract docs を正本にします。Python が解決した一つの <code>limits</code> record（file/total bytes、encoded stdin、JSON/string/array、model records、各stdout境界、public diagnostic stderr、adapter capture、timeout、V8 old-space、PropsTypeIR）を request、adapter response、validator、run manifest、run fingerprintへ伝播します。<code>max_adapter_stdout_capture_bytes</code> は child bytes をretain前に数える境界、<code>max_adapter_response_bytes</code> は完全なprivate responseをdecode前に数える境界、<code>max_selected_stdout_bytes</code> は公開artifactをcopy/write前に数える境界です。<code>max_stdout_bytes</code> はselected stdoutの互換aliasに限定します。<code>max_total_array_items</code> はresponse全arrayのmaterialize前aggregate、<code>max_model_records</code> は実model collectionとproof-onlyの再計算値です。各上限には対象・計測時点・UTF-8 byteかどうか・inclusive boundary・超過時 outcome を含め、値がちょうど上限なら受理し、1超過時の outcome を固定します。schema/catalogの変更があっても説明がdriftしないよう、個数ではなく名前と役割で説明します。</p>
-      <p>diagnostic code の単一 authority は <code>schemas/next-diagnostic-catalog-v1.json</code> です。各 code の severity、recoverability、固定 message、domain、許可する path/symbol reference、outcome を catalog から投影し、adapter の自由文や raw compiler text は公開しません。catalogにない code、誤ったseverity、statusとの不整合は契約違反です。</p>
-      <p><code>TrustedTypeEnvironment</code> は target package の型を借りる仕組みではなく、bundled declaration と certified symbol の semantic profile です。実際に同梱した declaration bytes と runtime fixture bytes を読み、physical→virtual mapping、size、SHA-256、非循環 inventory attestation、license digest、reserved module/global、certified symbol を known answer と照合します。target側の shadowing、ambient augmentation、path alias、trusted pathとの衝突は fail-closed で拒否します。</p>
-      <p><code>semantic_compatibility_id</code> は、semantic schema、<code>project</code> と <code>file</code> を含む identity versions、recognition/export/props/relation/fact/boundary algorithm version、trusted semantic profile ID の canonical descriptorから Python が再計算します。source content digestやNodeのpatch versionだけで意味互換性を変えたことにはしません。Issue #9 はこのIDを前提に、Component identityではなく primitive facts、typed members、relation、coverage を差分の入力として使います。domain不在だけを empty-side とし、target解析失敗を added/removed へ変換しません。</p>
-    </section>
-
-    <section>
-      <h2>process と supply-chain の安全策</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>risk</th><th>必須対策</th></tr></thead>
-          <tbody>
-            <tr><td>shell / argument injection</td><td>fixed argv、<code>shell=false</code>、fixed adapter entrypoint。</td></tr>
-            <tr><td>target filesystem 読み取り</td><td>private empty cwd、in-memory CompilerHost、request 外 path を解決しない。</td></tr>
-            <tr><td>environment injection</td><td>minimal env、<code>NODE_OPTIONS</code> / <code>NODE_PATH</code> を除去。</td></tr>
-            <tr><td>package execution</td><td>npm/npx/network/target node_modules/Next config/plugin/script を使わない。</td></tr>
-            <tr><td>resource exhaustion</td><td>file/total/stdout/stderr/time/memory cap、process group termination、truncation なし。</td></tr>
-            <tr><td>protocol confusion</td><td>exact one JSON、closed schema、version check、stdout noise は全 response reject。</td></tr>
-            <tr><td>data leak</td><td>Python が path/ref/redaction を検証し、raw compiler text や literal を公開しない。</td></tr>
-            <tr><td>supply-chain drift</td><td>compiled adapter + exact TypeScript + lockfile + license inventory を一体で bundle。</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p>resource limit の固定値や項目数はこのHTMLへ重複記載しません。正本は <code>schemas/next-limits-v1.schema.json</code> と関連する canonical contract docs です。child capture、private response、public selected copy は別の計測境界であり、同じ値でも意味は同じではありません。各境界は inclusive とし、exact は受理、+1 は raw/partial を公開せず <code>LIMIT-003</code> 系の typed unavailable へ進めます。silent truncation と unlimited は許しません。</p>
-    </section>
-
-    <section>
-      <h2>Round 16: sealed acquisition、typed request、final publication</h2>
-      <p>Round 16は、入力・検証・失敗・公開のauthorityを一つの閉じた流れにします。<code>SourceDiscoveryIntent</code>はproject root、control candidate、固定されたdiscover ruleだけを持ち、config・extends closure・final path・role mapを注入できません。凍結したcontrol bytesとinventoryから一度だけ <code>SourceView</code> と <code>FinalSourceAcquisitionPlan</code> をsealし、そのsealを必須の <code>NextPublicationContext</code>へ渡します。</p>
-
-      <script type="text/plain"
-              class="plantuml-source"
-              id="source-round16-boundary"
-              data-target="diagram-round16-boundary">
-@startuml
-title Round 16: 凍結取得から最終公開まで
-left to right direction
-
-component "SourceDiscoveryIntent\nroots / control candidates / fixed rules" as Intent
-component "凍結したcontrol bytes + inventory" as Frozen
-component "一つのseal\nSourceView + FinalSourceAcquisitionPlan" as Seal
-component "ValidatedAdapterRequest\nprivate request" as Request
-component "bounded response order\nraw cap -> bounded decode/aggregate\n-> closed schema -> base/path/reference/proof\n-> actual model+proof-only count -> model gate\n-> entity gate -> selected copy" as Boundary
-component "NextRunDecision\n+ NextPublicationContext" as Decision
-component "capture / stderr / selected copy\nPublicationBoundaryDecision" as Publication
-component "domain / root / manifest / stdout / stderr / artifacts / exit" as Surfaces
-
-Intent --> Frozen : discovery only
-Frozen --> Seal : closure と role を導出
-Seal --> Request : virtual files
-Request --> Boundary : one response boundary
-Boundary --> Decision : typed outcome
-Decision --> Publication : measurements をseal
-Publication --> Surfaces : one authority
-
-note right of Decision
-request-independent failure は
-invented project/request/config を持たない
-end note
-note right of Publication
-全projectionはこのimmutable decisionだけを受ける
-独立status/measurement mapは禁止
-end note
-@enduml
-      </script>
-
-      <div id="diagram-round16-boundary" class="plantuml-diagram">
-        Round 16のsealed acquisition flowを描画しています。
-      </div>
-
-      <details>
-        <summary>Round 16 sealed acquisition flowのPlantUMLソースを確認する</summary>
-        <pre data-source-copy="source-round16-boundary"></pre>
-      </details>
-
-      <div class="grid">
-        <article class="card"><h3>一つのpublication context</h3><p>全ての <code>NextRunDecision</code> variant が、sealed source view/plan、resolved public request/config、observed toolchain、trusted environment、compatibility descriptor、必須のversioned process launch descriptor、run context、fingerprint preimageを持つ <code>NextPublicationContext</code> を保持します。pre-response/not-applicableの <code>NextDecisionContext</code> も明示的にsealし、requestが作れない失敗にはsynthetic defaultを作らず、known/null factsだけを持つrequest-independent branchを使います。</p></article>
-        <article class="card"><h3>source failureのlocality</h3><p>Python-owned immutable <code>SourceFailureLedger</code> をproof/modelと照合します。safe subsetが独立に証明できるlocal failureだけが <code>SOURCE-001</code>/<code>partial_safe</code>、隔離できないfailureは <code>SOURCE-003</code>/<code>payload_unavailable</code>です。</p></article>
-        <article class="card"><h3>validationとlimit</h3><p>厳密な順序は <code>raw cap → bounded decode/aggregate → closed schema → base/path/reference/proof → actual model+proof-only count → model gate → entity gate → selected copy</code> です。全byte境界はexact/+1を検査し、+1はdecoderやpublicationへpartial bytesを渡しません。configured byte/structural resource overrunは <code>LIMIT-003</code>、malformed/closed-schema/proof violationは <code>PROTOCOL-001</code>です。</p></article>
-        <article class="card"><h3>targetとrole</h3><p>target failureはNextの二つのselectorだけに、8種類のclosed reasonをtargetごとに一件だけ出します。<code>BoundaryRolePropagation/v1</code>ではclient seed自身をdependency/server candidateにせず、別closureのpositive evidenceがそろうときだけdual roleを許します。</p></article>
-        <article class="card"><h3>Unicodeとprocess</h3><p>component、import/export、external/trusted reference、JSX segment、re-export witnessは同じUnicode 15.0.0 checked-in tableとcontext predicateを使います。full scalar bitstream digest、Other_ID、U+00B7、Join_Control、reserved wordをknown-answerで固定します。process launchはverified Node realpath、固定env/FD、process groupをdescriptorへsealします。</p></article>
-        <article class="card"><h3>canonical bytes</h3><p>専用field-order encoderは作らず、既存の <code>sort_keys=True</code>、NFC、UTF-8、LFを全surfaceで共有します。child capture、private response、public stderr、selected copyを一つの <code>PublicationBoundaryDecision</code> にsealし、domain/root/manifest/stdout/stderr/artifact/exitはこのdecisionだけから投影します。selected copy overrunはsemantic decisionを改変せず、保存済みartifact descriptorを維持したpublication resultとして扱います。</p></article>
-      </div>
-
-      <div class="callout">
-        <strong>Round 16の状態:</strong> 対象SHA <code>732477c72c7e05d3f15818ba8a3f75a4c97dc5a9</code>、CI <code>33494926439</code>（7/7 green）に対するhistorical Strict content reviewは <code>P0=0 / P1=16 / P2=3 / fail</code>、<code>implementation_ready=no</code>でした。利用可能な証跡はverification-onlyとcontent reviewの二試行としてartifactへ保存し、fresh current-SHA Strictはpending、readinessは未確認、production implementationは未着手です。local contract greenだけでこの状態をpassへ変更しません。</div>
-    </section>
-
-    <section id="round17">
-      <h2>Round 17: 観測値だけでsealし、最後のdecisionだけを公開する</h2>
-      <p>Round 17は、仕様を読んだ後続エージェントが「どの値を観測し、どこで凍結し、どの値を公開へ渡してよいか」を取り違えないための最終整理です。これは人間向けのベストプラクティス資料であり、production implementationを開始したことを意味しません。fresh current-SHA Strictはpending、readinessは未確認です。</p>
-      <div class="grid">
-        <article class="card"><h3>観測専用のsource inventory</h3><p><code>SourceDiscoveryIntent</code> はproject roots、control candidates、固定discover rulesだけを持ちます。inventoryはrevision、head、実際に読んだbytes、digest/size、独立観測した環境やlimitだけを報告し、project descriptor、compiler options、source roots、config、local extends、final paths、role map、plan digest、source-view fingerprintを注入しません。凍結control bytesからseal内で導出し、planとviewを一回の <code>SourceAcquisitionSeal</code> にします。</p></article>
-        <article class="card"><h3>未観測値を捏造しない</h3><p>adapter requestを作れないconfig/project/source-discovery failureは、observed stageを持つrequest-independent provenanceで表します。未観測のlimits、toolchain、trusted environment、process launch、compatibility、source planは <code>null</code>/<code>unobserved</code> とし、fixture/defaultからrequestやprojectを合成しません。<code>NextDecisionContext</code> はfrozenなclosed contextです。</p></article>
-        <article class="card"><h3>requestとlocality</h3><p><code>ValidatedAdapterRequest</code> はdict継承ではなくcomposition-based immutable authorityです。canonical bytes、request id、filesのbase64/size/digest、targets、run context、resolved limitsをresponse前に再検証します。<code>SourceFailureLedger</code> のisolated/safe subset/target taintはsealed graph、project ownership、failure/proof rootsから導出し、caller booleanを信頼しません。</p></article>
-        <article class="card"><h3>proof後のtarget reroute</h3><p>proofからunavailable target IDが出たときはsealed roots/taintでresolutionを再実行します。<code>missing</code>、<code>component_only</code>、<code>duplicate</code>、<code>out_of_scope</code>、<code>non_program</code>、<code>control_context</code>、<code>project_ambiguity</code>、<code>selected_taint</code> の8理由から一target一件だけを選び、resolver → proof → decision → diagnostic → domain → root manifest → stdout → exitへ同じ理由を伝えます。</p></article>
-        <article class="card"><h3>processとfinal publication</h3><p><code>process_launch_descriptor</code> はverified Node realpath/digest/version、actual spawn executable、fixed argv/env/FD/process-group、TOCTOU policyを観測してsealします。最後の <code>PublicationBoundaryDecision</code> がactual response bytes、validated request id、model digest、exact artifact bytes/descriptors、selector、diagnostic JSONL、capture/stderr/selected-copy measurementsを所有し、全projectionはこの一つだけを入力にします。</p></article>
-        <article class="card"><h3>closed stdoutと順序</h3><p>stdoutはsummary（selector <code>null</code>）、manifest、selected semantic/PlantUML artifact、typed unavailableのclosed unionです。三つのselected streamは共通 <code>max_selected_stdout_bytes</code> で測定し、exactはseal済み全bytes、+1はpartial bytesなしのtyped unavailableへ進みます。manifestは <code>run-manifest.json</code> descriptor、domainは保存済みArtifact descriptorを保持します。semantic projects/modelはID順、request/config/source-plan/rootはroot-path順とし、submitted orderをsort前に検証します。encoderはlexicographic <code>sort_keys=True</code>、NFC、UTF-8、LFだけを使います。<code>LIMIT-003</code> はconfigured byte/structural resource、<code>PROTOCOL-001</code> はmalformed/closed-schema/proofに限定します。</p></article>
-      </div>
-      <div class="callout">
-        <strong>Round 17の状態:</strong> 対象SHA <code>032c8d7e2f7786fb443fd2a49566c5a6ad9815d5</code>、CI <code>33514033888</code>（7/7 green）に対するhistorical Strict content reviewは <code>P0=0 / P1=9 / P2=3 / fail</code>、<code>implementation_ready=no</code>でした。transcriptは <code>required-strict-github-connector-verificati-667</code>（SHA-256 <code>6689d7384bcd1a7a7d1238dbcd61224ef0cf774176a83bd6bbb003b843ef0703</code>）です。過去のfail判定は上書きせず、fresh current-SHA Strictはpending、readinessは未確認、production implementationは未着手です。</div>
-    </section>
-
-    <section>
-      <h2>実装順序</h2>
-      <p>まず仕様を採用し、次に acceptance contract を固定します。adapter を先に書くと、identity や failure semantics が実装都合で固まりやすいためです。</p>
-
-      <script type="text/plain"
-              class="plantuml-source"
-              id="source-roadmap"
-              data-target="diagram-roadmap">
-@startuml
-title Issue #8 推奨 implementation roadmap
+title 入力の適用判定と凍結
 start
-:0. candidate の人間承認;
-:canonical Requirement / Design / Plan 更新;
-:independent strict spec review;
-:1. CLI・schema・protocol・outcome fixture;
-:2. SourceAcquisitionPlan と project/target parser;
-:Python / SQLAlchemy の byte regression 確認;
-:3. hardened one-shot Node runner;
-:4. TypeScript semantic analyzer;
-:identity → props → relations → client roles;
-:5. Python validator と JSON / PlantUML renderer;
-:6. registry・manifest・stdout・atomic publication;
-:7. security・limits・offline packaging・license;
-:deterministic golden と full regression;
-:Issue #9 へ primitive identity/facts を handoff;
+:明示projectのpackage.jsonを観測する;
+if (packageが正常か) then (はい)
+  if (直接のnext依存があるか) then (はい)
+    :該当projectだけに絞る;
+    :tsconfig → jsconfig → 組込み設定の順で選ぶ;
+    :local extendsと宣言元相対pathを解決する;
+    :files / include / excludeから候補を決める;
+    :control・program・contextのbytesを一度だけ読む;
+    :設定・source graph・digestを同じsealで確定;
+    :後続のNode起動を許可する;
+  else (いいえ)
+    :全project非該当ならnot_applicable;
+    :config・source・Nodeを観測しない;
+  endif
+else (いいえ)
+  :安全な適用判定診断を返す;
+endif
 stop
 @enduml
-      </script>
+</script>
+<div id="diagram-acquisition" class="plantuml-diagram">図を描画しています。</div>
+<details><summary>図のPlantUMLソース</summary><pre data-source-copy="source-acquisition"></pre></details>
+<div class="table-wrap"><table><thead><tr><th>条件</th><th>固定する判断</th><th>具体例</th></tr></thead><tbody>
+<tr><td>tsconfigとjsconfigが両方ある</td><td>tsconfigを採用</td><td>ファイル列挙順で結果を変えない</td></tr>
+<tr><td>両方ない</td><td>version付き組込みsafe config</td><td>設定コードを実行しない</td></tr>
+<tr><td>親configがpathを宣言</td><td>その宣言元からの相対pathを保持</td><td><code>config/base.json</code>の<code>./src</code>をrootの<code>src</code>へ付け替えない</td></tr>
+<tr><td><code>files: []</code> / <code>include: []</code></td><td>明示した空を尊重</td><td>値がない場合の既定値で置き換えない</td></tr>
+<tr><td>aliasが複数一致</td><td>exactを先にし、wildcardの規定順を適用</td><td>全候補を同格に混ぜない</td></tr>
+<tr><td>JSONC</td><td>BOM・コメント・末尾カンマを許可</td><td>duplicate key、循環extends、project外への脱出は拒否</td></tr>
+</tbody></table></div>
+<p>programはTS/TSX/JS/JSX、<code>.d.ts</code>はcontextです。<code>.git</code>、<code>node_modules</code>、<code>.next</code>、<code>out</code>、<code>dist</code>、<code>build</code>、<code>coverage</code>は除外します。test・spec・storyという名前だけでは除外しません。</p>
+<p><strong>起動の許可と、起動に成功した観測は別の事実です。</strong> packageを読んだだけでは、Nodeの存在・バージョン・adapter成功を記録できません。provenanceにはその時点までに本当に観測できた値だけを残します。</p>
+<details><summary>後続実装につながる取得結果の型</summary>
+<p><code>SourceDiscoveryIntent</code>は候補名だけです。requestより先にsourceをsealし、<code>CompleteSourceSeal</code>、<code>PartialSourceSeal</code>、<code>SourceAcquisitionUnavailable</code>、<code>SourceIntegrityFatal</code>、<code>SourceProjectUsage</code>のいずれかに確定します。</p>
+<p><code>SourceFailureLedger.from_seal</code>が、同じ凍結入力の依存関係から失敗の影響を導出します。依存先を限定できない呼出しを、依存なしと見なして部分成功にしません。path順序はNFC UTF-8 byte orderです。</p>
+</details>
+</section>
 
-      <div id="diagram-roadmap" class="plantuml-diagram">
-        implementation roadmap 図を描画しています。
-      </div>
-
-      <details>
-        <summary>PlantUMLソースを確認する</summary>
-        <pre data-source-copy="source-roadmap"></pre>
-      </details>
-
-      <h3>現在のコードで再確認する主な場所</h3>
-      <ul>
-        <li><code>src/code_structure_viz/source/source_view.py</code></li>
-        <li><code>src/code_structure_viz/source/targets.py</code></li>
-        <li><code>src/code_structure_viz/core/config.py</code></li>
-        <li><code>src/code_structure_viz/core/domains.py</code></li>
-        <li><code>src/code_structure_viz/application/snapshot_domain.py</code></li>
-        <li><code>src/code_structure_viz/artifacts/writer.py</code>、<code>manifest.py</code>、<code>streams.py</code></li>
-        <li><code>tests/contracts/test_json_schemas.py</code> と既存 Python / SQLAlchemy golden</li>
-      </ul>
-      <p>canonical 文書に記載された <code>adapters/next/...</code> は planned path です。実装開始時に current tree と整合させ、存在しない symbol を実装済みとして扱いません。</p>
-    </section>
-
-    <section>
-      <h2>acceptance で証明すること</h2>
-      <div class="grid">
-        <article class="card"><h3>意味</h3><p>App/Pages、named/default/barrel、props variants、static/dynamic/render、client roles、target/depth。</p></article>
-        <article class="card"><h3>空と失敗</h3><p>not applicable、complete empty、partial safe、payload unavailable、usage、fatal、interrupt。</p></article>
-        <article class="card"><h3>セキュリティ</h3><p>execution trap、path escape、symlink、environment、redaction、Git state before/after。</p></article>
-        <article class="card"><h3>再現性</h3><p>same input の exact-byte rerun、canonical ordering、digest、output collision、source drift。</p></article>
-        <article class="card"><h3>optional runtime</h3><p>Next 不在時に Node probe なし。Python/SQLAlchemy install・run・golden に Node 依存や byte drift なし。</p></article>
-        <article class="card"><h3>packaging</h3><p>offline adapter、exact TypeScript、TrustedTypeEnvironment、lockfile、license inventory、Node 22+ CI。</p></article>
-      </div>
-      <div class="callout warning">
-        <strong>停止条件:</strong> Node が frozen bytes 以外を読む、explicit target を fallback する、partial JSON と PlantUML が別 subset、budget を truncation で回避、既存 domain に Node 要件や byte drift を持ち込む場合は完了扱いにしません。
-      </div>
-    </section>
-
-    <section id="round18">
-      <h2>Round 18: provenance と sealed bytes を閉じる</h2>
-      <p>Round 18は、Round 17のStrict content reviewで残った「callerが観測結果を装える」「最終公開時に別のbytesを再生成できる」「schemaのdiscriminatorを省略できる」という経路を、後続実装前の契約として閉じます。ここでもproduction implementationは未着手です。fresh current-SHA Strictはpending、readinessは未確認です。</p>
-      <p id="round18-validation-order"><strong>検証順序:</strong> <code>raw cap</code> → <code>bounded decode/aggregate</code> → <code>closed schema</code> → <code>base/path/reference/proof</code> → <code>actual model+proof-only count</code> → <code>model gate</code> → <code>entity gate</code> → <code>selected copy</code>。各段階は前段のimmutable観測を入力とし、malformed/closed-schema/proof violationは<code>PROTOCOL-001</code>、byte/structural resource overrunは<code>LIMIT-003</code>へ固定します。</p>
-      <div class="grid">
-        <article class="card"><h3>seal内導出</h3><p><code>SourceDiscoveryIntent</code>はroots、control candidates、固定discover ruleだけを持ちます。trusted enumeratorがsnapshot/revisionに拘束されたbytesを列挙・単一読取し、config、local extends closure、final paths、role map、SourceView、FinalSourceAcquisitionPlanを同じ<code>SourceAcquisitionSeal</code>から導出します。callerのobserved_paths、reachable target、closure complete、derived planは入力にできません。</p></article>
-        <article class="card"><h3>観測の有無</h3><p><code>NextDecisionContext</code>と<code>NextPublicationContext</code>はfailure stageと各観測値をclosed unionで持ちます。request-independent branchでは未観測のrequest、limits、source plan、toolchain、trust、compatibility、launchを<code>null/unobserved</code>とし、budget解決前の<code>NextRunContext</code>も<code>budget_resolved=null</code>、<code>budget_source=unobserved</code>で表します。</p></article>
-        <article class="card"><h3>最終公開の因果</h3><p><code>ValidatedResponseDecision</code>のcanonical raw response bytes/SHA、validated request、model digest、diagnosticsを唯一のresponse authorityにします。<code>PublicationBoundaryDecision</code>はcapture、public stderr、selected copy、artifact bytes、selector候補bytes、measurement、sealを保持し、projectionはsealed valueを返すだけで別のresponse/diagnostic/status/payloadを受け取りません。</p></article>
-        <article class="card"><h3>OS identityとschema</h3><p>process descriptorは対応OS、hash時/spawn時のfile identity、実spawn handle/path、固定argv/env/FD/process groupを記録します。reference contractはhost実体を検査しないためOS process-level acceptanceを完了済みとは主張しません。run-manifestの<code>request_independent</code>はNextで必須の<code>true/false</code>、TARGET diagnosticの<code>reason</code>も必須です。</p></article>
-        <article class="card"><h3>順序とreason</h3><p>path-onlyのroot/source-rootはNFC-normalized UTF-8 bytes、object rowsはcanonical JSON bytesで並べます。8つのtarget failure reasonはresolver→proof→decision→diagnostic→domain→root manifest→stdoutまで同じ一件を保持し、selector非対象やgeneric unavailableへ漏らしません。</p></article>
-      </div>
-      <div class="callout"><strong>Round 18の履歴:</strong> reviewed SHA <code>885352347d250cc34aef0bd52e1fe27063288c05</code>、CI <code>33543204992</code>（7/7 success）、Strict session <code>required-strict-github-connector-verificati-680</code>（transcript SHA-256 <code>400431ed1fb444b3bd2509edf14ce557b8f292b0f011f281e74ffa241db8cec8</code>）のhistorical verdictは <code>P0=0 / P1=7 / P2=1 / fail</code>、<code>implementation_ready=no</code>です。これは上書きせずRound 18 artifactへ保存し、fresh current-SHA Strict pending、readiness unconfirmed、production implementation absentを維持します。</div>
-    </section>
-
-    <section id="round19">
-      <h2>Round 19: request前のseal、観測prefix、閉じた公開境界</h2>
-      <p>Round 19は、source sealをrequestから作り直せる経路、callerがsource localityをbooleanで装える経路、公開候補を後から差し替える経路を閉じます。既存の8図は変更せず、Round 16の検証順序図とRound 18の境界図をこの新しい因果規則の読解に使います。ここもproduction implementationではなく、実装前のdata-only contractです。</p>
-      <div class="grid">
-        <article class="card"><h3>requestより先にsourceをseal</h3><p><code>SourceDiscoveryIntent</code>はproject root、known control candidate、固定ruleだけを持ちます。trusted frozen snapshotから候補を一度だけ読み、duplicate-key rejecting JSONC parserでBOM・コメント・trailing commaを文字列外だけに許可します。single local <code>extends</code>、include/exclude/files、source roots、effective role、final membershipをseal内で導出し、request file setは既存sealのcaptured setと完全一致させます。request filesから新しいsealを再構築しません。</p></article>
-        <article class="card"><h3>partial-safeを型で表す</h3><p>取得結果は<code>CompleteSourceSeal</code>、<code>PartialSourceSeal</code>、<code>SourceAcquisitionUnavailable</code>、<code>SourceIntegrityFatal</code>のclosed unionです。一件のprogram/context read failureはdict comprehensionで即死させず、seal-owned raw graphからsafe file setとtarget taintを再計算します。localityを証明できるときだけ<code>CSV-NEXT-SOURCE-001</code>/<code>partial_safe</code>、隔離不能なら<code>CSV-NEXT-SOURCE-003</code>/<code>payload_unavailable</code>です。</p></article>
-        <article class="card"><h3>ledgerはsealの証拠だけを使う</h3><p><code>SourceFailureLedger.from_seal</code>が唯一の構築経路です。reachable target、closure complete、safe subset、seal id、digestはcallerの入力ではなくraw graphから導出します。edge削除やdigestだけの再計算は受理しません。safe subset request、<code>ValidatedResponseDecision</code>、<code>NextPublicationContext</code>は同じledger identityを引き継ぎます。</p></article>
-        <article class="card"><h3>最終bytesは一度だけseal</h3><p>adapter chunkはcapture boundaryで観測する入力であり、<code>stdout_candidates</code>、preselected payload、独立status、diagnostic bytesは公開側から注入できません。semantic decisionからsummary、root manifest、artifact、typed unavailableを内部生成し、success candidateを一度測定します。selected-copy超過時はfailure manifest descriptorを一度保存し、再copyせず、部分bytesを捨てます。</p></article>
-        <article class="card"><h3>process observationを明示する</h3><p><code>next-process-launch-observation-v1</code>はfixtureとproductionを分けます。productionはdarwin/linuxのOS-native file identity、verified-open handle、hash/version、actual spawn primitive、post-spawn equality、FD lifecycle、process group、TOCTOU failure pointが必須です。Windowsはv1のproduction scope外です。fixtureは参照テスト専用で、hostを操作しないreference validationをOS process-level acceptanceと呼びません。</p></article>
-        <article class="card"><h3>観測prefixと順序</h3><p><code>next-provenance-v1</code>はfailure stageまでのobserved prefixと後続の<code>unobserved/null</code>を同じbranchに記録します。config discriminatorは<code>request_independent</code>必須の排他的<code>oneOf</code>です。path-only rowsは<code>path:</code>を除くNFC UTF-8 byte order、object rowsはcanonical JSON bytesで比較し、stdoutは既存のlexicographic <code>sort_keys=True</code>・NFC・UTF-8・LFを共有します。</p></article>
-      </div>
-      <div class="callout"><strong>Round 19の履歴:</strong> reviewed SHA <code>0b80bff7706ca4bec770dbdf25620fbb5d2ecc2d</code>、CI <code>33557963556</code>（7/7 success）、Strict session <code>required-strict-github-connector-verificati-687</code>（transcript SHA-256 <code>a64f04b5948db0df3106803c659cc27c6ee8edd5abf300afa15e81d64691e351</code>）のhistorical verdictは <code>P0=0 / P1=5 / P2=1 / fail</code>、<code>implementation_ready=no</code>です。Round 18の履歴は上書きせず、fresh current-SHA Strictはpending、readinessは未確認、production implementationは未着手です。</div>
-    </section>
-
-    <section id="round20">
-      <h2>Round 20: 適用可否と取得元を凍結してから判断する</h2>
-      <p>Round 20は「Nextを起動するか」「どのsourceを意味として扱うか」「早期失敗をどう公開するか」を、同じ観測から一度だけ決めるためのdata-only remediationです。レビュー固定点は <code>aba6509ae818f8b959aa31276a6e8f5d6956680a</code>、historical Strict verdictは <code>P0=0 / P1=6 / P2=1 / fail</code>、<code>implementation_ready=no</code>です。Strict sessionは <code>required-strict-github-connector-verificati-692</code>、verification sessionは <code>issue-eight-strict-round-twenty</code>。transcriptファイルは存在しないため、meta/output/modelログだけを証跡として扱います。fresh current-SHA Strictはpending、readinessは未確認、production implementationは未着手です。</p>
-      <div class="grid">
-        <article class="card"><h3>まずpackageで適用可否を決める</h3><p>各project rootの凍結 <code>package.json</code> を一度だけparseし、直接の <code>dependencies.next</code> または <code>devDependencies.next</code> が非空文字列のときだけ <code>applicable</code> とします。package欠落またはdirect Nextなしは <code>non_applicable</code>、duplicate key・不正UTF-8/BOM/JSON・dependency table型・version型の異常は <code>malformed</code>。lockfile、transitive dependency、directory名、configは根拠にしません。全rootがnon-applicableならNodeをprobeしない <code>NotApplicableDecision</code> です。</p></article>
-        <article class="card"><h3>controlからmembershipを導出</h3><p>known project-root control candidateだけを先に読みます。JSONCは文字列外のBOM、comment、trailing commaだけを許し、duplicate key、unsafe <code>..</code>、package/array <code>extends</code>、<code>plugins</code>/<code>typeRoots</code>/<code>types</code>、invalid module/moduleResolutionをfail-closedにします。include/excludeは <code>fnmatch</code> ではなく segment grammar（<code>*</code>、<code>?</code>、whole-segment <code>**</code>）です。control read/parse failureを空configへ置換しません。</p></article>
-        <article class="card"><h3>source graphは凍結bytesの帰結</h3><p><code>SourceAcquisitionSeal</code> がfrozen bytes、resolved relative imports/extends、project ownershipからgraphを導出します。reader/requestがgraphを注入できず、edge削除後のdigest再計算も受理しません。source resultは <code>CompleteSourceSeal</code>、<code>PartialSourceSeal</code>、<code>SourceAcquisitionUnavailable</code>、<code>SourceIntegrityFatal</code> のclosed unionで、fatalとpayload unavailableのmanifest、stdout、exitを別々に再構成しません。</p></article>
-        <article class="card"><h3>観測できない値を埋めない</h3><p><code>NextDecisionContext</code> と <code>NextPublicationContext</code> は同じcanonical shape（<code>kind</code>、<code>stage</code>、<code>failure_code</code>、<code>observed</code>）を使います。failure stageまでのprefixだけをobservedにし、後段のrequest、limits、source plan、toolchain、trust、process、compatibility、budgetは <code>unobserved</code>/<code>null</code>。fixtureやdefaultからproject/requestを合成しません。</p></article>
-        <article class="card"><h3>process identityを捏造しない</h3><p><code>next-process-launch-observation-v1</code> は <code>fixture</code> と <code>production</code> を分けます。productionはdarwin/linuxのNode realpath、hash/version、hash/spawn file identity、verified handle、OS-specific spawn primitive、post-spawn equality、FD lifecycle、process group、TOCTOU pointを必須にします。Windowsはv1のproduction scope外です。unavailable/not_applicableはidentityをnullにし、hostを触らないreference testをOS process-level acceptance済みとは呼びません。</p></article>
-        <article class="card"><h3>failureを一つの投影へ</h3><p>source integrityは <code>CSV-NEXT-SOURCE-003</code> のfatal/payload_unavailableを混同せず、local safe subsetだけが <code>CSV-NEXT-SOURCE-001</code>/<code>partial_safe</code> です。diagnostic code、outcome、payload/manifest有無、stdout reason、exitは <code>SourceAcquisitionDecisionProjection</code> で一度に固定し、coverage indexは実質的なpositive/negative testへ対応付けます。</p></article>
-      </div>
-      <p class="callout"><strong>Round 20の確認方法:</strong> <code>test_round20_package_applicability_matrix_is_direct_dependency_only</code>、<code>test_round20_source_control_uses_segment_grammar_and_fail_closed_control_reads</code>、<code>test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection</code>、<code>test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection</code>、<code>test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_identity</code>、<code>test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch</code>、<code>test_round20_fixture_coverage_index_is_substantive</code>を、schemasとfixture indexの両方向から実行します。既存の8 PlantUML diagramsは増やさず、Round 18の検証順序図とRound 16/18のauthority図をこの判断の視覚的な正本として保ちます。</p>
-    </section>
-
-    <section>
-      <h2>実装開始前の readiness gate</h2>
-      <p>この提案を「実装可能」と呼ぶ条件は、文章が揃うことではありません。machine-checkable な request/response、public semantic、run manifest、stdout、diagnostic、PlantUML の closed contractを実体化し、exact bytes と reference validator で相互投影を検証し、既存 Python/SQLAlchemy の全テストと Next の data-only contract vectors を clean checkout で通すことです。Round 6〜11の指摘とRound 12の8件を含む修復をローカル契約へ反映し、修復後の GitHub 同一SHAを対象に fresh ChatGPT Use Strict を実行して P0=0かつP1=0を確認する必要があります。Round 12のfail記録をpassへ書き換えたり、ローカルテストの成功だけでreadinessを確定したりしません。</p>
-      <div class="callout warning">
-        <strong>Strictの判定:</strong> Round 6 は <code>review_status: fail</code>（P0=0、P1=9、P2=2）、Round 7 は P0=0、P1=6、P2=0、Round 8 は P0=0、P1=4、P2=0、Round 9 は P0=0、P1=7、P2=1、Round 10 は <code>review_status: fail</code>（P0=0、P1=8、P2=0）、Round 11も <code>review_status: fail</code>（P0=0、P1=8、P2=0）、Round 12も <code>review_status: fail</code>（P0=0、P1=8、P2=0）でした。Round 12の8件は現在の data-only contracts、schemas、fixtures、reference validator、R/D/Pへ反映した状態ですが、fresh Strictは未通過です。したがって readiness は未確定であり、プロダクトの Next 実装も未着手です。このHTMLは実装着手やreadiness passを宣言するものではありません。
-      </div>
-      <h3>Round 6 / Round 7 / Round 8 / Round 9 / Round 10 / Round 11 / Round 12 remediation：ローカル契約へ反映した項目</h3>
-      <ul>
-        <li><strong>✓ taint の必須 edge:</strong> records・roots・closed rule/ownership tableからPythonが必須 causal edgeとtaint closureを独立導出し、submitted edgeと完全一致させます。frontier重複、edge omission、boundary role under-taintを拒否します。</li>
-        <li><strong>✓ public target:</strong> 公開文法は <code>path:&lt;repository-relative-path&gt;</code> だけです。program roleかつ suffix が <code>.ts</code>・<code>.tsx</code>・<code>.js</code>・<code>.jsx</code> の file は frozen file・Module・Component 集合へ、directory は全 canonical descendant 集合へ解決し、複数 descendant は正常です。<code>.d.ts</code>・<code>package.json</code>・<code>tsconfig.json</code>・<code>jsconfig.json</code> の direct targetは semantic targetにしません。File→Moduleの <code>missing</code>・<code>component_only</code>・<code>duplicate</code>、missing path・project-scope ambiguity・out-of-scope・選択集合の tainted/excluded/failed はすべて <code>CSV-NEXT-TARGET-001</code>、<code>payload_unavailable</code>、no-artifact とし、manifest/stdout の unavailable vector まで一致させます。内部 Module/Component IDや旧 <code>component:</code>・<code>module:</code>・<code>file:</code> 形式は受理しません。</li>
-        <li><strong>✓ export observation と re-export witness:</strong> public <code>ExportBinding</code> の前に、Pythonが凍結UTF-8 source bytesから owner file・exact byte span・token identity・syntax kind・canonical exported name・value/type role・re-export/starを持つ完全な独立 census を導出し、Node observationの syntax identity と完全照合します。local list、default alias/declaration/expression、複数・改行specifier、comments、Unicode IdentifierName（NFC）、CRLF、BOMを閉じた文法として扱います。各re-exportには source specifier、imported/original name、resolved source Module、expanded exported name、target declarationを持たせ、Pythonが凍結module graphからalias・star・cycle・conflictを再計算します。resolution（component/value/type/unknown）と任意の Component IDはmodel/TypeChecker witnessと cross-checkし、public bindingは一意なComponentへ解決したvalue exportだけにします。value/type/unknownはcoverage-onlyとし、observation・binding・countの協調省略、duplicate・component substitution・star/type conflict・count改変を拒否します。</li>
-        <li><strong>✓ limits と outcome composition:</strong> schema-drivenな file/model/process/PropsTypeIR resource limits と<code>max_entities</code>の単位・計測時点・UTF-8・inclusive boundary・超過時 outcomeを固定し、個数の重複記載によるdriftを避けます。<code>max_entities</code> は選択・公開された内部 Module + Componentだけ、全recordは <code>max_model_records=10,000</code> と分離し、500成功・501 unavailable・600 override成功・10,001 record failureを非巨大allocationで検査します。<code>max_adapter_stdout_capture_bytes</code>、<code>max_adapter_response_bytes</code>、<code>max_selected_stdout_bytes</code>は別境界で、<code>max_adapter_stderr_capture_bytes</code> と公開diagnosticの<code>max_stderr_bytes</code>、<code>max_total_array_items</code> と<code>max_collection_items</code>も別カウンタです。</li>
-        <li><strong>✓ trusted/runtime bytes:</strong> 実際の declaration/runtime fixture bytes の physical→virtual mapping、size、SHA-256、license、非循環 inventory attestationを known answer と照合し、shadowingを拒否します。TypeScript 5.9.2 の Program が parse/semantic diagnostics 0であること、AST/TypeCheckerから導出した certified identity/signature digest が checked-in inventoryと一致することも gateにします。</li>
-        <li><strong>✓ source plan・root seeds と順序:</strong> closedな<code>SourceAcquisitionPlan/v1</code>がresolved control paths、local extends closure、file-role map、projects、suffixes、exclusions、limits、trusted digestを全てhashします。failure rootのrecord_idsは証人にすぎず、root kindとrecordsから完全な必須seedを再導出します。export failureではinternal Component seed、incoming explicit re-export、barrel Module、dependent bindingまで含め、submitted causal edge・taint closureと完全一致させます。input/config/source-planはNFC UTF-8 root-path order、semantic recordsはrecord-ID order、recognition evidence、diagnostic、target completeness、failed filesなどは canonical JSON UTF-8 orderをsubmittedのまま比較します。</li>
-        <li><strong>✓ stdout/status matrix:</strong> <code>None</code>、<code>manifest</code>、<code>next:semantic-json</code>、<code>next:plantuml</code>を、complete・not_applicable・partial_safe・payload_unavailable・fatal・interrupt・usageの全statusで exact bytes、publication、stderr、exitと検証します。</li>
-        <li><strong>✓ external PlantUML relation:</strong> 外部 JSX render targetを redacted cloud の <code>X_&lt;64hex&gt;</code> で表し、external JSX goldenとmutationを追加します。</li>
-        <li><strong>✓ compatibility identity:</strong> semantic compatibility preimageへ <code>project</code> と <code>file</code> の identity versionを含め、known-answer IDで固定します。併せて <code>head_commit</code> は40桁または64桁だけ、非空 role subsetは7通りだけを受理します。</li>
-        <li><strong>✓ Round 10 Pass A:</strong> projectはID/root対応を比較し、input/config/source-plan/root manifestはNFC UTF-8 root-path順、semantic recordsはrecord-ID順として別々に検証します。EntityBudgetGateはvalidated proofからpre-budget outcomeを導出し、暗黙の <code>complete</code> を持たず、requested formatだけを公開します。共有 <code>next-path-v1</code> はpath本体のUTF-8 4096 bytes、rootだけの <code>.</code>、empty/`.`/`..` segment・trailing slash・control・backslash・非NFC拒否を固定します。program FileごとにModule exactly oneを要求し、欠落したfile/directory targetをfail closedにします。</li>
-      </ul>
-      <h3>Round 12 review state とローカル契約の反映</h3>
-      <div class="callout warning">
-        <strong>Round 12:</strong> 対象SHA <code>48266f813353a7fd78e4e15d72ff6d33c4142827</code>、CI <code>33435802167</code>（7/7 success）に対する Strict は <code>review_status: fail</code>、P0=0、P1=8、P2=0でした。これは過去のレビュー結果として保持します。以下はその8件を data-only contract、schema、reference validator、fixtureへ反映する設計です。fresh exact-SHA Strictはまだ未実行・未通過で、readinessは未確定です。製品 adapter/CLI実装も開始していません。
-      </div>
-      <ul>
-        <li><strong>1. 同じモデルを最後まで使う:</strong> 逆順になる二つのprojectを、response→domain→root manifest→公開bytes→run fingerprintまで同じ検証済みmodelで運びます。project対応はID/root、各入力面はNFC UTF-8 root順、semantic recordsはrecord-ID順で独立に検査し、counts・budget・coverageと並べ替え変異を拒否します。</li>
-        <li><strong>2. stdoutの実行文脈を一つにする:</strong> <code>NextRunContext</code> は selector を <code>null</code>、<code>manifest</code>、<code>next:semantic-json</code>、<code>next:plantuml</code> のいずれかとして持ち、requestの値をresponse、gate、domain、root、stdoutへそのまま写します。<code>FORMAT_ORDER</code>やbudget provenanceからの推測、gateへの重複resolved値は許しません。</li>
-        <li><strong>3. raw responseを安全に段階検証する:</strong> UTF-8 raw bytesをbounded decoderで数え、closed response schema、base validation、typed target precedenceの順に通します。schema違い、余計なkey、危険な複合変更は同じraw-byte入口で拒否し、adapterの自己申告を成功根拠にしません。</li>
-        <li><strong>4. Unicode JSXを正しく字句化する:</strong> NFCのUnicode IdentifierNameをdot/colonのsegmentとして扱い、paired・nested・member・namespace tagを認識します。一方、JSX本文・属性式・property・regex・template・string・comment内の<code>export</code>らしき文字列はmodule-level exportと誤認しません。</li>
-        <li><strong>5. re-exportは公開名だけで解決する:</strong> source graphのlookupはpublic exported nameだけをキーにし、declaration keyを代替検索しません。隠れた declaration keyを差し替えても解決できないことをnegative vectorで固定します。</li>
-        <li><strong>6. witnessの所有者と物理宣言を結ぶ:</strong> re-export witnessに <code>owner_module_id</code> と owner fileを持たせ、exact joinで検証します。double alias/starは物理 targetをcomponent binding・coverage・domain・rootまで伝播し、<code>resolution=component</code> は必ずnon-null Component targetを持ちます。cycle/conflictはschema-valid responseから <code>CSV-NEXT-EXPORT-001</code>、payload unavailable、exit 3へ一貫して写します。</li>
-        <li><strong>7. pathの共通境界を使う:</strong> request、response、proof、domain、root、raw graphのすべてのpath面が同じNFC/UTF-8 POSIX helperと <code>next-path-v1</code> を使い、fragment marker <code>#</code>、空segment、制御文字、非NFCを拒否します。schemaの<code>maxLength</code>だけを安全性の根拠にしません。</li>
-        <li><strong>8. File→Module failureを三分類する:</strong> file targetとdirectory targetの両方で、選択されたprogram Fileは存在するがModuleがなく期待されるModule identityを参照するComponentもない純粋な <code>missing</code>、Moduleはない一方でそのComponentが残る <code>component_only</code>、同じ選択Fileにbyte-identicalなModule行が複数ある <code>duplicate</code> を別の証拠として扱います。<code>duplicate</code>だけは選択対象の同一行に限る狭い例外としてtyped failureへ進めます。三分類すべてを <code>CSV-NEXT-TARGET-001</code>、no-artifact、manifest/stdout unavailable、exit 3まで response→diagnostic→domain→root manifest→stdout の同じ経路で検査します。</li>
-      </ul>
-      <h3>Round 14で閉じるべき契約</h3>
-      <p>Round 14のレビューは、valid responseだけでなく、responseが成立する前の失敗も一つの実行判断から公開できるかを問い直しました。ここでいう「判断」は処理途中のmutableな状態ではなく、入力・失敗理由・件数・公開可否・終了コードを一緒に凍結した値です。</p>
-
-      <script type="text/plain"
-              class="plantuml-source"
-              id="source-round14-decision-flow"
-              data-target="diagram-round14-decision-flow">
+<section id="relations">
+<h2>5. 静的な関係と、分からない関係を区別する</h2>
+<p>モジュール間の参照と、Componentの出力に含まれるJSX関係を分けます。importしただけでは、そのComponentを描画したとは限りません。動的構文を見つけたのに無視すると、到達範囲を過小評価してしまいます。</p>
+<script type="text/plain" class="plantuml-source" id="source-relations" data-target="diagram-relations">
 @startuml
-title Round 14で固定する一つの実行判断
+title モジュールの参照とJSXの利用
 left to right direction
-
-actor "要求者" as Requester
-component "Pythonの要求・実行文脈" as Context
-component "raw bytesのbounded decoder" as Decoder
-component "proof-base検証" as Proof
-component "typed target routing" as Route
-component "NextRunDecision closed union" as Decision
-component "domain / root / stdout / stderr projection" as Projection
-component "Artifact・manifest・終了コード" as Output
-
-Requester --> Context : 要求を凍結
-Context --> Decoder : child応答を受け取る
-Decoder --> Proof : schema-valid bytes
-Proof --> Route : proofを完全検証
-Route --> Decision : valid / pre-response / N/A
-Decision --> Projection : decisionだけを渡す
-Projection --> Output : 公開またはunavailable
-
-note bottom of Decision
-PreResponseFailureDecisionは
-NextRunContext、stage、diagnostic、counts、
-payload_unavailable、artifact 0件、exit 3を所有
+rectangle "モジュールの平面" {
+  component "Page.tsx" as PageFile
+  component "ui/index.ts" as Barrel
+  component "Button.tsx" as ButtonFile
+  PageFile --> Barrel : 名前を取り込む
+  Barrel --> ButtonFile : 別名で再公開する
+}
+rectangle "コンポーネントの平面" {
+  component Page
+  component Button
+  Page --> Button : JSX出力として利用
+}
+PageFile ..> Page : 宣言を所有
+ButtonFile ..> Button : 宣言を所有
+note bottom of Page
+任意のcallbackや実行結果から
+描画関係を推測しない
 end note
 @enduml
-      </script>
+</script>
+<div id="diagram-relations" class="plantuml-diagram">図を描画しています。</div>
+<details><summary>図のPlantUMLソース</summary><pre data-source-copy="source-relations"></pre></details>
+<p>source graphは凍結bytes、解決済みconfig、projectの所有範囲から導きます。同じimportが二度あれば、二つの出現位置を区別します。位置は文字数でなくUTF-8 byte offsetです。日本語が前に入っても証拠の範囲をずらしません。</p>
+<p>解決済みedgeと未解決のopen edgeを分けます。open edgeには安全な相対path・package名、または元bytesの位置に結び付いた不透明な識別子を残します。秘密を含み得るspecifier全文は公開しません。入力から再導出したgraphと比較し、edgeを削除してdigestだけ再計算した偽装を拒否します。</p>
+<h3>client/server境界とtarget完全性</h3>
+<p><code>"use client"</code>は観測した事実です。入口からvalue import等で伝わるclient側の役割を別に計算します。指令がないだけでserver専用とは断定しません。routerの配置やtype-only参照も別の意味として保持します。</p>
+<p>選ばれたprogram FileにはModuleがちょうど一つ必要です。指定targetがmissing・duplicate・Component-onlyなら、別のtargetの結果で成功を装いません。proofはtarget、export、件数、参照先がmodelと一致することを検証します。</p>
+</section>
 
-      <div id="diagram-round14-decision-flow" class="plantuml-diagram">
-        Round 14のdecision flowを描画しています。
-      </div>
-
-      <details>
-        <summary>Round 14 decision flowのPlantUMLソースを確認する</summary>
-        <pre data-source-copy="source-round14-decision-flow"></pre>
-      </details>
-
-      <div class="grid">
-        <article class="card"><h3>三つのdecision variant</h3><p><code>ValidatedResponseDecision</code>、<code>PreResponseFailureDecision</code>、<code>NotApplicableDecision</code>だけを許します。domain、root manifest、stdout、stderrはこのunion以外からstatusやcontextを再構成しません。</p></article>
-        <article class="card"><h3>wire limitの到達可能性</h3><p><code>max_model_records=10,000</code>へ固定します。9,999件のcompact context Fileと1件のProjectを実際にschema検証し、exactは5,642,861 bytes・aggregate 40,001、10,001件はmodel gateの<code>CSV-NEXT-LIMIT-005</code>へ進むことを確認します。</p></article>
-        <article class="card"><h3>reasonの意味</h3><p><code>not_selected</code>はstatusを下げません。<code>unsupported</code>はunknown coverage付きのcomplete、locality proof付きtaintだけがpartial_safeです。<code>over_budget</code>はadapterから拒否し、PythonのEntityBudgetGateが所有します。</p></article>
-        <article class="card"><h3>Unicodeの再現性</h3><p>IdentifierNameの分類はhost UCD（<code>unicodedata.category()</code>）を呼ばず、Unicode 15.0.0のchecked-in tableを使います。ID_Start、ID_Continue、Other_ID sets、U+00B7を含むtable digestをprofileとfingerprintへ入れ、NFCはtransport ruleとして明示します。</p></article>
-        <article class="card"><h3>子processの上限</h3><p>child stdoutは<code>max_adapter_stdout_capture_bytes</code>でretain前に数えます。exactは受理し、+1はprocess groupを止め、partial bytesを破棄してdecoderを呼びません。ローカル証拠はfaithfulなchunk-reader harness（OS process-level試験ではない）で、production契約のprocess-group停止を明示的に表します。</p></article>
-        <article class="card"><h3>target failure</h3><p>stdoutの正本はsortedな<code>target_failures:[{target_key,reason}]</code>です。availableやfatalなどのbranchへtarget failureを混ぜず、旧top-level単一<code>reason</code>は使いません。</p></article>
-        <article class="card"><h3>sourceのseal</h3><p><code>SourceDiscoveryIntent</code>から二段階のsingle-readを行い、最後のreadとdrift check後に<code>FinalSourceAcquisitionPlan</code>と<code>SourceView</code>を同じsealで確定します。その後はfilesystemを再読しません。</p></article>
-      </div>
-
-      <div class="callout">
-        <strong>実装前の確認方法:</strong> pre-responseのNode・protocol・limit失敗をdecisionからdomain/root/stdout/stderr/exit 3まで通し、proof reasonの4ケース、Unicode全code point digest、<code>max_model_records=10,000</code>のschema-valid exact/+1、aggregate/rawのexact/+1、stdout capture exact/+1、target failureの単一・反復・混在、source readerの一回読みを契約テストで検証します。これらのローカルテストが通っても、fresh current-SHA Strictが完了するまでreadinessは確定しません。
-      </div>
-
-      <h3>まだ完了していない gate</h3>
-      <ul>
-        <li><strong>✓ Round 10 Pass B（ローカル契約）:</strong> module-level closed export grammar（async/generic/type、ASI、JSX/property/regex等のfalse positive除外）、raw declarations/edgesからの独立re-export graph witness（star 0..N/default exclusion/cycle/conflict）、canonical UTF-8 JSONL public diagnostic stderr gate（inclusive limit/+1、partial write 0、<code>CSV-NEXT-LIMIT-003</code>、manifest-only）、bounded nested-response decoder（duplicate key、depth/string、per-array/aggregate、100001 pre-materialization）をdata-only contractへ接続しました。</li>
-        <li><strong>✓ Round 11 Pass C（ローカル契約）:</strong> immutable project ID/root対応とroot-path/record-IDのsurface別orderを逆順二projectでrequest→response→domain→root manifest→fingerprintへ通し、requested formats・budget requested/resolved/source・stdout selectorを一つのrun contextで伝播させました。全path surfaceは共通helperでNFC・UTF-8 bytes・root <code>.</code>の文脈を検証し、4095/4096 bytesを受理、4097 bytesとNFC collisionを拒否します。file/directory targetのmissing・duplicate・Component-onlyはmodel assertionではなくtyped <code>CSV-NEXT-TARGET-001</code>、payload unavailable、no-artifact、manifest/stdout unavailable、exit 3へ投影します。</li>
-        <li><strong>✓ Round 11 Pass D（ローカル契約）:</strong> module-level export scannerでself-closing/fragment/nested same-name JSX、属性式内のstring/template/comment/regex、property/literal内の偽<code>export</code>を除外し、async/generic/type、BOM/CRLF、NFC、exact UTF-8 byte spanを固定しました。raw declaration/edgeから独立re-export witnessを再計算し、double alias、star 0..N/default exclusion、cycle/conflict/missing sourceとoriginal/exported nameを保持して、component binding/value/type coverageへ投影します。public diagnostic stderrは全JSONLをUTF-8 encode後にinclusive gateし、limit+1をpartial write 0、<code>CSV-NEXT-LIMIT-003</code>、manifest-onlyへ投影します。raw response bytesはbounded decoder一つを通り、duplicate key、depth、decoded string、per-array、aggregateをmaterialization前に数えます。</li>
-        <li><strong>✓ Round 13 local remediation（契約・fixture・validator）:</strong> Round 13 Strict は対象SHA <code>991516bf730f4f2ddb3d15067702dcfae95ec6b1</code>、CI <code>33446911714</code>（7/7 success）に対して <code>review_status: fail</code>、P0=0、P1=9、P2=1でした。この履歴は変更せず、次のdata-only修復を反映しました。公開semantic六collectionとPlantUMLを同じimmutable validated modelから生成し、order/payload mutation・artifact SHA・rootを照合します。request-owned <code>NextValidatedDecision</code>だけをdomain/root/stdoutへ渡し、<code>missing</code>・<code>component_only</code>・<code>duplicate</code>を全surfaceへ投影します。typed target failure前にcausal/export-owner/target-row proofを検証し、double alias、empty/multi star（default除外）、cycle/conflictを別々のwhole-run vectorでexit 3まで検証します。re-export joinはexported/original name・syntax identity・byte spanまで全消費し、IdentifierName表をUnicode 15.0.0に固定してU+00B7とOther_ID setsを含め、compatibility/fingerprintへversionを含めます。shared root-or-path schemaはroot <code>.</code>を全適用面で受理し、raw responseはdecode前に16 MiB capを検査します。Round 11 Pass Cの重複項目は一つ削除しました。</li>
-        <li><strong>□ fresh exact-SHA Strict:</strong> data-only 修復後の同一GitHub SHAを ChatGPT Use Strict で再レビューし、<code>review_status: pass</code>、P0=0、P1=0を確認する。</li>
-        <li><strong>□ production implementation:</strong> Strict pass後に初めて、hardened Node adapter、Python integration、publicationを実装し、production acceptanceを別途証明する。</li>
-      </ul>
-      <p>ローカル契約の修復と全テストの成功は、fresh Strict passやIssue完了を意味しません。上の gate が揃うまで、この資料の状態は「実装前・readiness未確定」です。</p>
-    </section>
-
-    <section>
-      <h2>Round 15: 判断・入力・公開を一つに閉じる</h2>
-      <p>Round 15では、処理途中の別々の値を後から組み合わせることをやめ、immutableな<code>NextRunDecision</code>を唯一の出版authorityにします。成功したresponseだけでなく、requestを作れない早期failureとNext非該当も同じ考え方で、何が分かっていて何が分からないかをcontextに固定します。</p>
-      <script type="text/plain"
-              class="plantuml-source"
-              id="source-round15-authority"
-              data-target="diagram-round15-authority">
+<section id="failure">
+<h2>6. 空の成功・部分結果・取得不能を区別する</h2>
+<p>Componentが0件でも、全対象を正常に調べ終えたならcompleteです。失敗して調べられなかった0件を同じ意味にしません。部分結果には、失敗が指定targetや公開する安全な部分へ影響しないという証明が必要です。</p>
+<script type="text/plain" class="plantuml-source" id="source-outcomes" data-target="diagram-outcomes">
 @startuml
-title Round 15: one decision and one sealed provenance context
-left to right direction
+title 意味解析の結果と終了コード
+start
+if (CLI入力が不正か) then (はい)
+  :usage / exit 2\nartifactを作らない;
+elseif (中断されたか) then (はい)
+  :interrupt / exit 130\n子processを片付ける;
+elseif (入力の整合性を失ったか) then (はい)
+  :fatal / exit 1\n信頼できる結果として公開しない;
+elseif (全projectが非該当か) then (はい)
+  :not_applicable / exit 0;
+elseif (意味解析が完了したか) then (はい)
+  :complete / exit 0\n0件も成功;
+elseif (安全な部分を証明できるか) then (はい)
+  :partial_safe / exit 3\n安全な部分と診断を公開;
+else (いいえ)
+  :payload_unavailable / exit 3\n意味payloadを公開しない;
+endif
+stop
+@enduml
+</script>
+<div id="diagram-outcomes" class="plantuml-diagram">図を描画しています。</div>
+<details><summary>図のPlantUMLソース</summary><pre data-source-copy="source-outcomes"></pre></details>
+<div class="table-wrap"><table><thead><tr><th>状態</th><th>利用者への意味</th><th>扱い</th></tr></thead><tbody>
+<tr><td>complete</td><td>約束した対象を解析できた</td><td>JSON・PlantUMLを公開。0件もあり得る</td></tr>
+<tr><td>complete + unsupported</td><td>約束の対象は完了し、対象外構文を検出した</td><td>未対応範囲をdiagnostic・coverageへ残す</td></tr>
+<tr><td>partial_safe</td><td>失敗の影響を隔離し、安全な部分を証明した</td><td>安全なsubsetと診断。全体成功へ昇格させない</td></tr>
+<tr><td>payload_unavailable</td><td>意味payloadを保証できない</td><td>manifestと安全な理由。payloadの断片は出さない</td></tr>
+<tr><td>not_applicable</td><td>Next projectではなかった</td><td>Node不要。解析失敗と区別</td></tr>
+</tbody></table></div>
+<p>provenanceはrequest-independentな非該当・失敗と、request-boundな失敗・成功の4種類です。観測行はfieldのschema/versionと実値digestへ結び付けます。未観測の値は<code>unobserved/null</code>です。既定値を実測値の代わりに入れません。</p>
+<p>診断はusage、domain semantic、publication、fatalのscopeを区別します。project root重複のusage errorと、解析後のstdout超過は別段階の問題です。終了コードだけで失敗の意味を表そうとしません。</p>
+</section>
 
-component "SourceDiscoveryIntent" as Intent
-component "two-phase single-read\nand drift check" as Read
-component "atomic seal\nSourceView + FinalSourceAcquisitionPlan" as Seal
-component "bounded capture /\nresponse boundary" as Boundary
-component "NextRunDecision\nclosed union" as Decision
-component "NextPublicationContext" as Context
-component "domain / root / manifest /\nstdout / stderr / artifacts" as Surfaces
-
-Intent --> Read : intent only
-Read --> Seal : frozen bytes
-Seal --> Context : fingerprints + seal id
-Boundary --> Decision : validated or typed failure
-Context --> Decision : provenance
-Decision --> Surfaces : decision-only
-
-note right of Decision
-ValidatedResponseDecision
-PreResponseFailureDecision
-NotApplicableDecision
+<section id="process">
+<h2>7. Nodeの起動条件と実観測を照合する</h2>
+<p>NodeはNext対象のときだけ必要です。v1はmacOS/Linuxを対象とし、安定版Nodeのmajor 22以上を要求します。shellなしのone-shot workerに、private cwd、閉じた引数・環境変数、専用stdioを使います。</p>
+<script type="text/plain" class="plantuml-source" id="source-process" data-target="diagram-process">
+@startuml
+title 起動方針と観測証拠
+top to bottom direction
+rectangle "ProcessLaunchPolicy\n許可した条件" as Policy
+rectangle "起動前の検証\nNode・adapterの実体とhash" as Before
+rectangle "OSによる起動\n引数・環境・FD・process group" as Spawn
+rectangle "ProcessLaunchObservation\n起動後の同一性と測定" as Observation
+rectangle "検証済みの実行判断" as Decision
+Policy --> Before : 条件を適用
+Before --> Spawn : 検証した実体へ結び付ける
+Spawn --> Observation : 実際の結果を観測
+Policy --> Observation : 全条件を照合
+Observation --> Decision : 一致した事実だけ渡す
+note bottom of Observation
+参照fixtureとproduction観測は別の型
+fixtureはOS検証済みの証拠ではない
 end note
 @enduml
-      </script>
-      <div id="diagram-round15-authority" class="plantuml-diagram">
-        Round 15のauthority flowを描画しています。
-      </div>
-      <details>
-        <summary>Round 15 authority flowのPlantUMLソースを確認する</summary>
-        <pre data-source-copy="source-round15-authority"></pre>
-      </details>
-      <div class="grid">
-        <article class="card"><h3>immutable context</h3><p>sealed SourceView/Plan、request/config、semantic compatibility descriptor/identity versions、実toolchain、TrustedTypeEnvironment、run context、fingerprint preimageを<code>NextPublicationContext</code>に保持します。writerがfixtureやdefaultを再構成しません。</p></article>
-        <article class="card"><h3>三つのcapture境界</h3><p><code>max_adapter_stdout_capture_bytes</code>はchunk retain前、<code>max_adapter_response_bytes</code>はdecode前、<code>max_selected_stdout_bytes</code>はpublic copy前に測定します。exactは許可し、+1は全量破棄します。</p></article>
-        <article class="card"><h3>countの正本</h3><p>published model collectionの合計、modelにないproof-only payload、両者の合計を別名で保持します。aggregate+1はschema-validな実wireからbounded decoderで検証し、model capとは別にします。</p></article>
-        <article class="card"><h3>failureの意味</h3><p>locality proof付きsource failureだけが<code>partial_safe</code>、隔離不能sourceは<code>CSV-NEXT-SOURCE-003</code>、unsupportedはunknown付きcomplete、adapterの<code>over_budget</code>は禁止です。</p></article>
-        <article class="card"><h3>target failure</h3><p>Nextの二つのselectorだけに、closed eight-reason enumをtargetごとに一件、canonical sortedで出します。generic unavailableやfatalには混ぜません。</p></article>
-        <article class="card"><h3>Unicode / role / bytes</h3><p>Unicode 15.0.0 tableを<code>is_identifier_name</code>などのcontext-specific predicateで共有し、BoundaryRolePropagationをfacts/router/static value edgesから再計算します。stdoutは<code>sort_keys=True</code>、NFC、UTF-8、LFです。</p></article>
-      </div>
-      <div class="callout">
-        <strong>この資料の読み方:</strong> ここまでのschema、reference validator、fixtures、testsはproduction adapterの実装ではなく、実装前に意味を固定するdata-only契約です。Round 15 artifactには三つのStrict試行の証跡と、historical <code>P0=0 / P1=13 / P2=1 / fail</code>を保存します。fresh current-SHA Strictがpassするまでreadinessは未確認です。
-      </div>
-    </section>
+</script>
+<div id="diagram-process" class="plantuml-diagram">図を描画しています。</div>
+<details><summary>図のPlantUMLソース</summary><pre data-source-copy="source-process"></pre></details>
+<p>hash計算時のファイルと、実際に起動した実体が同じか確認します。追加argv、別adapter、禁止環境変数、想定外FDの継承を拒否します。timeout時はprocess groupを片付け、raw stderrや途中の応答を公開しません。</p>
+<div class="table-wrap"><table><thead><tr><th>資源</th><th>主なv1上限</th></tr></thead><tbody>
+<tr><td>入力</td><td>20,000 files、4 MiB/file、decoded source 64 MiB、encoded stdin 96 MiB</td></tr>
+<tr><td>応答とstdout</td><td>adapter capture・private response・selected stdoutを別々に測定し、各16 MiB</td></tr>
+<tr><td>診断</td><td>child stderr captureと公開JSONLを分離。既定64 KiB</td></tr>
+<tr><td>構造</td><td>nesting 64、string 8 MiB。arrayはcollectionごとと全体の両方を検査</td></tr>
+<tr><td>実行</td><td>60秒、V8 old-space 512 MiB。総RSS上限の保証ではない</td></tr>
+</tbody></table></div>
+<p>「上限ちょうど」と「1 byte超過」をそれぞれ検証します。model/entityの上限と、輸送・公開bytesの上限も別です。解析後の公開失敗で、意味解析の成功まで消してしまわないようにします。</p>
+<h3>出荷物の一覧と実行結果も分ける</h3>
+<p>現在の参照fixture一覧は<code>next-reference-runtime-inventory/v1</code>、将来のadapter・TypeScript・trusted declarations・license一覧は<code>next-runtime-build-inventory/v1</code>です。実行結果はrun/domain manifestが担当します。今回依存やwheel/sdistは変更せず、将来の配布検証をPlanへ固定します。</p>
+</section>
 
-    <section>
-      <h2>この候補を採用する際の四つの判断</h2>
-      <ol>
-        <li>Component identity を export site から declaration site へ移し、export binding を分離する。</li>
-        <li>monorepo project root を自動探索せず、CLI / config で明示する。</li>
-        <li>Node に target repository path を渡さず、Python が凍結した bytes だけを渡す。</li>
-        <li>client/server を排他的分類ではなく、positive-evidence role として表現する。</li>
-      </ol>
-      <p>この四点とfailure matrix、数値limit、acceptance traceはcanonical Requirement / Design / Planへ反映済みです。commit/push後のChatGPT Use Strict reviewを通過して初めてimplementation-readyと判定します。このHTMLとcompanion Markdownはevidenceであり、それ自体はcanonical specificationではありません。</p>
-    </section>
+<section id="publication">
+<h2>8. 一つの判断から、保存するbytesを一度だけ作る</h2>
+<p>元request・検証したresponse・config・provenance・診断を保持した一つのimmutable decisionを公開層へ渡します。出力候補は内部で生成し、外部から任意bytesへ差し替えられないようにします。</p>
+<details><summary>responseを信頼するまでの検証順序</summary>
+<ol id="validation-order">
+<li data-gate="raw-cap">受信bytesの上限を確認する。<code>max_adapter_response_bytes</code>を超えた入力をJSONとして展開しません。</li>
+<li data-gate="bounded-decode">深さ・文字列長・配列数・全配列要素数を制限しながらJSONを読む。</li>
+<li data-gate="closed-schema">未知fieldを拒否するclosed schemaを検証する。</li>
+<li data-gate="reference-proof">path・ID・参照・proofが同じrequestと矛盾しないか検証する。</li>
+<li data-gate="model-count">公開modelとproofだけにあるrecordの実数を数える。</li>
+<li data-gate="model-gate">全record数の上限を適用する。</li>
+<li data-gate="entity-gate">Module・Component数の予算を適用する。</li>
+<li data-gate="selected-copy">公開判断を確定し、選択stdoutの<code>max_selected_stdout_bytes</code>を実測する。</li>
+</ol>
+<p>構造上限の超過は<code>CSV-NEXT-LIMIT-003</code>、不正なprotocolは<code>CSV-NEXT-PROTOCOL-001</code>です。同じ上限コードでも受信と公開は別scopeです。最終的な<code>PublicationBoundaryDecision</code>が保存bytes、stdout、診断、終了状態を保持します。</p>
+</details>
+<script type="text/plain" class="plantuml-source" id="source-publication" data-target="diagram-publication">
+@startuml
+title 解析結果と公開結果の確定
+actor "CLIの利用者" as User
+participant "意味解析の判断" as Semantic
+participant "公開の最終化" as Finalize
+participant "保存先" as Store
+participant "stdout" as Stdout
+Semantic -> Finalize : 検証済みdecision
+Finalize -> Finalize : JSON・PlantUML候補を一度生成
+Finalize -> Store : bytesとdescriptorを確定
+Finalize -> Finalize : 選択stdoutの実byte数を測定
+alt 上限以内
+  Finalize -> Stdout : 確定したbytesをそのまま渡す
+else 1 byteでも超過
+  Finalize -> Finalize : semantic statusとartifactを保持
+  Finalize -> Stdout : typed unavailableだけ渡す
+  Finalize --> User : publication incomplete / exit 3
+end
+note over Finalize
+再render・再測定で成功へ戻さない
+部分的なstdoutは出さない
+end note
+@enduml
+</script>
+<div id="diagram-publication" class="plantuml-diagram">図を描画しています。</div>
+<details><summary>図のPlantUMLソース</summary><pre data-source-copy="source-publication"></pre></details>
+<p><code>--stdout</code>なしならsummary、<code>manifest</code>ならmanifest、<code>next:semantic-json</code>や<code>next:plantuml</code>なら指定artifactのexact bytesを返します。selectorは一度だけ指定でき、要求formatと一致させます。stderrの診断JSONLをstdoutへ混ぜません。</p>
+<p>selected stdout超過でも、complete/partial_safeという意味解析状態と保存済みartifact descriptorを保持します。stdoutには理由付きunavailable、runはexit 3です。解析自体がpayload_unavailableなら、意味payloadの候補を公開しません。</p>
+<h3>再現性と比較可能性</h3>
+<p>JSONはNFC・UTF-8・固定key順と改行規則に従います。pathは正規化UTF-8 bytes順、semantic recordはID順です。Unicodeは15.0.0に固定し、hostのUnicode databaseを使いません。日本語や結合文字も公式の正規化テストで検証します。</p>
+<p>semantic compatibilityはidentity/algorithm、Unicode、TypeScript、trusted semantic profileの契約を識別します。run fingerprintは実際の入力・設定・制限・toolchainなどを識別します。host固有pathやFDはlocal attestationへ分けます。Issue #9はcompatibilityが一致するsnapshotだけを比較します。</p>
+</section>
 
-    <section id="round21">
-      <h2>Round 21：入力の適用性から公開までを一つのauthority chainにする</h2>
-      <p>Round 21は、入力を読んだ後に別の値を足して結論を作る経路を閉じます。package、config、source graph、failure provenance、Node processの観測を一つずつsealし、下流はそのdecisionとsealed bytesだけを使います。これはproduction実装ではなく、実装前のdata-only contractです。</p>
-      <div class="callout">
-        <strong>順序：</strong> frozen package/control bytes → <code>PackageApplicabilityMatrix</code> → strict config/membership → source graph（open edgeを保持）→ provenance → validated request/response → <code>next-process-launch-observation-v1</code> → decision/publication seal → domain・manifest・stdout・stderr・artifact・exit。
-      </div>
-      <div class="grid">
-        <article class="card"><h3>1. Nextを起動してよいか</h3><p>各project rootのfrozen <code>package.json</code>を一度だけ読み、directな非空 <code>dependencies.next</code> または <code>devDependencies.next</code>だけを <code>applicable</code> とします。missing/no-directは <code>non_applicable</code>、duplicate/conflicting・encoding・JSON・型異常は <code>malformed</code>。全件non-applicableなら <code>NotApplicableDecision</code> としNode probeを禁止し、mixedならapplicable rootだけを残します。</p></article>
-        <article class="card"><h3>2. configを安全に読む</h3><p>JSONCはBOM、文字列外comment、trailing comma（comma→comment→closingも含む）だけを規範化します。<code>extends</code>はproject内の明示的な <code>./...</code> string一件だけ。bare/package、array、absolute、<code>../</code>、URL-like、曖昧さ、cycle、plugins/typeRoots/types、不正なmodule/moduleResolutionはrejectし、read/parse failureを空objectにしません。</p></article>
-        <article class="card"><h3>3. graphの欠落を隠さない</h3><p>frozen bytesからstatic/side-effect import、export-from、literal dynamic <code>import()</code>、literal <code>require()</code>、<code>baseUrl</code>/<code>paths</code>を決定的にscanします。comment・template・regexはfalse edgeにせず、unsupported・ambiguous・unresolved・externalは <code>open_edge</code> として保持します。edgeを落としてpartial-safeにはしません。</p></article>
-        <article class="card"><h3>4. 観測順をそのまま残す</h3><p>request-boundとrequest-independentは同じcatalog由来の <code>stage/code/observed</code> unionです。failureまでのprefixだけをobservedにし、後続のrequest、limits、source plan、toolchain、trust、process、budgetを合成しません。<code>source_control</code>も同じprovenanceからdomain、manifest、stdout、exitへ到達します。</p></article>
-        <article class="card"><h3>5. process identityを分ける</h3><p><code>next-process-launch-observation-v1</code>がprocessの正本です。darwin/linuxでverified-openと実spawnをbindし、realpath・hash/version・hash/spawn identity・primitive・post-spawn equality・argv/cwd/env/FD/group・TOCTOUを検証します。Windowsはv1のproduction scope外です。FD/device/inodeはsecurity evidenceとして保持しますがstable fingerprintからは除外し、unavailableではidentityを捏造しません。</p></article>
-        <article class="card"><h3>6. coverageも実行する</h3><p>criterionごとにsubstantive test、positive vector、negative vector、validatorをfixture indexへ列挙し、test body側のvector IDとmutation assertionを逆向きにも確認します。coverage自身の誤mappingをnegative meta-testで落とすため、HTMLやschemaの存在だけでは通りません。</p></article>
-      </div>
-      <h3>実装者向けの機械的受入順</h3>
-      <ol>
-        <li><code>test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces</code> と read-once testで、matrix・Node permission・全public surfaceの一致を確認する。</li>
-        <li><code>test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_deterministic</code> でJSONC、extends、membershipのpositive/negative表を確認する。</li>
-        <li><code>test_round21_source_graph_scanner_closes_supported_import_planes_and_open_edges</code> でsupported edgeとopen edgeを確認する。</li>
-        <li><code>test_round21_provenance_catalog_has_single_request_independent_source_control_union</code> と process observation testでstage/codeとidentity/fingerprintのmutationを拒否する。</li>
-        <li><code>test_round21_coverage_index_is_bidirectional_and_self_validating</code> でcriterion、vector、validator、mutationの対応を双方向に確認する。</li>
-      </ol>
-      <p class="callout warning"><strong>状態：</strong> reviewed SHA <code>67351f970835afe05b3f4db1aa40b73b3abf0198</code> のRound 21 Strict verdictは <code>P0=0 / P1=5 / P2=1 / fail / implementation_ready=no</code> です。verification-onlyとfull reviewのsessionは証跡上分離して記録します。fresh current-SHA Strictはpending、readinessは未確認、production implementationは未着手です。既存のPlantUMLは8図のまま維持しています。</p>
-    </section>
-
-    <section id="round22">
-      <h2>Round 22：Strict findingを一つの実装前契約へ閉じる</h2>
-      <p>Round 22は reviewed SHA <code>e63c5d411cedc40c85f396cccbf12ca141b1938f</code>（CI <code>33586646010</code>、7/7 success）に対する remediation です。historical Strict verdictは <code>P0=0 / P1=20 / P2=0 / fail / implementation_ready=no</code> のままです。fresh current-SHA Strictはpending、readinessは未確認、production implementationは未着手です。</p>
-      <div class="callout">
-        <strong>一本の因果：</strong> frozen package/control/source bytes → <code>PackageApplicabilityMatrix</code> → closed config/membership → resolved|open source graph → provenance → validated request/opaque response → process observation → <code>PublicationBoundaryDecision</code> → sealed domain・root manifest・stdout・stderr・artifact・exit。
-      </div>
-      <div class="grid">
-        <article class="card"><h3>9つの採択決定</h3><ol><li>malformed packageは <code>CSV-NEXT-APPLICABILITY-002</code>、non-applicableは <code>CSV-NEXT-APPLICABILITY-001</code>。</li><li>source graphはredactedな <code>resolved|open</code> union。</li><li>v1 productionはdarwin/linuxのみ（Windowsは別scope）。</li><li><code>next-process-launch-observation-v1</code>をprocess正本にする。</li><li>portable stable fingerprintとlocal process attestationを分離。</li><li>stable Node SemVer major >=22のみ許可。</li><li>provenanceはtyped observed valueまたはunobserved/null。</li><li>source integrityは専用fatal code、通常の隔離不能は <code>SOURCE-003</code>。</li><li>selected-copy超過は一度だけsealed publicationを作り、<code>LIMIT-003</code>・exit 3・partial stdoutなし。</li></ol></article>
-        <article class="card"><h3>実装者が守る受入順</h3><p>raw capture cap → bounded decode/aggregate → closed schema → base/path/reference/proof → actual model+proof-only count → model gate → entity gate → selected copy。各段階の値は次の段階で再注入せず、最終decisionのsealed bytesだけを公開します。</p><p>JSONはlexicographic <code>sort_keys=True</code>、NFC、UTF-8、LF。path-only行は <code>path:</code> を除いたNFC UTF-8 bytes順です。</p></article>
-        <article class="card"><h3>実行可能な証拠</h3><p><code>tests/fixtures/next_contract_vectors.json</code>のruntime registryが全RGのpositive/negative producerとvalidatorを解決して実行します。unknown、duplicate、未実行、wrong criterion、mutation欠落は失敗です。設定、graph、process、provenance、integrity、root overlap、selected copyのfocused testがこのregistryと同じ契約を検証します。</p></article>
-      </div>
-      <h3>人間が確認するべき状態</h3>
-      <ul>
-        <li>local test/CI greenはStrict passや実装開始可能を意味しません。</li>
-        <li>reference validationはhost processを起動していないため、OS process-level acceptance済みとは呼びません。</li>
-        <li>Round 22の全finding、First Red/Green、検証結果は専用artifactに保存します。fresh same-SHA Strictが <code>P0=0 / P1=0 / review_status=pass</code> を返すまでIssueは実装開始しません。</li>
-      </ul>
-    </section>
+<section id="implementation">
+<h2>9. 後続実装をどう進めるか</h2>
+<p>現在の作業は、後続AIが重要な契約を独自に決めずに実装へ入れるようにする準備です。参照validatorは契約を試すもので、製品adapterや実OS上の動作の完成証拠ではありません。</p>
+<script type="text/plain" class="plantuml-source" id="source-roadmap" data-target="diagram-roadmap">
+@startuml
+title 契約の確認から製品実装へ
+start
+:要件・設計・計画・説明HTMLを一致させる;
+:実schemaと参照vectorで\n正常・改ざん・境界値を検証する;
+:commit・pushし対象SHAを固定する;
+:独立GPT-6 Maxレビュー\nP0/P1を解消する;
+:ここまでが現在の作業;
+partition "後続の製品実装" {
+  :取得・config・one-shot bridgeを実装する;
+  :Component・props・関係・境界を解析する;
+  :検証・出力・stdout・診断を接続する;
+  :実Node・OS境界・offline配布・回帰を検証する;
+}
+stop
+@enduml
+</script>
+<div id="diagram-roadmap" class="plantuml-diagram">図を描画しています。</div>
+<details><summary>図のPlantUMLソース</summary><pre data-source-copy="source-roadmap"></pre></details>
+<div class="table-wrap"><table><thead><tr><th>段階</th><th>完了を示す証拠</th></tr></thead><tbody>
+<tr><td>入力契約</td><td>非該当でNode/config非観測、config優先順位、明示empty、single-read、drift拒否</td></tr>
+<tr><td>意味契約</td><td>宣言とalias、props、namespace/string export、JSX、client境界、target完全性</td></tr>
+<tr><td>検証と公開</td><td>実schemaに適合する全surface、値の差し替え拒否、0/1/2/3/130、exact/+1</td></tr>
+<tr><td>説明と引き継ぎ</td><td>R/D/P・契約・HTMLが一致し、図が描画・拡大できる</td></tr>
+<tr><td>独立評価</td><td>push済み固定SHAの検証と独立GPT-6 Maxレビューの重要指摘ゼロ</td></tr>
+<tr><td>将来の製品検証</td><td>実Node/OS、CompilerHost拒否経路、wheel/sdist、offline再build、既存domain回帰</td></tr>
+</tbody></table></div>
+<p><a href="../requirement.md">Requirement</a>で結果と非目標を確認し、<a href="../design.md">Design</a>で責務・field・失敗規則を読み、<a href="../plan.md">Plan</a>で実装順と受入条件を確認します。具体的なJSONはschema、例と改ざん拒否はcontract testsへ進みます。過去reviewの提案を現在の規則へ直接混ぜません。</p>
+<details id="review-history"><summary>レビューの履歴と検証経路の変更</summary>
+<p>最後の外部StrictはRound 24、対象SHA <code>d660608ff5af76b7c65ca7d067ac797d3cea225f</code>、P0=0 / P1=18 / P2=3 / failでした。これは当時の結果として保持します。</p>
+<p>2026-09-08の指示で外部ChatGPT系スキルを停止し、内部GPT-6による分析と独立Maxレビューへ切り替えました。内部レビューを外部Strict passとは呼びません。</p>
+<p>全指摘と11修復群、runtime inventory分離、二つのスキルの比較、機械的な失敗、再開時テストは<a href="20260907t223650z-disc-nextjs-contract-consolidation.md">契約統合の証拠Artifact</a>に保存しています。最終判定前に対象SHAと証拠の鮮度を確認します。</p>
+</details>
+</section>
   </main>
 
   <div id="diagram-zoom-dialog" class="diagram-zoom-dialog" hidden>

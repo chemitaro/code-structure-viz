@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-02"
+最終更新: "2026-09-08"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -15,9 +15,9 @@ package_sequence_key: "ISSUE-05"
 
 ## Current v1 normative authority
 
-この節がIssue #8の現在の単一正本です。後続に現れる `Round N` の節は、検証履歴を保存するためのhistorical evidenceであり、実装の入力やfallback authorityではありません。現行の実装前契約は、`next-round23-authority-v1`、関連するNext contract schema、reference validator、fixtureの実行可能な対応だけで閉じます。
+この節がIssue #8の現在の単一正本です。後続に現れる `Round N` の節は、検証履歴を保存するためのhistorical evidenceであり、実装の入力やfallback authorityではありません。現行の実装前契約は、既存のpublic schema、reference validator、fixtureの実行可能な対応だけで閉じます。`next-round23-authority-v1` のようなラウンド専用umbrella schemaは正本ではなく、使用しません。
 
-因果鎖は `PackageApplicabilityMatrix` → frozen source acquisition seal → stage-dependent provenance → validated private request/response → semantic decision → final publication decision → domain/root manifest/stdout/stderr/exit です。全surfaceは同じimmutable decisionまたはfinal publication decisionを受け、別のrequest、config、status、measurement、bytesを再構成しません。
+因果鎖は frozen package bytes → `PackageApplicabilityMatrix` → source acquisition/config/source-plan/source-graph → trusted environment・process policy → private request → process observation → validated private response → semantic decision → final publication decision → `run-manifest/v1`、Next domain manifest、semantic JSON、PlantUML、stdout/stderr/exit です。全surfaceは同じimmutable decisionまたはfinal publication decisionを受け、別のrequest、config、status、measurement、bytesを再構成しません。
 
 現行v1で固定する判断は次のとおりです。
 
@@ -28,8 +28,9 @@ package_sequence_key: "ISSUE-05"
 5. provenanceはrequest-independent not-applicable/failureとrequest-bound failure/successのclosed unionです。観測行はschema/versionと実値のSHA-256を持ち、失敗stage以後だけ`unobserved/null`になります。
 6. semantic statusを維持したまま、selected stdoutのexact/+1はfinal publicationだけで一度測定します。+1ではartifact descriptorを保持し、partial bytesを出さずtyped unavailableとします。
 7. Unicode 15.0.0 NFC profile、string export disposition、namespace import memberをversioned closed contractとして固定し、将来のUnicode/table・wheel/sdist変更は別compatibility migrationとします。
+8. run/publication provenanceは `code-structure-viz.run-manifest/v1` と Next domain manifestだけが所有します。checked-in reference fixtureは `code-structure-viz.next-reference-runtime-inventory/v1`、将来の出荷物は `code-structure-viz.next-runtime-build-inventory/v1` とし、旧 `code-structure-viz.next-runtime-manifest/v1` はsupersededで、第二のrun/package authorityとして使用しません。これは `pyproject.toml`、依存、lockfile、wheel、sdistを変更する決定ではありません。
 
-このIssueはproduction adapter/Node実行をまだ含みません。fresh current-SHA Strictが`P0=0 / P1=0 / review_status=pass`になるまで、readinessは未確認、production implementationは未着手です。
+現在の作業は実装前契約の整備であり、production adapter/Node実行は含みません。2026-09-08の明示指示により、利用不能な外部ChatGPT系スキルを停止し、主担当GPT-6の分析と独立GPT-6・推論Maxレビューへ切り替えます。cleanかつpush済みの固定SHAを対象に必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、実装開始可能性は未確定です。内部レビューを外部ChatGPT Strict passと表記しません。過去のStrict結果は当時の証拠として保持します。
 
 ## 目的
 

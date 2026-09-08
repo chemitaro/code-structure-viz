@@ -54,7 +54,8 @@
           "maxItems": 1,
           "prefixItems": [{"oneOf": [
             {"$ref": "#/$defs/domain_incomplete"},
-            {"$ref": "#/$defs/next_complete_domain"}
+            {"$ref": "#/$defs/next_complete_domain"},
+            {"$ref": "#/$defs/next_not_applicable_domain"}
           ]}]
         },
         "manifest": {"const": "run-manifest.json"}

@@ -1,221 +1,78 @@
-# Next runtime manifest v1
+# Next.js runtime inventoryと実行manifestの分離
 
-## Current v1 normative authority
+## 三つの用途
 
-runtime manifestはfinal publication decisionと同じsemantic decision、process observation、provenance、applicability、artifact descriptorを投影します。request-independent not-applicable/failure branchは未観測のrequest/config/toolchainを合成せず、applicable branchだけがNode observationを持ちます。legacy descriptorやfixtureはauthorityではありません。以下のRound節はhistorical evidence（非normative）です。
+Issue #8 の実装前契約です。「runtime manifest」の語で実行結果と同梱ファイル一覧を兼用しません。
+この文書のパスは既存リンクを維持していますが、正規schema名は次のとおりです。
 
-Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
-`48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
-Runtime and trusted fixture attestation remain data-only pre-implementation
-contracts. The Round 12 raw-response and cross-surface publication checks are
-locally represented; fresh exact-SHA Strict is pending, readiness is
-unconfirmed, and production implementation has not started. The fail result is
-not rewritten as a pass.
-
-Round 13 review state: Strict reviewed SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`
-with CI run `33446911714` (7/7 success) and returned `review_status: fail`,
-P0=0, P1=9, P2=1. The local publication checks bind semantic and PlantUML
-bytes, artifact hashes, and root descriptors to the same validated model and
-reject schema-valid order or payload substitutions. The historical fail is not
-rewritten: fresh exact-SHA Strict is pending, readiness is unconfirmed, and
-production implementation has not started.
-
-`schemas/next-runtime-manifest-v1.schema.json` is the checked-in compatibility
-unit inventory. `members` are sorted by safe wheel-relative path and unique;
-`licenses` are sorted by `(ecosystem,name,version,license_id)` and unique.
-Member paths are confined to `src/code_structure_viz/_next_runtime/` and may
-not contain traversal segments. Each member carries the physical fixture path,
-the virtual runtime path, its actual UTF-8 byte size, and its SHA-256 digest;
-the manifest has no untracked files. The physical-to-virtual mapping is
-closed and is validated against the checked-in fixture bytes, so a path
-substitution cannot pass by changing only metadata.
-
-The v1 filesystem set is exact, not a minimum:
-
-| checked-in fixture bytes | virtual path | role |
+| 用途 | schema / 正本 | 証明するもの |
 | --- | --- | --- |
-| `tests/fixtures/next_runtime/adapter.js` | `src/code_structure_viz/_next_runtime/adapter.js` | `adapter` |
-| `tests/fixtures/next_runtime/manifest.json` | `src/code_structure_viz/_next_runtime/manifest.json` | `manifest` |
-| `tests/fixtures/next_runtime/trusted.d.ts` | `src/code_structure_viz/_next_runtime/trusted.d.ts` | `trusted_declaration` |
-| `tests/fixtures/next_runtime/typescript-lib.d.ts` | `src/code_structure_viz/_next_runtime/typescript-lib.d.ts` | `typescript_lib` |
+| 実行結果 | run-manifest-v1、next-domain-manifest-v1、next-run-decision-v1、next-publication-decision-v1 | その実行の観測、意味判定、公開bytes、診断、終了code |
+| 参照fixtureのinventory | next-reference-runtime-inventory-v1 | チェックイン済み4ファイルとそのmapping、内容hash、license |
+| 将来の製品build inventory | next-runtime-build-inventory-v1 | 配布物に入れるruntime resourceのexact setとbuild入力/出力hash |
 
-The data-only validator requires exactly these four paths and four distinct
-roles. Removal, addition, duplicate path, role substitution, unsafe path, or
-filesystem-set drift is rejected. The trusted declaration files and certified
-symbols are the exact four-file/14-symbol profile described by
-`next-semantic-v1`; their per-file SHA-256 and license ID are checked before
-the environment digest is accepted.
+旧next-runtime-manifest-v1.schema.jsonは用途が曖昧なため廃止し、後二者へ分離しました。
+名前変更はfixtureを製品runtimeに昇格させるものではありません。現時点で製品adapter、wheel/sdistの変更は行いません。
 
-The v1 license inventory is exactly two rows: npm `typescript@5.9.2` under
-Apache-2.0 and the CodeStructureViz trusted-types resource under MIT. Source
-URLs are HTTPS, content/lock digests are 64 lowercase hex characters, and the
-ordered inventory digest is reused by the trusted environment and this
-runtime manifest. A missing, extra, reordered, or changed license row is a
-contract failure.
+## 参照fixture inventory
 
-The digest preimages are exact canonical JSON:
+next-reference-runtime-inventory/v1は4件のexact setです。
+
+| 実在するfixture | 参照上のvirtual path | role |
+| --- | --- | --- |
+| tests/fixtures/next_runtime/adapter.js | src/code_structure_viz/_next_runtime/adapter.js | adapter |
+| tests/fixtures/next_runtime/manifest.json | src/code_structure_viz/_next_runtime/manifest.json | manifest |
+| tests/fixtures/next_runtime/trusted.d.ts | src/code_structure_viz/_next_runtime/trusted.d.ts | trusted_declaration |
+| tests/fixtures/next_runtime/typescript-lib.d.ts | src/code_structure_viz/_next_runtime/typescript-lib.d.ts | typescript_lib |
+
+virtual pathはfixtureの対応関係であり、実wheelのmember名ではありません。
+実filesのUTF-8 bytes、size、SHA-256と各rowを一致させ、追加・欠落・重複・role変更・path変更を拒否します。
+trusted semantic profileの4宣言ファイル/認証symbol集合は別のinventoryです。上表の小さなtrusted.d.tsをその代用にしません。
+
+membersはpath順、licensesはecosystem/name/version/license_id順です。
+licenseはTypeScript 5.9.2のApache-2.0とCodeStructureViz trusted-typesのMITの2件を閉じた集合として検証します。
 
 ```text
-build_input_digest  = SHA-256(canonical-json({members, licenses}))
-build_output_digest = SHA-256(canonical-json({members}))
-manifest_sha256     = SHA-256(canonical-json(manifest without manifest_sha256))
+build_input_digest  = SHA256(canonical-json({members, licenses}))
+build_output_digest = SHA256(canonical-json({members}))
+inventory_attestation.sha256 = SHA256(canonical-json({members}))
+manifest_sha256 = SHA256(canonical-json(inventory without manifest_sha256))
 ```
 
-`inventory_attestation` repeats the exact sorted `members` array and carries
-`SHA-256(canonical-json({members}))`. The manifest digest deliberately excludes
-only `manifest_sha256`; it includes the attestation, while the attestation
-does not include the manifest digest. This acyclic construction permits an
-independent known-answer check for every member's real bytes, size, and hash.
+attestation.membersはmembersのexact copyです。自己hashをそのpreimageに含めず、循環を作りません。
+テスト上のvalidate_runtime_manifestという旧helper名は、この参照inventoryだけを検証します。
 
-Canonical JSON is UTF-8, NFC-normalized, sorted object keys, compact
-separators, and no floating-point values. The data-only vectors in
-`tests/contracts/test_next_contracts.py` include known-answer and traversal,
-duplicate, and digest-negative cases. The existing Python/SQLAlchemy runtime
-inventory remains outside this Next section and is not rewritten by Issue #8.
+## 将来の製品build inventory
 
-## Round 15 provenance boundary
+next-runtime-build-inventory/v1は、製品resourceを実装した段階でbuild ownerが生成します。
+現在のschemaはその形式を定めるものであり、製品ファイルが存在・同梱済みという証拠ではありません。
 
-The runtime manifest is one input to the immutable `NextPublicationContext`,
-not an independent publication authority. The context records the actual
-toolchain/trusted-environment descriptor and its digest together with the
-sealed source-view and source-plan identities. A pre-response failure may
-carry a null or unavailable toolchain version, but it retains the same closed
-failure kind, diagnostic, known/null counts, and exit behavior; a writer must
-not substitute a local default runtime inventory. The Unicode 15.0.0 table
-version and exact table digest are part of this trusted profile and its
-compatibility/run-fingerprint preimages.
+- membersはsource_kind、source_path、package_path、size_bytes、sha256、roleを持つ。
+- source_pathはbuild入力のrepository-relative path。package_pathはwheel内の配布相対pathで、src/ layout prefixと区別する。
+- adapter、固定TypeScript資材、trusted declarations、license資材を含むexact resource setをinventory_versionごとに定義する。
+- path traversal、絶対path、symlink逃逸、重複正規化pathを拒否する。各roleとsource_kindは対応させる。
+- source bytes、build output bytes、archiveから読んだbytesのsize/hashを照合する。hashを記したJSONだけで同梱を証明しない。
+- inventory自身とarchiveのRECORD等の自己参照的metadataをresource setから分離する。archive全体を相互hashする循環を作らない。
 
-## Round 16 launch provenance
+将来実装の受入は次の順序で行います。
 
-The runtime manifest is also the source of the versioned Next process-launch
-descriptor. The descriptor records verified absolute Node realpath and digest,
-symlink policy, fixed argv and cwd, the exact environment allowlist and denied
-variables, piped stdio, close-on-exec FD policy, and process-group termination
-scope. PATH shadow, symlink replacement, hostile environment/locale/TZ, and
-extra FD mutations are rejected before a publication decision exists. Its
-digest is carried by `NextPublicationContext` and the run fingerprint; it is
-not reconstructed from a host default.
+1. versioned build recipeとlocked inputsから、期待するruntime resourceのexact member setを作る。
+2. clean buildでwheelとsdistを生成する。現在のpyprojectを仕様作成だけのために変更しない。
+3. wheelのcode_structure_viz/_next_runtime/配下を列挙し、期待集合との完全一致・内容hash・licenseを検証する。
+4. sdistは配布名/versionの単一rootを確認してから相対化し、同じ資材対応を検証する。sdist由来の再buildでも同じruntime bytesを得る。
+5. missing/extra/duplicate/traversal/hash/role/licenseのmutationを一つずつ失敗させる。
+6. インストール先でpackage resourcesから資材を取得し、target側のnode_modules・config・scriptに依存しない実行を受け入れる。
 
-The descriptor is mandatory for every decision variant, including
-request-independent pre-response failures and not-applicable runs. Its
-`node_status` must agree with the observed toolchain, and omission or
-substitution is rejected before any projection is created. A writer must not
-construct a replacement descriptor from a default, PATH lookup, or fixture.
+参照4ファイル検査がgreenでも、この製品package gateをpassにしません。
+member setを変更するときはinventory versionと既知値・migration・compatibility影響を同時に更新します。
 
-Once child capture, private response, public stderr, and selected-copy
-measurements are sealed, the immutable `PublicationBoundaryDecision` is the
-sole input for domain, root manifest, artifact, stdout, stderr, and exit
-projection. No surface may accept an independent publication outcome or
-measurement map. This keeps selected-copy failure separate from the semantic
-domain while still making the root publication result incomplete with exit 3.
+## 実行時の関係
 
-The reference harness proves incremental capture semantics but does not claim
-OS process-level coverage. Fresh current-SHA Strict is pending and production
-implementation remains absent.
+製品build inventoryのadapter content identityは起動前policyの入力になります。
+型環境は自身の完全digest、Nodeはhostの検証済み実体identityを持ちます。
+それぞれを [next-process-launch-v1.md](next-process-launch-v1.md) と [next-compatibility-v1.md](next-compatibility-v1.md) の境界で結合します。
 
-## Round 19 stage provenance and config correlation
+run manifestはその実行のsealed decisionを投影するだけです。inventoryから未観測のrequest、Node起動、応答成功を合成しません。
+未観測段階のnull、partial-safe、公開失敗の扱いはprovenance/publication契約が所有します。
 
-For the Next branch, `request_independent` is a required boolean at both the
-top-level run manifest projection and the nested domain/config projection.
-The `true` branch is a closed request-independent failure: it has a catalog
-stage/code pair, empty project/request/config payloads, and explicit nulls for
-values not observed before that stage. The `false` branch is the normal
-observed request branch and carries the resolved source plan, limits, toolchain,
-and trusted environment. The two branches are disjoint; deleting the
-discriminator or injecting normal fields into the independent branch is a
-schema/reference failure.
-
-`next-provenance-v1` records each observation as `{state, value}`. A failure
-may retain only its observed prefix: source-selection/read/integrity keeps
-limits and source-plan facts already observed, while config/project failures
-keep them unobserved. The same stage/code catalog row controls reference
-permissions, counts, outcome, and exit code. `CSV-NEXT-TARGET-001` requires a
-closed target reason, while other diagnostic codes forbid that reason.
-
-Round 19 evidence is covered by
-`test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutations`,
-`test_round19_next_config_discriminator_is_required_and_disjoint`, and the
-schema tests for `next-provenance-v1`. Fresh current-SHA Strict is pending,
-readiness is unconfirmed, and production implementation is absent.
-
-## Round 22 publication authority
-
-Applicability, source control, provenance, and process observations are sealed before publication. The
-final `PublicationBoundaryDecision` alone owns summary/root-manifest/domain/artifact/typed-unavailable
-bytes, diagnostic JSONL, selected descriptor, and capture/copy measurements; every projection returns
-those bytes without rerendering or accepting an external status or candidate. A selected-copy limit breach
-retains the semantic result and persisted descriptor, then seals one incomplete/exit-3 result with
-`CSV-NEXT-LIMIT-003` stderr and no partial stdout.
-
-The normative process observation supports v1 production on darwin/linux only; Windows is out of scope.
-Its portable stable fingerprint excludes host path, OS primitive, device/inode, and FD values, which remain
-in the local process attestation. Fresh current-SHA Strict is pending, readiness is unconfirmed, and
-production implementation is absent.
-
-## Round 20 source applicability and manifest authority
-
-The root manifest does not invent a Next project when acquisition has not
-observed one. `PackageApplicabilityMatrix` is derived from the frozen
-project-root package bytes and direct `dependencies.next`/
-`devDependencies.next` values. An all-non-applicable matrix selects the closed
-not-applicable branch without a Node probe. Missing/non-direct packages and
-malformed package evidence remain distinguishable; malformed evidence is not
-silently treated as an empty project.
-
-Control discovery and source membership are derived inside the sealed source
-acquisition from known root controls, strict JSONC, segment glob grammar, and
-the frozen inventory. The source graph is recomputed from frozen bytes and
-resolved ownership/import edges. A caller-provided graph, edge deletion, or
-digest recomputation cannot alter the manifest's source authority.
-
-The source result is projected once as `CompleteSourceSeal`, `PartialSourceSeal`,
-`SourceAcquisitionUnavailable`, or `SourceIntegrityFatal`. The resulting
-diagnostic code, outcome, payload/manifest availability, stdout reason, and exit
-are then copied to the root manifest. Round 20 reference evidence is
-`test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection`
-and `test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection`.
-Fresh current-SHA Strict remains pending, readiness is unconfirmed, and
-production implementation is absent.
-
-## Round 17 observed launch and publication provenance
-
-The `next-process-launch-observation-v1` object is an observed boundary value,
-not a default runtime object. For an available Node run it binds the verified
-absolute realpath, executable digest, version, and the actual executable
-passed to spawn; for an unavailable or not-applicable run it records explicit
-absence as required by the closed schema. Toolchain status and observation
-status must agree, and the observation is included in the compatibility/run-
-fingerprint preimage. A fixture value is acceptable only as a named
-reference-test observation; it is not a production fallback and cannot be
-substituted after sealing. Any legacy descriptor is derived from it.
-
-`PublicationBoundaryDecision` then seals the actual validated response bytes,
-validated request identity, model digest, exact artifact byte map and
-descriptors, selector bytes, diagnostic JSONL, and all capture/copy
-measurements. Domain, root manifest, stdout, stderr, artifact, and exit
-projections consume that final object only; they do not re-render or accept a
-second measurement/outcome map. A capture or public-stderr breach produces a
-typed unavailable result with no partial bytes. A selected-copy breach keeps
-the persisted artifact descriptor and semantic result but records the
-publication failure and exit 3. The faithful reference harness is not an OS
-process-level test. Fresh current-SHA Strict is pending and production
-implementation remains absent.
-
-## Round 21 applicability and process authority
-
-The manifest consumes the `PackageApplicabilityMatrix` projection, not an inferred project list. Each
-frozen project-root package is read once: direct non-empty Next dependency is `applicable`, missing/no-direct
-Next is `non_applicable`, and duplicate/conflicting or malformed package evidence is `malformed`. An all-
-non-applicable matrix emits the closed `NotApplicableDecision` without Node probing; a mixed matrix retains
-only applicable roots; malformed evidence is global unavailable. Matrix observations, project filter, toolchain
-permission, domain/root/stdout/stderr, and exit are one decision-owned projection.
-
-The source graph is derived from sealed bytes with the module-plane scanner (static/side-effect imports,
-export-from, literal dynamic import, literal require, and baseUrl/paths). Open, unresolved, ambiguous, or
-unsupported edges remain explicit and prevent `partial_safe`. Request-bound and request-independent manifest
-provenance use one catalog-derived stage/code union and never synthesize unobserved suffix values.
-
-The normative process object is `next-process-launch-observation-v1`; any legacy descriptor is a derived view.
-The observation binds darwin/linux executable identity and spawn, while stable fingerprint excludes
-host-ephemeral FD/device/inode values that remain security evidence. Fresh current-SHA Strict is pending,
-readiness is unconfirmed, and production implementation is absent.
+過去Roundのレビュー経緯はGit履歴およびIssue artifactsへ移しました。現在の判定は最終固定SHAレビュー前であり、実装着手可能との認定はまだありません。

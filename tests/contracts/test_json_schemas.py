@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import subprocess
 import sys
@@ -19,7 +21,13 @@ from code_structure_viz.adapters.sqlalchemy.semantic_json import render_semantic
 from code_structure_viz.source.source_view import SourceView
 from tests.contracts.ecmascript_unicode_15_0 import TABLE_DIGEST
 from tests.contracts.next_reference_validation import (
+    _compatibility_descriptor_snapshot,
+    _process_launch_for_toolchain,
+    _toolchain_snapshot,
+    _trusted_environment_snapshot,
+    digest,
     process_launch_local_attestation_digest,
+    process_launch_observation_from_descriptor,
     process_launch_stable_fingerprint,
 )
 from tests.helpers.acceptance import (
@@ -55,7 +63,10 @@ def _validator(name: str) -> Draft202012Validator:
         "next-config-v1",
         "next-domain-manifest-v1",
         "next-process-launch-v1",
+        "next-process-launch-policy-v1",
         "next-process-launch-observation-v1",
+        "next-run-decision-v1",
+        "next-publication-decision-v1",
         "next-export-graph-raw-v1",
         "next-limits-v1",
         "next-semantic-v1",
@@ -67,7 +78,8 @@ def _validator(name: str) -> Draft202012Validator:
         "next-package-applicability-v1",
         "next-applicability-decision-v1",
         "next-trusted-type-environment-v1",
-        "next-round23-authority-v1",
+        "next-reference-runtime-inventory-v1",
+        "next-runtime-build-inventory-v1",
     }
     registry = Registry()
     for resource_name in resources:
@@ -89,10 +101,14 @@ def _validator(name: str) -> Draft202012Validator:
         "next-config-v1.schema.json",
         "next-domain-manifest-v1.schema.json",
         "next-process-launch-v1.schema.json",
+        "next-process-launch-policy-v1.schema.json",
         "next-process-launch-observation-v1.schema.json",
+        "next-run-decision-v1.schema.json",
+        "next-publication-decision-v1.schema.json",
         "next-export-graph-raw-v1.schema.json",
         "next-limits-v1.schema.json",
-        "next-runtime-manifest-v1.schema.json",
+        "next-reference-runtime-inventory-v1.schema.json",
+        "next-runtime-build-inventory-v1.schema.json",
         "next-source-plan-v1.schema.json",
         "next-path-v1.schema.json",
         "next-root-or-path-v1.schema.json",
@@ -102,7 +118,6 @@ def _validator(name: str) -> Draft202012Validator:
         "next-applicability-decision-v1.schema.json",
         "next-semantic-v1.schema.json",
         "next-trusted-type-environment-v1.schema.json",
-        "next-round23-authority-v1.schema.json",
         "run-manifest-v1.schema.json",
         "run-summary-v1.schema.json",
         "semantic-v1.schema.json",
@@ -193,7 +208,21 @@ def _next_source_plan(config_project: Mapping[str, object]) -> dict[str, object]
         "hard_exclusions": [".git", "node_modules", ".next", "out", "dist", "build", "coverage"],
         "limits": _next_limits(),
         "trusted_environment_digest": "7" * 64,
-        "source_graph": {"nodes": [], "edges": [], "open_edges": []},
+        "config_resolution": [
+            {
+                "project_root": ".",
+                "config_path": "tsconfig.json",
+                "declaring_paths": [],
+                "membership": {"kind": "default", "patterns": ["src"], "exclude": []},
+                "path_resolution_order": [],
+            }
+        ],
+        "source_graph": {
+            "nodes": [],
+            "edges": [],
+            "open_edges": [],
+            "graph_digest": digest({"nodes": [], "edges": [], "open_edges": []}),
+        },
     }
 
 
@@ -226,32 +255,18 @@ def _next_coverage() -> dict[str, object]:
 
 
 def _next_compatibility_descriptor() -> dict[str, object]:
-    return {
-        "schema": "code-structure-viz.next-semantic-compatibility/v1",
-        "semantic_schema": "code-structure-viz.semantic/v1",
-        "identity_versions": {
-            "project": 1,
-            "file": 1,
-            "module": 1,
-            "component": 1,
-            "member": 1,
-            "relation": 1,
-            "fact": 1,
-            "props_ir": 1,
-        },
-        "algorithm_versions": {
-            "recognition": 1,
-            "export": 1,
-            "props": 1,
-            "relation": 1,
-            "fact": 1,
-            "boundary": 1,
-            "identifier_unicode": "ecma-unicode-15.0",
-            "identifier_unicode_table_digest": TABLE_DIGEST,
-        },
-        "semantic_profile_id": "next-trusted-profile-v1",
-        "compatibility_id": "a" * 64,
-    }
+    return _compatibility_descriptor_snapshot(
+        toolchain=_toolchain_snapshot(),
+        trusted_environment=_trusted_environment_snapshot(),
+        process_observation=process_launch_observation_from_descriptor(
+            _process_launch_for_toolchain(
+                _toolchain_snapshot(),
+                node_realpath="/usr/local/bin/node",
+                node_sha256="1" * 64,
+                spawn_executable="/usr/local/bin/node",
+            )
+        ),
+    )
 
 
 def _next_project() -> dict[str, object]:
@@ -581,6 +596,15 @@ def test_next_semantic_and_domain_manifest_contracts_resolve_and_reject_extras()
             "trusted_environment_digest": "7" * 64,
             "source_plan": _next_source_plan(config_project),
             "source_plan_digest": "c" * 64,
+            "config_resolution": [
+                {
+                    "project_root": ".",
+                    "config_path": "tsconfig.json",
+                    "declaring_paths": [],
+                    "membership": {"kind": "default", "patterns": ["src"], "exclude": []},
+                    "path_resolution_order": [],
+                }
+            ],
             "domain_config_digest": "d" * 64,
         },
         "projects": [_next_project()],
@@ -957,6 +981,18 @@ def test_round19_process_observation_is_fixture_or_supported_os_production() -> 
         "kind": "production",
         "host_os": "linux",
         "node_status": "available",
+        "policy_digest": "2" * 64,
+        "adapter": {
+            "schema": "code-structure-viz.next-adapter/v1",
+            "version": "1.0.0",
+            "sha256": "a" * 64,
+        },
+        "timeout_seconds": 60,
+        "capture_limits": {
+            "max_adapter_stdout_capture_bytes": 16777216,
+            "max_adapter_stderr_capture_bytes": 65536,
+            "max_adapter_response_bytes": 16777216,
+        },
         "node_realpath": "/usr/local/bin/node",
         "node_sha256": "1" * 64,
         "node_version": "22.14.0",
@@ -1006,6 +1042,46 @@ def test_round19_process_observation_is_fixture_or_supported_os_production() -> 
             validator.validate(mutation)
 
 
+def test_round24_process_launch_policy_is_closed_and_not_an_observation() -> None:
+    validator = _validator("next-process-launch-policy-v1.schema.json")
+    policy = {
+        "schema": "code-structure-viz.next-process-launch-policy/v1",
+        "version": 1,
+        "platform": "fixture",
+        "node": {
+            "realpath": "/usr/local/bin/node",
+            "sha256": "1" * 64,
+            "version": "22.14.0",
+        },
+        "adapter": {
+            "schema": "code-structure-viz.next-adapter/v1",
+            "version": "1.0.0",
+            "sha256": "a" * 64,
+        },
+        "argv": ["/usr/local/bin/node", "/.code-structure-viz/next-adapter.mjs"],
+        "shell": False,
+        "cwd": "/.code-structure-viz/private-run",
+        "env_allowlist": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+        "denied_env": ["NODE_OPTIONS", "NODE_PATH", "PATH", "npm_config_user_config"],
+        "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
+        "fd_inheritance": {"close_fds": True, "allowed": [0, 1, 2]},
+        "process_group": {"create": True, "terminate_scope": "group", "wait_after_terminate": True},
+        "timeout_seconds": 30,
+        "capture_limits": {
+            "max_adapter_stdout_capture_bytes": 16 * 1024 * 1024,
+            "max_adapter_stderr_capture_bytes": 16 * 1024 * 1024,
+            "max_adapter_response_bytes": 16 * 1024 * 1024,
+        },
+    }
+    validator.validate(policy)
+    with pytest.raises(ValidationError):
+        validator.validate({**policy, "observation": {"node_status": "available"}})
+    with pytest.raises(ValidationError):
+        validator.validate({**policy, "shell": True})
+    with pytest.raises(ValidationError):
+        validator.validate({**policy, "denied_env": ["NODE_OPTIONS"]})
+
+
 def test_round19_stage_provenance_is_closed_and_preserves_observed_prefix() -> None:
     validator = _validator("next-provenance-v1.schema.json")
 
@@ -1024,10 +1100,13 @@ def test_round19_stage_provenance_is_closed_and_preserves_observed_prefix() -> N
         }
 
     independent = {
-        "kind": "request_independent",
+        "kind": "request_independent_failure",
         "stage": "source_selection",
         "failure_code": "CSV-NEXT-SOURCE-003",
         "observed": {
+            "applicability": row(True),
+            "config": row(True),
+            "source": row(True),
             "request": row(False),
             "limits": row(True),
             "source_plan": row(True),
@@ -1035,6 +1114,7 @@ def test_round19_stage_provenance_is_closed_and_preserves_observed_prefix() -> N
             "trusted_environment": row(False),
             "compatibility": row(False),
             "process_launch": row(False),
+            "response": row(False),
             "budget": row(False),
         },
     }
@@ -1044,11 +1124,11 @@ def test_round19_stage_provenance_is_closed_and_preserves_observed_prefix() -> N
             **independent,
             "stage": "config_validation",
             "failure_code": "CSV-NEXT-CONFIG-001",
-            "observed": {key: row(False) for key in independent["observed"]},
+            "observed": {key: row(key == "applicability") for key in independent["observed"]},
         }
     )
     bound = {
-        "kind": "request_bound",
+        "kind": "request_bound_success",
         "stage": None,
         "failure_code": None,
         "observed": {key: row(True) for key in independent["observed"]},
@@ -2118,3 +2198,156 @@ def test_diagnostic_schema_rejects_catalog_metadata_and_context_mismatches() -> 
     for mutation in mutations:
         with pytest.raises(ValidationError):
             validator.validate(mutation)
+
+
+def _next_request_independent_decision_wire() -> dict[str, object]:
+    unobserved = {"state": "unobserved", "value": None}
+    observed: dict[str, Any] = {
+        name: deepcopy(unobserved)
+        for name in (
+            "applicability",
+            "config",
+            "source",
+            "limits",
+            "toolchain",
+            "trusted_environment",
+            "process",
+            "response",
+            "budget",
+        )
+    }
+    observed["applicability"] = {
+        "state": "observed",
+        "value": {
+            "schema": "code-structure-viz.next-observation/v1",
+            "version": 1,
+            "sha256": "b" * 64,
+        },
+    }
+    provenance = {
+        "kind": "request_independent_failure",
+        "stage": "project_validation",
+        "failure_code": "CSV-NEXT-PROJECT-002",
+        "observed": {
+            "applicability": deepcopy(observed["applicability"]),
+            "config": deepcopy(observed["config"]),
+            "source": deepcopy(observed["source"]),
+            "request": deepcopy(unobserved),
+            "limits": deepcopy(unobserved),
+            "source_plan": deepcopy(unobserved),
+            "toolchain": deepcopy(unobserved),
+            "trusted_environment": deepcopy(unobserved),
+            "compatibility": deepcopy(unobserved),
+            "process_launch": deepcopy(unobserved),
+            "response": deepcopy(unobserved),
+            "budget": deepcopy(unobserved),
+        },
+    }
+    observed_prefix = {
+        name: deepcopy(unobserved)
+        for name in (
+            "applicability",
+            "config",
+            "source",
+            "limits",
+            "toolchain",
+            "trusted_environment",
+            "process",
+            "response",
+            "budget",
+        )
+    }
+    observed_prefix["applicability"] = {"state": "observed", "value": "b" * 64}
+    return {
+        "schema": "code-structure-viz.next-run-decision/v1",
+        "version": 1,
+        "kind": "request_independent_failure",
+        "outcome": "payload_unavailable",
+        "request_independent": True,
+        "payload_available": False,
+        "exit_code": 3,
+        "provenance": provenance,
+        "context": {
+            "request_id": None,
+            "run_fingerprint": "a" * 64,
+            "run_context": {
+                "requested_formats": ["semantic-json"],
+                "budget_requested": None,
+                "budget_resolved": None,
+                "budget_source": "unobserved",
+                "stdout_selector": None,
+            },
+            "source_plan_digest": None,
+            "source_view_fingerprint": None,
+            "compatibility_id": None,
+            "process_observation_digest": None,
+            "observed_prefix": observed_prefix,
+        },
+        "request": None,
+        "response": None,
+    }
+
+
+def _next_publication_decision_wire() -> dict[str, object]:
+    result = (
+        b'{"availability":false,"artifact":null,"domain_status":"incomplete",'
+        b'"schema":"code-structure-viz.stdout-result/v1",'
+        b'"selector":"next:semantic-json","stable_reason":"domain_payload_unavailable",'
+        b'"type":"stdout_result"}\n'
+    )
+    empty_sha = "e" * 64
+    measurement = {"allowed": False, "measured_bytes": 0, "retained_bytes": 0}
+    return {
+        "schema": "code-structure-viz.next-publication-decision/v1",
+        "version": 1,
+        "semantic_decision": _next_request_independent_decision_wire(),
+        "response": None,
+        "artifacts": [],
+        "stdout": {
+            "selector": "next:semantic-json",
+            "availability": False,
+            "copy_status": "not_attempted",
+            "candidate": None,
+            "result_bytes_base64": base64.b64encode(result).decode("ascii"),
+            "result_size_bytes": len(result),
+            "result_sha256": hashlib.sha256(result).hexdigest(),
+        },
+        "stderr": {
+            "available": True,
+            "bytes_base64": "",
+            "size_bytes": 0,
+            "sha256": empty_sha,
+            "diagnostics_sha256": empty_sha,
+        },
+        "measurements": {
+            "adapter_stdout": deepcopy(measurement),
+            "adapter_stderr": deepcopy(measurement),
+            "public_stderr": deepcopy(measurement),
+            "selected_stdout": deepcopy(measurement),
+        },
+        "publication_outcome": "payload_unavailable",
+        "exit_code": 3,
+        "seal": {
+            "algorithm": "sha256",
+            "sha256": "f" * 64,
+            "preimage_sha256": "0" * 64,
+        },
+    }
+
+
+def test_round24_actual_decision_and_publication_schemas_are_composed_and_closed() -> None:
+    decision_validator = _validator("next-run-decision-v1.schema.json")
+    publication_validator = _validator("next-publication-decision-v1.schema.json")
+    decision = _next_request_independent_decision_wire()
+    publication = _next_publication_decision_wire()
+    decision_validator.validate(decision)
+    publication_validator.validate(publication)
+
+    bad_decision = deepcopy(decision)
+    cast(dict[str, object], bad_decision["context"])["untrusted_fixture"] = True
+    with pytest.raises(ValidationError):
+        decision_validator.validate(bad_decision)
+    bad_publication = deepcopy(publication)
+    cast(dict[str, object], bad_publication["stdout"])["copy_status"] = "published"
+    with pytest.raises(ValidationError):
+        publication_validator.validate(bad_publication)

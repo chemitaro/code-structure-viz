@@ -1,127 +1,83 @@
-# Next semantic compatibility descriptor v1
+# Next.js semantic compatibility v1
 
-## Current v1 normative authority
+## 目的と適用境界
 
-compatibility descriptorはUnicode 15.0.0 NFC profile/table digest、TypeScript/trusted identities、portable toolchain fingerprintを含みます。Node content/versionとadapter contentはportable digestへ含め、host path、OS primitive、device/inode/FDはlocal attestationへ分離します。future Unicode profileやwheel/sdist member変更はversioned migration/known-answer contractであり、current pyprojectは変更しません。以下のRound節はhistorical evidence（非normative）です。
+Issue #8 の実装前契約です。比較対象のソース内容が変わっても、同じ意味で解釈したスナップショットかを判定します。
+Issue #9 は compatibility_id が一致するスナップショットだけを比較します。不一致は内容差分ではなく比較不能です。
 
-Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
-`48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
-Round 12's data-only remediation keeps project and file identity versions in the
-compatibility preimage and preserves the same exact-SHA Strict gate. A fresh
-exact-SHA Strict review is pending, readiness is unconfirmed, and production
-implementation has not started. The historical Round 11 result remains evidence,
-not a pass.
+現在の正本はこの文書、next-compatibility-v1.schema.json、参照計算と既知値テストです。
+過去Roundの記述はGit履歴とIssue artifactsのレビュー記録へ分離しました。旧「Node/adapter patchを変えてもID不変」という規則は採用しません。
 
-Round 13 review state: Strict reviewed SHA `991516bf730f4f2ddb3d15067702dcfae95ec6b1`
-with CI run `33446911714` (7/7 success) and returned `review_status: fail`,
-P0=0, P1=9, P2=1. The local data-only contract pins the IdentifierName
-implementation to the checked-in Unicode 15.0.0 profile, including
-`Other_ID_Start`, `Other_ID_Continue`, and U+00B7, and includes that profile
-version in compatibility and run-fingerprint preimages. Fresh exact-SHA Strict
-is pending, readiness is unconfirmed, and production implementation has not
-started; the historical fail remains unchanged.
+## 正確なpreimage
 
-Round 14 closes the implementation provenance: the profile is a checked-in,
-dependency-free interval table in
-`tests/contracts/ecmascript_unicode_15_0.py`, with table digest
-`c9336daa555ce98e93cbd48e6b91df22f50a221881bd10b3ed79cf9180297969`.
-The table is based on Unicode 15.0.0 `ID_Start`/`ID_Continue` plus the
-explicit `Other_ID_Start`, `Other_ID_Continue` (including U+00B7), and
-join-control sets. Runtime classification must not call the host Python UCD;
-the profile version and exact table digest are checked in the trusted
-environment, compatibility descriptor, and run-fingerprint preimage. The
-TypeScript 5.9.2 scanner remains the pinned semantic consumer; changing the
-table requires a new compatibility/profile version and known-answer digest.
-Operational resource limits such as `max_model_records` are intentionally
-excluded from this semantic compatibility preimage. They are included in the
-request/run-fingerprint preimages, so changing the resolved limit changes run
-identity while leaving semantic compatibility unchanged.
+compatibility_id は次の8項目だけのcanonical JSONのSHA-256です。descriptorのtransport schemaとcompatibility_id自身は除きます。
 
-`code-structure-viz.next-semantic-compatibility/v1` is a closed descriptor,
-not a caller-supplied label. It contains the public semantic schema ID, the
-eight identity versions (project, file, module, component, member, relation,
-fact, and PropsTypeIR), the recognition/export/props/relation/fact/boundary
-algorithm versions, and the trusted semantic profile ID.
+| 項目 | 意味・取得元 |
+| --- | --- |
+| semantic_schema | 公開semantic schemaの識別子 |
+| identity_versions | project/file/module/component/member/relation/fact/props_irの各identity version |
+| algorithm_versions | recognition/export/props/relation/fact/boundaryとIdentifierName Unicode profile |
+| semantic_profile_id | next-trusted-profile-v1 |
+| unicode_profile | Unicode 15.0.0 NFCのprofile/algorithm/table/full-scalar KAT digest |
+| typescript_identity | 固定したTypeScript 5.9.2のidentity |
+| trusted_type_environment_digest | 認証済み型環境全体のsha256。宣言ファイル内容、inventory、予約symbol、license情報を含む |
+| portable_toolchain_fingerprint | 以下の観測済みruntime contentのdigest |
 
-The compatibility ID is the digest of this exact preimage (the descriptor's
-transport `schema` and `compatibility_id` fields are not in the preimage):
+portable_toolchain_fingerprintのpreimageは閉じた次のobjectです。
 
 ```text
-SHA-256(canonical-json({
-  semantic_schema,
-  identity_versions,
-  algorithm_versions,
-  semantic_profile_id,
-}))
+{
+  node: { status, version, sha256 },
+  adapter: { schema, version, sha256 },
+  typescript_identity
+}
 ```
 
-Canonical JSON uses UTF-8, NFC strings, sorted object keys, no insignificant
-whitespace, and integer versions. The known-answer vector in
-`tests/contracts/test_next_contracts.py` must remain stable. Changing an
-identity or algorithm version changes the ID; changing only a Node or adapter
-patch version, source/config digest, or content-only environment digest does
-not. Issue #9 may compare snapshots only when this ID is exactly equal.
+Nodeの実bytes/versionとadapterの実bytes/versionのいずれかが変われば互換性IDも変わります。
+Nodeの単なる「major >=22」やadapter protocol名だけで代用しません。
+型環境のdigestをlicense一覧だけのdigestで代用しません。
+TypeScript versionは型環境のversionと照合し、現在のprofileと異なる版は新しいversioned migrationで導入します。
 
-## Round 15 semantic identity closure
+Node未取得時の値はnullのままです。この状態のfailure descriptorは意味のある比較結果を認証しません。
+request-independent停止ではcompatibility descriptor自体がnullです。取得stageごとの公開可否はprovenance契約に従います。
 
-The checked-in Unicode table is the semantic source of truth for
-IdentifierName classification. Its exact byte digest is
-`c9336daa555ce98e93cbd48e6b91df22f50a221881bd10b3ed79cf9180297969`, and the
-algorithm version is `ecma-unicode-15.0`. The table includes Unicode 15.0.0
-ID_Start/ID_Continue plus Other_ID_Start, Other_ID_Continue (including
-U+00B7), and Join_Control. Context-specific binding/declaration-key checks
-share this data while applying reserved-word rules by context. The full
-scalar-range classification bitstream has a known-answer SHA-256 test and
-does not consult host `unicodedata.category()` or host UCD classification;
-shared NFC canonicalization remains an explicit transport rule.
+## 実行identityとの分離
 
-The table version and digest are part of the trusted semantic profile,
-compatibility preimage, and run-fingerprint preimage. A table or algorithm
-change therefore requires an explicit compatibility version change; changing
-only operational limits or a Node/adapter patch does not change the semantic
-compatibility ID.
+次の変更はsemantic compatibilityを変えません。
 
-All semantic and publication projections also carry the immutable
-`NextPublicationContext` through their `NextRunDecision`. This context binds
-the sealed source-view/plan identity, resolved request/config, the complete
-compatibility descriptor and identity versions, toolchain, trusted
-environment, and run-fingerprint inputs, so an artifact cannot claim
-semantic compatibility while silently using a different source, identity, or
-trust profile.
+- 対象repositoryのソース・config・commit・target。
+- resolved resource limits、timeout、選択出力format。
+- host path、OS、device/inode、FD番号、private cwd。
 
-## Round 16 provenance and contextual semantics
+これらの実行条件・観測はrun fingerprintまたはlocal process attestationに記録します。
+process observationのstable fingerprintは起動ポリシーや制限も含むため、semantic compatibilityのportable fingerprintにそのまま流用しません。
 
-The compatibility descriptor is owned by the sealed `NextPublicationContext`.
-The checked-in Unicode 15.0.0 table digest, identity/algorithm versions, and
-trusted semantic profile are part of its preimage; the observed
-`next-process-launch-observation-v1` digest is separately included in the run
-fingerprint. A writer must not
-replace either value with a host-derived or fixture-derived default.
+productionでは独立した事前policyがNode/adapterの許可identityを持ち、起動後の観測をそのpolicyと照合します。
+別の正当なpolicyで別runtimeを使うこと自体は偽装ではありません。その実行は別のcompatibility_idになります。
+同じpolicyから外れた観測や、応答が自己再hashした別compatibility descriptorは拒否します。
 
-IdentifierName checks are contextual: binding identifiers exclude reserved
-words, declaration/export property keys may use them, and explicit anonymous
-default declarations use the reserved `@anonymous-default` slot at most once
-per module. The same table covers import/export, JSX, re-export, and trusted
-reference names. Round 16 keeps this as a data-only contract; fresh Strict is
-pending and the historical verdict remains fail.
+## 構築と検証
 
-## Round 21 process fingerprint split
+1. 同梱型環境をcontent/inventory/予約symbolまで検証する。
+2. toolchainとprocess observationのNode version/status、adapter version/protocol、TypeScript identityを照合する。
+3. 観測から上記8項目を導出し、NextPublicationContextへdefensive copyで封印する。
+4. 応答のdescriptorをclosed schemaと既知profileで検証し、owner contextのdescriptorとexact一致させる。
+5. semantic JSON、domain/run manifestは同じcontextを投影する。writerによる再推測を認めない。
 
-The process observation is the only process authority. Its security fields retain OS-native file identity,
-verified-open handle, and spawn/TOCTOU evidence for darwin and linux. Windows is outside the v1 production scope. The stable run-fingerprint
-projection excludes host-ephemeral FD number, device, and inode values, so equivalent observations remain
-cross-machine stable while identity substitutions still fail validation. The legacy launch descriptor is only a
-derived compatibility view. Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
-implementation is absent.
+参照テストのNode hash 1/2の反復とadapter hash aの反復は、明示的な録画fixtureの例です。
+実ホストのprobe、同梱adapterの実bytes、OS起動を検証した証拠ではありません。製品実装では実取得値へ置き換えます。
 
-## Round 22 compatibility boundary
+## Unicodeと既知値
 
-The portable `stable_toolchain_fingerprint` is derived from Node bytes hash/version, adapter identity, and
-portable argv semantics; it excludes host path, OS primitive, device/inode, and FD/HANDLE values. The full
-verified host observation is retained only in `local_process_attestation_digest`. Stable parseable Node
-SemVer major >=22 is required; prerelease, older, or unparsable versions use `CSV-NEXT-NODE-001`.
+canonical JSONはUTF-8、NFC文字列、key sort、余分な空白なしです。
+NFCはhost UCDではなくチェックイン済みUnicode 15.0.0の表を使います。
+表・official normalization test 19,074行・license・migration条件は [next-unicode-nfc-v1.md](next-unicode-nfc-v1.md) を参照してください。
 
-The final publication decision, not a compatibility helper, owns exact public bytes and publication status.
-Selected-copy overflow is one `CSV-NEXT-LIMIT-003` incomplete/exit-3 result with canonical stderr and no
-partial stdout. v1 production process observation is darwin/linux only; Windows is outside this scope.
-Fresh current-SHA Strict is pending, readiness is unconfirmed, and production implementation is absent.
+現行の標準録画fixture（Node 22.14.0/hash 1×64、adapter 1.0.0/hash a×64）の既知値:
+
+- 型環境: `2e232edf27d832b12ecd8159295681145eb27ce906a06abfa0e666eaa82de77d`
+- portable toolchain: `422c0d93f5168180c85233ffc9b7735cf66d80fb21dc1c5a66605e99e6f6089d`
+- compatibility_id: `b6c2f6f7bbf0403df1357380636fc2134fa33d6588ddb9ad71d731938a32fb20`
+
+tests/contracts/test_next_contracts.pyの既知値、runtime content変更、host/limit不変、foreign descriptor拒否テストで固定します。
+これらの成功は実装前契約の確認であり、製品adapterの完成や最終レビューpassではありません。

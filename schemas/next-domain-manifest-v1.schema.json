@@ -57,13 +57,16 @@
     "limits": {"oneOf": [{"$ref": "urn:code-structure-viz:schema:next-limits-v1"}, {"type": "null"}]},
     "coverage": {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/coverage"},
     "artifact_paths": {"type": "array", "maxItems": 2, "uniqueItems": true, "items": {"enum": ["next.snapshot.semantic.json", "next.snapshot.puml"]}},
-    "diagnostics": {"type": "array", "items": {"$ref": "urn:code-structure-viz:schema:diagnostic-v1"}}
+    "diagnostics": {"type": "array", "items": {"$ref": "urn:code-structure-viz:schema:diagnostic-v1"}},
+    "decision": {"$ref": "urn:code-structure-viz:schema:next-run-decision-v1"},
+    "publication": {"$ref": "urn:code-structure-viz:schema:next-publication-decision-v1"}
   },
   "oneOf": [
     {"properties": {"request_independent": {"const": false}, "status": {"const": "complete"}, "payload_available": {"const": true}, "entity_count": {"type": "integer"}, "artifact_paths": {"minItems": 1}, "projects": {"minItems": 1}}, "not": {"required": ["incomplete_kind"]}},
     {"properties": {"request_independent": {"const": false}, "status": {"const": "not_applicable"}, "payload_available": {"const": false}, "entity_count": {"const": 0}, "artifact_paths": {"maxItems": 0}, "diagnostics": {"minItems": 1, "maxItems": 1}}, "not": {"required": ["incomplete_kind"]}},
     {"properties": {"request_independent": {"const": false}, "status": {"const": "incomplete"}, "incomplete_kind": {"const": "partial_safe"}, "payload_available": {"const": true}, "entity_count": {"type": "integer"}, "artifact_paths": {"minItems": 1}, "diagnostics": {"minItems": 1}, "projects": {"minItems": 1}}, "required": ["incomplete_kind"]},
     {"properties": {"request_independent": {"const": false}, "status": {"const": "incomplete"}, "incomplete_kind": {"const": "payload_unavailable"}, "payload_available": {"const": false}, "entity_count": {"const": null}, "artifact_paths": {"maxItems": 0}, "diagnostics": {"minItems": 1}, "projects": {"minItems": 1}}, "required": ["incomplete_kind"]},
+    {"properties": {"request_independent": {"const": true}, "status": {"const": "not_applicable"}, "payload_available": {"const": false}, "entity_count": {"const": 0}, "artifact_paths": {"maxItems": 0}, "request": {"type": "null"}, "projects": {"maxItems": 0}, "source": {"properties": {"kind": {"const": "unavailable"}}}, "config": {"properties": {"request_independent": {"const": true}, "projects": {"maxItems": 0}, "limits": {"const": null}, "source_plan": {"const": null}, "source_plan_digest": {"const": null}, "trusted_environment_digest": {"const": null}, "failure_stage": {"const": "applicability"}, "failure_code": {"const": "CSV-NEXT-APPLICABILITY-001"}}}, "toolchain": {"type": "null"}, "trusted_environment": {"type": "null"}, "limits": {"type": "null"}, "diagnostics": {"minItems": 1, "maxItems": 1}}, "not": {"required": ["incomplete_kind"]}},
     {"properties": {"request_independent": {"const": true}, "status": {"const": "incomplete"}, "incomplete_kind": {"const": "payload_unavailable"}, "payload_available": {"const": false}, "entity_count": {"const": null}, "artifact_paths": {"maxItems": 0}, "request": {"type": "null"}, "projects": {"maxItems": 0}, "source": {"properties": {"kind": {"const": "unavailable"}}}, "config": {"properties": {"request_independent": {"const": true}, "projects": {"maxItems": 0}, "upstream_depth": {"const": null}, "downstream_depth": {"const": null}}}, "diagnostics": {"minItems": 1}}, "required": ["request_independent", "incomplete_kind"]}
   ],
   "$defs": {

@@ -44,6 +44,8 @@ from tests.contracts.next_reference_validation import (
     TRUSTED_PROFILE_LICENSES,
     TRUSTED_PROFILE_PHYSICAL_TO_VIRTUAL,
     TRUSTED_PROFILE_SHADOWING_WITNESS,
+    UNICODE_NFC_FULL_SCALAR_KAT_DIGEST,
+    UNICODE_NFC_TABLE_DIGEST,
     VALIDATOR_SCHEMA,
     CompleteSourceSeal,
     InstrumentedSourceReader,
@@ -67,8 +69,10 @@ from tests.contracts.next_reference_validation import (
     _assert_file_path,
     _assert_path,
     _canonical_json_line,
+    _compatibility_descriptor_snapshot,
     _decision_known_counts,
     _decision_provenance,
+    _decision_semantic_diagnostics,
     _derived_taint_fixed_point,
     _export_binding_projection_for_model,
     _is_export_identifier,
@@ -84,6 +88,7 @@ from tests.contracts.next_reference_validation import (
     assert_encoded_stdin_boundary,
     assert_limit_boundary,
     bounded_decode_json,
+    candidate_key_for_selector,
     canonical_json_bytes,
     canonical_run_context,
     canonical_target_key,
@@ -96,6 +101,7 @@ from tests.contracts.next_reference_validation import (
     decision_context_for_request,
     decision_failure_kind,
     decision_failure_spec,
+    decision_public_diagnostics,
     derive_boundary_roles,
     derive_package_applicability_matrix,
     derive_pre_budget_outcome,
@@ -125,6 +131,8 @@ from tests.contracts.next_reference_validation import (
     load_export_graph_raw_fixture,
     model_record_budget_allowed,
     model_wire_record_count,
+    next_publication_decision_projection,
+    next_run_decision_projection,
     not_applicable_decision,
     package_applicability_projection,
     pre_response_failure_decision,
@@ -156,6 +164,7 @@ from tests.contracts.next_reference_validation import (
     render_plantuml,
     render_public_diagnostic_stderr,
     request_from_partial_source_seal,
+    request_independent_not_applicable_decision,
     resolve_target_resolutions,
     response_boundary_decision,
     runtime_vector_registry,
@@ -173,6 +182,8 @@ from tests.contracts.next_reference_validation import (
     validate_limits,
     validate_limits_consistency,
     validate_model,
+    validate_next_publication_decision_projection,
+    validate_next_run_decision_projection,
     validate_no_trusted_shadowing,
     validate_package_applicability_projection,
     validate_plantuml_contract,
@@ -196,6 +207,8 @@ from tests.contracts.next_reference_validation import (
     validate_runtime_manifest,
     validate_runtime_vector_registry,
     validate_semantic_snapshot,
+    validate_source_graph_against_frozen_bytes,
+    validate_source_graph_projection,
     validate_stage_dependent_provenance,
     validate_trusted_environment,
 )
@@ -211,6 +224,10 @@ from tests.contracts.test_json_schemas import (
     _next_trusted_environment,
     _schema,
     _validator,
+)
+from tests.contracts.unicode_15_0_nfc import (
+    full_scalar_kat_digest,
+    normalize_nfc,
 )
 
 
@@ -261,6 +278,8 @@ def _id(kind: str, digit: str) -> str:
             "8",
         ): {
             "owner_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
+            "local_name": "Card",
+            "binding_kind": "named",
             "imported_name": "Card",
             "role": "value",
             "source": {
@@ -354,6 +373,7 @@ def _id(kind: str, digit: str) -> str:
             "source_id": raw("module", {"project_id": project_id, "path": "src/Button.tsx"}),
             "target": {
                 "kind": "external",
+                "target_kind": "external_package",
                 "safe_specifier": "react",
                 "exported_name": "lazy",
             },
@@ -490,6 +510,7 @@ def _config_projection(
         local_extends=source_plan_local_extends,
         file_role_map=source_plan_file_role_map,
     )
+    projection["config_resolution"] = copy.deepcopy(projection["source_plan"]["config_resolution"])
     projection["source_plan_digest"] = source_plan_digest_value or recompute_source_plan_digest(
         projection
     )
@@ -662,7 +683,9 @@ def _model() -> dict[str, Any]:
             "id": _id("member", "8"),
             "owner_id": module_one["id"],
             "local_component_id": component_two["id"],
+            "local_name": "Card",
             "imported_name": "Card",
+            "binding_kind": "named",
             "role": "value",
             "source": {"kind": "internal", "module_id": module_two["id"]},
         },
@@ -1154,34 +1177,37 @@ def _empty_model() -> dict[str, Any]:
 
 
 def _model_with_applicability_control_files(model: dict[str, Any]) -> dict[str, Any]:
-    """Add the observed package controls required by acquisition fixtures.
+    """Add the observed package/config controls required by acquisition fixtures.
 
     Semantic model builders intentionally omit package metadata.  The
     adapter request/response fixture, however, represents the complete frozen
-    source view, so it carries one control file per project to make the
-    package applicability matrix an observed, first-stage fact.
+    source view.  A non-null config_path must name captured bytes, not a
+    fabricated built-in config path.
     """
 
     candidate = copy.deepcopy(model)
     for project in candidate["projects"]:
         root = project["root"]
         package_path = "package.json" if root == "." else f"{root.rstrip('/')}/package.json"
-        if any(record["path"] == package_path for record in candidate["files"]):
-            continue
-        payload = b'{"dependencies":{"next":"15.0.0"}}'
-        package_record: dict[str, Any] = {
-            "kind": "file",
-            "id": "",
-            "path": package_path,
-            "project_id": project["id"],
-            "roles": ["control"],
-            "effective_role": "control",
-            "size_bytes": len(payload),
-            "sha256": hashlib.sha256(payload).hexdigest(),
-        }
-        package_record["id"] = recompute_record_id(package_record)
-        candidate["files"].append(package_record)
-        project["file_ids"] = sorted([*project["file_ids"], package_record["id"]])
+        controls = {package_path: b'{"dependencies":{"next":"15.0.0"}}'}
+        if project["config_path"] is not None:
+            controls[project["config_path"]] = b"{}"
+        for path, payload in controls.items():
+            if any(record["path"] == path for record in candidate["files"]):
+                continue
+            control_record: dict[str, Any] = {
+                "kind": "file",
+                "id": "",
+                "path": path,
+                "project_id": project["id"],
+                "roles": ["control"],
+                "effective_role": "control",
+                "size_bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+            control_record["id"] = recompute_record_id(control_record)
+            candidate["files"].append(control_record)
+            project["file_ids"] = sorted([*project["file_ids"], control_record["id"]])
     candidate["files"].sort(key=lambda record: record["id"])
     counts = candidate["coverage"]["counts"]
     previous_published = counts["published"]
@@ -1326,6 +1352,8 @@ def _request(
             else f"{project['root'].rstrip('/')}/package.json"
         )
         contents[package_path] = b'{"dependencies":{"next":"15.0.0"}}'
+        if project["config_path"] is not None:
+            contents[project["config_path"]] = b"{}"
     files = []
     census_contents = {item["path"]: item["content"] for item in load_export_census_fixture()}
     for file_record in model["files"]:
@@ -1397,58 +1425,161 @@ def _request(
 
 
 def _source_seal_for_graph(graph: dict[str, Any], *, project_roots: tuple[str, ...]) -> Any:
-    """Build a trusted fixture seal for graph-locality counterexamples."""
+    """Materialize locality examples as actual files and one failed read."""
 
-    normalized_graph = {
-        "nodes": tuple(sorted(copy.deepcopy(graph["nodes"]), key=canonical_json_bytes)),
-        "edges": tuple(sorted(copy.deepcopy(graph["edges"]), key=canonical_json_bytes)),
-        "open_edges": tuple(sorted(copy.deepcopy(graph["open_edges"]), key=canonical_json_bytes)),
-    }
-    files = {node["path"]: b"" for node in normalized_graph["nodes"]}
-    # Applicability is the first acquisition observation.  Graph-only
-    # counterexamples still represent an applicable Next project explicitly;
-    # otherwise the matrix correctly short-circuits before source discovery.
+    import posixpath
+
+    node_paths = {node["id"]: node["path"] for node in graph["nodes"]}
+    files = {path: b"" for path in node_paths.values()}
+    for edge in graph["edges"]:
+        source, target = node_paths[edge["source"]], node_paths[edge["target"]]
+        specifier = posixpath.relpath(target, posixpath.dirname(source))
+        files[source] += f'import "./{specifier}";\\n'.encode()
+    for edge in graph["open_edges"]:
+        files[node_paths[edge["source"]]] += b"import(unknownModule);\\n"
     for root in project_roots:
         package_path = "package.json" if root == "." else f"{root.rstrip('/')}/package.json"
-        files.setdefault(package_path, b'{"dependencies":{"next":"15"}}')
-    base = seal_source_acquisition(
+        files[package_path] = b'{"dependencies":{"next":"15"}}'
+    return seal_source_acquisition(
         SourceDiscoveryIntent(project_roots=project_roots, control_candidates=()),
-        # The graph is deliberately installed only in this isolated fixture
-        # helper.  production-shaped acquisition derives its graph from
-        # frozen bytes and ignores reader graph injection.
+        InstrumentedSourceReader(files, read_failures={"src/Broken.tsx": "CSV-NEXT-SOURCE-003"}),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+        allow_partial=True,
+    )
+
+
+@pytest.mark.parametrize("attack", ["edge_drop", "bytes_swap", "config_swap", "failure_claim"])
+def test_source_seal_rederives_graph_controls_and_read_observations(attack: str) -> None:
+    files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "tsconfig.json": b'{"include":["src/**/*.ts"]}',
+        "src/entry.ts": b'import "./dep";',
+        "src/dep.ts": b"export const dep = 1;",
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
         InstrumentedSourceReader(files),
         {
             "observed_limits": _next_limits(),
             "observed_trusted_environment_digest": _trusted_environment()["sha256"],
         },
     )
-    graph_digest = digest(normalized_graph)
-    final_plan = copy.deepcopy(base.final_plan)
-    final_plan["source_graph"] = copy.deepcopy(normalized_graph)
-    plan_digest = digest(final_plan)
-    source_view = copy.deepcopy(base.source_view)
-    source_view["source_graph_digest"] = graph_digest
-    source_view_fingerprint = digest(source_view)
-    seal_id = digest(
+    plan, view, graph, captured = (
+        seal.final_plan,
+        seal.source_view,
+        seal.source_graph,
+        seal.captured_files,
+    )
+    if attack == "edge_drop":
+        assert graph["edges"]
+        graph["edges"] = []
+    elif attack == "bytes_swap":
+        captured["src/entry.ts"] = b"export const noImport = 1;"
+        view["files"] = sorted(
+            [
+                {
+                    "path": path,
+                    "size_bytes": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }
+                for path, payload in captured.items()
+            ],
+            key=canonical_json_bytes,
+        )
+    elif attack == "config_swap":
+        plan["projects"][0]["compiler_options"]["check_js"] = True
+    else:
+        view["read_failures"] = [{"path": "src/dep.ts", "stage": "source_read"}]
+    graph["graph_digest"] = digest({key: graph[key] for key in ("nodes", "edges", "open_edges")})
+    plan["source_graph"] = graph
+    view["source_graph_digest"] = graph["graph_digest"]
+    _validator("next-source-plan-v1.schema.json").validate(plan)
+    plan_digest, view_digest = digest(plan), digest(view)
+    recomputed = digest(
         {
             "plan_digest": plan_digest,
-            "source_view_fingerprint": source_view_fingerprint,
-            "seal_operation": base.seal_operation,
-            "snapshot_id": base.snapshot_id,
-            "revision_before": base.revision_before,
-            "revision_after": base.revision_after,
-            "source_graph_digest": graph_digest,
+            "source_view_fingerprint": view_digest,
+            "seal_operation": seal.seal_operation,
+            "snapshot_id": seal.snapshot_id,
+            "revision_before": seal.revision_before,
+            "revision_after": seal.revision_after,
+            "source_graph_digest": graph["graph_digest"],
         }
     )
-    return replace(
-        base,
-        final_plan=final_plan,
-        plan_digest=plan_digest,
-        source_graph=normalized_graph,
-        source_view=source_view,
-        source_view_fingerprint=source_view_fingerprint,
-        seal_id=seal_id,
+    with pytest.raises(AssertionError):
+        replace(
+            seal,
+            final_plan=plan,
+            source_view=view,
+            source_graph=graph,
+            captured_files=captured,
+            plan_digest=plan_digest,
+            source_view_fingerprint=view_digest,
+            seal_id=recomputed,
+        )
+
+
+def test_source_read_failure_has_no_fabricated_empty_content_or_caller_failure_ledger() -> None:
+    files = {"package.json": b'{"dependencies":{"next":"15"}}', "src/broken.ts": b"unknown"}
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(files, read_failures={"src/broken.ts": "CSV-NEXT-SOURCE-003"}),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+        allow_partial=True,
     )
+    node = next(row for row in seal.source_graph["nodes"] if row["path"] == "src/broken.ts")
+    assert node["content_sha256"] is None
+    assert "src/broken.ts" not in seal.captured_files
+    _validator("next-source-plan-v1.schema.json").validate(seal.final_plan)
+    for failures in ((), ({"path": "package.json", "stage": "source_read"},)):
+        with pytest.raises(AssertionError):
+            SourceFailureLedger.from_seal(
+                seal,
+                failures=failures,
+                targets=(),
+                proof_roots=({"id": "failure-root", "path_ref": "src/broken.ts"},),
+            )
+
+
+@pytest.mark.parametrize("target", ["path:.", "path:src", "path:src/dep.ts", "path:src/safe.ts"])
+def test_source_partial_selection_respects_directory_targets_and_failed_importers(
+    target: str,
+) -> None:
+    files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "src/dep.ts": b"unread",
+        "src/entry.ts": b'import "./dep";',
+        "src/safe.ts": b"export const safe = 1;",
+    }
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(files, read_failures={"src/dep.ts": "CSV-NEXT-SOURCE-003"}),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+        targets=(target,),
+        proof_roots=({"id": "failure-root", "path_ref": "src/dep.ts"},),
+    )
+    if target == "path:src/safe.ts":
+        assert isinstance(result, PartialSourceSeal)
+        assert set(result.safe_file_set) == {"package.json", "src/safe.ts"}
+        assert {"src/dep.ts", "src/entry.ts"} == set(result.ledger.failure_closure_paths)
+        plan, view = result.seal.final_plan, result.seal.source_view
+        detached = replace(result.seal, final_plan=plan, source_view=view)
+        plan["projects"].clear()
+        view["files"].clear()
+        assert detached.plan_digest == digest(detached.final_plan)
+        assert detached.source_view_fingerprint == digest(detached.source_view)
+    else:
+        assert isinstance(result, SourceAcquisitionUnavailable)
+        assert result.diagnostic_code == "CSV-NEXT-SOURCE-003"
 
 
 def _complete_proof(model: dict[str, Any]) -> dict[str, Any]:
@@ -1648,7 +1779,7 @@ def _response(
         }
         for record in model["files"]:
             key = ("files", record["id"])
-            if record["path"].endswith("package.json") and key not in discovered_keys:
+            if record["effective_role"] == "control" and key not in discovered_keys:
                 response_proof["discovered_records"].append(
                     {"collection": "files", "record_id": record["id"], "taints": []}
                 )
@@ -2287,6 +2418,47 @@ def _legacy_domain_fixture(
             )
         )
         legacy_source_seal = _trusted_fixture_source_seal(legacy_request, None)
+        if pre_budget_outcome == "partial_safe" or export_failure:
+            # These legacy cases are explicit status-vector fixtures, not
+            # evidence that an adapter discovered the recorded diagnostic.
+            model["diagnostics"] = [
+                {
+                    "code": row["code"],
+                    "severity": row["severity"],
+                    "recoverable": row["recoverable"],
+                    "count": 1,
+                    "path_ref": row["path"],
+                    "symbol_ref": row["symbol"],
+                    "outcome": row["outcome"],
+                    "ref_permission": row["ref_permission"],
+                }
+                for row in value["diagnostics"]
+            ]
+        legacy_descriptor = _compatibility_descriptor_snapshot(
+            toolchain=value["toolchain"],
+            trusted_environment=environment,
+            process_observation=process_launch_observation_from_descriptor(launch_for_fingerprint),
+        )
+        # Preserve the complete wire identity even in these recorded status
+        # fixtures. The empty proof remains a legacy fixture, not adapter
+        # validation evidence and not an exception to envelope binding.
+        legacy_response_bytes = canonical_json_bytes(
+            {
+                "schema": "code-structure-viz.next-adapter-response/v1",
+                "protocol": legacy_request["protocol"],
+                "request_id": legacy_request["request_id"],
+                "adapter_version": legacy_request["adapter_version"],
+                "trusted_type_environment_digest": environment["sha256"],
+                "semantic_compatibility_id": legacy_descriptor["compatibility_id"],
+                "compatibility_descriptor": legacy_descriptor,
+                "identity_versions": legacy_descriptor["identity_versions"],
+                "limits": legacy_request["limits"],
+                "run_context": run_context,
+                "model": model,
+                "proof": {},
+                "model_digest": digest(model),
+            }
+        )
         validated_decision = NextValidatedDecision(
             validated_model=model,
             validated_proof={},
@@ -2310,10 +2482,8 @@ def _legacy_domain_fixture(
                 "artifact_paths": value["artifact_paths"],
             },
             request=legacy_request,
-            raw_response_bytes=canonical_json_bytes({"model": model, "proof": {}}),
-            raw_response_sha256=hashlib.sha256(
-                canonical_json_bytes({"model": model, "proof": {}})
-            ).hexdigest(),
+            raw_response_bytes=legacy_response_bytes,
+            raw_response_sha256=hashlib.sha256(legacy_response_bytes).hexdigest(),
             targets=tuple(target_values),
             target_failures=target_evidence,
             export_failures=export_evidence,
@@ -2321,6 +2491,7 @@ def _legacy_domain_fixture(
                 legacy_request,
                 run_context,
                 source_seal=legacy_source_seal,
+                response_bytes=legacy_response_bytes,
                 toolchain={
                     "node": {
                         "status": "not_applicable"
@@ -2484,31 +2655,11 @@ def _decision_model_shell(decision: NextRunDecision) -> dict[str, Any]:
 
 
 def _decision_diagnostics(decision: NextRunDecision, model: dict[str, Any]) -> list[dict[str, Any]]:
-    """Project diagnostics from the decision, never from a fixture status flag."""
+    """Use the same diagnostic authority as the actual publication finalizer."""
 
-    if isinstance(decision, (PreResponseFailureDecision, NotApplicableDecision)):
-        return [copy.deepcopy(decision.diagnostic)]
-    if decision.target_failures:
-        return [
-            _public_diagnostic(
-                "CSV-NEXT-TARGET-001",
-                path=failure["target_key"].removeprefix("path:"),
-                reason=failure["reason"],
-            )
-            for failure in decision.target_failures
-        ]
-    if decision.export_failures:
-        return [_public_diagnostic("CSV-NEXT-EXPORT-001")]
-    diagnostic_code = decision.gate.get("diagnostic_code")
-    if isinstance(diagnostic_code, str):
-        return [_public_diagnostic(diagnostic_code)]
-    if decision.gate["outcome"] == "partial_safe":
-        return [_public_diagnostic("CSV-NEXT-FLOW-001")]
-    # ``model`` is an authority carried by the decision.  It is intentionally
-    # accepted as an argument to make this branch explicit for future partial
-    # diagnostics, while a complete decision has no public diagnostics.
-    assert not model["diagnostics"]
-    return []
+    if isinstance(decision, NextValidatedDecision):
+        assert model == decision.validated_model
+    return decision_public_diagnostics(decision)
 
 
 def _decision_target_resolutions(
@@ -2545,7 +2696,10 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
     model = _decision_model_shell(decision)
     public_config = publication_context.public_next_config
     config = copy.deepcopy(public_config)
-    independent = publication_context.observation_provenance["kind"] == "request_independent"
+    independent = publication_context.observation_provenance["kind"] in {
+        "request_independent_not_applicable",
+        "request_independent_failure",
+    }
     if independent:
         assert publication_context.source_acquisition_seal is None
         assert config["limits"] is None
@@ -2720,6 +2874,10 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
     if value["request"] is not None:
         value["request"]["run_fingerprint"] = value["run_fingerprint"]
     value["request_independent"] = independent
+    # The actual current-v1 domain surface carries the same decision object
+    # that was accepted at the response boundary.  Legacy fixture domains do
+    # not have this sidecar and remain isolated historical vectors.
+    value["decision"] = next_run_decision_projection(decision)
     return _DomainProjection(
         value,
         validated_model=model,
@@ -2748,7 +2906,7 @@ def _semantic_artifacts_from_decision(
     identity-bearing values from the decision's immutable context.
     """
 
-    if not isinstance(decision, NextValidatedDecision):
+    if not isinstance(decision, NextValidatedDecision) or not decision.gate["payload_available"]:
         return {}
     context = decision.publication_context
     assert context.public_next_request is not None
@@ -2783,7 +2941,7 @@ def _semantic_artifacts_from_decision(
         "members": copy.deepcopy(model["members"]),
         "relations": copy.deepcopy(model["relations"]),
         "facts": copy.deepcopy(model["facts"]),
-        "diagnostics": [],
+        "diagnostics": _decision_semantic_diagnostics(decision),
     }
     if status == "partial_safe":
         semantic["incomplete_kind"] = "partial_safe"
@@ -2824,9 +2982,6 @@ def _publication_domain(
         domain["budget"]["outcome"] = "payload_unavailable"
         domain["artifact_paths"] = []
         domain["diagnostics"] = [_public_diagnostic("CSV-NEXT-LIMIT-003")]
-    elif publication.publication_outcome == "selected_artifact_unavailable":
-        assert domain["payload_available"] is True
-        assert domain["artifact_paths"]
     return domain
 
 
@@ -3037,6 +3192,11 @@ def _run_manifest(
         "run_context": copy.deepcopy(domain["run_context"]),
     }
     base["domains"] = [domain]
+    decision = getattr(domain, "validated_decision", None)
+    if "decision" in domain and is_next_run_decision(decision):
+        base["next_decision"] = next_run_decision_projection(decision)
+    if publication is not None:
+        base["next_publication"] = next_publication_decision_projection(publication)
     sealed_artifacts = (
         publication.artifact_bytes if publication is not None else _published_bytes(domain)
     )
@@ -3210,12 +3370,12 @@ def _runtime_manifest() -> dict[str, Any]:
     members.sort(key=lambda item: item["path"])
     licenses = copy.deepcopy(list(TRUSTED_PROFILE_LICENSES))
     manifest: dict[str, Any] = {
-        "schema": "code-structure-viz.next-runtime-manifest/v1",
+        "schema": "code-structure-viz.next-reference-runtime-inventory/v1",
         "members": members,
         "licenses": licenses,
         "license_inventory_digest": TRUSTED_PROFILE_LICENSE_DIGEST,
         "inventory_attestation": {
-            "schema": "code-structure-viz.next-runtime-inventory/v1",
+            "schema": "code-structure-viz.next-reference-runtime-inventory/v1",
             "members": members,
             "sha256": digest({"members": members}),
         },
@@ -3640,7 +3800,12 @@ def test_reference_validator_closes_ownership_order_and_fact_invariants() -> Non
             "kind": "literal_dynamic_import",
             "id": _id("relation", "1"),
             "source_id": _id("module", "3"),
-            "target": {"kind": "external", "safe_specifier": "react", "exported_name": "lazy"},
+            "target": {
+                "kind": "external",
+                "target_kind": "external_package",
+                "safe_specifier": "react",
+                "exported_name": "lazy",
+            },
             "role": "type",
             "reexport": False,
             "boundary_effect": "none",
@@ -3754,13 +3919,16 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         "id": "",
         "owner_id": extra_module["id"],
         "local_component_id": None,
+        "local_name": "Imported",
         "imported_name": "default",
+        "binding_kind": "default",
         "role": "value",
         "source": {"kind": "internal", "module_id": _id("module", "3")},
     }
     extra_import["id"] = recompute_record_id(extra_import)
     extra_import_alias = copy.deepcopy(extra_import)
     extra_import_alias["imported_name"] = "PropsView"
+    extra_import_alias["binding_kind"] = "named"
     extra_import_alias["id"] = recompute_record_id(extra_import_alias)
     partial_proof = _complete_proof(partial_model)
     partial_proof["discovered_records"].extend(
@@ -3850,6 +4018,37 @@ def test_adapter_request_response_and_partial_safe_proof_are_reference_validated
         "next.snapshot.semantic.json",
         "next.snapshot.puml",
     ]
+    for selector in (None, "manifest", "next:semantic-json", "next:plantuml"):
+        selected_request = _request(
+            targets=["path:src/Button.tsx"], run_context=_run_context(selector=selector)
+        )
+        raw_partial = canonical_json_bytes(
+            _response(partial_model, partial_proof, selected_request)
+        )
+        selected_decision = response_boundary_decision(
+            raw_partial, validate_adapter_request(selected_request)
+        )
+        assert isinstance(selected_decision, NextValidatedDecision)
+        assert selected_decision.gate["outcome"] == "partial_safe"
+        publication = finalize_publication_decision(
+            selected_decision, adapter_stdout_chunks=(raw_partial,)
+        )
+        _validator("next-publication-decision-v1.schema.json").validate(
+            next_publication_decision_projection(publication)
+        )
+        domain, manifest, metadata, artifacts, stderr = _validate_publication_chain(publication)
+        assert domain["incomplete_kind"] == "partial_safe"
+        # Legacy stdout-result metadata describes an artifact, so a summary
+        # has no artifact. The publication wire describes stream availability.
+        assert metadata["availability"] is (selector is not None)
+        assert next_publication_decision_projection(publication)["stdout"]["availability"] is True
+        assert manifest["run"]["exit_code"] == 3
+        assert len(artifacts) == 2
+        assert stderr == _diagnostic_jsonl(domain["diagnostics"])
+        assert domain["diagnostics"][0]["code"] == "CSV-NEXT-SOURCE-001"
+        assert domain["diagnostics"][0]["path"] == "src/Unused.tsx"
+        semantic = json.loads(artifacts["next.snapshot.semantic.json"])
+        assert semantic["diagnostics"][0]["path_ref"] == "src/Unused.tsx"
     validate_proof(
         partial_response["proof"],
         partial_response["model"],
@@ -4250,6 +4449,29 @@ def test_export_scanner_closes_unicode_paired_member_and_namespace_jsx_tags() ->
     assert [row["exported_name"] for row in other_id] == ["Foo·Bar"]
 
 
+def test_round24_unicode_15_nfc_profile_is_frozen_and_exhaustive() -> None:
+    assert (
+        UNICODE_NFC_TABLE_DIGEST
+        == "877b34f03bc09c193fb9014c381b3d3d980dea0676b942b4d54f56c1e11a6eb2"
+    )
+    assert UNICODE_NFC_FULL_SCALAR_KAT_DIGEST == (
+        "61f9ea3772b20f223112b3709361f387cde38bf0c5b7c329aeae49fd0d7de3d5"
+    )
+    assert normalize_nfc("e\u0301") == "é"
+    assert normalize_nfc("\u1100\u1161\u11a8") == "각"
+    assert normalize_nfc("\u0344") == "\u0308\u0301"
+    assert full_scalar_kat_digest() == UNICODE_NFC_FULL_SCALAR_KAT_DIGEST
+    descriptor = _descriptor()
+    assert descriptor["unicode_profile"] == {
+        "profile_id": "unicode-15.0.0-nfc-v1",
+        "unicode_version": "15.0.0",
+        "normalization": "NFC",
+        "algorithm_version": "unicode-nfc-15.0.0",
+        "table_digest": UNICODE_NFC_TABLE_DIGEST,
+        "full_scalar_kat_digest": UNICODE_NFC_FULL_SCALAR_KAT_DIGEST,
+    }
+
+
 def test_round13_ecmascript_identifier_tables_are_pinned_and_complete() -> None:
     import unicodedata
 
@@ -4412,9 +4634,9 @@ def test_round15_source_failure_preserves_locality_boundary(
             {"id": "broken", "path": "src/Broken.tsx", "project_root": "."},
             {"id": "target", "path": "src/Other.tsx", "project_root": "."},
         ),
-        "edges": ({"source": "broken", "target": "target"},) if localized is False else (),
+        "edges": ({"source": "target", "target": "broken"},) if localized is False else (),
         "open_edges": (
-            ({"source": "broken"},) if localized is True and not safe_subset_proven else ()
+            ({"source": "target"},) if localized is True and not safe_subset_proven else ()
         ),
     }
     if localized and safe_subset_proven:
@@ -4970,7 +5192,7 @@ def test_source_plan_and_view_are_atomically_sealed_after_single_reads() -> None
             "snapshot_id": seal.snapshot_id,
             "revision_before": seal.revision_before,
             "revision_after": seal.revision_after,
-            "source_graph_digest": digest(seal.source_graph),
+            "source_graph_digest": seal.source_graph["graph_digest"],
         }
     )
     assert reader.read_counts == {
@@ -5215,7 +5437,7 @@ def test_round17_source_failure_ledger_derives_locality_without_caller_booleans(
             )
 
     tainted_graph = copy.deepcopy(graph)
-    tainted_graph["edges"] = ({"source": "broken", "target": "unrelated"},)
+    tainted_graph["edges"] = ({"source": "unrelated", "target": "broken"},)
     tainted_ledger = SourceFailureLedger.from_seal(
         _source_seal_for_graph(tainted_graph, project_roots=(".",)),
         failures=({"path": "src/Broken.tsx", "stage": "source_read"},),
@@ -5226,7 +5448,7 @@ def test_round17_source_failure_ledger_derives_locality_without_caller_booleans(
     assert tainted_ledger.safe_subset_proven is False
 
     nonisolatable_graph = copy.deepcopy(graph)
-    nonisolatable_graph["open_edges"] = ({"source": "broken"},)
+    nonisolatable_graph["open_edges"] = ({"source": "unrelated"},)
     nonisolatable_ledger = SourceFailureLedger.from_seal(
         _source_seal_for_graph(nonisolatable_graph, project_roots=(".",)),
         failures=({"path": "src/Broken.tsx", "stage": "source_read"},),
@@ -5258,10 +5480,13 @@ def test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutati
         }
 
     value = {
-        "kind": "request_independent",
+        "kind": "request_independent_failure",
         "stage": "source_selection",
         "failure_code": "CSV-NEXT-SOURCE-003",
         "observed": {
+            "applicability": row(True),
+            "config": row(True),
+            "source": row(True),
             "request": row(False),
             "limits": row(True),
             "source_plan": row(True),
@@ -5269,6 +5494,7 @@ def test_round19_stage_provenance_reference_rejects_stage_code_and_prefix_mutati
             "trusted_environment": row(False),
             "compatibility": row(False),
             "process_launch": row(False),
+            "response": row(False),
             "budget": row(False),
         },
     }
@@ -5316,6 +5542,7 @@ def test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity
     }
     failed_path = "src/isolated.tsx"
     source_files[failed_path] = b"export const isolated = true;\n"
+    source_files["src/failed-importer.ts"] = b'import "./isolated";'
     reader = InstrumentedSourceReader(
         source_files,
         read_failures={failed_path: "CSV-NEXT-SOURCE-003"},
@@ -5334,11 +5561,26 @@ def test_round19_partial_source_result_preserves_safe_subset_and_ledger_identity
     assert reader.sealed is True
     assert reader.read_counts[failed_path] == 1
     assert failed_path not in result.safe_file_set
-    assert set(result.safe_file_set) == set(source_files) - {failed_path}
+    assert set(result.safe_file_set) == set(source_files) - {failed_path, "src/failed-importer.ts"}
     assert result.ledger.safe_subset_proven is True
     assert result.ledger.source_seal.seal_id == result.seal.seal_id
 
+    importer = copy.deepcopy(
+        next(row for row in request["files"] if row["path"] == "src/Button.tsx")
+    )
+    importer.update(
+        path="src/failed-importer.ts",
+        size_bytes=len(source_files["src/failed-importer.ts"]),
+        sha256=hashlib.sha256(source_files["src/failed-importer.ts"]).hexdigest(),
+        content_base64=base64.b64encode(source_files["src/failed-importer.ts"]).decode("ascii"),
+    )
+    importer["id"] = recompute_record_id(importer)
+    request["files"] = sorted([*request["files"], importer], key=lambda row: row["id"])
+    request["projects"][0]["file_ids"] = sorted(row["id"] for row in request["files"])
+    request["request_id"] = recompute_request_id(request)
+    validate_adapter_request(request)
     safe_request = request_from_partial_source_seal(result, request)
+    assert importer["id"] not in safe_request["projects"][0]["file_ids"]
     response_bytes = canonical_json_bytes(_response(_model(), request=safe_request.snapshot()))
     projection = validate_response_envelope(
         response_bytes,
@@ -5410,8 +5652,8 @@ def test_round19_source_acquisition_union_is_typed_and_fail_closed() -> None:
         (b'{"devDependencies":{"next":"^15"}}', "applicable", "direct_next_dependency"),
         (
             b'{"dependencies":{"next":"14"},"devDependencies":{"next":"15"}}',
-            "applicable",
-            "direct_next_dependency",
+            "malformed",
+            "malformed_package",
         ),
         (b'{"dependencies":{"next":""}}', "malformed", "malformed_package"),
         (b'{"dependencies":{"next":false}}', "malformed", "malformed_package"),
@@ -5475,12 +5717,13 @@ def test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces(
             },
             ("apps/a", "apps/b"),
         ),
-        node_status="available",
     )
     validate_projection(mixed)
     assert mixed["project_filter"] == ["apps/a"]
     assert mixed["non_applicable_observations"] == ["apps/b"]
-    assert mixed["decision_kind"] == "ValidatedResponseDecision"
+    assert mixed["decision_kind"] == "ApplicabilityPreflightDecision"
+    assert mixed["node_probe"]["performed"] is False
+    assert mixed["payload_available"] is False
     assert mixed["domain"]["project_roots"] == ["apps/a"]
     assert mixed["root_manifest"]["project_roots"] == ["apps/a"]
     assert mixed["stdout_result"]["project_roots"] == ["apps/a"]
@@ -5502,24 +5745,22 @@ def test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces(
     assert malformed["root_manifest"]["exit_code"] == 3
     assert malformed["stdout_result"]["branch"] == "typed_unavailable"
 
-    # Both direct declaration tables are observations of applicability; a
-    # differing range does not create a precedence ambiguity.
+    # A direct declaration in both tables is a duplicate/conflicting
+    # applicability observation and must fail closed before Node probing.
     conflicting = derive_package_applicability_matrix(
         {"package.json": b'{"dependencies":{"next":"14"},"devDependencies":{"next":"15"}}'},
         (".",),
     )
-    assert conflicting.aggregate_state == "applicable"
-    assert (
-        package_applicability_projection(conflicting, node_status="available")["node_probe"][
-            "performed"
-        ]
-        is True
-    )
+    assert conflicting.aggregate_state == "malformed"
+    assert package_applicability_projection(conflicting)["node_probe"] == {
+        "permission": "prohibited",
+        "performed": False,
+    }
     duplicate_direct = derive_package_applicability_matrix(
         {"package.json": b'{"dependencies":{"next":"15"},"devDependencies":{"next":"15"}}'},
         (".",),
     )
-    assert duplicate_direct.aggregate_state == "applicable"
+    assert duplicate_direct.aggregate_state == "malformed"
 
 
 def test_round21_applicability_source_observation_precedes_node_and_is_read_once() -> None:
@@ -5546,6 +5787,53 @@ def test_round21_applicability_source_observation_precedes_node_and_is_read_once
     assert reader.read_counts == {"package.json": 1}
 
 
+def test_round24_applicability_preflight_grants_permission_without_node_observation() -> None:
+    """Package bytes authorize a later probe; they cannot fabricate one."""
+
+    matrix = derive_package_applicability_matrix(
+        {"package.json": b'{"dependencies":{"next":"15.0.0"}}'}, (".",)
+    )
+    projection = package_applicability_projection(matrix)
+    validate_package_applicability_projection(projection)
+    _validator("next-applicability-decision-v1.schema.json").validate(projection)
+    assert projection["node_probe"] == {"permission": "permitted", "performed": False}
+    assert projection["decision_kind"] == "ApplicabilityPreflightDecision"
+    assert projection["outcome"] == "applicable"
+    assert projection["toolchain"] == {"node_status": None}
+    assert projection["domain"]["project_roots"] == ["."]
+    assert projection["root_manifest"]["status"] == "summary"
+    assert projection["stdout_result"]["reason"] == "applicable_pending"
+
+
+def test_round24_all_non_applicable_is_request_independent_end_to_end() -> None:
+    """All-non-applicable package bytes short-circuit every later authority."""
+
+    matrix = derive_package_applicability_matrix(
+        {"package.json": b'{"name":"plain-package"}'}, (".",)
+    )
+    assert matrix.aggregate_state == "non_applicable"
+    decision = request_independent_not_applicable_decision(
+        _run_context(independent=True), targets=()
+    )
+    assert decision.request is None
+    decision_wire = next_run_decision_projection(decision)
+    _validator("next-run-decision-v1.schema.json").validate(decision_wire)
+    domain = _domain(decision=decision)
+    validate_domain_manifest(domain)
+    _validator("next-domain-manifest-v1.schema.json").validate(domain)
+    manifest = _run_manifest(domain)
+    validate_run_manifest(manifest, domain, {})
+    _validator("run-manifest-v1.schema.json").validate(manifest)
+    stdout = _stdout_result_for_domain(domain, manifest)
+    _validator("stdout-result-v1.schema.json").validate(stdout)
+    assert manifest["request_independent"] is True
+    assert manifest["run"]["status"] == "not_applicable"
+    assert manifest["run"]["exit_code"] == 0
+    assert stdout["stable_reason"] == "domain_not_applicable"
+    assert decision.publication_context.toolchain is None
+    assert decision.publication_context.final_source_acquisition_plan is None
+
+
 def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_deterministic() -> None:
     assert "round21-config-closed-grammar"
     assert "round21-config-extends-injection"
@@ -5568,6 +5856,22 @@ def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_determi
         },
     )
     _validator("next-source-plan-v1.schema.json").validate(seal.final_plan)
+    resolved_config = {
+        "schema": "code-structure-viz.domain-config/next/v1",
+        "request_independent": False,
+        "projects": copy.deepcopy(seal.final_plan["projects"]),
+        "targets": [],
+        "upstream_depth": 1,
+        "downstream_depth": 1,
+        "formats": ["semantic-json"],
+        "limits": _next_limits(),
+        "trusted_environment_digest": _trusted_environment()["sha256"],
+        "source_plan": copy.deepcopy(seal.final_plan),
+        "source_plan_digest": digest(seal.final_plan),
+        "config_resolution": copy.deepcopy(seal.final_plan["config_resolution"]),
+    }
+    resolved_config["domain_config_digest"] = digest(resolved_config)
+    _validator("next-config-v1.schema.json").validate(resolved_config)
     assert seal.final_plan["local_extends"] == [
         {"project_root": ".", "config_path": "tsconfig.json", "extends": ["base.json"]}
     ]
@@ -5759,10 +6063,13 @@ def test_round21_provenance_catalog_has_single_request_independent_source_contro
         }
 
     value: dict[str, Any] = {
-        "kind": "request_independent",
+        "kind": "request_independent_failure",
         "stage": "source_control",
         "failure_code": "CSV-NEXT-CONFIG-002",
         "observed": {
+            "applicability": row(True),
+            "config": row(True),
+            "source": row(False),
             "request": row(False),
             "limits": row(False),
             "source_plan": row(False),
@@ -5770,6 +6077,7 @@ def test_round21_provenance_catalog_has_single_request_independent_source_contro
             "trusted_environment": row(False),
             "compatibility": row(False),
             "process_launch": row(False),
+            "response": row(False),
             "budget": row(False),
         },
     }
@@ -5980,6 +6288,7 @@ def test_round20_source_graph_is_derived_from_frozen_bytes_not_reader_injection(
                     "normalized_specifier": "src/B.tsx",
                 }
             ),
+            "source_span": {"byte_start": 14, "byte_end": 19},
         }
     ]
     with pytest.raises(AssertionError):
@@ -6041,16 +6350,8 @@ def test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_
     assert process_launch_observation_from_descriptor(descriptor) == fixture_observation
 
 
-def test_round21_process_observation_is_normative_and_fingerprint_excludes_ephemeral_identity() -> (
-    None
-):
-    assert "round21-process-observation-fingerprint"
-    assert "round21-process-identity-substitution"
-    unavailable = process_launch_observation_from_descriptor(None)
-    validate_process_launch_observation(unavailable)
-    assert unavailable["stable_fingerprint"] == process_launch_stable_fingerprint(unavailable)
-    assert unavailable["node_realpath"] is None
-    assert unavailable["stable_fingerprint"]
+def _production_launch_fixture() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Explicit recorded fixture, not evidence of a real host process."""
 
     identity = {
         "realpath": "/opt/node/bin/node",
@@ -6102,12 +6403,54 @@ def test_round21_process_observation_is_normative_and_fingerprint_excludes_ephem
         "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
         "fd_inheritance": {"close_fds": True, "allowed": [0, 1, 2]},
     }
-    production["stable_fingerprint"] = process_launch_stable_fingerprint(production)
-    production["stable_toolchain_fingerprint"] = production["stable_fingerprint"]
-    production["local_process_attestation_digest"] = process_launch_local_attestation_digest(
-        production
+    policy: dict[str, Any] = {
+        "schema": "code-structure-viz.next-process-launch-policy/v1",
+        "version": 1,
+        "platform": "linux",
+        "node": {"realpath": "/opt/node/bin/node", "sha256": "2" * 64, "version": "22.14.0"},
+        "adapter": {
+            "schema": "code-structure-viz.next-adapter/v1",
+            "version": "1.0.0",
+            "sha256": "a" * 64,
+        },
+        "argv": ["/opt/node/bin/node", "/.code-structure-viz/next-adapter.mjs"],
+        "shell": False,
+        "cwd": "/.code-structure-viz/private-run",
+        "env_allowlist": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+        "denied_env": ["NODE_OPTIONS", "NODE_PATH", "PATH", "npm_config_user_config"],
+        "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
+        "fd_inheritance": {"close_fds": True, "allowed": [0, 1, 2]},
+        "process_group": {"create": True, "terminate_scope": "group", "wait_after_terminate": True},
+        "timeout_seconds": 60,
+        "capture_limits": {
+            "max_adapter_stdout_capture_bytes": 16777216,
+            "max_adapter_stderr_capture_bytes": 65536,
+            "max_adapter_response_bytes": 16777216,
+        },
+    }
+    production.update(
+        policy_digest=digest(policy),
+        adapter=copy.deepcopy(policy["adapter"]),
+        timeout_seconds=policy["timeout_seconds"],
+        capture_limits=copy.deepcopy(policy["capture_limits"]),
     )
-    validate_process_launch_observation(production)
+    production["stable_fingerprint"] = process_launch_stable_fingerprint(production)
+    return policy, process_observation_with_fingerprints(production)
+
+
+def test_round21_process_observation_is_normative_and_fingerprint_excludes_ephemeral_identity() -> (
+    None
+):
+    assert "round21-process-observation-fingerprint"
+    assert "round21-process-identity-substitution"
+    unavailable = process_launch_observation_from_descriptor(None)
+    validate_process_launch_observation(unavailable)
+    assert unavailable["stable_fingerprint"] == process_launch_stable_fingerprint(unavailable)
+    assert unavailable["node_realpath"] is None
+    assert unavailable["stable_fingerprint"]
+
+    policy, production = _production_launch_fixture()
+    validate_process_launch_observation(production, policy=policy)
     _validator("next-process-launch-observation-v1.schema.json").validate(production)
     ephemeral: dict[str, Any] = copy.deepcopy(production)
     ephemeral["file_identity_at_hash"]["device"] = 11
@@ -6130,6 +6473,90 @@ def test_round21_process_observation_is_normative_and_fingerprint_excludes_ephem
         validate_process_launch_observation(windows)
     with pytest.raises(ValidationError):
         _validator("next-process-launch-observation-v1.schema.json").validate(windows)
+
+
+@pytest.mark.parametrize(
+    ("path", "replacement"),
+    [
+        (("argv", 0), "/other/node"),
+        (("argv", 1), "/target/run-me.js"),
+        (("argv",), ["/opt/node/bin/node", "/.code-structure-viz/next-adapter.mjs", "--eval"]),
+        (("denied_env",), []),
+        (("cwd",), "/target/project"),
+        (("node_version",), "22.14.1"),
+        (("file_identity_at_hash", "version"), "22.14.1"),
+        (("adapter", "sha256"), "b" * 64),
+        (("timeout_seconds",), 61),
+        (("capture_limits", "max_adapter_response_bytes"), 1024),
+        (("fd_lifecycle", "closed_after_spawn_result"), False),
+        (("verified_open_handle", "number"), 0),
+        (("process_group", "create"), False),
+    ],
+)
+def test_production_process_observation_rejects_rehashed_policy_substitution(
+    path: tuple[str | int, ...], replacement: Any
+) -> None:
+    policy, observation = _production_launch_fixture()
+    _validator("next-process-launch-policy-v1.schema.json").validate(policy)
+    validate_process_launch_observation(observation, policy=policy)
+    with pytest.raises(AssertionError):
+        validate_process_launch_observation(observation)
+    changed = copy.deepcopy(observation)
+    parent: Any = changed
+    for key in path[:-1]:
+        parent = parent[key]
+    parent[path[-1]] = replacement
+    changed["stable_fingerprint"] = process_launch_stable_fingerprint(changed)
+    changed = process_observation_with_fingerprints(changed)
+    with pytest.raises(AssertionError):
+        validate_process_launch_observation(changed, policy=policy)
+
+
+def test_production_policy_is_bound_to_publication_context_and_request_limits() -> None:
+    policy, observation = _production_launch_fixture()
+    request = _request()
+    raw = canonical_json_bytes(_response(_model(), request=request))
+    decision = response_boundary_decision(raw, validate_adapter_request(request))
+    assert isinstance(decision, NextValidatedDecision)
+    seal = decision.publication_context.source_acquisition_seal
+    assert seal is not None
+
+    def make_context(
+        launch_policy: dict[str, Any], launch_observation: dict[str, Any]
+    ) -> NextPublicationContext:
+        return _publication_context_for_validated_request(
+            validate_adapter_request(request),
+            request["run_context"],
+            source_seal=seal,
+            toolchain=_toolchain_snapshot(),
+            trusted_environment=_trusted_environment(),
+            source_failure_ledger=(),
+            process_launch_policy=launch_policy,
+            process_launch_observation=launch_observation,
+            response_bytes=raw,
+        )
+
+    context = make_context(policy, observation)
+    policy["cwd"] = "/mutated-caller-policy"
+    assert context.process_launch_policy is not None
+    assert context.process_launch_policy["cwd"] == "/.code-structure-viz/private-run"
+    leaked = context.process_launch_policy
+    assert leaked is not None
+    leaked["cwd"] = "/mutated-return-value"
+    assert context.process_launch_policy["cwd"] == "/.code-structure-viz/private-run"
+    for key, value in (
+        ("timeout_seconds", 61),
+        ("adapter", {**observation["adapter"], "version": "1.0.1"}),
+    ):
+        new_policy, new_observation = _production_launch_fixture()
+        new_policy[key] = value
+        new_observation[key] = value
+        new_observation["policy_digest"] = digest(new_policy)
+        new_observation["stable_fingerprint"] = process_launch_stable_fingerprint(new_observation)
+        new_observation = process_observation_with_fingerprints(new_observation)
+        validate_process_launch_observation(new_observation, policy=new_policy)
+        with pytest.raises(AssertionError):
+            make_context(new_policy, new_observation)
 
 
 def test_round20_source_integrity_has_one_fatal_vs_payload_unavailable_projection() -> None:
@@ -6178,10 +6605,13 @@ def test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch() 
         }
 
     value = {
-        "kind": "request_independent",
+        "kind": "request_independent_failure",
         "stage": "source_selection",
         "failure_code": "CSV-NEXT-SOURCE-003",
         "observed": {
+            "applicability": row(True),
+            "config": row(True),
+            "source": row(True),
             "request": row(False),
             "limits": row(True),
             "source_plan": row(True),
@@ -6189,6 +6619,7 @@ def test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch() 
             "trusted_environment": row(False),
             "compatibility": row(False),
             "process_launch": row(False),
+            "response": row(False),
             "budget": row(False),
         },
     }
@@ -6345,7 +6776,7 @@ def test_round19_html_describes_closed_source_union_without_adding_a_diagram() -
         / "20260831t022707z--nextjs-component-snapshot-best-practice-guide.html"
     )
     source = html_path.read_text(encoding="utf-8")
-    start = source.index('<section id="round19">')
+    start = source.index('<section id="acquisition">')
     end = source.index("</section>", start)
     section = source[start:end]
     for token in (
@@ -6355,10 +6786,8 @@ def test_round19_html_describes_closed_source_union_without_adding_a_diagram() -
         "SourceIntegrityFatal",
         "SourceFailureLedger.from_seal",
         "requestより先にsourceをseal",
-        "next-process-launch-observation-v1",
-        "next-provenance-v1",
+        "SourceProjectUsage",
         "NFC UTF-8 byte order",
-        "fresh current-SHA Strictはpending",
     ):
         assert token in section
     assert source.count('class="plantuml-source"') == 8
@@ -6700,7 +7129,9 @@ def test_export_root_seeds_include_target_barrel_and_consumer_records() -> None:
         "id": "",
         "owner_id": consumer_module["id"],
         "local_component_id": _id("component", "5"),
+        "local_name": "Button",
         "imported_name": "Button",
+        "binding_kind": "named",
         "role": "value",
         "source": {"kind": "internal", "module_id": _id("module", "3")},
     }
@@ -6863,7 +7294,9 @@ def test_model_proof_wire_budget_and_response_precedence() -> None:
 def test_schema_valid_model_record_limit_is_reachable_on_generated_wire() -> None:
     limit = _next_limits()["max_model_records"]
 
-    exact_model = _generated_context_model(limit - 2)
+    # One Project and the observed package + config controls occupy three
+    # wire records before generated context files.
+    exact_model = _generated_context_model(limit - 3)
     exact_request = _request(exact_model, default_content=b"")
     exact_response = _response(exact_model, request=exact_request)
     _validator("next-adapter-response-v1.schema.json").validate(exact_response)
@@ -6879,7 +7312,7 @@ def test_schema_valid_model_record_limit_is_reachable_on_generated_wire() -> Non
     )
     assert isinstance(exact_decision, NextValidatedDecision)
 
-    over_model = _generated_context_model(limit - 1)
+    over_model = _generated_context_model(limit - 2)
     over_request = _request(over_model, default_content=b"")
     over_response = _response(over_model, request=over_request)
     _validator("next-adapter-response-v1.schema.json").validate(over_response)
@@ -8117,7 +8550,9 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     assert selected_stream["stable_reason"] == "selected_artifact_unavailable"
     assert selected_stream["artifact"] == selected_manifest["artifacts"][0]
     assert selected_artifacts["next.snapshot.semantic.json"] == selected_payload
-    assert selected_stderr == _diagnostic_jsonl([_public_diagnostic("CSV-NEXT-LIMIT-003")])
+    assert selected_stderr == _diagnostic_jsonl(
+        [{**_public_diagnostic("CSV-NEXT-LIMIT-003"), "scope": "publication"}]
+    )
     assert selected_overrun.public_stderr["payload"] == selected_stderr
 
     capture_overrun = finalize_publication_decision(
@@ -8136,7 +8571,7 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     assert capture_manifest["run"]["exit_code"] == 3
     assert capture_stream["stable_reason"] == "domain_payload_unavailable"
     assert capture_artifacts == {}
-    assert capture_stderr == b""
+    assert capture_stderr == _diagnostic_jsonl(capture_manifest["diagnostics"])
     assert _publication_stdout_bytes(capture_overrun) == capture_overrun.sealed_stdout_result
     assert capture_overrun.sealed_stdout_result.endswith(b"\n")
     _validator("stdout-result-v1.schema.json").validate(
@@ -8160,7 +8595,7 @@ def test_round16_final_publication_decision_seals_capture_stderr_and_selected_co
     assert stderr_manifest["run"]["exit_code"] == 3
     assert stderr_stream["stable_reason"] == "domain_payload_unavailable"
     assert stderr_artifacts == {}
-    assert stderr_bytes == b""
+    assert stderr_bytes == _diagnostic_jsonl(stderr_manifest["diagnostics"])
     assert stderr_overrun.sealed_stdout_result.endswith(b"\n")
     _validator("stdout-result-v1.schema.json").validate(
         json.loads(stderr_overrun.sealed_stdout_result.decode("utf-8"))
@@ -9418,13 +9853,16 @@ def test_round16_pre_response_failure_is_narrowed_to_nonisolatable_source() -> N
 def test_round16_request_independent_source_failure_projects_schema_valid_whole_run() -> None:
     context = _run_context(independent=True)
     source_graph = {
-        "nodes": ({"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},),
+        "nodes": (
+            {"id": "broken", "path": "src/Broken.tsx", "project_root": "src"},
+            {"id": "unknown", "path": "src/Unknown.tsx", "project_root": "src"},
+        ),
         "edges": (),
-        "open_edges": ({"source": "broken"},),
+        "open_edges": ({"source": "unknown"},),
     }
     ledger = SourceFailureLedger.from_seal(
         _source_seal_for_graph(source_graph, project_roots=("src",)),
-        failures=({"path": "src/Broken.tsx", "stage": "source_selection"},),
+        failures=({"path": "src/Broken.tsx", "stage": "source_read"},),
         targets=(),
         proof_roots=({"id": "failure-root-2", "path_ref": "src/Broken.tsx"},),
     )
@@ -9796,7 +10234,7 @@ def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests()
         "b866a8e7ee775ee3143b272824a55d4e5332a532d08860254b5398cff25026f1"
     )
     assert runtime["manifest_sha256"] == (
-        "8b43890131639a685f064b361e97c98798fd09736129e95420215aac441164ab"
+        "41ed71a49c2062e4643f1a22ae8dbc1f95081011cebfa2abce8494dffcea520d"
     )
     assert runtime["build_input_digest"] == digest(
         {"members": runtime["members"], "licenses": runtime["licenses"]}
@@ -9806,20 +10244,20 @@ def test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests()
         {key: value for key, value in runtime.items() if key != "manifest_sha256"}
     )
     validate_runtime_manifest(runtime)
-    _validator("next-runtime-manifest-v1.schema.json").validate(runtime)
+    _validator("next-reference-runtime-inventory-v1.schema.json").validate(runtime)
 
     unsafe = copy.deepcopy(runtime)
     unsafe["members"][0]["path"] = "src/code_structure_viz/_next_runtime/../secret.js"
     with pytest.raises(AssertionError):
         validate_runtime_manifest(unsafe)
     with pytest.raises(ValidationError):
-        _validator("next-runtime-manifest-v1.schema.json").validate(unsafe)
+        _validator("next-reference-runtime-inventory-v1.schema.json").validate(unsafe)
     unsafe_url = copy.deepcopy(runtime)
     unsafe_url["licenses"][0]["source_url"] = "http://registry.invalid/typescript"
     with pytest.raises(AssertionError):
         validate_runtime_manifest(unsafe_url)
     with pytest.raises(ValidationError):
-        _validator("next-runtime-manifest-v1.schema.json").validate(unsafe_url)
+        _validator("next-reference-runtime-inventory-v1.schema.json").validate(unsafe_url)
     missing_member = copy.deepcopy(runtime)
     missing_member["members"].pop()
     with pytest.raises(AssertionError):
@@ -9933,7 +10371,12 @@ def test_plantuml_exact_bytes_and_control_character_golden() -> None:
             "kind": "literal_dynamic_import",
             "id": _id("relation", "1"),
             "source_id": _id("module", "3"),
-            "target": {"kind": "external", "safe_specifier": "react", "exported_name": "lazy"},
+            "target": {
+                "kind": "external",
+                "target_kind": "external_package",
+                "safe_specifier": "react",
+                "exported_name": "lazy",
+            },
             "role": "value",
             "reexport": False,
             "boundary_effect": "none",
@@ -9957,6 +10400,7 @@ def test_plantuml_exact_bytes_and_control_character_golden() -> None:
         "source_id": _id("component", "5"),
         "target": {
             "kind": "external",
+            "target_kind": "external_package",
             "safe_specifier": "react",
             "exported_name": "memo",
         },
@@ -9993,6 +10437,7 @@ def test_plantuml_exact_bytes_and_control_character_golden() -> None:
     )
     external_import["source"] = {
         "kind": "external",
+        "target_kind": "external_package",
         "safe_specifier": "react",
         "exported_name": "memo",
     }
@@ -10008,12 +10453,12 @@ def test_compatibility_descriptor_known_answer_is_content_independent() -> None:
     descriptor = _descriptor()
     validate_compatibility_descriptor(descriptor)
     assert descriptor["compatibility_id"] == (
-        "927c4a8619d7d3550db6dc817f5c359df8fe5f7443eef66aeaa1774b375192ca"
+        "b6c2f6f7bbf0403df1357380636fc2134fa33d6588ddb9ad71d731938a32fb20"
     )
     assert descriptor["compatibility_id"] == recompute_compatibility_id(descriptor)
-    changed_content = copy.deepcopy(descriptor)
-    changed_content["compatibility_id"] = descriptor["compatibility_id"]
-    assert changed_content["compatibility_id"] == recompute_compatibility_id(changed_content)
+    # Repository source/config are not in this preimage; runtime content is.
+    assert descriptor["trusted_type_environment_digest"] == _trusted_environment()["sha256"]
+    assert descriptor["trusted_type_environment_digest"] != TRUSTED_PROFILE_LICENSE_DIGEST
     changed_algorithm = copy.deepcopy(descriptor)
     changed_algorithm["algorithm_versions"]["props"] = 2
     changed_algorithm["compatibility_id"] = recompute_compatibility_id(changed_algorithm)
@@ -10024,11 +10469,216 @@ def test_compatibility_descriptor_known_answer_is_content_independent() -> None:
         validate_compatibility_descriptor(wrong)
 
 
+@pytest.mark.parametrize("role", ["value", "type"])
+def test_actual_namespace_imports_keep_alias_identity_through_publication(role: str) -> None:
+    model = _model()
+    fixture = next(
+        row for row in load_export_census_fixture() if row["path"] == f"src/namespace-{role}.tsx"
+    )
+    file = _file("namespace", fixture["path"], "program", fixture["content"])
+    file["id"] = recompute_record_id(file)
+    module = {
+        "kind": "module",
+        "project_id": file["project_id"],
+        "path": file["path"],
+        "router_context": "none",
+        "client_entry": False,
+        "derived_roles": [],
+    }
+    module["id"] = recompute_record_id(module)
+    model["files"].append(file)
+    model["modules"].append(module)
+    fact = {"kind": "router_context", "owner_id": module["id"], "value": "none"}
+    fact["id"] = recompute_record_id(fact)
+    model["facts"].append(fact)
+    model["projects"][0]["file_ids"] = sorted([*model["projects"][0]["file_ids"], file["id"]])
+    for alias in ("Cards", "OtherCards"):
+        member = {
+            "kind": "import_binding",
+            "owner_id": module["id"],
+            "local_component_id": None,
+            "local_name": alias,
+            "binding_kind": "namespace",
+            "imported_name": None,
+            "role": role,
+            "source": {"kind": "internal", "module_id": _id("module", "4")},
+        }
+        member["id"] = recompute_record_id(member)
+        model["members"].append(member)
+    for collection in ("files", "modules", "members", "facts"):
+        model[collection].sort(key=lambda row: row["id"])
+    _refresh_model_counts(model)
+    request = _request(model=model)
+    raw = canonical_json_bytes(_response(model, request=request))
+    validate_response_envelope(raw, request)
+    decision = response_boundary_decision(raw, validate_adapter_request(request))
+    assert isinstance(decision, NextValidatedDecision)
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=(raw,))
+    _domain_value, _manifest_value, _stdout_value, artifacts, _stderr = _validate_publication_chain(
+        publication
+    )
+    semantic = json.loads(artifacts["next.snapshot.semantic.json"])
+    members = [row for row in semantic["members"] if row.get("binding_kind") == "namespace"]
+    assert len(members) == len({row["id"] for row in members}) == 2
+    assert all(
+        row["imported_name"] is None and row["local_component_id"] is None for row in members
+    )
+    assert b"import * as Cards" in artifacts["next.snapshot.puml"]
+    assert b"import * as OtherCards" in artifacts["next.snapshot.puml"]
+    for changed_field, changed_value in (
+        ("imported_name", "*"),
+        ("local_name", "default"),
+        ("local_component_id", _id("component", "6")),
+    ):
+        changed = copy.deepcopy(model)
+        member = next(row for row in changed["members"] if row.get("binding_kind") == "namespace")
+        member[changed_field] = changed_value
+        member["id"] = recompute_record_id(member)
+        changed["members"].sort(key=lambda row: row["id"])
+        with pytest.raises(AssertionError):
+            validate_model(changed)
+
+
 def test_canonical_digest_normalizes_unicode_before_hashing() -> None:
     composed = {"label": "é"}
     decomposed = {"label": "e\u0301"}
     assert canonical_json_bytes(composed) == b'{"label":"\xc3\xa9"}'
     assert digest(composed) == digest(decomposed)
+
+
+@pytest.mark.parametrize(
+    "change", ["node_bytes", "node_version", "adapter_bytes", "adapter_version"]
+)
+def test_compatibility_binds_observed_runtime_content(change: str) -> None:
+    policy, observed = _production_launch_fixture()
+    toolchain = _toolchain_snapshot()
+    environment = _trusted_environment()
+    baseline = _compatibility_descriptor_snapshot(
+        toolchain=toolchain, trusted_environment=environment, process_observation=observed
+    )
+    changed = copy.deepcopy(observed)
+    changed_toolchain = copy.deepcopy(toolchain)
+    if change == "node_bytes":
+        changed["node_sha256"] = "3" * 64
+    elif change == "node_version":
+        changed["node_version"] = "22.14.1"
+        changed_toolchain["node"]["version"] = "22.14.1"
+        changed_toolchain["node_version"] = "22.14.1"
+    elif change == "adapter_bytes":
+        changed["adapter"]["sha256"] = "b" * 64
+    else:
+        changed["adapter"]["version"] = "1.0.1"
+        changed_toolchain["adapter_version"] = "1.0.1"
+    descriptor = _compatibility_descriptor_snapshot(
+        toolchain=changed_toolchain, trusted_environment=environment, process_observation=changed
+    )
+    validate_compatibility_descriptor(descriptor)
+    assert descriptor["compatibility_id"] != baseline["compatibility_id"]
+    assert (
+        descriptor["portable_toolchain_fingerprint"] != baseline["portable_toolchain_fingerprint"]
+    )
+    assert descriptor["trusted_type_environment_digest"] == environment["sha256"]
+    # This helper computes semantic identity; process admissibility is checked
+    # independently and still rejects a change against the original policy.
+    changed["stable_fingerprint"] = process_launch_stable_fingerprint(changed)
+    changed = process_observation_with_fingerprints(changed)
+    with pytest.raises(AssertionError):
+        validate_process_launch_observation(changed, policy=policy)
+
+
+def test_compatibility_excludes_host_state_and_operational_limits() -> None:
+    _policy, observed = _production_launch_fixture()
+    baseline = _compatibility_descriptor_snapshot(
+        toolchain=_toolchain_snapshot(),
+        trusted_environment=_trusted_environment(),
+        process_observation=observed,
+    )
+    changed = copy.deepcopy(observed)
+    changed["node_realpath"] = "/another-host/node"
+    changed["host_os"] = "darwin"
+    changed["verified_open_handle"]["number"] = 17
+    changed["file_identity_at_hash"]["inode"] = 99
+    changed["timeout_seconds"] = 61
+    changed["capture_limits"]["max_adapter_response_bytes"] = 1024
+    assert (
+        _compatibility_descriptor_snapshot(
+            toolchain=_toolchain_snapshot(),
+            trusted_environment=_trusted_environment(),
+            process_observation=changed,
+        )
+        == baseline
+    )
+
+
+def test_actual_response_rejects_self_consistent_foreign_compatibility() -> None:
+    request = _request()
+    response = _response(_model(), request=request)
+    original = response_boundary_decision(
+        canonical_json_bytes(response), validate_adapter_request(request)
+    )
+    assert isinstance(original, NextValidatedDecision)
+    foreign = response["compatibility_descriptor"]
+    foreign["portable_toolchain_fingerprint"] = "f" * 64
+    foreign["compatibility_id"] = recompute_compatibility_id(foreign)
+    response["semantic_compatibility_id"] = foreign["compatibility_id"]
+    validate_compatibility_descriptor(foreign)
+    _validator("next-adapter-response-v1.schema.json").validate(response)
+    decision = response_boundary_decision(
+        canonical_json_bytes(response), validate_adapter_request(request)
+    )
+    assert isinstance(decision, PreResponseFailureDecision)
+    assert decision.diagnostic_code == "CSV-NEXT-PROTOCOL-001"
+    raw = canonical_json_bytes(response)
+    with pytest.raises(AssertionError):
+        replace(
+            original, raw_response_bytes=raw, raw_response_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    provenance = original.publication_context.observation_provenance
+    provenance["observed"]["response"]["value"]["sha256"] = digest(
+        {"encoding": "base64", "data": base64.b64encode(raw).decode("ascii")}
+    )
+    changed_context = replace(original.publication_context, observation_provenance=provenance)
+    with pytest.raises(AssertionError):
+        replace(
+            original,
+            raw_response_bytes=raw,
+            raw_response_sha256=hashlib.sha256(raw).hexdigest(),
+            publication_context=changed_context,
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("schema", "code-structure-viz.next-adapter-response/v2"),
+        ("request_id", "f" * 64),
+        ("adapter_version", "1.0.1"),
+        ("semantic_compatibility_id", "f" * 64),
+        ("trusted_type_environment_digest", "f" * 64),
+        ("model_digest", "f" * 64),
+    ],
+)
+def test_validated_decision_rejects_rehashed_wire_envelope_substitution(
+    field: str, value: str
+) -> None:
+    request = validate_adapter_request(_request())
+    response = _response(_model(), request=dict(request))
+    original = response_boundary_decision(canonical_json_bytes(response), request)
+    assert isinstance(original, NextValidatedDecision)
+    response[field] = value
+    raw = canonical_json_bytes(response)
+    provenance = original.publication_context.observation_provenance
+    provenance["observed"]["response"]["value"]["sha256"] = digest(
+        {"encoding": "base64", "data": base64.b64encode(raw).decode("ascii")}
+    )
+    changed_context = replace(original.publication_context, observation_provenance=provenance)
+    with pytest.raises(AssertionError):
+        replace(
+            original,
+            raw_response_bytes=raw,
+            raw_response_sha256=hashlib.sha256(raw).hexdigest(),
+            publication_context=changed_context,
+        )
 
 
 def test_round16_html_has_no_fixed_limit_inventory() -> None:
@@ -10045,7 +10695,7 @@ def test_round16_html_has_no_fixed_limit_inventory() -> None:
         / "20260831t022707z--nextjs-component-snapshot-best-practice-guide.html"
     )
     source = html_path.read_text(encoding="utf-8")
-    assert "Round 16" in source
+    assert "実装開始可能性の最終判定も未完了" in source
     assert "max_adapter_response_bytes" in source
     assert "max_selected_stdout_bytes" in source
     assert "stdout 16 MiB" not in source
@@ -10066,25 +10716,19 @@ def test_round17_html_has_validation_pipeline_and_round17_state() -> None:
         / "20260831t022707z--nextjs-component-snapshot-best-practice-guide.html"
     )
     source = html_path.read_text(encoding="utf-8")
-    assert "Round 17" in source
+    assert "HTMLを第二の仕様とは扱いません" in source
     for token in (
         "SourceDiscoveryIntent",
         "SourceFailureLedger",
         "request-independent",
-        "process_launch_descriptor",
         "PublicationBoundaryDecision",
-        "raw cap",
-        "bounded decode/aggregate",
         "closed schema",
-        "base/path/reference/proof",
-        "actual model+proof-only count",
-        "model gate",
-        "entity gate",
-        "selected copy",
+        "proofだけにあるrecordの実数",
+        "意味解析状態と保存済みartifact descriptorを保持",
         "LIMIT-003",
         "PROTOCOL-001",
-        "selected_taint",
-        "sort_keys=True",
+        "unobserved/null",
+        "固定key順",
     ):
         assert token in source
     assert "stdout 16 MiB" not in source
@@ -10105,28 +10749,29 @@ def test_round18_html_validation_order_is_strict_and_reverse_mutation_fails() ->
         / "20260831t022707z--nextjs-component-snapshot-best-practice-guide.html"
     )
     source = html_path.read_text(encoding="utf-8")
-    start = source.index('<section id="round18">')
-    end = source.index("</section>", start)
+    start = source.index('<ol id="validation-order">')
+    end = source.index("</ol>", start)
     section = source[start:end]
     tokens = (
-        "raw cap",
-        "bounded decode/aggregate",
-        "closed schema",
-        "base/path/reference/proof",
-        "actual model+proof-only count",
-        "model gate",
-        "entity gate",
-        "selected copy",
+        "raw-cap",
+        "bounded-decode",
+        "closed-schema",
+        "reference-proof",
+        "model-count",
+        "model-gate",
+        "entity-gate",
+        "selected-copy",
     )
-    positions = [section.index(f"<code>{token}</code>") for token in tokens]
+    positions = [section.index(f'data-gate="{token}"') for token in tokens]
     assert positions == sorted(positions)
     assert len(set(positions)) == len(tokens)
 
-    reverse = section.replace(
-        "<code>model gate</code> → <code>entity gate</code>",
-        "<code>entity gate</code> → <code>model gate</code>",
+    reverse = (
+        section.replace('data-gate="model-gate"', 'data-gate="temporary"')
+        .replace('data-gate="entity-gate"', 'data-gate="model-gate"')
+        .replace('data-gate="temporary"', 'data-gate="entity-gate"')
     )
-    reverse_positions = [reverse.index(f"<code>{token}</code>") for token in tokens]
+    reverse_positions = [reverse.index(f'data-gate="{token}"') for token in tokens]
     assert reverse_positions != sorted(reverse_positions)
 
 
@@ -10376,8 +11021,8 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
     assert all(reverse.values())
 
 
-def test_round22_applicability_dual_valid_and_malformed_projection() -> None:
-    """Round 22 red: applicability owns the malformed package branch."""
+def test_round22_applicability_duplicate_and_malformed_projection() -> None:
+    """Applicability owns duplicate and malformed package branches."""
 
     equal_dual = derive_package_applicability_matrix(
         {
@@ -10387,7 +11032,15 @@ def test_round22_applicability_dual_valid_and_malformed_projection() -> None:
         },
         (".",),
     )
-    assert equal_dual.aggregate_state == "applicable"
+    assert equal_dual.aggregate_state == "malformed"
+    duplicate_projection = package_applicability_projection(equal_dual)
+    assert duplicate_projection["node_probe"] == {
+        "permission": "prohibited",
+        "performed": False,
+    }
+    assert duplicate_projection["domain"]["diagnostics"][0]["code"] == (
+        "CSV-NEXT-APPLICABILITY-002"
+    )
     malformed = derive_package_applicability_matrix(
         {"package.json": b'{"dependencies":{"next":false}}'}, (".",)
     )
@@ -10452,6 +11105,12 @@ def test_round22_source_graph_is_a_redacted_resolved_or_open_union() -> None:
     assert all(set(edge) >= {"source", "syntax_kind", "reason"} for edge in graph["open_edges"])
     assert all("specifier" not in edge and "raw" not in edge for edge in graph["open_edges"])
     assert seal.final_plan["source_graph"] == graph
+    validate_source_graph_against_frozen_bytes(
+        graph,
+        files,
+        (".",),
+        seal.final_plan,
+    )
     _validator("next-source-plan-v1.schema.json").validate(seal.final_plan)
     substituted = copy.deepcopy(seal.final_plan)
     substituted["source_graph"]["open_edges"][0]["raw"] = "./unsafe"
@@ -10501,8 +11160,19 @@ def test_round22_source_locality_scans_executable_template_jsx_and_runtime_suffi
         edge["target"] for edge in seal.source_graph["edges"] if edge["source"] == entry_id
     }
 
+    failed_seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        InstrumentedSourceReader(
+            files, read_failures={"src/template-target.ts": "CSV-NEXT-SOURCE-003"}
+        ),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+        allow_partial=True,
+    )
     failure = SourceFailureLedger.from_seal(
-        seal,
+        failed_seal,
         failures=({"path": "src/template-target.ts", "stage": "source_read"},),
         targets=("path:src/entry.ts",),
         proof_roots=({"id": "failure-root", "path_ref": "src/template-target.ts"},),
@@ -10566,16 +11236,19 @@ def test_round22_provenance_observed_rows_have_typed_identity() -> None:
     }
     row = {"state": "observed", "value": marker}
     value = {
-        "kind": "request_independent",
+        "kind": "request_independent_failure",
         "stage": "source_selection",
         "failure_code": "CSV-NEXT-SOURCE-003",
         "observed": {
             field: (
                 row
-                if field in {"limits", "source_plan"}
+                if field in {"applicability", "config", "source", "limits", "source_plan"}
                 else {"state": "unobserved", "value": None}
             )
             for field in (
+                "applicability",
+                "config",
+                "source",
                 "request",
                 "limits",
                 "source_plan",
@@ -10583,6 +11256,7 @@ def test_round22_provenance_observed_rows_have_typed_identity() -> None:
                 "trusted_environment",
                 "compatibility",
                 "process_launch",
+                "response",
                 "budget",
             )
         },
@@ -10834,7 +11508,7 @@ def test_round23_rg_01_applicability_is_package_first_and_project_filtered() -> 
         ("apps/dual",),
     )
     validate_r23_applicability_projection(dual)
-    assert dual["outcome"] == "complete"
+    assert dual["outcome"] == "payload_unavailable"
 
 
 def test_round23_rg_02_config_subset_has_one_closed_jsonc_grammar() -> None:
@@ -11209,11 +11883,11 @@ def test_round23_rg_17_graph_digest_binds_source_bytes_and_edge_occurrence() -> 
 
 
 def test_round23_rg_18_current_schema_and_history_contract_are_explicit() -> None:
-    schema = json.loads(
-        (ROOT / "schemas" / "next-round23-authority-v1.schema.json").read_text(encoding="utf-8")
-    )
-    assert schema["$id"].endswith("next-round23-authority-v1")
-    assert schema["additionalProperties"] is False
+    # The old round umbrella was a test-only surrogate and is intentionally
+    # gone.  Current-v1 authority is composed from the public schemas below.
+    assert not (ROOT / "schemas" / "next-round23-authority-v1.schema.json").exists()
+    assert (ROOT / "schemas" / "next-domain-manifest-v1.schema.json").exists()
+    assert (ROOT / "schemas" / "run-manifest-v1.schema.json").exists()
     package = r23_applicability_projection(
         {"package.json": b'{"dependencies":{"next":"15"}}'}, (".",)
     )
@@ -11232,7 +11906,7 @@ def test_round23_rg_18_current_schema_and_history_contract_are_explicit() -> Non
         process_observation=values["process_launch"],
         run_context=_round23_context(),
     )
-    _validator("next-round23-authority-v1.schema.json").validate(decision.as_dict())
+    validate_r23_decision(decision)
     for path in (
         ROOT
         / "spec-dock"
@@ -11265,3 +11939,619 @@ def test_round23_rg_18_current_schema_and_history_contract_are_explicit() -> Non
         text = path.read_text(encoding="utf-8")
         assert "Current v1 normative authority" in text
         assert "historical" in text.lower()
+
+
+def test_round24_actual_v1_decision_and_publication_chain_is_schema_bound() -> None:
+    """Exercise the real bytes -> decision -> publication schema boundary."""
+
+    request = _request()
+    response_bytes = canonical_json_bytes(_response(_model(), request=request))
+    decision = response_boundary_decision(response_bytes, validate_adapter_request(request))
+    assert isinstance(decision, NextValidatedDecision)
+
+    decision_wire = next_run_decision_projection(decision)
+    _validator("next-run-decision-v1.schema.json").validate(decision_wire)
+    validate_next_run_decision_projection(decision_wire, decision)
+    assert decision_wire["response"]["raw_sha256"] == hashlib.sha256(response_bytes).hexdigest()
+
+    publication = finalize_publication_decision(
+        decision,
+        adapter_stdout_chunks=(response_bytes,),
+        adapter_stdout_limit=len(response_bytes),
+        selected_stdout_limit=16 * 1024 * 1024,
+    )
+    publication_wire = next_publication_decision_projection(publication)
+    _validator("next-publication-decision-v1.schema.json").validate(publication_wire)
+    validate_next_publication_decision_projection(publication_wire, publication)
+    assert publication_wire["semantic_decision"] == decision_wire
+    assert publication_wire["response"]["raw_sha256"] == decision_wire["response"]["raw_sha256"]
+
+    substituted_decision = copy.deepcopy(decision_wire)
+    substituted_decision["response"]["raw_sha256"] = "0" * 64
+    _validator("next-run-decision-v1.schema.json").validate(substituted_decision)
+    with pytest.raises(AssertionError):
+        validate_next_run_decision_projection(substituted_decision, decision)
+
+    substituted_publication = copy.deepcopy(publication_wire)
+    substituted_publication["stdout"]["result_sha256"] = "0" * 64
+    _validator("next-publication-decision-v1.schema.json").validate(substituted_publication)
+    with pytest.raises(AssertionError):
+        validate_next_publication_decision_projection(substituted_publication, publication)
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize(
+    "state", ["complete", "not_applicable", "protocol_failure", "entity_limit"]
+)
+def test_actual_publication_selector_matrix_and_measured_candidate_identity(
+    selector: str | None, state: str
+) -> None:
+    context = _run_context(selector=selector, independent=state == "not_applicable")
+    if state == "not_applicable":
+        decision: NextRunDecision = request_independent_not_applicable_decision(context)
+        raw = b""
+    else:
+        limits = _next_limits()
+        if state == "entity_limit":
+            limits["max_entities"] = 1
+            context = _run_context(selector=selector, resolved=1, source="cli", requested=1)
+        request = _request(run_context=context, limits=limits)
+        raw = (
+            b"{"
+            if state == "protocol_failure"
+            else canonical_json_bytes(_response(_model(), request=request))
+        )
+        decision = response_boundary_decision(raw, validate_adapter_request(request))
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=(raw,))
+    wire = next_publication_decision_projection(publication)
+    _validator("next-publication-decision-v1.schema.json").validate(wire)
+    validate_next_publication_decision_projection(wire, publication)
+    domain, _manifest, metadata, artifacts, _stderr = _validate_publication_chain(publication)
+    assert wire["stdout"]["result_size_bytes"] == len(_publication_stdout_bytes(publication))
+    assert (
+        wire["stdout"]["result_sha256"]
+        == hashlib.sha256(_publication_stdout_bytes(publication)).hexdigest()
+    )
+    if state != "complete":
+        assert artifacts == {}
+        assert domain["payload_available"] is False
+        if selector in {"next:semantic-json", "next:plantuml"}:
+            assert wire["stdout"]["candidate"] is None
+            assert wire["stdout"]["copy_status"] == "not_attempted"
+            assert wire["stdout"]["selected_size_bytes"] == 0
+            assert wire["stdout"]["availability"] is False
+            assert metadata["availability"] is False
+            return
+    key = candidate_key_for_selector(selector)
+    measured = publication.sealed_stdout_candidates[key]
+    over = finalize_publication_decision(
+        decision, adapter_stdout_chunks=(raw,), selected_stdout_limit=len(measured) - 1
+    )
+    over_wire = next_publication_decision_projection(over)
+    _validator("next-publication-decision-v1.schema.json").validate(over_wire)
+    assert over_wire["stdout"]["selected_size_bytes"] == len(measured)
+    assert over_wire["stdout"]["selected_sha256"] == hashlib.sha256(measured).hexdigest()
+    if over_wire["stdout"]["candidate"] is not None:
+        assert over_wire["stdout"]["candidate"]["size_bytes"] == len(measured)
+        assert over_wire["stdout"]["candidate"]["sha256"] == hashlib.sha256(measured).hexdigest()
+    assert (
+        over_wire["stdout"]["result_sha256"]
+        == hashlib.sha256(_publication_stdout_bytes(over)).hexdigest()
+    )
+    assert over.artifact_bytes == artifacts
+    assert over_wire["semantic_decision"] == wire["semantic_decision"]
+    over_domain, over_manifest, _, _, over_stderr = _validate_publication_chain(over)
+    assert over_domain == domain
+    scoped = [row for row in over_manifest["diagnostics"] if row.get("scope") == "publication"]
+    assert len(scoped) == 1 and scoped[0]["code"] == "CSV-NEXT-LIMIT-003"
+    assert json.loads(over_stderr.splitlines()[0])["type"] == "diagnostic"
+    assert not any("scope" in row for row in over_domain["diagnostics"])
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize("failed_gate", ["adapter_stdout", "adapter_stderr", "public_stderr"])
+@pytest.mark.parametrize("selected_limit", [None, 1])
+def test_actual_publication_capture_failure_matrix(
+    selector: str | None, failed_gate: str, selected_limit: int | None
+) -> None:
+    request = _request(run_context=_run_context(selector=selector))
+    raw = (
+        b"{"
+        if failed_gate == "public_stderr"
+        else canonical_json_bytes(_response(_model(), request=request))
+    )
+    decision = response_boundary_decision(raw, validate_adapter_request(request))
+    publication = finalize_publication_decision(
+        decision,
+        adapter_stdout_chunks=(raw,),
+        adapter_stderr_chunks=(b"ab",) if failed_gate == "adapter_stderr" else (),
+        adapter_stdout_limit=1 if failed_gate == "adapter_stdout" else len(raw),
+        adapter_stderr_limit=1,
+        public_stderr_limit=1 if failed_gate == "public_stderr" else 65536,
+        selected_stdout_limit=selected_limit,
+    )
+    wire = next_publication_decision_projection(publication)
+    _validator("next-publication-decision-v1.schema.json").validate(wire)
+    domain, manifest, metadata, artifacts, stderr = _validate_publication_chain(publication)
+    assert wire["response"] is None
+    assert artifacts == {} and domain["payload_available"] is False
+    assert metadata["availability"] is False
+    assert manifest["run"]["exit_code"] == publication.exit_code == 3
+    if failed_gate == "public_stderr":
+        assert stderr == b""
+    else:
+        assert stderr == _diagnostic_jsonl(manifest["diagnostics"])
+
+
+@pytest.mark.parametrize("counter", ["captured_bytes", "retained_bytes", "manifest_stdout_bytes"])
+def test_actual_publication_rejects_rehashed_capture_count_substitution(counter: str) -> None:
+    request = _request()
+    raw = canonical_json_bytes(_response(_model(), request=request))
+    decision = response_boundary_decision(raw, validate_adapter_request(request))
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=(raw,))
+    changed = publication.adapter_stdout
+    changed[counter] = 1
+    with pytest.raises(AssertionError):
+        replace(publication, adapter_stdout=changed, measurement_digest="")
+
+
+@pytest.mark.parametrize(
+    ("argument", "limit_name"),
+    [
+        ("adapter_stdout_limit", "max_adapter_stdout_capture_bytes"),
+        ("adapter_stderr_limit", "max_adapter_stderr_capture_bytes"),
+        ("public_stderr_limit", "max_stderr_bytes"),
+        ("selected_stdout_limit", "max_selected_stdout_bytes"),
+    ],
+)
+def test_actual_publication_cannot_expand_sealed_limits(argument: str, limit_name: str) -> None:
+    request = _request()
+    raw = canonical_json_bytes(_response(_model(), request=request))
+    decision = response_boundary_decision(raw, validate_adapter_request(request))
+    with pytest.raises(AssertionError):
+        finalize_publication_decision(
+            decision, adapter_stdout_chunks=(raw,), **{argument: request["limits"][limit_name] + 1}
+        )
+
+
+def test_round24_source_graph_preserves_type_roles_and_safe_target_kinds() -> None:
+    """The actual sealed graph distinguishes redacted relative/package frontiers."""
+
+    files = {
+        "package.json": b'{"dependencies":{"next":"15.0.0"}}',
+        "tsconfig.json": json.dumps(
+            {
+                "include": ["src/**/*.ts"],
+                "compilerOptions": {"module": "esnext", "moduleResolution": "bundler"},
+            }
+        ).encode(),
+        "src/entry.ts": (
+            b'import type { T } from "./types"; import "missing-package"; import("./missing");'
+        ),
+        "src/types.ts": b"export type T = string;",
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    graph = seal.source_graph
+    validate_source_graph_projection(graph)
+    _validator("next-source-plan-v1.schema.json").validate(seal.final_plan)
+    entry_id = digest({"kind": "source_node", "path": "src/entry.ts"})
+    assert any(edge["source"] == entry_id and edge["role"] == "type" for edge in graph["edges"])
+    package_edge = next(
+        edge for edge in graph["open_edges"] if edge.get("target_kind") == "external_package"
+    )
+    relative_edge = next(
+        edge for edge in graph["open_edges"] if edge.get("target_kind") == "unresolved_relative"
+    )
+    assert package_edge["safe_frontier"]["safe_specifier"] == "missing-package"
+    assert relative_edge["safe_frontier"]["normalized_specifier"] == "src/missing"
+
+    mismatched = copy.deepcopy(seal.final_plan)
+    mismatched_edge = next(
+        edge
+        for edge in mismatched["source_graph"]["open_edges"]
+        if edge.get("target_kind") == "external_package"
+    )
+    mismatched_edge["target_kind"] = "unresolved_relative"
+    with pytest.raises(ValidationError):
+        _validator("next-source-plan-v1.schema.json").validate(mismatched)
+
+
+@pytest.mark.parametrize("project_root", [".", "apps/web"])
+@pytest.mark.parametrize("membership", ["files", "include"])
+def test_config_inheritance_retains_origins_through_actual_source_seal(
+    project_root: str, membership: str
+) -> None:
+    def path(value: str) -> str:
+        return value if project_root == "." else f"{project_root}/{value}"
+
+    files = {
+        path("package.json"): b'{"dependencies":{"next":"15"}}',
+        path("tsconfig.json"): b'{"extends":"./config/base.json"}',
+        path("config/base.json"): json.dumps(
+            {
+                "extends": "./nested/common.json",
+                membership: ["component.tsx" if membership == "files" else "*.tsx"],
+                "exclude": ["ignored.tsx"],
+                "compilerOptions": {"baseUrl": ".", "paths": {"@ui/*": ["ui/*"]}},
+            }
+        ).encode(),
+        path("config/nested/common.json"): b'{"compilerOptions":{"checkJs":true}}',
+        path("config/component.tsx"): b"export const Component = 1;",
+        path("config/ignored.tsx"): b"export const Ignored = 1;",
+        path("component.tsx"): b"export const WrongLocation = 1;",
+    }
+    reader = InstrumentedSourceReader(files)
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(project_root,), control_candidates=()),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    _validator("next-source-plan-v1.schema.json").validate(seal.final_plan)
+    project = seal.final_plan["projects"][0]
+    resolution = seal.final_plan["config_resolution"][0]
+    assert project["compiler_options"]["base_url"] == path("config")
+    assert project["compiler_options"]["paths"] == {"@ui/*": [path("config/ui/*")]}
+    assert project["compiler_options"]["check_js"] is True
+    assert resolution["membership"]["patterns"] == [
+        path("config/component.tsx" if membership == "files" else "config/*.tsx")
+    ]
+    assert {item["option"]: item["path"] for item in resolution["declaring_paths"]} == {
+        "baseUrl": path("config/base.json"),
+        "paths": path("config/base.json"),
+        "checkJs": path("config/nested/common.json"),
+        membership: path("config/base.json"),
+        "exclude": path("config/base.json"),
+    }
+    assert path("config/component.tsx") in seal.captured_files
+    assert path("component.tsx") not in reader.read_counts
+    assert path("config/ignored.tsx") not in reader.read_counts
+    assert all(count == 1 for count in reader.read_counts.values())
+
+    # Child membership/paths replace the parent as one authority; an explicit
+    # empty array is not default discovery and inherited baseUrl keeps origin.
+    files[path("tsconfig.json")] = json.dumps(
+        {
+            "extends": "./config/base.json",
+            membership: [],
+            "compilerOptions": {"paths": {"@/*": ["src/*"]}},
+        }
+    ).encode()
+    empty = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(project_root,), control_candidates=()),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    assert empty.final_plan["config_resolution"][0]["membership"]["patterns"] == []
+    assert not any(row["effective_role"] == "program" for row in empty.final_plan["file_role_map"])
+    assert empty.final_plan["projects"][0]["compiler_options"]["base_url"] == path("config")
+    assert empty.final_plan["projects"][0]["compiler_options"]["paths"] == {"@/*": [path("src/*")]}
+
+
+@pytest.mark.parametrize("candidates", [(), ("tsconfig.json", "jsconfig.json"), ("jsconfig.json",)])
+def test_config_lookup_observes_only_selected_config_and_builtin_is_applicable(
+    candidates: tuple[str, ...],
+) -> None:
+    files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "tsconfig.json": b"{}",
+        "jsconfig.json": b"{",
+        "src/app.ts": b"export const app=1;",
+    }
+    reader = InstrumentedSourceReader(files)
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=candidates),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    assert "jsconfig.json" not in reader.read_counts
+    assert seal.final_plan["projects"][0]["config_path"] == "tsconfig.json"
+    builtin = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(
+            {path: payload for path, payload in files.items() if not path.endswith("config.json")}
+        ),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    _validator("next-source-plan-v1.schema.json").validate(builtin.final_plan)
+    assert builtin.package_applicability.aggregate_state == "applicable"
+    assert builtin.final_plan["projects"][0]["config_path"] is None
+    assert builtin.final_plan["config_resolution"][0] == {
+        "project_root": ".",
+        "config_path": None,
+        "declaring_paths": [],
+        "membership": {"kind": "default", "patterns": ["src"], "exclude": []},
+        "path_resolution_order": [],
+    }
+    assert "src/app.ts" in builtin.captured_files
+
+
+@pytest.mark.parametrize(
+    "aliases,expected",
+    [
+        (
+            {"@x/*": ["src/general/*"], "@x/ui": ["src/missing", "src/exact", "src/other"]},
+            "src/exact.ts",
+        ),
+        ({"@x/*": ["src/general/*"], "@*": ["src/other"]}, "src/general/ui.ts"),
+        ({"@*/ui": ["src/exact"], "@x/u*": ["src/other"]}, "src/exact.ts"),
+        ({"@x/u*": ["src/other"], "@*/ui": ["src/exact"]}, "src/other.ts"),
+        ({"@x/*x/ui": ["src/other"], "@x/*": ["src/general/*"]}, "src/general/ui.ts"),
+    ],
+)
+def test_actual_source_graph_obeys_alias_and_replacement_precedence(
+    aliases: dict[str, list[str]], expected: str
+) -> None:
+    files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "tsconfig.json": json.dumps(
+            {"compilerOptions": {"paths": aliases, "baseUrl": "."}}
+        ).encode(),
+        "src/entry.ts": b'import {ui} from "@x/ui";',
+        "src/exact.ts": b"export const ui=1;",
+        "src/other.ts": b"export const ui=2;",
+        "src/general/ui.ts": b"export const ui=3;",
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    _validator("next-source-plan-v1.schema.json").validate(seal.final_plan)
+    validate_source_graph_projection(seal.source_graph)
+    assert len(seal.source_graph["edges"]) == 1
+    assert seal.source_graph["edges"][0]["normalized_specifier"] == expected
+    assert not seal.source_graph["open_edges"]
+
+
+def test_resolved_compiler_options_cross_request_response_and_public_semantic_schemas() -> None:
+    request = _request()
+    files = {
+        record["path"]: base64.b64decode(record["content_base64"]) for record in request["files"]
+    }
+    files["tsconfig.json"] = b'{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}'
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    project = request["projects"][0]
+    project["compiler_options"] = copy.deepcopy(seal.final_plan["projects"][0]["compiler_options"])
+    project["config_digest"] = project_config_digest(project)
+    for record in request["files"]:
+        payload = files[record["path"]]
+        record.update(
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            content_base64=base64.b64encode(payload).decode(),
+        )
+    request["request_id"] = recompute_request_id(request)
+    register_source_acquisition_seal(request, seal)
+    _validator("next-adapter-request-v1.schema.json").validate(request)
+    model = _model_with_applicability_control_files(_model())
+    model["projects"] = copy.deepcopy(request["projects"])
+    model["files"] = [
+        {key: value for key, value in record.items() if key != "content_base64"}
+        for record in request["files"]
+    ]
+    response = _response(model, request=request)
+    _validator("next-adapter-response-v1.schema.json").validate(response)
+    decision = response_boundary_decision(
+        canonical_json_bytes(response), validate_adapter_request(request)
+    )
+    assert isinstance(decision, NextValidatedDecision)
+    publication = finalize_publication_decision(
+        decision,
+        adapter_stdout_chunks=(canonical_json_bytes(response),),
+        adapter_stdout_limit=len(canonical_json_bytes(response)),
+        selected_stdout_limit=16 * 1024 * 1024,
+    )
+    semantic = json.loads(publication.artifact_bytes["next.snapshot.semantic.json"])
+    _validator("next-semantic-v1.schema.json").validate(semantic)
+    assert semantic["projects"][0]["compiler_options"] == project["compiler_options"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        b'export const x=require("./dep");',
+        b'export function x(){return require("./dep");}',
+        b'export default ()=>import("./dep");',
+        b'export const x=import("./dep" + name);',
+        b'export const x=require("./dep" + name);',
+        b'function f(require){return require("./dep");}',
+        b'object.import("./dep");',
+        b'export {x}\nconst x=require("./dep");',
+        b'(require)("./dep");',
+        b'require?.("./dep");',
+        b'const load=require; load("./dep");',
+        b'const x = <number>1; const y = require("./dep");',
+        b'import dep = require("./dep");',
+    ],
+)
+def test_exported_or_uncertain_module_calls_cannot_hide_failed_target_dependencies(
+    source: bytes,
+) -> None:
+    reader = InstrumentedSourceReader(
+        {
+            "package.json": b'{"dependencies":{"next":"15"}}',
+            "src/entry.ts": source,
+            "src/dep.ts": b"export const dep=1;",
+            "src/safe.ts": b"export const safe=1;",
+        },
+        read_failures={"src/dep.ts": "read-failed"},
+    )
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+        targets=("path:src/entry.ts",),
+        proof_roots=({"id": "dep-failure", "path_ref": "src/dep.ts"},),
+    )
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert result.diagnostic_code == "CSV-NEXT-SOURCE-003"
+    assert reader.read_counts["src/dep.ts"] == 1
+
+
+def test_opaque_source_frontier_identity_binds_bytes_and_each_occurrence() -> None:
+    files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "src/entry.ts": b'import("https://unsafe"); import("https://unsafe");',
+    }
+
+    def graph_for(payload: bytes) -> dict[str, Any]:
+        seal = seal_source_acquisition(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+            InstrumentedSourceReader({**files, "src/entry.ts": payload}),
+            {
+                "observed_limits": _next_limits(),
+                "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+            },
+        )
+        validate_source_graph_projection(seal.source_graph)
+        return seal.source_graph
+
+    graph = graph_for(files["src/entry.ts"])
+    identities = {edge["specifier_identity"] for edge in graph["open_edges"]}
+    assert len(identities) == 2
+    changed = graph_for(files["src/entry.ts"] + b" // different content")
+    assert identities.isdisjoint(edge["specifier_identity"] for edge in changed["open_edges"])
+    assert "https://unsafe" not in canonical_json_bytes(graph).decode()
+
+
+@pytest.mark.parametrize(
+    "files,code,stage",
+    [
+        ({"package.json": b"{"}, "CSV-NEXT-APPLICABILITY-002", "applicability"),
+        (
+            {"package.json": b'{"dependencies":{"next":"15"}}', "tsconfig.json": b"{"},
+            "CSV-NEXT-CONFIG-001",
+            "source_control",
+        ),
+        (
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"extends":"package-config"}',
+            },
+            "CSV-NEXT-CONFIG-002",
+            "source_control",
+        ),
+    ],
+)
+def test_actual_acquisition_failure_preserves_its_catalog_stage_and_code(
+    files: dict[str, bytes], code: str, stage: str
+) -> None:
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert (result.diagnostic_code, result.stage) == (code, stage)
+    projection = source_acquisition_result_decision(result)
+    assert (projection.diagnostic_code, projection.stage, projection.exit_code) == (code, stage, 3)
+
+
+def test_applicability_cannot_accept_caller_claimed_node_or_response_success() -> None:
+    matrix = derive_package_applicability_matrix(
+        {"package.json": b'{"dependencies":{"next":"15"}}'}, (".",)
+    )
+    with pytest.raises(TypeError):
+        package_applicability_projection(matrix, node_status="available")  # type: ignore[call-arg]
+    preflight = package_applicability_projection(matrix)
+    for field, replacement in (
+        ("decision_kind", "ValidatedResponseDecision"),
+        ("outcome", "complete"),
+        ("payload_available", True),
+        ("node_probe", {"permission": "permitted", "performed": True}),
+    ):
+        forged = {**preflight, field: replacement}
+        with pytest.raises(ValidationError):
+            _validator("next-applicability-decision-v1.schema.json").validate(forged)
+        with pytest.raises(AssertionError):
+            validate_package_applicability_projection(forged)
+
+
+def test_failed_response_and_entity_gate_keep_actual_observation_digests() -> None:
+    request = validate_adapter_request(_request())
+    observed_responses = []
+    for raw in (b"{", b"{}", b""):
+        decision = response_boundary_decision(raw, request)
+        assert isinstance(decision, PreResponseFailureDecision)
+        wire = next_run_decision_projection(decision)
+        _validator("next-run-decision-v1.schema.json").validate(wire)
+        observed = wire["provenance"]["observed"]
+        assert observed["request"]["value"]["sha256"] == digest(request.snapshot())
+        assert observed["limits"]["value"]["sha256"] == digest(request["limits"])
+        response_digest = observed["response"]["value"]["sha256"]
+        assert response_digest == digest(
+            {"encoding": "base64", "data": base64.b64encode(raw).decode()}
+        )
+        observed_responses.append(response_digest)
+    assert len(set(observed_responses)) == 3
+
+    limits = {**_next_limits(), "max_entities": 1}
+    bounded_request = _request(
+        limits=limits, run_context=_run_context(resolved=1, source="cli", requested=1)
+    )
+    raw = canonical_json_bytes(_response(_model(), request=bounded_request))
+    gated = response_boundary_decision(raw, validate_adapter_request(bounded_request))
+    assert isinstance(gated, NextValidatedDecision)
+    wire = next_run_decision_projection(gated)
+    _validator("next-run-decision-v1.schema.json").validate(wire)
+    assert wire["kind"] == "request_bound_failure"
+    assert wire["provenance"]["stage"] == "model_validation"
+    assert wire["provenance"]["failure_code"] == "CSV-NEXT-LIMIT-005"
+    assert wire["provenance"]["observed"]["request"]["value"]["sha256"] == digest(bounded_request)
+
+
+@pytest.mark.parametrize("membership", ["files", "include"])
+def test_equivalent_config_membership_paths_normalize_without_untyped_failure(
+    membership: str,
+) -> None:
+    files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "tsconfig.json": json.dumps({membership: ["src/a.ts", "./src/a.ts"]}).encode(),
+        "src/a.ts": b"export const a=1;",
+    }
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    assert isinstance(result, CompleteSourceSeal)
+    _validator("next-source-plan-v1.schema.json").validate(result.seal.final_plan)
+    assert result.seal.final_plan["config_resolution"][0]["membership"]["patterns"] == ["src/a.ts"]

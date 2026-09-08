@@ -540,7 +540,7 @@
       "test_round21_coverage_index_is_bidirectional_and_self_validating"
     ],
     "round22.rg-01": [
-      "test_round22_applicability_dual_valid_and_malformed_projection"
+      "test_round22_applicability_duplicate_and_malformed_projection"
     ],
     "round22.rg-02": [
       "test_round22_config_codes_and_jsonc_composition_are_closed"

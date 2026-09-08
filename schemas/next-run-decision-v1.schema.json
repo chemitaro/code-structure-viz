@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-run-decision-v1",
+  "title": "CodeStructureViz Next run decision v1",
+  "description": "The closed semantic decision at the Next trust boundary. Every later surface consumes this decision; null fields mean that the corresponding observation did not occur.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "kind", "outcome", "request_independent", "payload_available", "exit_code", "provenance", "context", "request", "response"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-run-decision/v1"},
+    "version": {"const": 1},
+    "kind": {"enum": ["request_bound_success", "request_bound_failure", "request_independent_not_applicable", "request_independent_failure"]},
+    "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "fatal", "usage", "interrupted"]},
+    "request_independent": {"type": "boolean"},
+    "payload_available": {"type": "boolean"},
+    "exit_code": {"enum": [0, 1, 2, 3, 130]},
+    "provenance": {"$ref": "urn:code-structure-viz:schema:next-provenance-v1"},
+    "context": {"$ref": "#/$defs/context"},
+    "request": {"oneOf": [{"$ref": "urn:code-structure-viz:schema:next-adapter-request-v1"}, {"type": "null"}]},
+    "response": {"oneOf": [{"$ref": "#/$defs/validated_response"}, {"type": "null"}]}
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {"const": "request_bound_success"},
+        "request_independent": {"const": false},
+        "outcome": {"enum": ["complete", "partial_safe"]},
+        "payload_available": {"const": true},
+        "exit_code": {"enum": [0, 3]},
+        "context": {"$ref": "#/$defs/bound_context"},
+        "request": {"$ref": "urn:code-structure-viz:schema:next-adapter-request-v1"},
+        "response": {"$ref": "#/$defs/validated_response"},
+        "provenance": {"properties": {"kind": {"const": "request_bound_success"}}}
+      }
+    },
+    {
+      "properties": {
+        "kind": {"const": "request_bound_failure"},
+        "request_independent": {"const": false},
+        "outcome": {"const": "payload_unavailable"},
+        "payload_available": {"const": false},
+        "exit_code": {"const": 3},
+        "context": {"$ref": "#/$defs/bound_context"},
+        "request": {"$ref": "urn:code-structure-viz:schema:next-adapter-request-v1"},
+        "response": {"oneOf": [{"$ref": "#/$defs/validated_response"}, {"type": "null"}]},
+        "provenance": {"properties": {"kind": {"const": "request_bound_failure"}}}
+      }
+    },
+    {
+      "properties": {
+        "kind": {"const": "request_independent_not_applicable"},
+        "request_independent": {"const": true},
+        "outcome": {"const": "not_applicable"},
+        "payload_available": {"const": false},
+        "exit_code": {"const": 0},
+        "context": {"$ref": "#/$defs/independent_context"},
+        "request": {"type": "null"},
+        "response": {"type": "null"},
+        "provenance": {"properties": {"kind": {"const": "request_independent_not_applicable"}}}
+      }
+    },
+    {
+      "properties": {
+        "kind": {"const": "request_independent_failure"},
+        "request_independent": {"const": true},
+        "outcome": {"enum": ["payload_unavailable", "fatal", "usage", "interrupted"]},
+        "payload_available": {"const": false},
+        "exit_code": {"enum": [1, 2, 3, 130]},
+        "context": {"$ref": "#/$defs/independent_context"},
+        "request": {"type": "null"},
+        "response": {"type": "null"},
+        "provenance": {"properties": {"kind": {"const": "request_independent_failure"}}}
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "observation_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "value"],
+      "properties": {
+        "state": {"enum": ["observed", "unobserved"]},
+        "value": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}
+      },
+      "oneOf": [
+        {"properties": {"state": {"const": "observed"}, "value": {"$ref": "#/$defs/digest"}}},
+        {"properties": {"state": {"const": "unobserved"}, "value": {"const": null}}}
+      ]
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "run_fingerprint", "run_context", "source_plan_digest", "source_view_fingerprint", "compatibility_id", "process_observation_digest", "observed_prefix"],
+      "properties": {
+        "request_id": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "run_fingerprint": {"$ref": "#/$defs/digest"},
+        "run_context": {"$ref": "urn:code-structure-viz:schema:next-run-context-v1"},
+        "source_plan_digest": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "source_view_fingerprint": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "compatibility_id": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "process_observation_digest": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "observed_prefix": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["applicability", "config", "source", "limits", "toolchain", "trusted_environment", "process", "response", "budget"],
+          "properties": {
+            "applicability": {"$ref": "#/$defs/observation_state"},
+            "config": {"$ref": "#/$defs/observation_state"},
+            "source": {"$ref": "#/$defs/observation_state"},
+            "limits": {"$ref": "#/$defs/observation_state"},
+            "toolchain": {"$ref": "#/$defs/observation_state"},
+            "trusted_environment": {"$ref": "#/$defs/observation_state"},
+            "process": {"$ref": "#/$defs/observation_state"},
+            "response": {"$ref": "#/$defs/observation_state"},
+            "budget": {"$ref": "#/$defs/observation_state"}
+          }
+        }
+      }
+    },
+    "bound_context": {
+      "allOf": [
+        {"$ref": "#/$defs/context"},
+        {"properties": {"request_id": {"$ref": "#/$defs/digest"}, "source_plan_digest": {"$ref": "#/$defs/digest"}, "source_view_fingerprint": {"$ref": "#/$defs/digest"}, "compatibility_id": {"$ref": "#/$defs/digest"}, "process_observation_digest": {"$ref": "#/$defs/digest"}}}
+      ]
+    },
+    "independent_context": {
+      "allOf": [
+        {"$ref": "#/$defs/context"},
+        {"properties": {"request_id": {"const": null}, "source_plan_digest": {"const": null}, "source_view_fingerprint": {"const": null}, "compatibility_id": {"const": null}, "process_observation_digest": {"const": null}}}
+      ]
+    },
+    "validated_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["validated_response", "raw_sha256", "byte_length", "canonical_json"],
+      "properties": {
+        "validated_response": {"$ref": "urn:code-structure-viz:schema:next-adapter-response-v1"},
+        "raw_sha256": {"$ref": "#/$defs/digest"},
+        "byte_length": {"type": "integer", "minimum": 1},
+        "canonical_json": {"const": true}
+      }
+    }
+  }
+}

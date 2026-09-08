@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-02"
+最終更新: "2026-09-08"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -16,11 +16,11 @@ package_sequence_key: "ISSUE-05"
 
 ## Current v1 normative authority
 
-この節が唯一の現在の実装順序・受入正本です。後続の`Round N`節はhistorical evidence（非normative）として保存し、実装計画を上書きしません。新たなmaterial requirement/security/platform判断は追加せず、採択済みのIssue #8契約と実行可能なR23 registryだけをmaterializeします。
+この節が唯一の現在の実装順序・受入正本です。後続の`Round N`節はhistorical evidence（非normative）として保存し、実装計画を上書きしません。新たなmaterial requirement/security/platform判断は追加せず、採択済みのIssue #8契約と既存public schemaを結ぶ実行可能なreference chainだけをmaterializeします。R23専用authority registryは使用しません。
 
 ```text
-package bytes
-  -> applicability matrix (Node permission)
+frozen package bytes
+  -> applicability matrix (permission only)
   -> frozen control closure + source graph seal
   -> one provenance union + validated request/response
   -> semantic decision
@@ -28,9 +28,9 @@ package bytes
   -> domain/root/manifest/stdout/stderr/exit
 ```
 
-実装前の順序は、(1) package-only preflight、(2) project-relative controlsとJSONC/local-extends/membership、(3) source graph resolved/open/privacy、(4) process policy/observation、(5) provenance stage matrix、(6) semantic and publication projection、(7) executable coverage registryです。各段階はpositive/negative vector、schema、reference validatorを同時に追加し、caller-supplied graph/paths/roles/status/bytesを拒否します。`files`/`include`の空配列も明示値として扱い、defaultsは双方が無いときだけです。
+実装前の順序は、(1) package-only preflight、(2) project-relative controlsとJSONC/local-extends/membership、(3) source graph resolved/open/privacy、(4) process policy/observation、(5) provenance stage matrix、(6) semantic and publication projection、(7) executable coverage registryです。各段階はpositive/negative vector、実schema、reference validatorを同時に追加し、caller-supplied graph/paths/roles/status/bytesを拒否します。`files`/`include`の空配列も明示値として扱い、defaultsは双方が無いときだけです。run/publication provenanceは`run-manifest/v1`とNext domain manifest、checked-in reference/build inventoryは別schema identityです。
 
-受入では、contract focused test、all contract/full pytest、mypy、ruff、SpecDock、pinned PlantUMLを順に実行します。Windows/OS process-level/将来wheel・s​​distはproductionまたは別migrationの計画契約として記録しますが、現時点で実測済みとは主張しません。fresh current-SHA Strictが`P0=0 / P1=0 / review_status=pass`になるまでproduction実装を開始せず、readinessを未確認のまま維持します。
+受入では、contract focused test、all contract/full pytest、mypy、ruff、SpecDock、pinned PlantUMLを順に実行します。Windows/OS process-level/将来wheel・sdistはproductionまたは別migrationの計画契約として記録し、実測済みとは主張しません。2026-09-08のユーザー指示により外部ChatGPT系スキルを停止し、主担当GPT-6で修正、独立GPT-6・推論Maxでレビューします。cleanかつpush済みの固定SHAについて必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、production実装を開始しません。後段の外部Strict必須という履歴は現在の検証経路を上書きしません。
 
 ## Planning Level
 

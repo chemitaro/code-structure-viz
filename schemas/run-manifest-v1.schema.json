@@ -33,6 +33,8 @@
     "request": {"oneOf": [{"$ref": "#/$defs/request"}, {"type": "null"}]},
     "next_request": {"oneOf": [{"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/snapshot_request"}, {"type": "null"}]},
     "next_config": {"$ref": "urn:code-structure-viz:schema:next-config-v1"},
+    "next_decision": {"$ref": "urn:code-structure-viz:schema:next-run-decision-v1"},
+    "next_publication": {"$ref": "urn:code-structure-viz:schema:next-publication-decision-v1"},
     "source": {"$ref": "#/$defs/source"},
     "comparison": {"$ref": "#/$defs/comparison"},
     "sources": {"$ref": "#/$defs/sources"},
@@ -66,6 +68,15 @@
     }
   },
   "oneOf": [
+    {
+      "properties": {
+        "command": {"properties": {"name": {"const": "snapshot"}, "domain": {"const": "next"}}},
+        "run": {"properties": {"status": {"const": "incomplete"}, "exit_code": {"const": 3}}},
+        "domains": {"prefixItems": [{"properties": {"status": {"const": "not_applicable"}, "payload_available": {"const": false}, "artifact_paths": {"maxItems": 0}}}]},
+        "artifacts": {"maxItems": 0},
+        "diagnostics": {"contains": {"required": ["code", "scope"], "properties": {"code": {"const": "CSV-NEXT-LIMIT-003"}, "scope": {"const": "publication"}}}}
+      }
+    },
     {
       "properties": {
         "run": {
@@ -305,22 +316,18 @@
           "next_request": {"type": "null"},
           "next_config": {"$ref": "urn:code-structure-viz:schema:next-config-v1"},
           "run": {
-            "properties": {
-              "status": {"const": "incomplete"},
-              "exit_code": {"const": 3}
-            }
+            "oneOf": [
+              {"properties": {"status": {"const": "incomplete"}, "exit_code": {"const": 3}}},
+              {"properties": {"status": {"const": "not_applicable"}, "exit_code": {"const": 0}}}
+            ]
           },
           "domains": {
             "prefixItems": [
               {
-                "properties": {
-                  "request_independent": {"const": true},
-                  "status": {"const": "incomplete"},
-                  "incomplete_kind": {"const": "payload_unavailable"},
-                  "payload_available": {"const": false},
-                  "artifact_paths": {"maxItems": 0}
-                },
-                "required": ["request_independent"]
+                "oneOf": [
+                  {"properties": {"request_independent": {"const": true}, "status": {"const": "incomplete"}, "incomplete_kind": {"const": "payload_unavailable"}, "payload_available": {"const": false}, "artifact_paths": {"maxItems": 0}}, "required": ["request_independent", "incomplete_kind"]},
+                  {"properties": {"request_independent": {"const": true}, "status": {"const": "not_applicable"}, "payload_available": {"const": false}, "artifact_paths": {"maxItems": 0}}, "required": ["request_independent"]}
+                ]
               }
             ]
           },
@@ -1486,6 +1493,7 @@
         "symbol": {"type": ["string", "null"]},
         "line": {"type": ["integer", "null"], "minimum": 1},
         "recoverable": {"type": "boolean"},
+        "scope": {"const": "publication"},
         "message": {"type": "string", "minLength": 1},
         "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]},
         "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},

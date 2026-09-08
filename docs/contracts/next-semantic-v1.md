@@ -271,7 +271,7 @@ preimage, not over serialized source text or collection position:
 | Module | `project_id, path` |
 | Component | `module_id, declaration_key` |
 | ExportBinding | `owner_id, exported_name, role` |
-| ImportBinding | `owner_id, imported_name, role, source` |
+| ImportBinding | `owner_id, local_name, binding_kind, imported_name, role, source` |
 | Prop | `owner_id, name` |
 | static/dynamic relation | `kind, source_id, target, role, reexport, boundary_effect` |
 | JSX relation | `kind, source_id, target` |

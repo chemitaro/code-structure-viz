@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-02"
+最終更新: "2026-09-08"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -16,15 +16,15 @@ package_sequence_key: "ISSUE-05"
 
 ## Current v1 normative authority
 
-ここが現在の唯一の設計正本です。本文後半の`Round N`節はhistorical evidence（非normative）であり、後続実装が別のauthorityとして参照してはなりません。current v1の機械的な対応は`schemas/next-round23-authority-v1.schema.json`と`tests/contracts/next_reference_validation.py`のR23 validator/testです。
+ここが現在の唯一の設計正本です。本文後半の`Round N`節はhistorical evidence（非normative）であり、後続実装が別のauthorityとして参照してはなりません。current v1の機械的な対応は既存のpublic schema群、`tests/contracts/next_reference_validation.py`、およびそれらを結ぶ実チェーンのfixture/testです。ラウンド専用umbrella schemaはauthorityではありません。
 
 ```plantuml
 @startuml
 title Current v1: single authority chain
 left to right direction
-component "PackageApplicabilityMatrix\npackage bytes only" as A
+component "Frozen package bytes\nPackageApplicabilityMatrix" as A
 component "Frozen source seal\nconfig + graph" as S
-component "Provenance + validated request/response" as V
+component "Provenance + actual validated request/response" as V
 component "Semantic decision" as D
 component "Final publication decision\nsealed bytes/measurements" as P
 component "domain / root / stdout / stderr / exit" as O
@@ -39,11 +39,11 @@ note bottom of O : No external reconstruction or fallback
 
 `PackageApplicabilityMatrix`が最初にpackage bytesから適用可否を閉じ、全non-applicableなら後続のconfig/source/Node観測は発生しません。applicable rootだけをtrusted frozen inventoryへ渡し、`SourceDiscoveryIntent`はroots、known controls、fixed rulesに限定します。seal内でJSONC、local extends、membership、compiler options、source graphを導出し、resolved/open edgeとsafe frontierをdigestへ含めます。
 
-`NextDecisionContext`/`NextPublicationContext`は全variantで同じsealed valuesを運びます。provenanceは四つのdiscriminator（request-independent not-applicable/failure、request-bound failure/success）とstage/code matrixを共有し、observed prefixの各値にfield schema/versionと実値digestを要求します。processは`ProcessLaunchPolicy`と`ProcessLaunchObservation`を分離し、legacy descriptorはobservationからの一方向compatibility viewに限ります。
+`NextDecisionContext`/`NextPublicationContext`は全variantで同じsealed valuesを運びます。provenanceは四つのdiscriminator（request-independent not-applicable/failure、request-bound failure/success）とstage/code matrixを共有し、observed prefixの各値にfield schema/versionと実値digestを要求します。processは`ProcessLaunchPolicy`と`ProcessLaunchObservation`を分離し、legacy descriptorはobservationからの一方向compatibility viewに限ります。run/publication provenanceは`code-structure-viz.run-manifest/v1`とNext domain manifestだけが所有し、checked-in reference inventoryと将来のbuild inventoryを別schema identityへ分離します。
 
 semantic rendererはdecisionだけを受け、publication finalizerは実際のcandidate bytesとmeasurementを一度sealします。summary/root-manifest/artifact/typed-unavailableはそのsealed bytesを返すだけで再render/retryしません。selected copy overrunはsemantic statusを変えず、persisted descriptorを保持したpublication-incomplete/exit 3です。canonical JSONはsort_keys/NFC/UTF-8/LF、path-only rowsはNFC UTF-8 bytes、object rowsはcanonical JSON bytesです。
 
-この設計はdata-only reference contractです。production adapter、OS process-level証明、Node runtimeの実測は未実施であり、fresh current-SHA Strict passまでimplementation readinessを確定しません。
+現在の整備対象はdata-only reference contractです。production adapter、OS process-level証明、Node runtimeの実測は未実施です。2026-09-08のユーザー指示により、外部ChatGPT系スキルは停止し、独立GPT-6・推論Maxの固定SHAレビューへ切り替えます。必要な検証と重要指摘ゼロを確認するまでimplementation readinessを確定しません。内部レビューと過去の外部Strict結果を混同しません。
 
 ## 設計目標
 

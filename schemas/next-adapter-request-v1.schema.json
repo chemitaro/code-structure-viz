@@ -32,15 +32,7 @@
       }
     },
     "compiler_options": {
-      "type": "object", "additionalProperties": false,
-      "required": ["allow_js", "check_js", "jsx", "module", "module_resolution", "base_url", "paths"],
-      "properties": {
-        "allow_js": {"type": "boolean"}, "check_js": {"type": "boolean"},
-        "jsx": {"enum": ["preserve", "react", "react-jsx", "react-jsxdev"]},
-        "module": {"const": "esnext"}, "module_resolution": {"const": "bundler"},
-        "base_url": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
-        "paths": {"type": "object", "patternProperties": {"^[A-Za-z0-9_.*?/-]+$": {"type": "array", "items": {"$ref": "#/$defs/path"}}}, "additionalProperties": false}
-      }
+      "$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/compiler_options"
     },
     "project": {
       "type": "object", "additionalProperties": false,

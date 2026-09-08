@@ -1,195 +1,100 @@
-# Next adapter process launch descriptor v1
+# Next.js adapterの起動policyと観測
 
-## Current v1 normative authority
+## 境界と正本
 
-現在の唯一のprocess authorityは`next-process-launch-observation-v1`です。`ProcessLaunchPolicy`はexact argv、checked-in adapter identity、private cwd、allowlist/deny set、pipe/FD、process group、timeout/capture limitsを定義し、`ProcessLaunchObservation`は実launch前はnull、実測後だけidentityを持ちます。macOS/Linuxのverified branchはNode realpath/hash/version、adapter、argv、verified-open handle、actual image、post-spawn equality、cwd/env/stdio/FD/group、TOCTOUをpolicyと相互検証し、証明不能ならunavailableです。legacy descriptorはobservationからの一方向compatibility viewに限ります。portable toolchain fingerprintはhost path/OS primitive/device/inode/FDを除外し、local attestationは別digestです。本文後半のRound節はhistorical evidence（非normative）であり、fixtureをproduction実測とは扱いません。
+Issue #8 の実装前契約です。起動を許可するpolicyと実際に起きたことのobservationを別objectにします。
 
-`schemas/next-process-launch-v1.schema.json` は、Next adapter を起動する際の
-trust boundary を表す閉じた descriptor である。これは production adapter の
-実装ではなく、実装前に検証すべき契約である。descriptor は
-`NextPublicationContext` と run-fingerprint preimage に含め、実際に観測・検証した
-Node 実体を後段の writer が再構成しない。
+- next-process-launch-policy-v1.schema.json: ownerが事前に解決・封印した許可条件。
+- next-process-launch-observation-v1.schema.json: 実行境界の観測。productionと明示fixtureは別branch。
+- next-process-launch-v1.schema.json: 旧descriptorの派生互換view。新しいauthorityとして構築しない。
 
-## 固定する launch surface
+production対応範囲はdarwin/Linuxです。Windowsは別scopeです。
+schemaの成功や録画fixtureはOS起動を証明しません。実装計画のOS別受入を通して初めてproduction観測として扱います。
 
-`node_status=available` の場合、`node_realpath` は symlink を解決した絶対実体パス、
-`node_sha256` はその実体の検証済み digest とする。`unavailable` と
-`not_applicable` ではこの二つを `null` とする。`symlink_policy` は
-`resolve_and_verify_realpath` のみを許可し、単に PATH の名前解決結果を信用しない。
+## policyを構築するownerの前提
 
-以下の値は v1 の closed contract である。
+policyはtarget repositoryやadapter responseから受け取る設定ではありません。
+trusted parent runnerが次を検証して作り、以後はdefensive copyで保持します。
 
-- `argv` は `node` と固定された checked-in adapter entrypoint の二要素で、
-  `shell=false` とする。
-- `cwd` は絶対パスで、target repository の作業ディレクトリを公開・継承しない。
-- 環境変数は `LANG=C.UTF-8`、`LC_ALL=C.UTF-8`、`TZ=UTC` の allowlist だけを使う。
-  `NODE_OPTIONS`、`NODE_PATH`、PATH shadow、npm/npx の設定などは denied set として
-  明示し、未列挙の host environment を暗黙に継承しない。
-- stdin/stdout/stderr は全て pipe、file descriptor は close-on-exec で 0,1,2 だけを
-  許可する。追加 FD を adapter へ渡さない。
-- process group を作り、timeout または capture overrun では group 全体を終了し、
-  終了後に wait する。子 process だけの kill や silent truncation は契約外である。
+1. target側のscript、package manager、node_modulesを実行せず、許可されたNode実体と同梱adapter資材を解決する。
+2. Nodeのrealpath/bytes hash/version、adapterのversion/protocol/content hashを取得し、同梱inventoryと照合する。
+3. trusted parentがprivate temporary directoryを新規に確保する。target rootやその子・symlink先をcwdに使わない。
+4. directoryの実体・所有者・0700相当の排他アクセスと寿命を確認し、実行中はownerが保持する。target由来pathで再利用しない。
+5. resolved request limitsと、固定argv/env/pipe/FD/process group規則を封印する。
 
-Observation の field、配列順、固定 map は JSON Schema と canonical JSON bytes で
-検証する。PATH shadow、symlink の実体置換、hostile environment、locale/TZ の変更、
-extra FD、process-group の scope 変更はいずれも observation mutation として拒否し、
-検証済みの semantic/publication decision を作らない。
+cwdが絶対pathであるだけではprivate-ownedの証明になりません。
+このallocation/target separationはpolicy sealing前のowner preconditionです。
+同じowner policyに対する観測差替えを拒否することと、別の正当なowner policyを認めることは区別します。
+参照fixtureの/.code-structure-viz/private-runは説明用の固定値で、実hostにそのdirectoryを作成・検証した主張ではありません。
 
-`next-process-launch-observation-v1` は `NextPublicationContext` の必須フィールドであり、
-default factory、host の PATH、または `node_status` からの後段 fallback は持たない。
-available/unavailable/not-applicable の各 decision variant は、実際にその境界で
-検証した observation を明示的に seal し、observation の digest を run-fingerprint
-preimage に含める。observation を省略した構築、toolchain の node status と異なる
-observation、preimage だけを差し替えた構築は受理しない。旧 descriptor はこの observation
-からの互換 view に限る。
+## 固定launch surface
 
-## capture と証拠の境界
+| 項目 | v1の規則 |
+| --- | --- |
+| Node | stable SemVer major >=22。prerelease・不正表記・旧版はunavailable |
+| argv | 許可Node実体と固定adapter entrypointの2要素だけ。追加引数なし |
+| shell | false |
+| cwd | 上記ownerが確保・保持するprivate directory |
+| env | LANG=C.UTF-8、LC_ALL=C.UTF-8、TZ=UTCだけを明示構築 |
+| denied_env | PATH、NODE_OPTIONS、NODE_PATH、npm_config_user_configを含むsorted unique set。その他も継承しない |
+| stdio | stdin/stdout/stderrはpipe |
+| FD | adapter imageに残るFDは0/1/2だけ。検証用parent FDは3以上、close-on-execでspawn結果まで保持 |
+| process group | 独立groupを作成。timeout/capture超過ではgroup全体を停止しwait |
+| limits | timeoutとstdout/stderr/response capをrequestのresolved値と一致させる |
 
-この descriptor は child stdout/stderr の incremental capture 契約と組み合わせる。
-capture は chunk を retain する前に数え、上限超過時は read-stop、buffer dispose、
-process-group termination を記録する。private response の raw-byte cap、public
-selected-artifact copy cap、公開 stderr cap はそれぞれ別の measurement point であり、
-descriptor へ混同して記録しない。
+固定entrypointの/.code-structure-viz/next-adapter.mjsは契約上のruntime locationです。
+実装で物理資材への対応を変える場合は、policy・inventory・OS受入を同時に整合させます。
 
-ローカルの reference test は `Iterable[bytes]` を使う faithful runner harness であり、
-read-stop、dispose、termination flag、child text 非漏洩を検証する。ただしこれは OS
-process-level の証明ではない。production 実装の OS process behavior は後続 acceptance
-で別途検証する必要がある。
+## production observationの検証順序
 
-Round 16 content review は対象 SHA
-`732477c72c7e05d3f15818ba8a3f75a4c97dc5a9`、CI `33494926439`（7/7 green）に対し、
-`P0=0 / P1=16 / P2=3 / fail`、`implementation_ready=no` だった。fresh current-SHA
-Strict は pending、readiness は未確認、production implementation は未着手である。
+1. Nodeの検証用FDを開き、hash時点のrealpath/hash/version/device/inodeを記録する。
+2. 許可policyからargv/cwd/env/stdio/group/limitsを構築し、policy digestを保持する。
+3. OS別のverified executable spawn経路を使う。検証用FDはstdioと役割分離し、spawn結果まで保持する。
+4. spawn時の実体とhash時点のidentityを照合し、post-spawn identityもequalを確認する。
+5. 観測の全launch fieldを、独立した元policyとexact一致させる。観測からpolicyを再生成しない。
+6. toolchainのNode/version/status、adapter version/protocol、request limitsとの一致を確認してcontextへ封印する。
 
-## Round 17 observation-to-spawn binding
+観測中のreplacement、version/hash、argv、env、FD/group、post-spawn不一致はfail-closedです。
+必要なOS保証が実装できない場合はavailableを生成しません。
+darwin/Linuxのschema内primitive名は検証契約の識別tagであり、同名のOS APIが存在するという主張ではありません。
+実装前のOS spikeで実APIへの対応を確定し、実現不能ならこの規則を推測で緩めず設計へ戻します。
 
-The descriptor must be assembled from a launch observation made at the trust
-boundary. The observation records the verified Node realpath, its digest and
-version, and the exact executable passed to spawn; it also records the fixed
-argv/cwd, allowlisted environment and denied variables, stdio/FD policy,
-process-group scope, and the TOCTOU check. The actual spawn identity must
-equal the observed identity. PATH lookup, a default executable name, a
-caller-provided digest, symlink replacement, hostile locale/TZ or extra FD
-cannot be used to complete the descriptor.
+起動前の未観測suffixをavailableのdefaultで埋めません。
+未取得のNode/handleはnull、未発生launchのprovenanceはunobservedです。
+途中失敗で何を保持できるかはstage-dependent provenanceの観測prefixが決めます。
 
-Request-independent decisions still carry an explicit descriptor field, with
-`null`/`unobserved` values where the stage prevented observation. They do not
-receive a synthetic launch descriptor from a fixture or host defaults. The
-descriptor is bound to the toolchain and fingerprint before any publication
-projection. Capture tests use a faithful iterable harness and explicitly do
-not claim OS process-level coverage; production implementation is absent and
-fresh current-SHA Strict is pending.
+## 三つのdigest
 
-## Round 18 observation-to-spawn identity contract
+- local_process_attestation_digest: host path/OS/FD/device/inodeを含む完全な観測。
+- process observationのstable fingerprint: host固有identityを除き、起動条件とobserved contentを保持する実行用projection。
+- semantic compatibilityのportable_toolchain_fingerprint: Node hash/version、adapter identity、TypeScript identityだけ。timeoutやcapture capを含めない。
 
-An available descriptor is valid only when it is derived from one launch
-observation and the observation is bound to the actual OS spawn. The contract
-is:
+詳細preimageは [next-compatibility-v1.md](next-compatibility-v1.md) を参照してください。
+参照fixtureのa×64などのhashは録画値で、実配布物のdigestではありません。
 
-1. On a supported OS, open the resolved executable without following a later
-   replacement, record its absolute real path, file identity, version, and
-   SHA-256, then close only after the observation is sealed.
-2. Spawn the fixed `argv` with the recorded executable identity, fixed cwd and
-   environment, pipe/FD policy, and process-group policy. The observed
-   identity and the executable/handle used by spawn must compare equal.
-3. Re-check the identity at the defined TOCTOU point. Replacement, PATH
-   shadowing, symlink substitution, hostile inherited variables, locale/TZ
-   changes, or extra descriptors fail closed before a publication decision.
-4. If the host cannot provide the required identity/handle guarantee, the
-   descriptor is unavailable and the run cannot claim an available Node
-   observation; it is not completed using a fake default.
+## captureと公開
 
-The schema/reference tests validate the descriptor shape and mutation rules.
-They do not touch a host executable and do not claim this contract is an OS
-process-level acceptance test; production implementation must add that
-acceptance later. Request-independent provenance uses explicit
-`null`/`unobserved` values for facts not observed before the failure. Fresh
-current-SHA Strict remains pending, readiness is unconfirmed, and production
-implementation is absent.
+private stdoutとstderrはincrementalに数え、chunk保持前に上限を判定します。超過ならread-stop、buffer破棄、group停止/waitです。
+stderrの子process本文は公開診断へ転記しません。公開するのはcatalog-owned診断だけです。
 
-## Round 19 observed process identity union
+finalizerはrequest/contextの上限を使用します。参照テストのfault injection引数は縮小だけを許可し、拡大を拒否します。
+capture counter、retained bytes、allowed/failure、chosen limitを照合してからpublicationへ封印します。
+selected-copyだけの超過は元のsemantic/domain/artifactsを保持し、runをincomplete/exit 3にします。
+先行capture/public-stderr失敗がある場合はpayload_unavailableを優先し、selected-copy失敗が併発してもtyped resultへ進めます。
+部分的なstdout/stderr本文は出力しません。
 
-The launch boundary is represented by
-`schemas/next-process-launch-observation-v1.schema.json`, a closed union of
-`fixture` and `production`. A fixture row is named reference-test evidence
-(`fixture_id`, `identity_token`, and `recorded-fixture`); it must never be
-promoted to production launch evidence.
+summary/manifestの測定時candidateと、公開失敗を記した最終manifestは別bytesになり得ます。
+selected size/hashおよびstdout.candidateは測定時candidateを指し、最終manifest/typed resultのsize/hashとは別に保持します。
 
-The production branch is supported on `darwin` and `linux`; Windows is outside the v1 scope. It requires
-the absolute verified Node realpath, Node digest/version, file identity at
-hash and spawn (realpath, digest, version, device, inode), a verified open FD
-handle retained through spawn, the OS-specific verified-FD spawn primitive,
-an equal post-spawn identity check, and the close-on-exec/non-inheritance FD
-lifecycle. `argv`, `shell=false`, and process-group creation/termination are
-shared required fields. The identity algorithm is fail-closed: a path,
-symlink, mount/inode, hash, version, handle, spawn primitive, or post-spawn
-identity mismatch cannot produce an available observation. A host that cannot
-provide the guarantee produces an unavailable result rather than a fake
-default.
+## 後続実装の受入
 
-`validate_process_launch_observation` and the JSON Schema are reference
-validation only. They intentionally do not open or spawn a host executable;
-the Plan must add a real OS process-level acceptance later. The local
-faithful iterable capture harness is not evidence for that future test.
+各対応OSで、実processを用いて次を検証します。
 
-Round 19 provenance is tied to reviewed SHA
-`0b80bff7706ca4bec770dbdf25620fbb5d2ecc2d`, CI `33557963556`, and the
-historical Strict result `P0=0 / P1=5 / P2=1 / fail`. Fresh current-SHA
-Strict remains pending, readiness is unconfirmed, and production
-implementation is absent.
+- private cwdの所有・target separation・cleanup、PATH/env汚染、追加FD非継承。
+- Nodeの解決先/hash/version、symlink/実体差替え、検証FDの寿命とpost-spawn比較。
+- timeoutと両capture超過のread-stop・group全停止・wait・raw/partial破棄。
+- requestから各出力surfaceまでの同一観測・上限・response bytes・descriptor結合。
+- productionとfixtureの識別保持。fixtureのflagsを実OS受入の証拠に流用しない。
 
-## Round 20 process and applicability boundary
-
-The process observation remains a closed `fixture | production` union and is
-derived once at the launch boundary. A fixture is named reference evidence
-only; it is never promoted to production. The production branch is supported on
-`darwin`, and `linux` and correlates the observed Node version, absolute realpath,
-hash-time and spawn-time OS file identities, verified-open handle, concrete
-OS-specific spawn primitive, `argv[0]`, and post-spawn identity check. The
-descriptor also seals the fixed cwd, environment allowlist/denied variables,
-stdio and FD inheritance lifecycle, process-group policy, and TOCTOU failure
-point. A missing Node path, identity mismatch, symlink/mount/inode replacement,
-or unavailable OS guarantee is explicit `unavailable`/`not_applicable` with
-null identity fields; no executable name or host default fills the gap.
-
-This one observed object is the authority for toolchain, run fingerprint,
-manifest, and failure decision. A caller cannot substitute a descriptor after
-the observation or claim that a schema-only fixture is an OS process-level
-acceptance. The local test is deliberately host-free and asserts the
-unavailable branch contains no fabricated identity:
-`test_round20_process_observation_has_explicit_unavailable_union_and_no_fake_identity`.
-Fresh current-SHA Strict is pending, readiness is unconfirmed, and production
-implementation is absent.
-
-## Round 21 normative observation
-
-`next-process-launch-observation-v1` is the sole normative process authority. The older
-`process_launch_descriptor` is not an independent source of truth; when retained for compatibility it is a
-mechanically derived view of this observation. The production union supports `darwin` and `linux`; Windows is a separate scope and is not a v1 production branch.
-Each OS binds a verified-open Node executable to the concrete OS spawn primitive, compares the hash-time and
-spawn-time file identities, performs a post-spawn equality check, and fails closed on path, symlink, mount/inode,
-hash, version, handle, primitive, or TOCTOU mismatch. The observation also seals argv, cwd, allowlisted/denied
-environment, stdio and FD inheritance, and process-group policy.
-
-`stable_fingerprint` is calculated from the cross-machine stable projection: schema/version, node status, host OS,
-argv, shell/process-group policy, Node realpath/hash/version, spawn primitive, and TOCTOU result (plus fixture
-identity for fixture rows). Host-ephemeral FD number, device, and inode values remain in the security observation
-and are validated, but are deliberately excluded from this fingerprint. `unavailable` and `not_applicable` carry
-explicit null identity fields and never use a PATH/default executable. The reference suite validates this split
-without opening or spawning a host executable; OS process-level acceptance remains a later production gate.
-
-## Round 22 process authority
-
-The normative object is `next-process-launch-observation-v1`; `process_launch_descriptor` is only a
-mechanically derived compatibility view. For v1 production, only darwin and linux are supported. The
-observation owns private cwd, exact environment allowlist and denied names, pipe stdio, inherited-FD
-allowlist/closure, `shell=false`, process-group terminate/wait, verified-open executable identity, and
-hash-time/spawn-time plus post-spawn equality checks. Missing Node, a symlink/mount/inode replacement,
-or a TOCTOU mismatch is fail-closed with explicit unavailable/null identity fields.
-
-Stable Node policy is parseable stable SemVer major >=22; prerelease, older, or unparsable values use
-`CSV-NEXT-NODE-001`. `stable_toolchain_fingerprint` contains only portable semantic inputs (Node bytes
-hash/version, adapter identity, and portable argv semantics). `local_process_attestation_digest` retains
-the full host observation, including path, OS primitive, device/inode, and FD evidence; cross-machine
-stability is promised only for the portable fingerprint. This reference contract does not claim a live
-OS process check.
+現時点のテストはhost-freeな参照契約です。製品adapter実装、OS-level受入、最終固定SHA認定は未完了です。
+過去Roundの相反する説明はGit履歴とIssue artifactsへ分離しました。

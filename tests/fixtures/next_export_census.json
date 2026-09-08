@@ -90,6 +90,14 @@
       "content_base64": "ZXhwb3J0IGNvbnN0IFNoYXJlZCA9IDI7Cg=="
     },
     {
+      "path": "src/namespace-type.tsx",
+      "content_base64": "aW1wb3J0IHR5cGUgKiBhcyBDYXJkcyBmcm9tICIuL0NhcmQiOwppbXBvcnQgdHlwZSAqIGFzIE90aGVyQ2FyZHMgZnJvbSAiLi9DYXJkIjsK"
+    },
+    {
+      "path": "src/namespace-value.tsx",
+      "content_base64": "aW1wb3J0ICogYXMgQ2FyZHMgZnJvbSAiLi9DYXJkIjsKaW1wb3J0ICogYXMgT3RoZXJDYXJkcyBmcm9tICIuL0NhcmQiOwo="
+    },
+    {
       "path": "src/types.d.ts",
       "content_base64": "ZXhwb3J0IGludGVyZmFjZSBQcm9wcyB7fQo="
     }

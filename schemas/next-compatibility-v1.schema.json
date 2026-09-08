@@ -4,16 +4,21 @@
   "title": "CodeStructureViz Next semantic compatibility descriptor v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "semantic_schema", "identity_versions", "algorithm_versions", "semantic_profile_id", "compatibility_id"],
+  "required": ["schema", "semantic_schema", "identity_versions", "algorithm_versions", "semantic_profile_id", "unicode_profile", "typescript_identity", "trusted_type_environment_digest", "portable_toolchain_fingerprint", "compatibility_id"],
   "properties": {
     "schema": {"const": "code-structure-viz.next-semantic-compatibility/v1"},
     "semantic_schema": {"const": "code-structure-viz.semantic/v1"},
     "identity_versions": {"$ref": "#/$defs/identity_versions"},
     "algorithm_versions": {"$ref": "#/$defs/algorithm_versions"},
     "semantic_profile_id": {"type": "string", "pattern": "^next-trusted-profile-v[0-9]+$"},
+    "unicode_profile": {"$ref": "#/$defs/unicode_profile"},
+    "typescript_identity": {"const": "typescript-5.9.2"},
+    "trusted_type_environment_digest": {"$ref": "#/$defs/digest"},
+    "portable_toolchain_fingerprint": {"$ref": "#/$defs/digest"},
     "compatibility_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
   },
   "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "identity_versions": {
       "type": "object",
       "additionalProperties": false,
@@ -25,6 +30,19 @@
       "additionalProperties": false,
       "required": ["recognition", "export", "props", "relation", "fact", "boundary", "identifier_unicode", "identifier_unicode_table_digest"],
       "properties": {"recognition": {"const": 1}, "export": {"const": 1}, "props": {"const": 1}, "relation": {"const": 1}, "fact": {"const": 1}, "boundary": {"const": 1}, "identifier_unicode": {"const": "ecma-unicode-15.0"}, "identifier_unicode_table_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+    },
+    "unicode_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_id", "unicode_version", "normalization", "algorithm_version", "table_digest", "full_scalar_kat_digest"],
+      "properties": {
+        "profile_id": {"const": "unicode-15.0.0-nfc-v1"},
+        "unicode_version": {"const": "15.0.0"},
+        "normalization": {"const": "NFC"},
+        "algorithm_version": {"const": "unicode-nfc-15.0.0"},
+        "table_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "full_scalar_kat_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
     }
   }
 }

@@ -11,12 +11,13 @@
     "selector": {"type": ["string", "null"], "enum": [null, "manifest", "python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
     "availability": {"type": "boolean"},
     "domain_status": {"enum": ["complete", "not_applicable", "incomplete"]},
-    "incomplete_kind": {"const": "partial_safe"},
+    "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]},
     "selected_stdout_unavailable": {"const": true},
     "run_status": {"enum": ["complete", "not_applicable", "incomplete", "fatal", "interrupted"]},
     "target_failures": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/target_failure"}},
     "stable_reason": {"enum": ["run_summary", "run_manifest", "published_artifact", "domain_not_applicable", "domain_payload_unavailable", "target_payload_unavailable", "selected_artifact_unavailable", "run_fatal", "final_manifest_unavailable", "run_interrupted"]},
-    "artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifact"}]}
+    "artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifact"}]},
+    "publication": {"$ref": "urn:code-structure-viz:schema:next-publication-decision-v1"}
   },
   "oneOf": [
     {
@@ -82,15 +83,15 @@
       "properties": {
         "selector": {"const": "manifest"},
         "availability": {"const": false},
-        "domain_status": {"enum": ["complete", "incomplete"]},
+        "domain_status": {"enum": ["complete", "not_applicable", "incomplete"]},
         "stable_reason": {"const": "selected_artifact_unavailable"},
         "selected_stdout_unavailable": {"const": true},
         "artifact": {"type": "object"}
       },
       "allOf": [
         {"anyOf": [
-          {"properties": {"domain_status": {"const": "complete"}}, "not": {"required": ["incomplete_kind"]}},
-          {"properties": {"domain_status": {"const": "incomplete"}, "incomplete_kind": {"const": "partial_safe"}}, "required": ["incomplete_kind"]}
+          {"properties": {"domain_status": {"enum": ["complete", "not_applicable"]}}, "not": {"required": ["incomplete_kind"]}},
+          {"properties": {"domain_status": {"const": "incomplete"}, "incomplete_kind": {"enum": ["partial_safe", "payload_unavailable"]}}, "required": ["incomplete_kind"]}
         ]},
         {"not": {"anyOf": [{"required": ["run_status"]}, {"required": ["reason"]}, {"required": ["target_failures"]}]}}
       ]
@@ -152,7 +153,7 @@
     {
       "required": ["domain_status"],
       "properties": {
-        "selector": {"enum": ["python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
+        "selector": {"enum": ["manifest", "python:semantic-json", "python:plantuml", "sqlalchemy:semantic-json", "sqlalchemy:plantuml", "next:semantic-json", "next:plantuml"]},
         "availability": {"const": false},
         "domain_status": {"const": "incomplete"},
         "stable_reason": {"const": "domain_payload_unavailable"},

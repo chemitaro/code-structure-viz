@@ -1,0 +1,275 @@
+# 結論
+
+対象ブランチのtipは、指定された完全SHA `d660608ff5af76b7c65ca7d067ac797d3cea225f` と完全一致しています。レビュー対象はこの固定commitのみです。
+
+**実装開始可能とは判定できません。** Round 23で採択された方向性自体は妥当ですが、実行可能証拠が実際のpublic/private Schemaへ接続されず、R23専用の簡略モデル内で自己完結しています。このため、R23のP1-01〜P1-26およびP2-01〜P2-08は、全体としてend-to-endでは閉じていません。
+
+今回の残存指摘は、過去の34件をそのまま再掲した件数ではなく、同じroot causeを隣接surfaceまでcompletion sweepしたうえで統合した件数です。
+
+* P0: 0件
+* P1: 18件
+* P2: 3件
+* 実装開始判定: no
+
+GitHub上の固定commitにあるコード、Schema、fixture、文書を確認したレビューです。Round 23 artifactに記載されたローカルテスト結果は読みましたが、GitHubコネクタのみという条件のため、コマンド自体は再実行していません。artifact自身も、ローカルgreenはfresh Strict passの代替ではないと明記しています。
+
+## Round 23 closure sweep
+
+Round 23 artifactは元の34件を18 root groupへ割り当てています。再確認結果は次のとおりです。
+
+* `R23-RG-01`〜`R23-RG-15`: 部分的な修復はありますが、実Schema・実publication surfaceまで接続されていないため、end-to-end未閉包です。
+* `R23-RG-16 / P2-03`: canonical validator pathを`tests/contracts/next_reference_validation.py`へ統一した点は閉じています。
+* `R23-RG-17`: namespace importはR23 helper内だけで、実semantic/private/PlantUML contractには未反映です。
+* `R23-RG-18`: package変更を将来のmigrationへ送っただけであり、production implementation用のpackage contractは未閉包です。
+
+Round 23 artifactが主張するgroupと実行可能証拠の対応自体にも後述する不整合があります。
+
+# P1 findings
+
+## P1-01 — `next-round23-authority-v1`が実契約ではなくopenなsurrogate authorityです
+
+**根拠:** `package_projection`、`request`、`limits`、`source_plan`、`toolchain`、`trusted_environment`、`process_observation`、公開projectionの主要部分が、単なる`{"type":"object"}`です。`observed_row.value`も無制約です。`R23Decision`はこれらをdeep copyし、R23専用の簡略projectionを生成して自己digestを計算しますが、実際のadapter request/response、semantic model、domain manifest、run manifest、stdout-result Schemaとの適合を検証していません。
+
+**問題:** closed authorityを宣言しながら、中核値と公開surfaceが任意objectです。requestとprovenance内のrequest、source planとそのobservation、process observationとtoolchainの相互一致も要求されません。
+
+**影響:** 実Schemaでは拒否されるfield、raw text、絶対path、異なるrequest、異なるstatusを含む値でもR23 authorityとしてsealできます。後続実装者はR23簡略型と実Schemaのどちらを正本にするか判断しなければなりません。
+
+**最小修正:** `json_object`を廃止し、各fieldを既存の実Schemaへ`$ref`してください。`ValidatedAdapterRequest`、opaque response bytes、validated semantic decision、実domain/root/stdout/diagnosticを一つのSchema-valid fixtureで接続し、全重複fieldのexact equalityをvalidatorで検査してください。
+
+## P1-02 — applicability projectionが実Schema非互換で、Node起動許可と実観測を混同しています
+
+**根拠:** `next-applicability-decision-v1` Schemaは`payload_available`、`non_applicable_observations`、closedなtoolchain/domain/root/stdout/stderrを要求します。一方、`r23_applicability_projection`は異なるfield集合を返し、`stderr`をbytesにし、toolchainを`None`または`{"node_status":"observed"}`にし、applicableであるだけで`decision_kind=request_bound_success`かつ`node_probe.performed=true`としています。両者は同じschema IDを名乗っていますが、R23 producerの値はSchema instanceではありません。
+
+**問題:** package bytesから分かるのは「Node probeを許可できる」ことまでです。probe実行、Node availability、adapter response成功はまだ観測されていません。
+
+**影響:** packageがapplicableであればNode起動・response成功まで済んだと誤分類する実装が可能になります。Node discovery failure、spawn failure、mixed project filteringの後段statusが一意に決まりません。
+
+**最小修正:** applicability decisionは`permitted/prohibited`だけを確定し、`performed`とtoolchain observationは後段のprocess observationからのみ設定してください。R23 producerを`next-applicability-decision-v1`の実instanceにし、frozen package path/digest、project root、read-once observationを相互拘束してください。
+
+## P1-03 — provenanceが二つの非互換な型体系に分裂しています
+
+**根拠:** current authorityとR23 Schemaは4 variant、すなわち`request_independent_not_applicable`、`request_independent_failure`、`request_bound_failure`、`request_bound_success`を要求します。一方、独立した`next-provenance-v1.schema.json`は`request_bound|request_independent`の2 kindだけで、`request_bound`はstage/failure codeがnullのsuccess branchに限定されています。また、独立SchemaにはR23側の`applicability` observation rowがありません。
+
+**問題:** request-bound failureを実provenance Schemaで表現できません。さらに`CSV-NEXT-SOURCE-INTEGRITY-001`はenumには含まれますが、stage/codeのclosed pair一覧に実質的なbranchがありません。
+
+**影響:** response後のprotocol/schema/model failure、source integrity fatal、not-applicableのprovenanceを、同一Schemaでdomain/root/publicationへ渡せません。
+
+**最小修正:** provenance Schemaを4 variantへ統一し、`schema`、`version`、`applicability`を含むfield-specific observation mapを一つだけ定義してください。全catalog codeについてstage、scope、outcome、exitをexhaustiveな`oneOf`で閉じてください。
+
+## P1-04 — failure stageとobserved prefixの対応が誤っており、未観測値を合成できます
+
+**根拠:** `r23_provenance`は`request_bound_failure`で全fieldを一律`observed`にします。R23 registryの`source_control` failureも`limits`と`source_plan`を観測済みとして渡しています。さらに、provenance内の値と`R23Decision`の同名top-level値とのexact equalityは検証されません。
+
+**問題:** config/control段階でまだ成立していないfinal source planや、response前failureで未観測のprocess/toolchain値を、任意値としてprovenanceへ入れられます。
+
+**影響:** run fingerprint、manifest、diagnosticが実際には観測していない値へ拘束され、同じfailureに複数の正当な出力が生じます。
+
+**最小修正:** stageごとの観測可能fieldを一つのcatalog tableに固定し、各observed rowの`value`をfield固有Schemaで検証してください。observation identityのdigestを実値から再計算し、decision内の対応値とのexact equalityを要求してください。
+
+## P1-05 — 実manifest Schemaがcurrent four-kind authorityを表現できません
+
+**根拠:** `next-domain-manifest-v1`の`request_independent=true` branchは`incomplete/payload_unavailable`しか許可せず、current authorityが要求するrequest-independent `not_applicable`を表現できません。通常の`not_applicable` branchは`request_independent=false`です。root `run-manifest-v1`もrequest-independent Next branchを`incomplete/payload_unavailable`へ固定しています。さらにdomain manifestにはapplicability matrix、provenance、process observationを格納するfieldがありません。
+
+**問題:** all-non-applicable、早期config failure、request-bound failure、process observationを、current authorityで要求された形のpublic manifestへ投影できません。
+
+**影響:** 実装者は、R23の簡略root manifestを採用するか、既存run-manifest Schemaを破るか、新しい非記載branchを追加するか判断する必要があります。
+
+**最小修正:** domain/root manifestを、少なくともrequest-independent not-applicable、request-independent failure、request-bound partial/success/failureへdiscriminateしてください。applicability identity、provenance、process observationまたはそれらのtyped descriptor/digestを必須投影にし、全branchのactual stdout/stderr/exit vectorを追加してください。
+
+## P1-06 — config resolverと実config Schemaが採択済みsemanticsを共有していません
+
+**根拠:** `r23_resolve_config_subset`は`tsconfig.json`と`jsconfig.json`の「正確に一つ」の存在を要求し、両方存在時のtsconfig優先と、両方不在時のbuilt-in safe configを実装していません。extendsでmergeした`files`/`include`は元のdeclaring config pathを失い、root config directory基準で解決されます。include grammarは`?`を許可せず、unknown compiler optionを保持します。R23出力は`code-structure-viz.next-config/v1`、camelCase options、`declaring_paths`等を持ちますが、実Schemaは`code-structure-viz.domain-config/next/v1`、snake_caseの別shapeです。
+
+**問題:** R23 resolverの正常出力は実config Schemaで検証できず、実Schemaはpath-valued optionごとのdeclaring config pathとreplacement declaration orderを保持できません。compiler-options定義もconfig、source plan、adapter request間で重複しています。
+
+**影響:** inherited `files/include/baseUrl/paths`の解決結果、config digest、request ID、module resolutionが実装方法によって変わります。
+
+**最小修正:** 一つのshared compiler-options Schemaとresolverを定義し、project-relative candidate lookup、tsconfig優先、built-in fallback、declaring config path、replacement orderを保持してください。R23 vectorは実`next-config-v1` instanceを生成してください。
+
+## P1-07 — source scanner/graphがfrozen source sealのauthorityになっていません
+
+**根拠:** R23 scannerの`byte_start`/`byte_end`はPython文字indexと`len(str)`であり、UTF-8 byte offsetではありません。同じspecifierの複数occurrenceは`text.find`により同一箇所へ対応し得ます。`source_identity`はcallerが任意文字列で注入できます。module resolutionはrelative importだけで、project ownership、`baseUrl`、`paths`、declaring configを受け取りません。validatorはgraph digestを受信graphから再計算するだけで、frozen bytesからnodes/edgesを再導出しません。
+
+実`next-source-plan-v1` Schemaとも、node field、open frontier名、graph digest、role enumが一致しません。Schema側のresolved roleは`value|control`であり、current authorityが要求する`value|type`を表現できません。R23は`frontier`、Schemaは`safe_frontier`を使用しています。
+
+**問題:** R23 graphはsource plan Schemaのinstanceではなく、source bytes、config、project ownershipから独立再計算できません。open edgeがlocalityや`partial_safe`を禁止する因果も接続されていません。
+
+**影響:** edge削除、誤ったspan、caller supplied identity、baseUrl/paths無視が、整合したdigestとして通ります。partial-safe判定とpublicationが不正なgraphへ依存できます。
+
+**最小修正:** graph shapeをsource-plan Schemaへ一本化し、UTF-8 bytes、resolved config、project ownershipから全graphを再導出してください。source seal digestをnode/occurrence identity preimageへ入れ、open closureからlocality/outcomeまでを一つのE2E vectorで検査してください。
+
+## P1-08 — process policy/observationが実Schema非互換で、security invariantも再計算されません
+
+**根拠:** R23 observationは`state`、`policy_digest`、`actual_image`等を持ちますが、実Schemaは`kind`、`node_status`、`shell`、`file_identity_at_hash`、`post_spawn_identity_check`等を要求します。R23のverified observationは`host_os="fixture"`も受理します。policyに`shell=false`がなく、validatorはstable/local digestを実fieldから再計算せず64桁hexであることしか確認しません。argvも先頭2要素だけ比較し、extra argumentを拒否しません。
+
+実process Schemaも`argv`に`maxItems`がなく、`stable_fingerprint`等の一部propertyはbranch内で具体的に拘束されません。unavailable/not-applicable branchでもcommon required fingerprintをnullへ固定していません。
+
+**問題:** R23 process vectorは実`next-process-launch-observation-v1` instanceではありません。fixture evidenceとproduction verificationが型上混在しています。
+
+**影響:** hostile extra argv、fake fingerprint、未検証fixture、policyと異なるdenied env/FD状態をverifiedとしてsealできます。
+
+**最小修正:** closed `ProcessLaunchPolicy` Schemaを追加し、実observation SchemaへR23 producerを合わせてください。exact argv length、shell、adapter identity、env deny/allow、FD lifecycle、group、TOCTOU、stable/local digestを実fieldから再計算してください。fixture branchはproduction verified branchと型レベルで分離してください。
+
+## P1-09 — semantic/run failure matrixがcomplete・not-applicable・payload-unavailableの3状態に縮退しています
+
+**根拠:** `_r23_projection_for`はsuccessを`complete/0`、not-applicableを`not_applicable/0`、その他すべてを`payload_unavailable/3`にします。`partial_safe`、source-integrity fatal/exit 1、usage/exit 2、interrupt/exit 130を生成するdecision branchがありません。current requirementは0/1/2/3/130とpartial-safeを明示しています。
+
+**問題:** authority Schemaのexit enumに1/2/130が書かれていても、それを生成・検証するreference pathが存在しません。`R23PublicationBoundary`の`partial_safe`も`R23Decision`へ接続されていません。
+
+**影響:** source integrity failure、CLI usage、handled SIGINT、localized partial analysisのpublic surfacesを後続実装者が新規設計する必要があります。
+
+**最小修正:** provenance kindとは別に、closedなsemantic decisionとrun/publication decision unionを定義してください。complete empty、complete+unsupported、partial-safe、payload-unavailable、not-applicable、fatal、usage、interruptを実Schema-valid domain/root/stdout/stderr/artifact/exit vectorへ通してください。
+
+## P1-10 — final publicationがsemantic decisionから導出されず、任意candidate bytesをsealできます
+
+**根拠:** `R23PublicationBoundary`は`R23Decision`を受け取らず、caller suppliedの`semantic_status`と任意`candidates` mapを入力にします。`payload_unavailable`でもsemantic JSONとPlantUML candidateを必須とします。selected-copy overflow時のstdoutは`{"availability":"unavailable","reason":"selected_stdout_limit"}`だけで、`stdout-result/v1`の`type/schema/selector/stable_reason/artifact`を持ちません。artifact descriptorも`kind/size/sha256`だけです。
+
+**問題:** 「decisionだけがpublication input」というtest名に反し、publication boundaryはdecisionと独立しています。
+
+**影響:** semantic modelとは無関係なJSON、PlantUML、manifest、summaryを、正しいdigest付きpublicationとしてsealできます。payload-unavailable時に禁止されたpayload bytesも保持されます。
+
+**最小修正:** `PublicationBoundaryDecision`の入力をimmutable semantic/run decision一つに限定し、rendererを内部で一度だけ呼んでください。実Artifact descriptor、`stdout-result-v1`、diagnostic JSONL、root manifestを生成し、全semantic statusとselectorのexact/+1を検査してください。
+
+## P1-11 — diagnostic catalogがusage failureとpublication-only failureをdomain payload failureへ誤分類しています
+
+**根拠:** Designのfailure matrixではproject root overlapの`CSV-NEXT-PROJECT-001`はusage、exit 2、artifactなしです。一方、diagnostic catalogは同codeをdomain `payload_unavailable`として定義しています。また`CSV-NEXT-LIMIT-003`は一律`payload_unavailable`ですが、current authorityではselected stdout copy超過はsemantic statusを維持するpublication-only failureです。
+
+**問題:** 一つの`outcome` fieldでdomain semantic outcome、run usage outcome、publication outcomeを表そうとしています。
+
+**影響:** overlapでsource readerを実行する、selected-copy overflowでsemantic artifactを破棄する、またはmanifest statusとdiagnostic outcomeが矛盾する実装が成立します。
+
+**最小修正:** catalogへ`scope/stage`を導入し、`usage`、`domain_semantic`、`publication`、`fatal`を分けてください。PROJECT-001とselected-copy LIMIT-003を、実stderr/stdout/artifact/exit vectorで別々に固定してください。
+
+## P1-12 — namespace importがR23 helper内にしか存在しません
+
+**根拠:** R23 helperは`binding_kind=named|default|namespace`、namespaceで`imported_name=null`を返します。しかし実`next-semantic-v1`の`import_member`には`binding_kind`と`local_name`がなく、`imported_name`はIdentifierNameまたは`default`で必須です。adapter responseはこのsemantic record定義を再利用しています。
+
+**問題:** 採択済みnamespace variantを実private/public modelへserializeできません。PlantUML contractにもnamespace-specific rendering ruleがありません。
+
+**影響:** 実装者はnamespace importを捨てる、`*`を名前として再導入する、local aliasを別fieldへ追加する、のいずれかを独自判断する必要があります。
+
+**最小修正:** private/public双方の`ImportBindingMember`をdiscriminated `named|default|namespace` unionへ変更し、ID/count/order、member accessとの分離、semantic JSON、PlantUMLのgoldenを一つのE2E fixtureで固定してください。
+
+## P1-13 — string-named export dispositionが実export proofとcoverageへ反映されていません
+
+**根拠:** R23では独立helperが3 dispositionを返すだけです。実adapter responseの`export_observation.exported_name`はIdentifierName、`default`、`*`だけで、string-named syntaxを証拠として表現できません。R23 helperのintentional unsupported branchは`code=None`であり、既存の`CSV-NEXT-UNSUPPORTED-001` contractにも接続されていません。
+
+**問題:** string exportを認識した事実、exact byte occurrence、安全なdecoded identity、component可能性、最終dispositionをprivate proofへ保持できません。
+
+**影響:** string exportを完全に見落としてもR23 testを通せます。また、古いDesignにはstring exportを一律TARGET-001とする記述が残っているため、後続実装の分類が一意になりません。
+
+**最小修正:** `export_observation`へstring-named occurrence variantを追加し、raw spellingを公開せずbyte span/token identityとdecoded safe classificationを保持してください。TARGET-001、UNSUPPORTED-001、EXPORT-001の3経路をdiagnostic、coverage、domain/root/stdoutまで通してください。
+
+## P1-14 — Unicode 15 NFC profileは3入力のwitnessに留まり、canonicalization contractを実装できません
+
+**根拠:** ECMAScript IdentifierName用のUnicode 15.0 table自体はchecked-inされています。しかしR23 NFC normalizerが認識する非ASCII入力は`e + acute`、`a + diaeresis`、Angstrom signの3件だけで、それ以外はfail-closedです。testも`Ω + acute`を拒否することを期待しています。artifact自身も「small checked-in KAT witness」であり完全なruntime tableではないと認めています。
+
+**問題:** current authorityはpath、JSON string、identifierについてUnicode 15.0.0 NFC profileを固定したと宣言していますが、通常の日本語、結合文字、既合成文字をcanonicalizeする実行可能契約がありません。
+
+**影響:** 日本語pathを拒否する実装と、host Unicode databaseを使う実装の両方が仕様上成立します。cross-Python determinismとNFC collision判定が未確定です。
+
+**最小修正:** Unicode 15.0.0の完全なnormalization data、または固定入力から生成するdependency-free generatorをchecked-inし、table digest、full normalization KAT、host-UCD非依存testを追加してください。
+
+## P1-15 — compatibility descriptorの説明・Schema・digest preimageが相互に矛盾しています
+
+**根拠:** current compatibility documentはNFC profile/table digest、TypeScript/trusted identities、portable toolchain fingerprintをdescriptorへ含むと述べています。しかし実Schemaにあるのはidentity versions、algorithm versions、IdentifierName table digest、semantic profile IDだけです。NFC digest、TypeScript identity、trusted environment digest、portable toolchain fingerprintはありません。文書内のcompatibility ID preimage式からも除外されています。
+
+**問題:** 何をsemantic compatibilityとし、何をrun fingerprintだけに入れるのかが確定していません。
+
+**影響:** NFC behavior、TypeScript certified semantics、trusted declaration、adapter/toolchainが変わっても同じcompatibility IDを維持する実装と、IDを変更する実装の両方が成立します。Issue #9のsnapshot比較可否にも影響します。
+
+**最小修正:** compatibility boundaryを再決定し、文書、Schema、known-answer preimageを一致させてください。semantic compatibilityへ含めない値は、current authorityの「descriptorに含む」という記述を削除し、run fingerprint側の必須fieldとして明示してください。
+
+## P1-16 — coverage registryが誤ったcriterion対応を自己検証できます
+
+**根拠:** `test_round23_rg_12_coverage_index_is_bidirectional_and_substantive`は、18 criterionすべてに同じapplicability producer、同じvalidator、同じtest名を割り当てても成功します。fixture側には個別producerがありますが、validatorは主として名前の存在、callability、positive/negativeの実行を確認するだけで、そのproducerが当該criterionの意味を検証するかは確認しません。
+
+さらにRound 23 artifactでは`R23-RG-02`がprovenance/catalog groupですが、fixtureの`round23.rg-02`はconfig groupです。同様にartifactのroot-group番号とfixture criterion番号が一致していません。
+
+**問題:** original finding → root group → criterion → vector → producer → validator → testのsemantic bijectionがありません。
+
+**影響:** 本来別のfindingを検証するproducerを割り当ててもcoverage gateがgreenになります。R23 P1-01〜P2-08の「全件実行可能に閉じた」という主張を機械的に証明できません。
+
+**最小修正:** 元のfinding IDをregistry recordへ直接保持し、各findingを正確に一つのroot groupへ割り当ててください。test側はfinding IDと期待mutation propertyを宣言し、wrong producer、wrong validator、wrong group、duplicate/missing findingをmeta-testで拒否してください。
+
+## P1-17 — 「後続Roundは非normative」というauthority宣言が同じDesign内で破られています
+
+**根拠:** R/D/P先頭は後続のRound節をhistorical/non-normativeとしています。しかし`design.md`後半には`## Normative closure contracts`、さらに`## Round 2 normative closure`と「競合時はこのsectionを優先する」という明示的なpriority ruleが残っています。
+
+authority testは文書内に`Current v1 normative authority`と`historical`という文字列が存在することだけを確認するため、後段の相反するpriority宣言を検出しません。
+
+**問題:** 実装者には「先頭current v1」と「競合時に優先されるRound 2」の二つの正本があります。
+
+**影響:** string export、config、runtime manifest等で古いRound contractを採用しても、文書上正当化できます。
+
+**最小修正:** historical sectionから`normative`、`正本`、`優先`等の効力を持つ表現を除去するか、別のhistorical artifactへ移動してください。authority testはcurrent section終了後にnormative priority文が存在しないことを検証してください。
+
+## P1-18 — runtime/package contractが「公開run provenance」と「4個のfixture inventory」を同じ名前で表しています
+
+**根拠:** `next-runtime-manifest-v1.md`先頭はruntime manifestがsemantic decision、process observation、provenance、applicability、artifact descriptorを投影すると宣言します。同じ文書の直後では、同名Schemaをchecked-in compatibility-unit inventoryとして説明しています。実Schemaは`tests/fixtures/next_runtime/*`の正確に4 memberと2 licenseだけを許可します。
+
+Designはproduction compiled adapter、TypeScript libs、trusted declarationsをwheelへ、Node source workspaceとlock/build inputsをsdistへ含めるとしています。しかし現在の`pyproject.toml`のsdist includeには`/adapters/next`がなく、Round 23 artifactはexact pyproject deltaを将来migrationへ送っています。
+
+**問題:** production実装は現在のexact-four-fixture Schemaへ適合できず、同時にcurrent authorityはruntime member変更を別compatibility migrationとしています。
+
+**影響:** 実装開始直後にv1 Schemaを破る、fixtureをproduction assetとして扱う、新しいmanifest familyを追加する、のいずれかを判断する必要があります。package contents、offline rebuild、license inventory、compatibility versionが未確定です。
+
+**最小修正:** run publication manifestとruntime build inventoryを別schema IDへ分離してください。production member set、source-to-wheel mapping、sdist inputs、build output verification、license rows、migration/version rule、`pyproject.toml`のexact deltaを実装開始前に固定してください。
+
+# P2 findings
+
+## P2-01 — Schemaの「closed」テストがtop-levelしか検査していません
+
+**根拠:** `test_checked_in_schema_is_valid_and_closed`は`Draft202012Validator.check_schema`と、rootの`schema["additionalProperties"] is False`だけを検査します。このため、R23 authorityの`json_object`や`observed_row.value:{}`のようなnested open schemaを検出しません。
+
+**影響:** 「全Schemaがclosed」というtest名と実際の保証範囲が一致しません。
+
+**最小修正:** 全object subschemaを再帰走査し、明示的に許可したmap以外は`additionalProperties:false`または閉じた`patternProperties`を要求してください。`{}`、型なしproperty、generic objectをnegative fixtureにしてください。
+
+## P2-02 — 人間向けHTMLの現在性表示が自己矛盾しています
+
+**根拠:** HTML headerは`Design candidate · 2026-08-31`、pillは「提案・契約整理」と表示し、多数のRound 6〜15 warningをcurrent authorityより前に配置しています。その後に「Current v1 normative authority」が現れ、さらに本文では「この資料はゼロベース分析から得た設計候補」「HTML自体は説明用Artifact」と記載しています。
+
+**影響:** human readerが最新R23 authorityと古いcandidate/historical stateを区別しにくく、実装者が古い記述へ誘導されます。
+
+**最小修正:** headerをcurrent pre-implementation contractへ更新し、historical Round calloutを折り畳みsectionまたは別artifactへ移動してください。HTMLは説明資料で正本ではないことを冒頭で一度だけ明示してください。
+
+## P2-03 — Round 23 evidence artifactが固定commit内で自己完結していません
+
+**根拠:** artifactはStrict output/transcriptを`/Users/.../.oracle/...`の絶対pathで、analysis/source packetを`.workbench/chatgpt/...`で参照しています。後者2件を固定SHAからGitHubコネクタで直接取得したところ404でした。artifactにはdigestがありますが、内容は固定commitから再確認できません。
+
+**影響:** 後続実装者・reviewerはhistorical P1-01〜P2-08の原文、root-group化の妥当性、SHA-256をrepositoryだけでは再検証できません。また個人環境の絶対pathがdurable artifactへ残っています。
+
+**最小修正:** 必要なtranscript/source packetを機密情報と絶対pathを除去してrepository-relative artifactとして格納するか、artifactの主張を固定commit内で検証可能なfinding tableだけへ限定してください。
+
+# 最終判定
+
+Round 23で追加されたdata-only reference laneは、個々の論点を整理する資料としては有用です。しかし、現状は以下の構造です。
+
+```text
+R23専用producer
+  → R23専用validator
+  → R23専用簡略projection
+  → 自己digest
+```
+
+必要なのは次の構造です。
+
+```text
+frozen package/control/source bytes
+  → actual applicability/config/source-plan schemas
+  → actual validated adapter request/response schemas
+  → actual semantic decision
+  → actual process observation
+  → actual publication boundary
+  → actual semantic/PlantUML/domain/root/stdout/stderr schemas
+```
+
+特に、surrogate authority、provenance split、manifest branch欠落、config/source graph非互換、process非互換、publicationの外部candidate注入、namespace/string export未反映、Unicode/compatibility未閉包、fixture-only package manifestは、後続実装者にmaterialなProduct/Policy/Security/Compatibility判断を残します。
+
+review_status=fail
+p0_count=0
+p1_count=18
+p2_count=3
+implementation_ready=no
+reviewed_sha=d660608ff5af76b7c65ca7d067ac797d3cea225f

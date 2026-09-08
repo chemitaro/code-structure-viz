@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-publication-decision-v1",
+  "title": "CodeStructureViz Next final publication decision v1",
+  "description": "One immutable publication result. Public projections return sealed bytes and descriptors from this object and never accept independent status, candidate, or measurement values.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "semantic_decision", "response", "artifacts", "stdout", "stderr", "measurements", "publication_outcome", "exit_code", "seal"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-publication-decision/v1"},
+    "version": {"const": 1},
+    "semantic_decision": {"$ref": "urn:code-structure-viz:schema:next-run-decision-v1"},
+    "response": {"oneOf": [{"$ref": "#/$defs/response_link"}, {"type": "null"}]},
+    "artifacts": {"type": "array", "maxItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/artifact"}},
+    "stdout": {"$ref": "#/$defs/stdout"},
+    "stderr": {"$ref": "#/$defs/stderr"},
+    "measurements": {"$ref": "#/$defs/measurements"},
+    "publication_outcome": {"enum": ["published", "selected_artifact_unavailable", "payload_unavailable"]},
+    "exit_code": {"enum": [0, 1, 2, 3, 130]},
+    "seal": {"$ref": "#/$defs/seal"}
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "publication_outcome": {"const": "published"},
+        "stdout": {"properties": {"copy_status": {"enum": ["published", "not_attempted"]}}},
+        "exit_code": {"enum": [0, 3]}
+      }
+    },
+    {
+      "properties": {
+        "publication_outcome": {"const": "selected_artifact_unavailable"},
+        "stdout": {"properties": {"availability": {"const": false}, "copy_status": {"const": "unavailable"}}},
+        "exit_code": {"const": 3}
+      }
+    },
+    {
+      "properties": {
+        "publication_outcome": {"const": "payload_unavailable"},
+        "artifacts": {"maxItems": 0},
+        "response": {"type": "null"},
+        "stdout": {"properties": {"availability": {"const": false}}},
+        "exit_code": {"enum": [1, 2, 3, 130]}
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "response_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "raw_sha256", "model_digest", "byte_length"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/digest"},
+        "raw_sha256": {"$ref": "#/$defs/digest"},
+        "model_digest": {"$ref": "#/$defs/digest"},
+        "byte_length": {"type": "integer", "minimum": 1}
+      }
+    },
+    "artifact_descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "domain", "format", "media_type", "size_bytes", "sha256"],
+      "properties": {
+        "path": {"enum": ["next.snapshot.semantic.json", "next.snapshot.puml", "run-manifest.json"]},
+        "domain": {"const": "next"},
+        "format": {"enum": ["semantic-json", "plantuml"]},
+        "media_type": {"enum": ["application/json", "text/vnd.plantuml; charset=utf-8"]},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["descriptor", "bytes_base64"],
+      "properties": {
+        "descriptor": {"$ref": "#/$defs/artifact_descriptor"},
+        "bytes_base64": {"type": "string", "contentEncoding": "base64"}
+      }
+    },
+    "stdout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector", "availability", "copy_status", "candidate", "result_bytes_base64", "result_size_bytes", "result_sha256"],
+      "properties": {
+        "selector": {"type": ["string", "null"], "enum": [null, "manifest", "next:semantic-json", "next:plantuml"]},
+        "availability": {"type": "boolean"},
+        "copy_status": {"enum": ["published", "unavailable", "not_attempted"]},
+        "candidate": {"oneOf": [{"$ref": "#/$defs/artifact_descriptor"}, {"type": "null"}]},
+        "selected_size_bytes": {"type": "integer", "minimum": 0},
+        "selected_sha256": {"$ref": "#/$defs/digest"},
+        "result_bytes_base64": {"type": "string", "contentEncoding": "base64"},
+        "result_size_bytes": {"type": "integer", "minimum": 0},
+        "result_sha256": {"$ref": "#/$defs/digest"}
+      },
+      "oneOf": [
+        {"properties": {"availability": {"const": true}, "copy_status": {"const": "published"}}, "oneOf": [
+          {"properties": {"selector": {"type": "null"}, "candidate": {"type": "null"}}},
+          {"properties": {"selector": {"type": "string"}, "candidate": {"$ref": "#/$defs/artifact_descriptor"}}}
+        ]},
+        {"properties": {"availability": {"const": false}, "copy_status": {"enum": ["unavailable", "not_attempted"]}}}
+      ]
+    },
+    "stderr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available", "bytes_base64", "size_bytes", "sha256", "diagnostics_sha256"],
+      "properties": {
+        "available": {"type": "boolean"},
+        "bytes_base64": {"type": "string", "contentEncoding": "base64"},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "diagnostics_sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "measured_bytes", "retained_bytes"],
+      "properties": {
+        "allowed": {"type": "boolean"},
+        "measured_bytes": {"type": "integer", "minimum": 0},
+        "retained_bytes": {"type": "integer", "minimum": 0}
+      },
+      "allOf": [
+        {"if": {"properties": {"allowed": {"const": true}}}, "then": {"properties": {"retained_bytes": {"maximum": 16777216}}}},
+        {"if": {"properties": {"allowed": {"const": false}}}, "then": {"properties": {"retained_bytes": {"const": 0}}}}
+      ]
+    },
+    "measurements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_stdout", "adapter_stderr", "public_stderr", "selected_stdout"],
+      "properties": {
+        "adapter_stdout": {"$ref": "#/$defs/measurement"},
+        "adapter_stderr": {"$ref": "#/$defs/measurement"},
+        "public_stderr": {"$ref": "#/$defs/measurement"},
+        "selected_stdout": {"$ref": "#/$defs/measurement"}
+      }
+    },
+    "seal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "sha256", "preimage_sha256"],
+      "properties": {
+        "algorithm": {"const": "sha256"},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "preimage_sha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

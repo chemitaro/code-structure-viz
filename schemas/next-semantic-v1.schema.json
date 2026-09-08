@@ -90,18 +90,7 @@
       ]
     },
     "compiler_options": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["allow_js", "check_js", "jsx", "module", "module_resolution", "base_url", "paths"],
-      "properties": {
-        "allow_js": {"type": "boolean"},
-        "check_js": {"type": "boolean"},
-        "jsx": {"enum": ["preserve", "react", "react-jsx", "react-jsxdev"]},
-        "module": {"const": "esnext"},
-        "module_resolution": {"const": "bundler"},
-        "base_url": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
-        "paths": {"type": "object", "patternProperties": {"^[A-Za-z0-9_.*?/-]+$": {"type": "array", "items": {"$ref": "#/$defs/path"}}}, "additionalProperties": false}
-      }
+      "$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/compiler_options"
     },
     "project": {
       "type": "object",
@@ -163,12 +152,17 @@
     "external_target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "safe_specifier", "exported_name"],
+      "required": ["kind", "target_kind", "safe_specifier", "exported_name"],
       "properties": {
         "kind": {"enum": ["external", "unresolved"]},
+        "target_kind": {"enum": ["external_package", "unresolved_relative"]},
         "safe_specifier": {"type": "string", "pattern": "^(@[a-z0-9._-]+/)?[a-z0-9._-]+(?:/[a-z0-9._-]+)*$"},
         "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"type": "null"}]}
-      }
+      },
+      "oneOf": [
+        {"properties": {"kind": {"const": "external"}, "target_kind": {"const": "external_package"}}},
+        {"properties": {"kind": {"const": "unresolved"}, "target_kind": {"const": "unresolved_relative"}}}
+      ]
     },
     "export_member": {
       "type": "object",
@@ -188,19 +182,43 @@
     "import_member": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "id", "owner_id", "local_component_id", "imported_name", "role", "source"],
+      "required": ["kind", "id", "owner_id", "local_component_id", "local_name", "imported_name", "binding_kind", "role", "source"],
       "properties": {
         "kind": {"const": "import_binding"},
         "id": {"$ref": "#/$defs/member_id"},
         "owner_id": {"$ref": "#/$defs/module_id"},
         "local_component_id": {"anyOf": [{"$ref": "#/$defs/component_id"}, {"type": "null"}]},
-        "imported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}]},
+        "local_name": {"$ref": "#/$defs/identifier"},
+        "imported_name": {"anyOf": [{"$ref": "#/$defs/identifier"}, {"const": "default"}, {"type": "null"}]},
+        "binding_kind": {"enum": ["named", "default", "namespace"]},
         "role": {"enum": ["value", "type"]},
         "source": {"oneOf": [
           {"type": "object", "additionalProperties": false, "required": ["kind", "module_id"], "properties": {"kind": {"const": "internal"}, "module_id": {"$ref": "#/$defs/module_id"}}},
           {"$ref": "#/$defs/external_target"}
         ]}
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "binding_kind": {"const": "named"},
+            "imported_name": {"$ref": "#/$defs/identifier"}
+          }
+        },
+        {
+          "properties": {
+            "binding_kind": {"const": "default"},
+            "imported_name": {"const": "default"}
+          }
+        },
+        {
+          "required": ["local_name"],
+          "properties": {
+            "binding_kind": {"const": "namespace"},
+            "imported_name": {"const": null},
+            "local_component_id": {"const": null}
+          }
+        }
+      ]
     },
     "prop_member": {
       "type": "object",

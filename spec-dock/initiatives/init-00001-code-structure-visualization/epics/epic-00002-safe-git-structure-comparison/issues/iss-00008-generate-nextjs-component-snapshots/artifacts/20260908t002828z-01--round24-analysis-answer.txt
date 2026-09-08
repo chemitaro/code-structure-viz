@@ -1,0 +1,1046 @@
+# Binding and evidence completeness
+
+本分析は、添付された `analyze-review-findings` skill、その governing requirements/design、Round 24 evidence packetを意味論上の基準として使用します。`reported classification`、`claim validity`、`blocking effect`、`response route`、`authorization`は分離して判定します。  Round 24のsource-native finding、review provenance、test evidence、親ポリシーはcurrent packetの記載を保持します。
+
+## Repository binding
+
+| 項目                         | 確認結果                                            |
+| -------------------------- | ----------------------------------------------- |
+| Repository                 | `chemitaro/code-structure-viz`                  |
+| Target branch              | `iss-00008-generate-nextjs-component-snapshots` |
+| Current candidate full SHA | `d660608ff5af76b7c65ca7d067ac797d3cea225f`      |
+| Expected SHAとの一致           | 40桁full SHAでbyte-for-byte一致                     |
+| Commit tree                | `aa3400b19ddce8cd4681352ac92a974788341fbd`      |
+| Parent commit              | `1e7b15f8564c17966545b902ea67928b847aa742`      |
+| Commit timestamp           | `2026-09-02T11:28:05Z`                          |
+| Commit subject             | `feat: Round 23のNext契約正本と検証基盤を追加`               |
+
+対象branchのtipは回答直前にもGitHub connectorで再確認し、指定SHAと完全一致しました。default branchや他branchは参照していません。
+
+repository rootの `AGENTS.md` は、このexact SHAへのGitHub connector fetchで404でした。したがって、適用可能なroot `AGENTS.md` 固有指示はありません。
+
+## Review, test, and artifact alignment
+
+| 項目                         | 確認結果                                                               |
+| -------------------------- | ------------------------------------------------------------------ |
+| Reviewed SHA               | `d660608ff5af76b7c65ca7d067ac797d3cea225f`                         |
+| Tested candidate content   | packet上、同一candidate contentにbind                                   |
+| Current CI                 | GitHub Actions run `33624764838`                                   |
+| CI head branch / SHA       | 対象branch / exact candidate SHA                                     |
+| CI result                  | `completed / success`、7 jobs success                               |
+| Review session             | `required-strict-github-connector-verificati-745`                  |
+| Verification session       | `issue-eight-strict-round-twenty-6`                                |
+| Review completion          | `2026-09-02T12:15:32.709Z`                                         |
+| Review output SHA-256      | `3074391a24d437222fe0f566c6bf3fda16d2d7c1ce2d14068bab4163a3a79d31` |
+| Review transcript SHA-256  | `433d8703e469e08b6d178c8760bb0424d65469035a70a5abce132121dacb6857` |
+| Evidence collection        | `2026-09-02T12:16:00Z`以降                                           |
+| Primary packet             | `.workbench/chatgpt/issue-8-round24-review-evidence-packet.md`     |
+| Primary packet digest      | 未提供                                                                |
+| Prior analyst session      | `required-strict-github-connector-verificati-733`                  |
+| Prior decision log SHA-256 | `72d776e2394880b508e6f29203639f04cf1826674354b3d49a4053c09c94fbe5` |
+
+CI runは対象branchとcandidate full SHAへ正確にbindしています。
+
+## Analyst provenance and continuity
+
+* Analysis identityは `issue-8-nextjs-snapshot-remediation-analysis-v1` です。
+* Invocationは `same-objective follow-up` です。
+* retained analyst transcriptは履歴と仮説としてのみ扱い、repository factsは今回のexact SHAで再確認しました。
+* reviewer sessionをanalyst sessionとして再利用していません。
+* 現在のanalyst sessionの外部Oracle/session identifierは提供されていないため、推測しません。
+
+## Source-native result
+
+分類は変更せず、次のまま保存します。
+
+* `review_status=fail`
+* `p0_count=0`
+* `p1_count=18`
+* `p2_count=3`
+* `implementation_ready=no`
+* `reviewed_sha=d660608ff5af76b7c65ca7d067ac797d3cea225f`
+
+## Packet completeness
+
+現在packetは、21件すべてについてsource-native classification、claim、repository evidence、impact、recommendation、reviewed surfaces、test evidence、repair history、親blocking policy、autonomous boundaryを含んでいます。意味論的なadjudicationを開始するにはcompleteです。
+
+ただし、次のmaterial evidence gapがあります。
+
+1. 本analystはローカルtestを実行していません。
+2. reviewerもtestを実行していません。
+3. focused 19 tests、363 Next/schema tests、386 contract tests、1242 full tests等はpacket提供の測定結果です。current remote CIの成功とは別の証拠です。
+4. live Node、actual macOS/Linux spawn、FD lifecycle、TOCTOU、process-group termination、consumer integration evidenceはありません。
+5. review output、transcript、prior decision logのdigestはpacket提供値であり、本analystがOracle filesystemで再hashした値ではありません。
+6. primary packet自体のdigestは提供されていません。
+7. current schema、diagnostic code、fingerprint、runtime inventoryを既に利用している外部consumerの有無は未確認です。
+8. HTML browser validationのexact invocationとartifact logはpacketに完全には固定されていません。
+9. Unicode 15.0.0の完全なnormalization dataまたはdependency-free generatorがrepository内に存在するかは未確認です。
+10. `.workbench/chatgpt/...` および個人環境のOracle pathはfixed commitから再取得できないものを含みます。ただし、current packetがsource review本文を収録しているため、今回のsemantic analysisは継続可能です。
+
+# Executive disposition
+
+**Batch-level dispositionは `blocked — one material public-contract decision plus one coherent authority-preserving repair batch` です。**
+
+18件のP1はすべて親policy上のblockerです。repository traceとcurrent authorityを照合した範囲では、完全に反証できるP1はありません。
+
+このうち17件、すなわちP1-01〜P1-17は、RequirementとDesign冒頭の `Current v1 normative authority` が期待する意味を明示しているため、追加のProduct・Policy・Security判断なしに修復方向を決められます。current Requirementは、package-only applicability、closed config、frozen graph、policy/observation分離、4-kind provenance、publication-only selected-copy failure、Unicode/string export/namespace semanticsを明示しています。 current Designも同じsingle authority chainと、decision以外からpublic bytesを再構成しない原則を定めています。
+
+残るP1-18は、次の二つの意味が同一schema identityへ割り当てられているため、単なるschema修正では閉じません。
+
+* run/publication provenanceとしてのruntime manifest
+* packagedまたはchecked-in runtime member/license inventoryとしてのruntime manifest
+
+どちらを `code-structure-viz.next-runtime-manifest/v1` の正本とし、もう一方をどのschema familyへ移し、既存v1をどうsupersedeまたはdeprecateするかは、public/persistent contractとcompatibility migrationの判断です。したがってP1-18のprimary routeは `requirement-decision-required` です。
+
+P2-01、P2-02、P2-03もclaimとして有効です。ただしsource-native classificationはP2のままで、親policyに従いreport-onlyです。これらは同じP1 root causeの修復時に補強できますが、独立したmutation authorizationにはなりません。
+
+現在安全に進められるのは、P1-18のhuman decisionを採択するところまでです。採択後に親workflowが一つのbounded repair batchを明示的に認可し、その後にのみspecification/schema/fixture/reference-test/document修復へ進めます。
+
+production `src/**`、Next adapter、Node workspace、dependency、lockfile、`pyproject.toml`、live process implementation、merge、release、Issue closeは引き続き禁止です。
+
+# Root-cause groups
+
+| Group ID  | Source findings / classification | Shared invariant / root cause                                                                                           | Primary route                   | Authorization                       |
+| --------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ----------------------------------- |
+| `R24-G01` | P1-01、P2-01                      | Round 23 surrogateがactual contractをcomposeせず、nested open objectsをself-validateしている                                      | `test-remediation`              | 既存authorityから一意                     |
+| `R24-G02` | P1-02、P1-03、P1-04、P1-05、P1-09    | applicability permission、observed lifecycle、provenance、run/publication stateがactual schemasへ一つのstate machineとして投影されていない | `test-remediation`              | 既存authorityから一意                     |
+| `R24-G03` | P1-06                            | adopted config semanticsがactual config/source-plan/request/semantic schemasとresolverへ共有されていない                           | `test-remediation`              | 既存authorityから一意                     |
+| `R24-G04` | P1-07                            | source graphがfrozen source sealから独立再計算されず、surrogate graphとself-digestに留まる                                               | `test-remediation`              | 既存authorityから一意                     |
+| `R24-G05` | P1-08                            | process policy、measured observation、fixture、legacy view、fingerprintがactual security contractへ一本化されていない                  | `test-remediation`              | 既存authorityから一意                     |
+| `R24-G06` | P1-10、P1-11                      | semantic decisionとpublication candidateが分離し、diagnostic outcomeがsemantic/run/publication scopeを混同する                      | `test-remediation`              | 既存authorityから一意                     |
+| `R24-G07` | P1-12、P1-13                      | adopted namespace importとstring-named export semanticsがactual private/public modelへ投影されていない                             | `test-remediation`              | 既存authorityから一意                     |
+| `R24-G08` | P1-14、P1-15                      | pinned Unicode normalizationとcompatibility preimageが小規模witness、文書、schemaへ分裂している                                         | `test-remediation`              | 既存authorityから一意。新dependency等が必要なら停止 |
+| `R24-G09` | P1-16                            | finding、root group、criterion、producer、validator、testのsemantic bijectionが存在しない                                           | `test-remediation`              | 既存authorityから一意                     |
+| `R24-G10` | P1-17、P2-02、P2-03                | current authority、historical prose、human HTML、durable evidenceのnormative statusとprovenanceが整理されていない                     | `documentation-correction`      | 既存authorityから一意                     |
+| `R24-G11` | P1-18                            | run provenanceとruntime build/reference inventoryが同一schema identityを所有している                                               | `requirement-decision-required` | Human decision                      |
+
+21件はすべて一度だけ割り当てています。duplicate treatmentはありません。
+
+P2-01はP1-01のnested-schema検証不足を補足するcoverage item、P2-02とP2-03はP1-17のhuman/durable projection不足を補足するitemです。いずれもP1へ昇格していません。
+
+# Detailed adjudication
+
+## R24-G01 — Actual contractを参照しないsurrogate authority
+
+**対象:** P1-01、P2-01。
+
+**Claim validityとreachability:** claimは有効です。`next-round23-authority-v1.schema.json` はtop-levelではclosedですが、`package_projection`、`request`、`limits`、`source_plan`、`toolchain`、`trusted_environment`、`process_observation`、domain/root/stdout projectionをgeneric `json_object`へ委譲しています。observed rowの`value`も無制約です。
+
+actual schemaで拒否されるabsolute path、raw source text、異なるrequest、arbitrary diagnostic、矛盾したstatusを含むobjectでも、surrogate bundle内では受理可能です。通常のpositive fixtureだけで到達し、特殊なenvironmentは不要です。
+
+P2-01も有効です。`test_checked_in_schema_is_valid_and_closed` はschema自体の妥当性とroot-level `additionalProperties:false`しか確認しておらず、nested `{}` やgeneric objectを検出しません。
+
+**In-scope impactとblocking effect:** P1-01がblockします。R23 laneのgreen resultがactual adapter request、semantic model、domain manifest、run manifest、stdout resultの妥当性を証明しないためです。P2-01はreport-onlyですが、同じfalse-positiveを許すcoverage gapです。
+
+**Violated authority:** current Requirementの「全surfaceは同じimmutable decisionまたはfinal publication decisionを受け、別のrequest、config、status、measurement、bytesを再構成しない」という命題、およびclosed/redacted public contractです。
+
+**First incorrect fault layer:** generated/reference projection schemaとschema-test layerです。
+
+**Root cause:** actual contractsをcompositionする代わりに、Round 23専用のumbrella objectを新しいauthorityとして追加したことです。
+
+**Primary route:** `test-remediation`。actual public/private schemasとvalidatorsを直接通すfixtureへ置換します。`next-round23-authority-v1`を残す場合も、非publicなtest composition bundleに限定し、各fieldはactual schemaへの `$ref` とcross-field equalityで閉じる必要があります。
+
+**Preserved guarantees:** Round 23で採択済みの意味、closed schema、redaction、no-production boundary。
+
+**Changed guarantees:** accepted behaviorは変更しません。surrogate-only greenを受入証拠として扱わないようにします。
+
+**Authorization:** 一意に決定可能です。ただし、外部consumerがsurrogate schema IDをpublic contractとして利用している証拠が見つかった場合は停止します。
+
+**Missing evidence:** actual schemasでは拒否されるnested mutationがsurrogateで通るFirst Red、全actual schemaを通るsingle end-to-end positive fixture、cross-field substitution negativeです。
+
+## R24-G02 — Applicability、provenance、manifest、run stateの分裂
+
+**対象:** P1-02、P1-03、P1-04、P1-05、P1-09。
+
+**Claim validityとreachability:** 5件とも有効です。
+
+* P1-02: package observationが確定するのはNode probeの`permission`までですが、R23 projectionは`performed`やsuccess-shaped decisionへ進めます。
+* P1-03: `next-round23-authority-v1` は4-kind provenanceを名乗る一方、actual `next-provenance-v1` は `request_bound | request_independent` の2-kindです。request-bound branchはsuccess-shapedで、failure stage/codeを保持できません。
+* P1-04: R23 reference branchはstageごとのobserved prefixをactual top-level valuesへexact-equalでbindしていません。
+* P1-05: actual domain/root manifestはrequest-independent `not_applicable/exit 0`、4-kind provenance、applicability/process observationを表現できません。
+* P1-09: R23 projectionはcomplete、not-applicable、payload-unavailableへ縮退し、`partial_safe`、fatal/exit 1、usage/exit 2、interrupt/exit 130をactual end-to-end surfaceへ通しません。
+
+all-non-applicable、Node discovery failure、spawn failure、response schema failure、localized source failure、source integrity fatal、CLI usage、SIGINTで到達します。
+
+**In-scope impactとblocking effect:** すべてP1でblockします。status、exit、manifest availability、provenance、Node optionality、reproduction identityが実装者依存になるためです。
+
+**Violated authority:** current Requirementは、package-only applicability、4-kind provenance、actual-value digest、failure以後だけの`unobserved/null`、0/1/2/3/130 exitを定めています。
+
+**First incorrect fault layer:** actual public schemaとreference lifecycle projection layerです。
+
+**Root cause:** `permission`、`observation`、`semantic outcome`、`run outcome`、`publication outcome`を一つのsimplified R23 statusへ圧縮したことです。
+
+**Primary route:** `test-remediation`。
+
+Reviewer recommendationは次のように限定して採用します。usageとinterruptをNext semantic decisionのvariantとして新設する必要はありません。これらは既存のouter CLI/run ownerに残しつつ、actual domain/root/stdout/stderr/exit vectorでNext branchとの接続を検証します。Next provenanceはcurrent authorityどおり4-kindに統一します。
+
+**Preserved guarantees:** no synthetic observation、all-non-applicableでNode/config/source非観測、failure stageまでのactual prefix、既存CLI/run ownership、exact exit。
+
+**Changed guarantees:** actual provenance/domain/root schemasとreference projectionがcurrent authorityへ一致します。
+
+**Authorization:** 一意に決定可能です。
+
+**Missing evidence:** 次のactual-schema-valid vectorsです。
+
+* request-independent not-applicable
+* request-independent applicability/config/source failure
+* request-bound Node/process/protocol/model failure
+* request-bound complete
+* partial-safe
+* source-integrity fatal
+* usage no-publication
+* interrupt
+* `permission=true / performed=false`
+* observed value substitutionとprefix deletionのnegative
+
+## R24-G03 — Config resolverとactual schemasの不一致
+
+**対象:** P1-06。
+
+**Claim validityとreachability:** claimは有効です。R23 resolverはactual `next-config-v1` instanceを生成せず、lookup、field naming、declaring path、fallback、pattern grammarがactual schemasと一致しません。`tsconfig.json`と`jsconfig.json`の双方不在、双方存在、nested `extends`、`files:[]`、`include:[]`、`baseUrl`、overlapping `paths`で通常に到達します。
+
+**In-scope impactとblocking effect:** P1でblockします。source membership、source-plan digest、private request、module resolution、semantic model、run fingerprintが実装方法によって変わるためです。
+
+**Violated authority:** current Requirementは、closed JSONC、local `./...` extends、declaring config path、`files`/`include`の排他的かつexplicit-empty authoritativeなmembership、declaration-relative `baseUrl`/`paths`、exact-before-wildcardを既に採択しています。
+
+**First incorrect fault layer:** reference resolver、shared schema composition、fixturesです。
+
+**Root cause:** adopted semanticsをactual `next-config-v1`、source plan、adapter request、semantic output、manifestへ投影せず、R23専用shapeを追加したことです。
+
+**Primary route:** `test-remediation`。一つのshared compiler-options schemaと一つのreference resolverをactual surfacesから参照します。
+
+**Preserved guarantees:** repository-local only、no package-based extends、closed v1 subset、frozen control bytes、deterministic replacement order。
+
+**Changed guarantees:** accepted config meaningは変更しません。actual schemaとreference bytesを既存authorityへ合わせます。
+
+**Authorization:** 一意に決定可能です。
+
+**Missing evidence:** candidate lookup order、built-in fallback、declaring-config-relative path、absent/present-empty truth table、exact/single-wildcard specificity、replacement declaration order、same resolved objectの全surface equalityです。
+
+## R24-G04 — Frozen source sealへbindされないsource graph
+
+**対象:** P1-07。
+
+**Claim validityとreachability:** claimは有効です。R23 scannerはUTF-8 byte offsetではなくPython character positionを利用し得るほか、同一specifierの複数occurrence、caller-provided source identity、project ownership、`baseUrl`/`paths`をactual source sealと独立に扱います。graph validatorもfrozen bytesから再導出せず、受信graphのself-digestを再計算する構造です。これらはmultibyte source、同一import複数回、nested project、alias importで到達します。
+
+**In-scope impactとblocking effect:** P1でblockします。edge omission、wrong span、wrong owner、wrong resolutionを整合したdigest付きgraphとして受理でき、`partial_safe`、target completeness、boundary propagationを誤らせるためです。
+
+**Violated authority:** current Requirementは、graphをfrozen bytesからprovableな`resolved | open` unionとして導出し、不確実なedgeはsafe frontierまたはbyte-span由来opaque identityだけを公開すると定めています。
+
+**First incorrect fault layer:** reference source-graph producer、source-plan schema integration、locality validatorです。
+
+**Root cause:** graphをSourceAcquisitionSealのderived factではなく、独立したR23 fixture objectとして扱ったことです。
+
+**Primary route:** `test-remediation`。
+
+**Preserved guarantees:** single source seal、UTF-8 byte identity、project ownership、type/value role、redaction、fail-closed locality。
+
+**Changed guarantees:** accepted graph semanticsは変更しません。caller-provided identityとself-digest-only validationを拒否します。
+
+**Authorization:** 一意に決定可能です。
+
+**Missing evidence:** multibyte exact span、同一specifier複数occurrence、source-seal substitution、project-owner substitution、`baseUrl`/`paths` resolution、open frontierからpartial-safe rejectionまでを通すactual end-to-end vectorsです。
+
+## R24-G05 — Process policy、observation、fixture、fingerprintの分裂
+
+**対象:** P1-08。
+
+**Claim validityとreachability:** claimは有効です。R23 process objectはactual `next-process-launch-observation-v1` instanceではなく、fixtureとproductionの境界、exact argv、`shell=false`、adapter content identity、environment、FD lifecycle、TOCTOU、stable/local digestの再計算がactual schemaへ接続されていません。
+
+available production、fixture-based reference、extra argv、fake digest、wrong adapter identity、wrong environmentで到達します。
+
+**In-scope impactとblocking effect:** P1でblockします。unsafe launch policyやunmeasured fixtureをverified production observationとしてsealできるためです。
+
+**Violated authority:** current Requirementはpolicyとactual observationを分離し、macOS/LinuxでNode、adapter、argv、private cwd、env、stdio/FD、group、TOCTOUを相互拘束し、証明できなければunavailableと定めています。
+
+**First incorrect fault layer:** process schema/reference validator/fixture integrationです。
+
+**Root cause:** Round 23専用process witnessをactual process contractへ変換せず、shape validationとdigest-format確認だけでauthority扱いしたことです。
+
+**Primary route:** `test-remediation`。
+
+**Preserved guarantees:** observation-only measurement authority、darwin/linux scope、no shell、exact adapter identity、portable/local split、no fabricated early observation。
+
+**Changed guarantees:** accepted security meaningは変更しません。actual schema、cross-field validator、fixture typeを一致させます。
+
+**Authorization:** 一意に決定可能です。actual OS spawn mechanismの実装はcurrent repairに含めません。
+
+**Missing evidence:** exact two-element argv、extra argument rejection、fixture/production disjointness、adapter-byte mutation、wrong cwd/env/FD/group/TOCTOU、stable/local digest recomputationです。actual OS process-level evidenceはproduction implementation時のfuture obligationです。
+
+## R24-G06 — Decision外candidate注入とdiagnostic scope混同
+
+**対象:** P1-10、P1-11。
+
+**Claim validityとreachability:** いずれも有効です。`R23PublicationBoundary` はimmutable semantic decisionではなく、caller supplied `semantic_status`、`selector`、任意candidate bytesを受け取ります。
+
+そのため、semantic modelと無関係なJSON、PlantUML、manifest、summaryを正しいdigest付きpublicationとしてsealできます。また、diagnostic catalogの単一`outcome`が、project-overlap usage errorとselected-copy publication-only failureをdomain `payload_unavailable`へ圧縮しています。
+
+**In-scope impactとblocking effect:** P1-10、P1-11ともblockします。payload-unavailable branchで禁止payloadを保持する、usage時にmanifestを作る、selected-copy overflowでsemantic artifactを破棄する実装が成立するためです。
+
+**Violated authority:** current Designは、semantic rendererがdecisionだけを受け、publication finalizerが内部生成したcandidate bytesと実測値を一度だけsealし、selected-copy overflowでもsemantic statusとpersisted descriptorを維持すると定めています。
+
+**First incorrect fault layer:** publication reference object、diagnostic catalog projection、stdout/root projectionです。
+
+**Root cause:** semantic outcome、run outcome、publication outcomeを分離せず、candidate bytesをdecision外から受け取ったことです。
+
+**Primary route:** `test-remediation`。
+
+catalog実装について、`scope/stage` field追加とregistry分離のどちらを採るかは、public diagnostic rowの意味、code、message、exitを変えない限り非materialな実装選択です。次の意味は固定です。
+
+* project overlapはusage、exit 2、zero publication
+* selected-copy overflowはpublication-only `CSV-NEXT-LIMIT-003`
+* semantic decisionとartifact descriptorは保持
+* no partial stdout
+* no rerender、retry、recopy
+
+**Preserved guarantees:** exact bytes、one measurement、canonical stderr、artifact descriptor保持、usage no-publication。
+
+**Changed guarantees:** arbitrary candidate injectionとscope-less outcomeを拒否します。
+
+**Authorization:** 一意に決定可能です。
+
+**Missing evidence:** candidate substitution、payload-unavailable candidate presence、usage reader/write call count 0、selected-copy exact/+1、semantic object identity不変、artifact descriptor不変、publication diagnostic一件、canonical stderr、render/copy count 1です。
+
+## R24-G07 — Namespace importとstring-named exportのsurrogate-only実装
+
+**対象:** P1-12、P1-13。
+
+**Claim validityとreachability:** いずれも有効です。actual semantic schemaの`ImportBindingMember`は`binding_kind`やnamespace local nameを持たず、`imported_name`をIdentifierNameまたは`default`として必須にしています。actual unresolved targetもpackage-like `safe_specifier`へ制限されています。
+
+string-named exportについてもR23 helperは存在しますが、actual adapter response/export observation、semantic proof、coverage、diagnostic、PlantUMLへ接続されていません。
+
+`import * as React`、namespace member access、`export { value as "external-name" }`等の通常のlegal syntaxで到達します。
+
+**In-scope impactとblocking effect:** いずれもP1でblockします。実装者がnamespaceを省略する、`*`をIdentifierNameとして再導入する、string exportをTARGET/EXPORT/UNSUPPORTEDのどれへ送るかを再決定する必要があるためです。
+
+**Violated authority:** current Requirementは、namespace import memberとstring export dispositionをversioned closed contractとして既に固定しています。
+
+**First incorrect fault layer:** actual adapter-response schema、semantic schema、coverage/diagnostic projection、PlantUML contractです。
+
+**Root cause:**採択済みsemantic decisionをhelperとして追加しただけで、private proofからpublic projectionまでのrecord unionへ反映しなかったことです。
+
+**Primary route:** `test-remediation`。
+
+**Preserved guarantees:** no fabricated IdentifierName、binding identity、value/type role、explicit target ownership、closed diagnostic routing。
+
+**Changed guarantees:** accepted semantic meaningは変更せず、actual private/public schemaへvariantを追加します。
+
+**Authorization:** 一意に決定可能です。
+
+**Missing evidence:**
+
+* named/default/namespaceのactual adapter-response→semantic→PlantUML vector
+* namespace local name、role、source、ID/count/order
+* string occurrenceのUTF-8 byte span/token identity
+* non-component proven unsupported
+* possible componentの`CSV-NEXT-EXPORT-001`
+* explicit target closure
+* TARGET-001をstring exportへ誤用しないnegative
+
+## R24-G08 — Unicode normalizationとcompatibility identityの分裂
+
+**対象:** P1-14、P1-15。
+
+**Claim validityとreachability:** いずれも有効です。R23 NFC implementationは少数のwitnessを持つだけで、通常の日本語、combining sequence、既合成文字、collisionを完全なUnicode 15.0.0 profileとして扱えません。
+
+またcurrent compatibility documentはNFC profile/table digest、TypeScript/trusted identities、portable toolchain fingerprintをdescriptorへ含めると明記しています。 一方、actual compatibility schemaはidentity versions、algorithm versions、semantic profile ID、IdentifierName table digestまでしか持ちません。
+
+**In-scope impactとblocking effect:** P1-14、P1-15ともblockします。supported Python laneやhost Unicode databaseによってpath/string normalization、order、digestが変わる可能性があり、TypeScript/trusted/adapter/toolchain変更時のsnapshot comparison可否も一意でないためです。
+
+**Violated authority:** current Requirementの「Unicode 15.0.0 NFC profileをversioned closed contractとする」、current compatibility documentの明示的preimageです。
+
+**First incorrect fault layer:** reference normalization data、compatibility schema、known-answer preimageです。
+
+**Root cause:** IdentifierName classification tableだけをfull profile化し、NFC normalizationとcompatibility projectionを小規模witnessまたはhistorical formulaのまま残したことです。
+
+**Primary route:** `test-remediation`。
+
+完全tableをchecked-inするか、固定Unicode dataからdependency-free generatorを使用するかはtechnical implementation choiceです。いずれも次を満たす必要があります。
+
+* Unicode 15.0.0へpin
+* host UCD非依存
+* table/profile digest
+* ordinary Japaneseを含むfull KAT
+* compatibility descriptorとknown-answer preimageへのexact inclusion
+* future profile changeをversioned migrationとして扱う
+
+**Preserved guarantees:** NFC canonicalization、cross-runtime determinism、dependency-free contract、versioned comparison。
+
+**Changed guarantees:** accepted compatibility meaningは変更しません。actual schemaとpreimageをcurrent authorityへ同期します。
+
+**Authorization:** 一意に決定可能です。ただし、実現に新dependency、license obligation、package topology変更、runtime data migrationが必要と判明した場合は停止します。
+
+**Missing evidence:** full normalization data identity、Japanese/combining/collision KAT、host-UCD access禁止、compatibility field mutation、portable/local identity mutationです。
+
+## R24-G09 — Semantic meaningを検証しないcoverage registry
+
+**対象:** P1-16。
+
+**Claim validityとreachability:** claimは有効です。current coverage testは、finding/root-group/criterionのsemantic meaningではなく、producer/validator/test名の存在と実行可能性を中心に確認しています。同じapplicability producerを複数criterionへ割り当てても、registry自己整合が成立し得ます。Round 23 artifactのgroup numberingとfixture criterion番号も一致していません。
+
+**In-scope impactとblocking effect:** P1でblockします。「全findingを実行可能に閉じた」という受入証拠が、別criterionのtestで代替できるためです。
+
+**Violated authority:** skillとPlanが要求する、finding→root cause→criterion→positive/negative vector→producer→validator→substantive testの検証可能な対応です。
+
+**First incorrect fault layer:** fixture registry、coverage meta-test、test naming layerです。
+
+**Root cause:** registry structural consistencyとsemantic adequacyを同一視したことです。
+
+**Primary route:** `test-remediation`。
+
+**Preserved guarantees:** executable producer/validator、unknown/duplicate/unexecuted rejection、source-text marker非依存。
+
+**Changed guarantees:** registry recordへsource finding IDと期待mutation propertyを直接持たせます。group labelだけをauthorityにしません。
+
+**Authorization:** 一意に決定可能です。
+
+**Missing evidence:** wrong producer、wrong validator、wrong finding、wrong group、duplicate/missing finding、unexecuted vector、positive/negative pair欠落、criterion swapがそれぞれfailするmeta-testです。
+
+## R24-G10 — Canonical authority、human projection、durable evidenceの不整合
+
+**対象:** P1-17、P2-02、P2-03。
+
+**Claim validityとreachability:** 3件とも有効です。
+
+current Design冒頭は後続Round sectionsをhistorical/non-normativeとしていますが、同一文書の後半に `Round 2 normative closure` と「競合時はこのsectionを優先する」という明示的priority ruleが残っています。
+
+したがってP1-17は単なる古い説明ではなく、同一canonical document内のauthority contradictionです。
+
+P2-02について、human HTMLは古いcandidate/Round warningとcurrent authorityが混在し、読者が現在性を判別しにくい状態です。
+
+P2-03について、Round 23 artifactは個人環境のOracle absolute pathとfixed commitに存在しない`.workbench` referencesを含み、repositoryだけではsource packetとtranscriptを再取得できません。
+
+**In-scope impactとblocking effect:** P1-17がblockします。後続実装者がhistorical ruleを正本として選べるためです。P2-02、P2-03はreport-onlyですが、human reviewとdurable provenanceを弱めます。
+
+**Violated authority:** Requirement/Design冒頭の「Current v1 sectionが唯一の正本であり、後続Round sectionsはfallback authorityではない」という命題です。
+
+**First incorrect fault layer:** canonical documentation、human projection、review artifact persistenceです。
+
+**Root cause:**各Round remediationをhistory artifactへ分離せず、canonical R/D/P本文へnormative proseとして累積したことです。
+
+**Primary route:** `documentation-correction`。
+
+**Preserved guarantees:** current adopted rules、historical traceability、review digest、no-production boundary。
+
+**Changed guarantees:** historical contentのnormative statusだけを解除します。historical findingやverdictは削除・改変しません。
+
+**Authorization:** 一意に決定可能です。current sectionがsole authorityであることは既に明記されています。
+
+**Missing evidence:**
+
+* current section以後に `normative`、`正本`、`優先`、fallback等の効力を持つ文が存在しないこと
+* current proposition→schema→test mappingのcomplete inventory
+* HTML header/currentnessとhistorical collapse
+* repository-relative、sanitized、self-contained finding table
+* fixed commitから取得不能なartifactをclosure proofとして要求しないこと
+
+## R24-G11 — Run provenanceとruntime build inventoryのschema identity衝突
+
+**対象:** P1-18。
+
+**Claim validityとreachability:** claimは有効です。`docs/contracts/next-runtime-manifest-v1.md` のcurrent sectionはruntime manifestをsemantic decision、process observation、provenance、applicability、artifact descriptorのprojectionと定義しています。その直後、同じschemaをchecked-in compatibility unit inventoryと説明し、exact four-member fixture setを定義しています。
+
+actual `next-runtime-manifest-v1.schema.json` は後者だけを表し、`tests/fixtures/next_runtime/*`のexact four membersとtwo license rowsを要求します。
+
+production adapter/package workを開始すると必ず到達します。run provenanceを出力するだけでも同じschema IDの意味が衝突します。
+
+**In-scope impactとblocking effect:** P1でblockします。実装者が次のいずれかを独自に選ばなければならないためです。
+
+* existing schema IDをrun provenanceへrepurposeする
+* existing schema IDをbuild inventoryとして維持する
+* polymorphic unionにする
+  -新しいschema familyを追加する
+* fixture inventoryをproduction inventoryと誤認する
+
+これはpublic/persistent schema identity、package contract、compatibility migrationを変更します。
+
+**Violated authority:** 一つのschema IDが一つのsemantic roleとsource of truthを持つこと、run stateとbuild/package inventoryを別ownerにすること、production package member変更をversioned migrationとして扱うことです。
+
+**First incorrect fault layer:** canonical public-contract allocationとschema-family designです。
+
+**Root cause:** 「runtime」という語へ、run execution provenanceとshipped runtime resourcesの二つの意味を割り当てたことです。
+
+**Primary route:** `requirement-decision-required`。public contract、data identity、compatibility、migrationを変更するためです。
+
+**Preserved guarantees:** run provenanceのsingle owner、reproducible package inventory、license attestation、offline build、no current package mutation。
+
+**Changed guarantees:** schema IDs、existing v1のmeaning/deprecation、future package inventory version、consumer migration ruleです。
+
+**Authorization:** Human decisionが必要です。
+
+**Missing decision/evidence:**
+
+* `code-structure-viz.next-runtime-manifest/v1` のcanonical semantic role
+* existing v1のdeprecation/supersession policy
+* run provenanceのowner
+* reference fixture inventoryのschema ID
+* production build inventoryのschema ID
+* exact wheel/sdist member baseline
+* source-to-wheel mapping
+* future `pyproject.toml` delta
+* license row/versioning rule
+* external consumerまたはpersisted artifactの有無
+
+# Integrated response design
+
+## Smallest coherent response
+
+個別findingごとにRound 24 helperやsurrogate schemaを追加する方法は採用しません。最小responseは、次の一回のauthority-flattening batchです。
+
+### 1. R24-G11のhuman decisionを先に採択する
+
+run provenance、reference inventory、production build inventoryのschema identityとmigration ruleを確定します。
+
+この決定前にactual manifest schemasを変更すると、G02、G06、G08、G10を再度変更する可能性があります。
+
+### 2. Current authorityを一つにする
+
+* Requirement、Design、Planの冒頭current-v1 sectionを唯一のnormative proseとします。
+* 後続Round sectionsはhistorical artifactへ移すか、明示的にnon-normativeへ降格します。
+* `Round 2 normative closure` 等のpriority文を除去します。
+* HTMLはcurrent pre-implementation contractを先頭に示し、historyを折り畳みまたは別artifactへ分離します。
+* durable remediation artifactはrepository-relative finding table、digest、exact SHA、session provenanceを保持し、個人absolute pathを正本にしません。
+
+### 3. Surrogate authorityをactual chainへ置換する
+
+実行可能な一本のfixture chainを次の形にします。
+
+```text
+frozen package bytes
+  -> actual PackageApplicabilityMatrix
+  -> actual config/source-plan/source-graph schemas
+  -> actual validated adapter request
+  -> actual bounded adapter response
+  -> actual semantic decision
+  -> actual process policy/observation or explicit unobserved
+  -> actual final publication decision
+  -> actual semantic JSON / PlantUML / domain manifest
+     / run manifest / stdout-result / stderr / exit
+```
+
+`next-round23-authority-v1`を残す場合は、actual objectsを参照するnon-public test bundleに限定します。別のwire contractやstatus authorityとしては使用しません。
+
+### 4. 修復順序
+
+1. `R24-G10`: canonical authorityとhistoryを整理
+2. `R24-G01`: surrogateをactual schemasへ接続
+3. `R24-G02`: applicability、4-kind provenance、manifest、run/publication state
+4. `R24-G03`: shared config resolver/schema
+5. `R24-G04`: frozen source graphとlocality
+6. `R24-G05`: process policy/observation
+7. `R24-G07`: namespace/string export
+8. `R24-G08`: Unicode/compatibility
+9. `R24-G06`: final decision-only publicationとdiagnostic scope
+10. `R24-G09`: finding-level executable registry
+11. docs、HTML、durable evidenceを最終actual schemasへ同期
+
+publicationとcoverageを最後にするのは、上流のstate/schema変更を繰り返し投影し直さないためです。
+
+## Affected surfaces
+
+最低限、次のverified existing pathsが対象です。
+
+### Canonical documents
+
+* `spec-dock/initiatives/init-00001-code-structure-visualization/epics/epic-00002-safe-git-structure-comparison/issues/iss-00008-generate-nextjs-component-snapshots/requirement.md`
+* 同 `design.md`
+* 同 `plan.md`
+
+### Contract documentation
+
+* `docs/contracts/next-provenance-v1.md`
+* `docs/contracts/next-config-v1.md`
+* `docs/contracts/next-source-plan-v1.md`
+* `docs/contracts/next-process-launch-v1.md`
+* `docs/contracts/next-semantic-v1.md`
+* `docs/contracts/next-compatibility-v1.md`
+* `docs/contracts/next-runtime-manifest-v1.md`
+* `docs/contracts/diagnostic-v1.md`
+* `docs/contracts/stdout-v1.md`
+
+### Schemas
+
+* `schemas/next-round23-authority-v1.schema.json`
+* `schemas/next-provenance-v1.schema.json`
+* `schemas/next-domain-manifest-v1.schema.json`
+* `schemas/run-manifest-v1.schema.json`
+* `schemas/next-config-v1.schema.json`
+* `schemas/next-source-plan-v1.schema.json`
+* `schemas/next-adapter-request-v1.schema.json`
+* `schemas/next-adapter-response-v1.schema.json`
+* `schemas/next-process-launch-v1.schema.json`
+* `schemas/next-process-launch-observation-v1.schema.json`
+* `schemas/next-semantic-v1.schema.json`
+* `schemas/next-compatibility-v1.schema.json`
+* `schemas/next-runtime-manifest-v1.schema.json`
+* `schemas/next-diagnostic-catalog-v1.json`
+* `schemas/diagnostic-v1.schema.json`
+* `schemas/stdout-result-v1.schema.json`
+
+### Reference evidence
+
+* `tests/contracts/next_reference_validation.py`
+* `tests/contracts/test_next_contracts.py`
+* `tests/contracts/test_json_schemas.py`
+* `tests/fixtures/next_contract_vectors.json`
+* Issue #8 human HTML
+* Round 23/24 remediation evidence artifact
+
+主要symbolsは、少なくとも次を再確認対象とします。
+
+* `R23Decision`
+* `r23_applicability_projection`
+* R23 provenance builder
+* `_r23_projection_for`
+* R23 config resolver
+* R23 source graph scanner/validator
+* R23 process validator
+* `R23PublicationBoundary`
+* namespace-import helper
+* string-export disposition helper
+* NFC normalization helper
+* R23 coverage-index validator
+* actual adapter request/response validators
+* actual semantic/publication projections
+
+## Unaffected surfaces and non-mutations
+
+次は変更しません。
+
+* `src/**`
+* `adapters/next/**` production workspace
+* `pyproject.toml`
+* `uv.lock`
+* dependencies
+* current wheel/sdist contents
+* live Node/process implementation
+* Python/SQLAlchemy domain semantics
+* GitHub Issue、PR、branch protection、workflow settings
+* persistent external state
+* commit、push、merge、release、deploy
+
+G11でfuture package contractを定義しても、current repairではpackage filesを実際に変更しません。
+
+## Compatibility and operational boundary
+
+* public/persistent schema IDの再割当は、G11 human decision後にだけ行います。
+* production implementationがないことを理由にschema compatibilityを無視しません。
+* 外部consumerまたはpersisted artifactがcurrent erroneous shapeへ依存している場合、通常のauthority-preserving batchを停止し、migration decisionへ戻します。
+* managed secret、new persistent store、Windows support、新dependency、runtime serviceは追加しません。
+* actual process-level保証はPlanへfuture gateとして記載し、実行済みとは主張しません。
+
+## Rollback and recovery
+
+repairは一つのcoherent specification-only commitとしてrevert可能でなければなりません。
+
+* schemaだけ、testだけ、documentationだけのpartial rollbackはsupportしません。
+* data migration、runtime recovery、external rollbackは発生させません。
+* external consumer migrationが必要と判明した場合、このrollback modelは無効となるため停止します。
+
+## Structural stop signal
+
+Round 23で新しいauthority bundleを追加したにもかかわらず、actual schemasとpublic surfacesが残り、さらにhistorical normative proseも維持されています。
+
+これは局所欠陥ではなく、同じmeaningに対する複数のsource of truthが増えている構造的signalです。したがって、次を追加してはいけません。
+
+* `next-round24-authority-v1`
+  -新しいsurrogate projection
+* bidirectional legacy converter
+* generic fallback diagnostic
+* helper-only semantic variant
+* self-digestだけのacceptance witness
+* run/build両方を持つpolymorphic manifest
+
+# Human decisions and authorization
+
+親authorizationは、現在のanalysisをread-onlyとし、後続parent workflowが一つの uniquely determined specification/schema/fixture/reference-test/document repairを別途認可できる、という範囲です。
+
+## Uniquely determined corrections
+
+次はcurrent Requirement/Designから一意に決まっています。
+
+| Group     | 一意に決まる correction                                                         |
+| --------- | ------------------------------------------------------------------------- |
+| `R24-G01` | actual schemasへのcomposition、nested closure、cross-field equality           |
+| `R24-G02` | permission/observation分離、4-kind provenance、actual run/publication vectors |
+| `R24-G03` | adopted config semanticsのshared resolver/schema                           |
+| `R24-G04` | frozen bytes/sealからのgraph再導出                                              |
+| `R24-G05` | policy/observation/fixture/legacyの一方向分離                                   |
+| `R24-G06` | decision-only publication、usage/domain/publication diagnostic scope分離     |
+| `R24-G07` | adopted namespace/string-export variantsのactual private/public投影          |
+| `R24-G08` | full pinned Unicode profileとcurrent compatibility preimage                |
+| `R24-G09` | finding-level executable registry                                         |
+| `R24-G10` | current authorityの単一化、history/HTML/evidenceのnon-normative projection      |
+
+これらについて新しいcanonical wordingを本analystが提案する必要はありません。既にcurrent authorityとして採択済みです。
+
+## R24-G11 decision package
+
+### Reproducible condition
+
+同じ `code-structure-viz.next-runtime-manifest/v1` が、run/publication provenanceとexact runtime member/license inventoryの双方を意味しています。actual schemaは後者だけを表します。
+
+### Option A — semantic roleごとにschema familyを分離する
+
+* run/publication provenanceは既存 `run-manifest-v1` と `next-domain-manifest-v1`だけが所有
+* checked-in reference fixture inventoryは `next-reference-runtime-inventory/v1`
+* future production package inventoryは `next-runtime-build-inventory/v1`
+  -現在の曖昧な `next-runtime-manifest/v1` はdeprecated/supersededとして扱う
+* current repairでは`pyproject.toml`を変更しない
+
+**Preserved:** single run owner、clear package owner、license attestation、future migration。
+
+**Changed:** schema IDs、existing v1 deprecation policy。
+
+**評価:** 推奨します。run manifestの二重化を避け、reference fixtureとproduction packageを分離できます。
+
+### Option B — current `next-runtime-manifest/v1` をbuild inventoryとして維持する
+
+* actual schemaの現在のroleを維持
+* docs冒頭のrun-provenance意味を削除
+* run provenanceは既存domain/root manifestだけが所有
+* production member変更時に`next-runtime-manifest/v2`を作る
+* reference/productionは`kind`ではなくversionまたは別profileで分離
+
+**Preserved:** current schema consumerとの互換性が比較的高い。
+
+**Changed:** current top-level adopted wordingをsupersedeします。
+
+**Risk:** test fixture inventoryとproduction inventoryの語彙が近く、将来再混同する可能性があります。
+
+### Option C — current `next-runtime-manifest/v1` をrun provenanceへrepurposeする
+
+* current top-level wordingを維持
+* exact-four inventoryを新しいreference/build schemaへ移す
+
+**Preserved:** current top-level document wording。
+
+**Changed:** actual checked-in schemaの意味を全面的に変更します。
+
+**Risk:**既存 `run-manifest-v1` / `next-domain-manifest-v1` と責務が重複します。
+
+### Rejected option
+
+run provenanceとbuild inventoryを `kind` discriminatorで一つのschema unionにする案は採用しません。一つのIDへ異なるsource of truth、lifecycle、compatibility ruleを残すため、P1-18のroot causeを温存します。
+
+### Recommended decision
+
+**Option Aを推奨します。**
+
+Candidate text — not adopted: `Run and publication provenance SHALL be owned only by code-structure-viz.run-manifest/v1 and the Next domain manifest. Checked-in reference runtime fixtures SHALL use code-structure-viz.next-reference-runtime-inventory/v1. Future shipped adapter, TypeScript, trusted-declaration, and license members SHALL use code-structure-viz.next-runtime-build-inventory/v1 and SHALL be versioned independently from run-state schemas. The ambiguous code-structure-viz.next-runtime-manifest/v1 identifier SHALL be marked superseded and SHALL NOT be used as a second run-state or package-state authority. No pyproject.toml, dependency, lockfile, wheel, or sdist mutation is authorized by this pre-implementation decision.`
+
+### Decision effects
+
+* **Public API:** schema IDsとsupersession metadataが変わります。
+* **Data:** production persistent dataは未存在と推定されますが、外部consumer確認が必要です。
+* **Security:** measured run factsとstatic package inventoryの混同を除去します。
+* **Compatibility:** existing v1のdeprecation/supersession ruleが必要です。
+* **Migration:** repository fixtureの移行は必要です。外部consumerが存在する場合は別migration campaignです。
+* **Operation:** current production runtimeへ影響しません。
+* **Package:** current `pyproject.toml` は変更しません。
+* **Rollback:** specification-only commit全体のrevertで戻せます。
+
+同じscope/campaignを継続できる条件は、external consumerとproduction persisted artifactがなく、current repairがschema/docs/tests/fixturesだけに留まることです。それ以外はfresh compatibility campaignが必要です。
+
+# Implementation handoff
+
+**現時点ではimplementation handoffは認可されません。**
+
+理由は、`R24-G11 / P1-18`についてpublic schema identity、source of truth、compatibility、migrationのmaterial decisionが未採択だからです。一意な17 P1修復だけを先行すると、manifest、compatibility、coverage、documentationをG11決定後に再変更することになります。
+
+handoffが成立するためのexact prerequisiteは次のとおりです。
+
+1. `R24-G11`についてOption A、B、Cまたは同等に具体的なcanonical decisionが採択されていること。
+2. 採択decisionがschema IDs、existing v1 treatment、run owner、reference inventory owner、production build inventory owner、version/migration ruleを明示すること。
+3. external consumerとpersisted artifactの有無が確認されていること。
+4. parent workflowが一つのspecification/schema/fixture/reference-test/document repairを明示的に認可すること。
+5. handoff作成時にrepository、branch、full tip SHAを再検証すること。
+6. affected pathsとsymbolsがそのcurrent SHAで再確認されていること。
+7. `src/**`、dependencies、lockfiles、`pyproject.toml`、production adapter、live Node implementationが引き続きnon-goalであること。
+8. G01〜G10のFirst Redが再現するか、再現しない項目がdisproof候補として返されていること。
+
+将来のbounded objectiveは一つです。
+
+> Adopted current-v1 authorityをactual private/public schemasと一つのend-to-end reference chainへ投影し、surrogate authorityとhistorical fallbackを除去して、Round 24の18 P1をadditional material choiceなしでsame-reviewer re-review可能にする。
+
+将来のimplementerは、次の場合に停止してparentへ返さなければなりません。
+
+* authority同士の新たな矛盾
+* G11 decisionの欠落または曖昧さ
+* verified path、symbol、schema、test nodeの不在
+* First Redが再現せずfinding前提が反証された
+* public API、data、security、privacy、migration、compatibility、rollback、recovery、operation、risk、responsibilityへの予期しない影響
+* external consumerまたはpersisted artifactの発見
+* production `src/**`変更の必要
+* `pyproject.toml`、dependency、lockfile変更の必要
+* managed secret、new state store、Windows support、新runtime serviceの必要
+* actual OS mechanismを実装しなければreference contractを閉じられない
+  -新しいsurrogate schema、dual authority、bidirectional compatibility converterが必要
+* complete Unicode profileの導入に新dependencyまたは未採択license/package変更が必要
+
+implementerがparentへ返す証拠は、一つのrepository-relative Markdown remediation recordとし、最低限次を含めます。
+
+* new candidate full SHA
+* adopted G11 decision IDとcanonical text
+* changed pathsとsymbols
+* finding/groupごとのFirst Red
+* focused positive/negative results
+* aggregate results
+* schema validation
+* HTML validation
+* scope/non-mutation checks
+* CI run IDとexact `head_sha`
+* external consumer確認結果
+* residual gaps
+* same-reviewer用finding-to-evidence mapping
+
+implementerはStrict pass、finding closure、implementation readiness、Issue completionを宣言してはいけません。
+
+# Verification plan
+
+## Supplied results
+
+次はcurrent packetが提供する結果です。本analystが実行したものではありません。
+
+| Evidence         | Supplied result                                                       | SHA binding / classification                                   |
+| ---------------- | --------------------------------------------------------------------- | -------------------------------------------------------------- |
+| GitHub Actions   | run `33624764838`、7 jobs success                                      | exact current SHAへbindしたremote mechanical/integration evidence |
+| Round 23 focused | 19 passed、344 deselected                                              | supplied semantic reference evidence                           |
+| Next/schema      | 363 passed                                                            | supplied schema/reference evidence                             |
+| Contract suite   | 386 passed                                                            | supplied contract regression evidence                          |
+| Full pytest      | 1242 passed、1 skipped                                                 | supplied aggregate regression evidence                         |
+| mypy             | 137 files success                                                     | supplied mechanical type evidence                              |
+| ruff             | check pass、159 files format-clean                                     | supplied mechanical lint/format evidence                       |
+| SpecDock         | nodes=10、pass                                                         | supplied planning evidence                                     |
+| HTML             | static 8、browser 8/8 SVG、zoom pass                                    | supplied artifact evidence                                     |
+| Scope            | clean、`src/**`、`pyproject.toml`、`uv.lock`、dependency、node_modules変更なし | supplied scope evidence                                        |
+
+CIのbranch、head SHA、completion、successはGitHub connectorで確認済みです。
+
+これらのgreen resultはcurrent Strict failを上書きしません。
+
+## First Red / focused falsification
+
+| Group     | 必須のFirst Redまたはdisproof evidence                                                                                                                                             |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `R24-G01` | actual schemaでinvalidなnested arbitrary objectがsurrogateでvalidになること。recursive closed-schema testが現在検出しないこと                                                                    |
+| `R24-G02` | applicable packageだけでprobe performed/successになること。request-bound failureとrequest-independent not-applicableがactual schemasで表現不能なこと。partial/fatal/usage/interrupt projection欠落 |
+| `R24-G03` | config candidate precedence、built-in fallback、declaring path、explicit empty、paths orderがR23 outputとactual config schemaで一致しないこと                                              |
+| `R24-G04` | multibyte byte-span、同一specifier複数occurrence、source identity substitution、project/config alias omission、graph self-digest substitution                                        |
+| `R24-G05` | R23 process objectがactual schema instanceでないこと。extra argv、fixture-as-production、fake stable/local digest、wrong policy fieldsが通ること                                            |
+| `R24-G06` | semantic decisionと無関係なcandidate bytesをsealできること。payload-unavailableにcandidateが残ること。PROJECT/LIMIT outcome scopeが二重なこと                                                         |
+| `R24-G07` | namespace importをactual semantic schemaへserializeできないこと。string-named exportをactual adapter proofへ保持できないこと                                                                    |
+| `R24-G08` | 通常の日本語/combining inputをfull Unicode profileとして処理できないこと。compatibility documentの必須identityがactual schema/preimageへ存在しないこと                                                      |
+| `R24-G09` | wrong producer、validator、group、findingを割り当ててもregistryがgreenになること                                                                                                             |
+| `R24-G10` | current section後にhistorical priority文が残ること。HTML currentnessとartifact provenanceの不整合                                                                                          |
+| `R24-G11` | 同じschema IDがrun provenanceとexact fixture inventoryの双方を要求すること                                                                                                                 |
+
+First Redを再現できないfindingは推測で修正せず、`finding-rebuttal`候補としてparentとsame reviewerへ返します。
+
+## Focused post-repair obligations
+
+修復後、最低限次をactual schema-valid end-to-end vectorsで検証します。
+
+* all-non-applicable、mixed、malformed applicability
+* permissionとperformed observationの分離
+* 4-kind provenanceとactual-value substitution rejection
+* request-independent not-applicable/failure
+* request-bound success/failure
+* partial-safe、payload-unavailable、fatal、usage、interrupt
+* config lookup/fallback/empty/declaring path/paths ordering
+* UTF-8 source occurrence identityとgraph再導出
+* open frontierからlocality判定まで
+* process policy/observation/fixture/legacyのdisjointness
+* arbitrary publication candidate拒否
+* selected-copy exact/+1
+* namespace import
+* string-named exportの3 disposition
+* full pinned Unicode normalization
+* compatibility known-answer mutation
+* finding-level coverage bijection
+* historical priority text absence
+* G11で採択したschema-role splitとpackage-member golden
+
+## Aggregate regression obligations
+
+新しいexact SHAで次を実行し、command、exit、counts、skips、full SHAを記録します。
+
+```text
+uv run pytest tests/contracts/test_next_contracts.py tests/contracts/test_json_schemas.py -q --tb=short
+uv run pytest tests/contracts -q --tb=short
+uv run pytest -q --tb=short
+uv run mypy src tests
+uv run ruff check . --output-format concise
+uv run ruff format --check .
+./spec-dock/scripts/spec-dock validate
+git diff --check
+git diff --name-only -- src
+git diff --name-only -- pyproject.toml uv.lock
+find . -type d -name node_modules -print
+```
+
+HTMLについては、checked-in harnessまたはpreceding artifactからexact static/browser invocationを特定してから同じcommandを実行します。未確認のcommandを新規に捏造しません。
+
+CIは新しいcandidate commitに対し、required 7 jobsすべてがsuccessし、runの`head_branch`と`head_sha`がexact candidateと一致する必要があります。
+
+## Integration and runtime obligations
+
+current repairでは次を実行済みと主張してはいけません。
+
+* actual Node discovery/open/hash
+* actual adapter execution
+* verified executable image
+* FD inheritance
+* process-group termination
+* timeout handling
+* TOCTOU
+* macOS/Linux process-level acceptance
+* wheel/sdist build inventory
+* offline production package reconstruction
+
+これらはproduction implementation開始後のmandatory acceptance evidenceです。
+
+## Semantic checkpoints and negative assertions
+
+* current normative authorityは一つだけ
+* actual schemasを通り、surrogate-only authorityを持たない
+* applicability permissionはprocess observationではない
+* unobserved値を合成しない
+* actual observed valueとprovenance digestが一致
+* usage、semantic、run、publication outcomeを混同しない
+* graphはfrozen source sealから再導出
+* caller-provided graph/status/bytesを信用しない
+* raw source、unsafe specifier、absolute private pathを公開しない
+* fixtureはproduction process evidenceではない
+* namespace/string export helperがactual modelへ接続
+* host Unicode databaseに依存しない
+* compatibility preimageがdocument/schema/testで一致
+* run provenanceとbuild inventoryのschema ownerを分離
+* no partial stdout
+* no rerender/retry/recopy
+* no `src/**`、dependency、lockfile、`pyproject.toml`変更
+
+## Rollback verification
+
+* repairは一つのspecification-only commit
+* commit全体をrevert可能
+* revert後にprevious exact treeへ戻る
+* schema/test/docのpartial rollbackは行わない
+* external data migrationなし
+* runtime state/recoveryなし
+* unrelated Python/SQLAlchemy behavior不変
+
+すべてのtest、CI、artifact、review evidenceは同じ40桁full SHAへbindします。working-tree result、別commit result、timestamp一致だけではfresh evidenceとしません。
+
+# Same-reviewer re-review obligations
+
+original reviewer lineageは `required-strict-github-connector-verificati-745` です。修復後の新しいexact SHAに対して独立に再レビューする必要があります。
+
+| Group     | Findings          | Original reviewerが再確認する内容                                                                        | Expected status                                  |
+| --------- | ----------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `R24-G01` | P1-01、P2-01       | actual schema composition、nested closure、cross-field substitutions、surrogate非authority           | P1 expected closure、P2 report-only confirmation  |
+| `R24-G02` | P1-02、03、04、05、09 | permission/observation、4-kind provenance、actual value binding、全run/publication branches          | Expected closure                                 |
+| `R24-G03` | P1-06             | candidate lookup、fallback、declaring path、empty semantics、shared schema、order                     | Expected closure                                 |
+| `R24-G04` | P1-07             | UTF-8 span、source-seal authority、project/config resolution、locality propagation                  | Expected closure                                 |
+| `R24-G05` | P1-08             | actual process schemas、fixture/production disjointness、policy equality、fingerprint recomputation | Expected closure。live OS evidenceはfuture         |
+| `R24-G06` | P1-10、11          | decision-only candidates、diagnostic scope、usage no-publication、selected-copy preservation        | Expected closure                                 |
+| `R24-G07` | P1-12、13          | namespace/string syntaxのprivate proof→semantic→PlantUML→diagnostic/coverage                      | Expected closure                                 |
+| `R24-G08` | P1-14、15          | full Unicode profile、host independence、compatibility fields/preimage/KAT                         | Expected closure                                 |
+| `R24-G09` | P1-16             | finding-level semantic bijection、wrong mapping mutations、all vectors executed                    | Expected closure                                 |
+| `R24-G10` | P1-17、P2-02、P2-03 | historical priority除去、HTML currentness、self-contained durable evidence                           | P1 expected closure、P2 report-only confirmation  |
+| `R24-G11` | P1-18             | approved schema-role/migration decisionと全affected docs/schemas/tests                             | Approved contractによるsupersession。未採択ならstill open |
+
+same reviewerはreported lineだけでなく、同じroot causeのadjacent completion sweepを実施します。
+
+* applicability → config/source/request/process/publication
+* provenance → domain/root/stdout/stderr/fingerprint
+* config → source-plan/request/semantic/manifest
+* graph → locality/target/coverage/redaction
+* process → policy/observation/descriptor/fingerprint/manifest
+* semantic variants → adapter proof/semantic JSON/PlantUML/coverage
+* Unicode → path/string/ordering/digest/compatibility
+* publication → artifacts/root/stdout/stderr/exit
+* coverage → finding/group/criterion/producer/validator/test
+* authority → Requirement/Design/Plan/contracts/HTML/artifacts
+* runtime inventory → run owner/reference owner/production package owner/versioning
+
+closure modeは次のように区別します。
+
+* **Expected closure:** existing authorityどおりactual contractsへ修復された
+* **Disproof:** First Redまたはrepository traceがfinding前提を反証した
+* **Supersession:** G11のhuman-approved contract changeが旧meaningを置換した
+* **Still open:** decision未採択、SHA不一致、evidence不足、adjacent residue、test/CI failure
+
+最終closureには、fresh exact-SHA resultとして少なくとも次が必要です。
+
+```text
+review_status=pass
+p0_count=0
+p1_count=0
+reviewed_sha=<current candidate full SHA>
+```
+
+local test、CI、analyst disposition、rebuttalだけではsame-reviewer closureを代替しません。
+
+# Parent workflow consequence
+
+次のparent-owned consequenceは、**R24-G11のhuman decisionを採択するまでimplementationとcertificationを停止すること**です。
+
+親workflowの順序は次のとおりです。
+
+1. G11 decision packageを責任者へ提示する。
+2. schema role、existing v1 treatment、version/migration ruleを採択する。
+3. external consumerとpersisted artifactの有無を確認する。
+   4.同じobjective/scopeで継続可能か、fresh compatibility campaignが必要か判断する。
+   5.継続可能な場合、一つのbounded specification/schema/fixture/reference-test/document repairを認可する。
+4. new exact SHAでFirst Red、focused、aggregate、schema、HTML、scope、CI evidenceを取得する。
+5. original reviewer lineageへfresh exact-SHA reviewを依頼する。
+6. `P0=0 / P1=0 / review_status=pass`後にのみproduction implementation開始可否を判断する。
+
+現在blockされたままのものは次です。
+
+* Issue #8 implementation readiness
+* specification repair handoff
+* production `src/**`
+* Next adapter/Node workspace
+* `pyproject.toml`、dependency、lockfile変更
+* package build
+* certification
+* Issue close、merge、release
+
+Option A等のG11 decisionが採択され、external consumerがなく、repairがdata-only contractに留まる場合はsame campaignを継続できます。
+
+次の場合はfresh campaignまたはnew scope identityが必要です。
+
+* current schemaの外部consumerまたはpersisted artifact
+* actual production packaging implementation
+* dependency/lockfile変更
+* public compatibility migration
+* Windows production support
+* managed key
+* new persistent state
+* runtime recovery/rollback responsibility
+* operational deployment guarantee
+* current Issue #8 scope外のAPI追加
+
+編集、test実行、Git操作、commit、push、CI起動、reviewer invocation、Issue/PR操作、merge、release、deploy、closureは本skillの外です。
+
+# Assumptions and unresolved evidence
+
+* 回答直前のbranch tipは `d660608ff5af76b7c65ca7d067ac797d3cea225f` と再確認済みです。tipが変わった時点で本packetのrepository factsとfreshnessは無効です。
+* root `AGENTS.md` はcurrent exact SHAに存在しません。
+* current Requirement/Design冒頭の `Current v1 normative authority` を、同一文書後半のhistorical Round proseより上位のrepository authorityとして扱いました。このpriority自体が否定される場合、G01〜G10のauthorization判定は再分析が必要です。
+* source-native classificationは変更していません。
+* current analystの外部session IDは不明です。
+* primary Round 24 packetのdigestは未提供です。
+* reviewer output、transcript、prior decision logのdigestはpacket提供値であり、本analystは再hashしていません。
+* local test結果は本analystもreviewerも再実行していません。
+* CIはexact SHAでsuccessしていますが、18 P1のsemantic closureを証明しません。
+* live Node、OS spawn、FD、TOCTOU、process group、consumer integration evidenceはありません。
+* external consumerとpersisted artifactの有無は未確認です。
+* complete Unicode 15.0.0 normalization dataまたはgeneratorの存在、size、license、package影響は未確認です。
+* HTML browser validatorのexact invocationとlog identityは未確認です。
+* `.workbench`および個人Oracle pathの一部はfixed commitから取得できません。
+* P2-01、P2-02、P2-03はreport-onlyであり、独立mutation authorizationではありません。
+* G11のOption A、B、CおよびCandidate textはいずれも未採択です。
+* G11 decisionでexternal migrationまたはproduction package変更が必要と判明した場合、現在のsingle specification-only repair前提は無効です。

@@ -108,12 +108,17 @@
     "symbol": {"type": ["string", "null"], "minLength": 1},
     "line": {"type": ["integer", "null"], "minimum": 1},
     "recoverable": {"type": "boolean"},
+    "scope": {"const": "publication"},
     "message": {"type": "string", "minLength": 1},
     "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]},
     "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
     "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
   },
   "allOf": [
+    {
+      "if": {"required": ["scope"]},
+      "then": {"properties": {"code": {"const": "CSV-NEXT-LIMIT-003"}}}
+    },
     {
       "if": {"required": ["reason"]},
       "then": {"properties": {"code": {"const": "CSV-NEXT-TARGET-001"}}}

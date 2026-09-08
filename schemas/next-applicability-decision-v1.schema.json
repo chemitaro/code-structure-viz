@@ -17,19 +17,23 @@
       "required": ["permission", "performed"],
       "properties": {
         "permission": {"enum": ["permitted", "prohibited"]},
-        "performed": {"type": "boolean"}
-      }
+        "performed": {"const": false}
+      },
+      "oneOf": [
+        {"properties": {"permission": {"const": "permitted"}, "performed": {"const": false}}},
+        {"properties": {"permission": {"const": "prohibited"}, "performed": {"const": false}}}
+      ]
     },
-    "decision_kind": {"enum": ["ValidatedResponseDecision", "PreResponseFailureDecision", "NotApplicableDecision"]},
-    "outcome": {"enum": ["complete", "payload_unavailable", "not_applicable"]},
-    "payload_available": {"type": "boolean"},
+    "decision_kind": {"enum": ["ApplicabilityPreflightDecision", "PreResponseFailureDecision", "NotApplicableDecision"]},
+    "outcome": {"enum": ["applicable", "payload_unavailable", "not_applicable"]},
+    "payload_available": {"const": false},
     "project_filter": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
     "non_applicable_observations": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
     "toolchain": {
       "type": "object",
       "additionalProperties": false,
       "required": ["node_status"],
-      "properties": {"node_status": {"enum": ["available", "unavailable", "not_applicable"]}}
+      "properties": {"node_status": {"oneOf": [{"enum": ["unavailable", "not_applicable"]}, {"type": "null"}]}}
     },
     "domain": {"$ref": "#/$defs/domain_surface"},
     "root_manifest": {"$ref": "#/$defs/root_surface"},
@@ -37,7 +41,80 @@
     "stderr": {"type": "string"},
     "exit_code": {"enum": [0, 3]}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"outcome": {"const": "applicable"}}, "required": ["outcome"]},
+      "then": {
+        "properties": {
+          "decision_kind": {"const": "ApplicabilityPreflightDecision"},
+          "payload_available": {"const": false},
+          "exit_code": {"const": 0},
+          "node_probe": {"const": {"permission": "permitted", "performed": false}},
+          "toolchain": {"properties": {"node_status": {"const": null}}},
+          "domain": {"properties": {"status": {"const": "summary"}, "payload_available": {"const": false}}},
+          "root_manifest": {"properties": {"status": {"const": "summary"}, "exit_code": {"const": 0}}},
+          "stdout_result": {
+            "properties": {
+              "branch": {"const": "summary"},
+              "availability": {"const": false},
+              "run_status": {"const": "summary"},
+              "domain_status": {"const": "summary"},
+              "reason": {"const": "applicable_pending"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"matrix": {"properties": {"aggregate_state": {"const": "non_applicable"}}}}, "required": ["matrix"]},
+      "then": {
+        "properties": {
+          "decision_kind": {"const": "NotApplicableDecision"},
+          "outcome": {"const": "not_applicable"},
+          "exit_code": {"const": 0},
+          "node_probe": {"const": {"permission": "prohibited", "performed": false}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"matrix": {"properties": {"aggregate_state": {"const": "malformed"}}}}, "required": ["matrix"]},
+      "then": {
+        "properties": {
+          "decision_kind": {"const": "PreResponseFailureDecision"},
+          "outcome": {"const": "payload_unavailable"},
+          "exit_code": {"const": 3},
+          "node_probe": {"const": {"permission": "prohibited", "performed": false}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"matrix": {"properties": {"aggregate_state": {"const": "applicable"}}}}, "required": ["matrix"]},
+      "then": {
+        "properties": {
+          "node_probe": {"properties": {"permission": {"const": "permitted"}}},
+          "decision_kind": {"const": "ApplicabilityPreflightDecision"},
+          "outcome": {"const": "applicable"}
+        }
+      }
+    }
+  ],
   "$defs": {
+    "applicability_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_root", "package_path", "state", "evidence"],
+      "properties": {
+        "project_root": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"},
+        "package_path": {"$ref": "urn:code-structure-viz:schema:next-path-v1"},
+        "state": {"enum": ["applicable", "non_applicable", "malformed"]},
+        "evidence": {"enum": ["direct_next_dependency", "no_direct_next", "missing_package", "malformed_package"]}
+      },
+      "oneOf": [
+        {"properties": {"state": {"const": "applicable"}, "evidence": {"const": "direct_next_dependency"}}},
+        {"properties": {"state": {"const": "non_applicable"}, "evidence": {"enum": ["no_direct_next", "missing_package"]}}},
+        {"properties": {"state": {"const": "malformed"}, "evidence": {"const": "malformed_package"}}}
+      ]
+    },
     "surface_common": {
       "type": "object",
       "additionalProperties": false,
@@ -46,9 +123,9 @@
         "status": {"enum": ["complete", "incomplete", "not_applicable", "summary", "typed_unavailable"]},
         "payload_available": {"type": "boolean"},
         "project_roots": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
-        "applicability_observations": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["project_root", "package_path", "state", "evidence"], "properties": {"project_root": {"type": "string"}, "package_path": {"type": "string"}, "state": {"enum": ["applicable", "non_applicable", "malformed"]}, "evidence": {"type": "string"}}}},
+        "applicability_observations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/applicability_observation"}},
         "coverage": {"type": "object", "additionalProperties": false, "required": ["projects"], "properties": {"projects": {"type": "integer", "minimum": 0}}},
-        "diagnostics": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+        "diagnostics": {"type": "array", "items": {"$ref": "urn:code-structure-viz:schema:diagnostic-v1"}}
       }
     },
     "domain_surface": {
@@ -62,11 +139,11 @@
       "additionalProperties": false,
       "required": ["status", "exit_code", "project_roots", "applicability_observations", "diagnostics"],
       "properties": {
-        "status": {"enum": ["complete", "incomplete", "not_applicable"]},
+        "status": {"enum": ["complete", "incomplete", "not_applicable", "summary"]},
         "exit_code": {"enum": [0, 3]},
         "project_roots": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
-        "applicability_observations": {"type": "array", "minItems": 1, "items": {"type": "object"}},
-        "diagnostics": {"type": "array", "items": {"type": "object"}}
+        "applicability_observations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/applicability_observation"}},
+        "diagnostics": {"type": "array", "items": {"$ref": "urn:code-structure-viz:schema:diagnostic-v1"}}
       }
     },
     "stdout_surface": {
@@ -77,11 +154,11 @@
         "schema": {"const": "code-structure-viz.stdout-result/next/v1"},
         "branch": {"enum": ["summary", "typed_unavailable"]},
         "availability": {"type": "boolean"},
-        "run_status": {"enum": ["complete", "incomplete", "not_applicable"]},
-        "domain_status": {"enum": ["complete", "incomplete", "not_applicable"]},
-        "reason": {"enum": ["complete", "not_applicable", "domain_payload_unavailable"]},
+        "run_status": {"enum": ["complete", "incomplete", "not_applicable", "summary"]},
+        "domain_status": {"enum": ["complete", "incomplete", "not_applicable", "summary"]},
+        "reason": {"enum": ["applicable_pending", "complete", "not_applicable", "domain_payload_unavailable"]},
         "project_roots": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"}},
-        "diagnostics": {"type": "array", "items": {"type": "object"}}
+        "diagnostics": {"type": "array", "items": {"$ref": "urn:code-structure-viz:schema:diagnostic-v1"}}
       }
     }
   }

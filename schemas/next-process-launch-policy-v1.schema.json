@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-process-launch-policy-v1",
+  "title": "CodeStructureViz Next process launch policy v1",
+  "description": "The sealed policy that authorizes a Next adapter launch. It is distinct from measured process observation; an observation is null until a launch is actually verified.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "platform", "node", "adapter", "argv", "shell", "cwd", "env_allowlist", "denied_env", "stdio", "fd_inheritance", "process_group", "timeout_seconds", "capture_limits"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-process-launch-policy/v1"},
+    "version": {"const": 1},
+    "platform": {"enum": ["fixture", "darwin", "linux"]},
+    "node": {"type": "object", "additionalProperties": false, "required": ["realpath", "sha256", "version"], "properties": {
+      "realpath": {"$ref": "#/$defs/absolute_path"}, "sha256": {"$ref": "#/$defs/digest"},
+      "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:\\+[0-9A-Za-z.-]+)?$"}
+    }},
+    "adapter": {"$ref": "#/$defs/adapter"},
+    "argv": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"$ref": "#/$defs/absolute_path"}, {"const": "/.code-structure-viz/next-adapter.mjs"}], "items": false},
+    "shell": {"const": false},
+    "cwd": {"$ref": "#/$defs/absolute_path"},
+    "env_allowlist": {"$ref": "#/$defs/env_allowlist"},
+    "denied_env": {"$ref": "#/$defs/denied_env"},
+    "stdio": {"$ref": "#/$defs/stdio"},
+    "fd_inheritance": {"$ref": "#/$defs/fd_inheritance"},
+    "process_group": {"$ref": "#/$defs/process_group"},
+    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "capture_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_adapter_stdout_capture_bytes", "max_adapter_stderr_capture_bytes", "max_adapter_response_bytes"],
+      "properties": {
+        "max_adapter_stdout_capture_bytes": {"type": "integer", "minimum": 1},
+        "max_adapter_stderr_capture_bytes": {"type": "integer", "minimum": 1},
+        "max_adapter_response_bytes": {"type": "integer", "minimum": 1}
+      }
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "absolute_path": {"type": "string", "minLength": 2, "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "sha256"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.next-adapter/v1"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "env_allowlist": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["LANG", "LC_ALL", "TZ"],
+      "properties": {
+        "LANG": {"const": "C.UTF-8"},
+        "LC_ALL": {"const": "C.UTF-8"},
+        "TZ": {"const": "UTC"}
+      }
+    },
+    "denied_env": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+      "contains": {"const": "PATH"}
+    },
+    "stdio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stdin", "stdout", "stderr"],
+      "properties": {"stdin": {"const": "pipe"}, "stdout": {"const": "pipe"}, "stderr": {"const": "pipe"}}
+    },
+    "fd_inheritance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["close_fds", "allowed"],
+      "properties": {"close_fds": {"const": true}, "allowed": {"const": [0, 1, 2]}}
+    },
+    "process_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["create", "terminate_scope", "wait_after_terminate"],
+      "properties": {"create": {"const": true}, "terminate_scope": {"const": "group"}, "wait_after_terminate": {"const": true}}
+    }
+  }
+}
