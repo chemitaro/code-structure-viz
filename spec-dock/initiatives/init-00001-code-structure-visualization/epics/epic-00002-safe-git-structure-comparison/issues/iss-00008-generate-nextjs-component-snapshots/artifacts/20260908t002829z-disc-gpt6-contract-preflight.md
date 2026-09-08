@@ -458,3 +458,44 @@ snapshot validatorは各1回、同一snapshotをproducer実行と最終集合比
 これはG09 executable coverage authority境界の限定閉鎖である。R21実OS/process、production
 Next adapter、G10 canonical R/D/P、G11 package計画、全体fixed-SHA Strict、Issue完了は
 未認定のまま保持する。
+
+### G10 canonical R/D/P consolidation (2026-09-08)
+
+現行の要件・設計・計画を履歴追記の集合から選択できるよう、3文書のcurrent-v1直後に
+canonical indexを追加した。Round 8〜24の本文と過去Artifactは削除・改変せず、非normative
+evidenceとして保持する。新しい選択規則は、(1) current-v1 authority、(2) stable ID、
+(3) schema、(4) reference validator/testの順に解決し、履歴節・旧API・旧registryを
+実装入力やfallbackに使わないことを明記する。
+
+RequirementはI05-REQ-001〜007をschema/validator/testと対応させ、current
+`runtime_vector_registry` 16件とhistorical `historical_runtime_vector_registry` 36件を
+分離した。Designはpackage/source、semantic graph、process/compatibility、decision、
+publication/stdout、runtime resourceのowner mapを追加した。Planは
+I05-PLAN-000→001→008→002〜007の停止条件を明示し、現在のdata-only契約と将来の
+production adapterを混同しないようにした。
+
+### G11 package/build/license acceptance boundary (2026-09-08)
+
+`code-structure-viz.next-reference-runtime-inventory/v1`（チェックイン4 fixture）と
+`code-structure-viz.next-runtime-build-inventory/v1`（将来の出荷archive）を別identityとして
+Planへ反映した。後者について、locked recipe、source→package mapping、wheel/sdistの実member
+列挙、bytes/size/SHA-256、license notice、自己参照metadata除外、symlink/traversal/重複防止、
+再build一致、checkout外offline install、missing/extra/hash/role/license mutationを受入れ
+順序として固定した。さらにclean virtualenvへwheelをinstallした後、checkout外でinstalled CLIを
+実行し、正常applicable fixtureは必ず`complete`・exit 0でsemantic JSON・PlantUML・run/domain
+manifestの存在とdigestをassertし、Node欠落・不正targetなどのunavailableは別の負例として
+status/exit 3をassertする手順を追加した。target側の`node_modules`、config、script、networkを読まないこともsecurity trapで確認する。
+target側の`node_modules`、config、script、networkを読まないこともsecurity trapで確認する。
+future test pathは`tests/packaging/test_next_runtime_inventory.py`と
+明記したが、未作成テスト・実package build・`pyproject.toml`・依存・`uv.lock`の変更は
+current evidenceへ含めていない。
+
+G11のschema曖昧性を一つ解消するため、`next-runtime-build-inventory-v1` のmemberへ
+`source_kind`→`role` の条件（adapter、typescript→typescript_lib、trusted declaration、
+license）を追加し、4つの不一致を `test_next_runtime_build_inventory_binds_source_kind_to_role`
+で拒否するreference testを追加した。これは将来inventoryのshapeを閉じる契約であり、実archive
+の存在・同梱・再現性を証明するものではない。
+
+この追記後の確認対象は、文書の差分check、SpecDock/schema/contract/full quality gate、
+clean push、固定SHAに対する独立GPT-6 Max reviewである。G10/G11は契約の読み取りと将来
+受入れを具体化したもので、R21実OS/process、production adapter、Issue完了を宣言しない。

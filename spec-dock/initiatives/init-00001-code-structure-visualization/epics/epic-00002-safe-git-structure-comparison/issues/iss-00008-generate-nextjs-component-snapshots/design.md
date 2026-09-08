@@ -47,6 +47,31 @@ run-level terminal branchはpublication finalizerの前に一度だけ分岐し�
 
 現在の整備対象はdata-only reference contractです。production adapter、OS process-level証明、Node runtimeの実測は未実施です。2026-09-08のユーザー指示により、外部ChatGPT系スキルは停止し、独立GPT-6・推論Maxの固定SHAレビューへ切り替えます。必要な検証と重要指摘ゼロを確認するまでimplementation readinessを確定しません。内部レビューと過去の外部Strict結果を混同しません。
 
+## Canonical design index and historical evidence boundary (G10)
+
+### 設計の選択規則
+
+実装者は、まず上の `Current v1 normative authority` の因果鎖を読み、次に下表の `I05-DES` とschema/validator/testの組を参照します。本文後半の `Round N` 節とIssue Artifactは、設計変更の経緯・反例・検証結果を保存する非normative evidenceです。そこにある旧API名、旧registry、旧schemaの例を現在の実装へコピーしません。現行v1の判断と履歴証拠が衝突した場合は、現行v1のsealed value、closed schema、reference validatorを優先し、履歴を上書きせずに新しいdecision/artifactを追加します。
+
+### authority owner map
+
+| sealed boundary / responsibility | Design | canonical schema / validator | 受入れ上の不変条件 |
+| --- | --- | --- | --- |
+| package permission と source seal | `I05-DES-002` | `next-package-applicability-v1`、`next-applicability-decision-v1`、`next-source-plan-v1`; `validate_package_applicability_projection`、`seal_source_acquisition`; `test_round24_applicability_preflight_grants_permission_without_node_observation`、`test_source_seal_rederives_graph_controls_and_read_observations` | package bytes→applicability→control closure→single-read sealの順序を逆転せず、non-applicableでNode/source観測を発生させない。 |
+| semantic identity と raw graph witness | `I05-DES-003` | `next-semantic-v1`、`next-export-graph-raw-v1`、`validate_semantic_snapshot`、`validate_export_observations`; `test_public_next_semantic_variants_are_closed`、`test_export_resolution_witness_uses_complete_source_census_and_coverage_only_rows` | physical declarationとbindingを分離し、raw graphからalias/star/cycle/conflictとcoverageを再計算する。 |
+| process / toolchain / compatibility | `I05-DES-006` | process policy/observation、compatibility、limits、trusted environment schema; `validate_process_launch_policy`、`validate_process_launch_observation`、`validate_compatibility_descriptor`、`validate_limits`、`validate_trusted_environment`; `test_round18_process_descriptor_requires_os_identity_and_spawn_binding`、`test_compatibility_binds_observed_runtime_content` | policyとactual observationを混同せず、host依存値をportable digestへ混入させず、fixtureをproduction証拠に昇格させない。 |
+| request/response と decision | `I05-DES-004`、`I05-DES-005` | request/response、run/publication decision、provenance schema; `validate_request_envelope`、`validate_response_envelope`、`validate_next_run_decision_projection`、`validate_next_publication_decision_projection`、`finalize_publication_decision`; `test_capture_success_routes_schema_valid_private_response_to_one_decision`、`test_validated_decision_is_the_only_publication_authority` | bounded decode→closed schema→proof/reference→decisionの一入口を守り、publicationはvalidated decisionだけを入力にする。 |
+| public projection と stdout | `I05-DES-001`、`I05-DES-007` | semantic/domain/run manifest、stdout-result、diagnostic schema; `validate_domain_manifest`、`validate_run_manifest`、`validate_run_status_vector`、`validate_plantuml_contract`; `test_next_stdout_matrix_has_exact_bytes_for_core_outcomes`、`test_round21_terminal_run_publication_is_manifest_free_and_selector_exact` | semantic/PlantUML/manifest/stdout/stderr/exitは同じsealed decisionから投影し、raw source/proofを公開しない。 |
+| runtime resource identity | `I05-DES-006` | `next-reference-runtime-inventory-v1`（現在）／`next-runtime-build-inventory-v1`（将来） | 参照fixtureの対応と出荷archiveの実memberを別identityで管理し、inventoryからrun成功やpackage同梱を推論しない。 |
+
+### currentとhistoricalの機械的な境界
+
+現行registryは `runtime_vector_registry` の16件、履歴registryは `historical_runtime_vector_registry` の36件です。validator/executorは `current` または `historical_r23` の閉じたselectorだけを受け、任意iterableや旧surrogateをauthorityとして注入できません。したがって、設計文書のRound 23例は履歴検証の再現には使えても、現行v1のproducer・validator・coverageの証明にはなりません。
+
+### resource identityの二層化
+
+`next-reference-runtime-inventory/v1` はチェックイン済み参照fixtureを検査するだけで、wheel/sdistのmemberを表しません。将来 `next-runtime-build-inventory/v1` を生成するときは、build recipeとlocked inputからsource path、package path、role、実bytes、licenseを測定し、wheelとsdistのarchiveから再読した結果を完全一致させます。どちらのinventoryもrun/publication manifestの代替ではなく、run manifestはその実行で観測したdecisionだけを投影します。
+
 ## 設計目標
 
 - `next` domain の `snapshot` を、CLI から source acquisition、analysis、versioned JSON、PlantUML、manifest、diagnostic まで一つの vertical pipeline として設計する。
@@ -146,7 +171,7 @@ greenはStrict passを意味せず、fresh current-SHA Strictが`P0=0 / P1=0 / r
 ### Current（canonical specification state）
 
 - 本 Issue の canonical state は stable scope ID と repository-relative Requirement/Design/Plan path、accepted ADR、interviewで識別する。採用・実装開始時に HEAD と configured upstream を再検証し、current commit SHA を本文へ固定しない。
-- Python package、CLI、Git/SourceView、config/targets、outcomes、Python/SQLAlchemy adapter、schema、manifest、stdout/writer、tests/goldenは実装済み。Next production adapter、Node workspace、protocol/schema、fixtures/goldenは未実装である。
+- Python package、CLI、Git/SourceView、config/targets、outcomes、Python/SQLAlchemy adapterは既存実装である。Nextのcurrent-v1 protocol/schema、reference fixture、reference validator/testは実装前契約としてチェックイン済みだが、Next production adapter、Node workspace、runtime integration、production goldenは未実装である。
 - current closed registriesは`python/sqlalchemy`を所有し、source candidate/target/configはPython semanticsへ具体依存する。Nextはこれらをopen-endedにせずclosed branchとして追加する。
 - 本Designは親の横断contractをslice固有の構造へ具体化し、依存Issueのpublic contractを変更せずに後続sliceへ渡す。
 
@@ -1227,7 +1252,7 @@ production adapter実装前のcontract-authoring commitで次を実ファイル�
 - `adapters/next/` source/lockを管理し、compiled runtime、TypeScript libs、trusted declarations、member manifestを`src/code_structure_viz/_next_runtime/`へchecked-inする。CIはsource build outputとchecked-in member digestを再現比較する。
 - wheelはruntime closed assets、sdistはruntimeに加えsource/lock/build scriptを収録する。release buildはnetworkなしで再現する。
 - license inventoryはecosystem、package/resource、version、license ID、source URL、content/lock digestを持つ。既存Python rows/order/bytesは不変、Node/trusted rowsは別`next_runtime` sectionへcanonical sortする。
-- packaging ownerは既存`tests/packaging/test_distribution.py`を拡張し、Next vectorsを`tests/packaging/test_next_distribution.py`から呼ぶ。両方をgateに含める。
+- packaging ownerは既存`tests/packaging/test_distribution.py`を維持し、Next runtime inventoryのarchive検査を将来の`tests/packaging/test_next_runtime_inventory.py`へ分離する。current reference contractのgreenをwheel/sdist gateの証拠として流用しない。
 
 diagnostic catalog v1（messageはこのfixed text、variable dataはsafe structured ref/countだけ）:
 
@@ -1328,7 +1353,7 @@ same SourceView fingerprint、source plan、project/target/limits、domain confi
 | I05-AT-007 | entity budget / diff-only option rejection | tests/acceptance/next/test_snapshot_budget.py | uv run pytest tests/acceptance/next/test_snapshot_budget.py -q |
 | I05-AT-008 | stdout selector matrix | tests/acceptance/next/test_stdout_selector.py | selector grammar、exact bytes、unavailable result、summary、stderr、exit/publication |
 | I05-AT-009 | TrustedTypeEnvironment | tests/acceptance/next/test_trusted_type_environment.py | target types/node_modules/networkなしのReact/Next subset、digest/license provenance |
-| I05-AT-010 | contracts / distribution | tests/contracts/next + tests/packaging/test_distribution.py + test_next_distribution.py | closed schemas/PlantUML/diagnostics/writer、wheel/sdist/offline/license |
+| I05-AT-010 | current contracts / future distribution | `tests/contracts/test_json_schemas.py` + `tests/contracts/test_next_contracts.py`; future `tests/packaging/test_next_runtime_inventory.py` | current closed schemas/PlantUML/diagnostics/writer。production実装後にwheel/sdist/offline/licenseを追加検証する。 |
 | I05-AT-011 | compatibility | tests/regression/test_next_domain_compatibility.py | Python/SQLAlchemy source/config/run fingerprintと全published/stream bytes不変 |
 
 - unit testはdomain parser/matcher/serializerとcanonicalizationのpure functionを対象にする。

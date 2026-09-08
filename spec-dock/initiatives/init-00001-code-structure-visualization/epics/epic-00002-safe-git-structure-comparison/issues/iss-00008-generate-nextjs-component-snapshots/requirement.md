@@ -33,6 +33,39 @@ package_sequence_key: "ISSUE-05"
 
 現在の作業は実装前契約の整備であり、production adapter/Node実行は含みません。2026-09-08の明示指示により、利用不能な外部ChatGPT系スキルを停止し、主担当GPT-6の分析と独立GPT-6・推論Maxレビューへ切り替えます。cleanかつpush済みの固定SHAを対象に必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、実装開始可能性は未確定です。内部レビューを外部ChatGPT Strict passと表記しません。過去のStrict結果は当時の証拠として保持します。
 
+## Canonical index and historical evidence boundary (G10)
+
+### 正本の選択規則
+
+後続の実装者・レビュー担当者は、次の順序で現在の契約を選択します。
+
+1. この文書の `Current v1 normative authority` と `観測可能な要件` を読む。
+2. Requirement ID（`I05-REQ-001`〜`I05-REQ-007`）から、下表のschema、validator、fixture/testへ進む。
+3. schemaで表せない所有権・再計算・順序・digest・statusは、指定されたreference validator/testの実装を参照する。
+4. `Round N`見出し、過去Artifact、`historical_runtime_vector_registry` は履歴証拠としてのみ読み、現行の入力・fallback・既定値には使わない。
+
+現行の節と履歴節が衝突する場合は、現行v1の表、schema、validator、fixture/testの組を採用し、履歴節の判定や件数を書き換えません。ラウンド専用umbrella schemaや、履歴producerを現行producerの代用にする経路はありません。
+
+### 現行v1の実体対応
+
+| 現行契約 | Requirement | schema / canonical owner | 実行可能な対応 |
+| --- | --- | --- | --- |
+| applicability と source seal | `I05-REQ-002` | `next-package-applicability-v1`、`next-applicability-decision-v1`、`next-source-plan-v1` | `validate_package_applicability_projection`、`seal_source_acquisition`、`test_round24_applicability_preflight_grants_permission_without_node_observation`、`test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift` |
+| identity、export、relation、boundary | `I05-REQ-001`、`I05-REQ-003` | `next-semantic-v1`、`next-export-graph-raw-v1`、`next-path-v1` | `validate_semantic_snapshot`、`validate_export_observations`、`test_public_next_semantic_variants_are_closed`、`test_export_resolution_witness_uses_complete_source_census_and_coverage_only_rows` |
+| private protocol と validated decision | `I05-REQ-004`、`I05-REQ-005` | `next-adapter-request-v1`、`next-adapter-response-v1`、`next-run-decision-v1`、`next-publication-decision-v1` | `validate_request_envelope`、`validate_response_envelope`、`finalize_publication_decision`、`test_capture_success_routes_schema_valid_private_response_to_one_decision`、`test_validated_decision_is_the_only_publication_authority` |
+| process、toolchain、compatibility、limits | `I05-REQ-006` | `next-process-launch-policy-v1`、`next-process-launch-observation-v1`、`next-compatibility-v1`、`next-limits-v1`、`next-trusted-type-environment-v1` | `validate_process_launch_policy`、`validate_process_launch_observation`、`validate_compatibility_descriptor`、`validate_limits`、`validate_trusted_environment`、`test_round18_process_descriptor_requires_os_identity_and_spawn_binding`、`test_compatibility_binds_observed_runtime_content` |
+| stdout、diagnostic、run/root manifest | `I05-REQ-004`、`I05-REQ-005`、`I05-REQ-007` | `run-manifest-v1`、`next-domain-manifest-v1`、`stdout-result-v1`、`diagnostic-v1` | `validate_run_manifest`、`validate_run_status_vector`、`validate_plantuml_contract`、`test_next_stdout_matrix_has_exact_bytes_for_core_outcomes`、`test_round21_terminal_run_publication_is_manifest_free_and_selector_exact` |
+| checked-in reference runtime inventory | `I05-REQ-004`、`I05-REQ-006` | `next-reference-runtime-inventory-v1` | `validate_reference_runtime_inventory` と `test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests`。これは出荷packageの証明ではない。 |
+| 将来の出荷runtime build inventory | `I05-REQ-004`、`I05-REQ-006` | `next-runtime-build-inventory-v1` | G11の将来package gateでwheel/sdistの実member・bytes・licenseを検査する。現時点のfixture・実package成功証拠は存在しない。 |
+
+### registryと履歴の境界
+
+現行coverageの唯一のregistryは `tests/fixtures/next_contract_vectors.json` の `runtime_vector_registry`（Round 22由来、16件）です。旧Round 23由来の36件は同fixtureの `historical_runtime_vector_registry` として明示的に隔離し、履歴test以外から解決できません。したがって「登録されている」だけでは現行要件の実装証拠にならず、現行registryのcriterion、positive/negative、producer、validator、substantive testの対応を同時に検査します。
+
+### versioned inventoryの境界
+
+`code-structure-viz.next-reference-runtime-inventory/v1` はチェックイン済み4 fixtureの物理path・virtual path・size・SHA-256・licenseを固定する参照証人です。`code-structure-viz.next-runtime-build-inventory/v1` は将来の出荷物のsource→package mappingとarchive実測を固定する別の証人です。前者から後者、またはどちらからrun manifest・Node起動成功を推論しません。旧 `next-runtime-manifest/v1` はsupersededであり、互換移行が別途承認されない限り読み書きしません。
+
 ## 目的
 
 coding agent が first-party TypeScript adapter を通じ、Next.js repository の module、exported component、props、static relation、client boundary を JSON と PlantUML で取得できる。
@@ -479,7 +512,7 @@ boolean flag、path、alias、略記、大小文字違い、値省略は受理�
 | I05-AC-007 | valid responseの後にselected/published internal Module+Componentを独立再計算し、501 entitiesならdomain `incomplete_kind: payload_unavailable`・`CSV-NEXT-LIMIT-005`・exit 3・affected JSON/PlantUMLなし・actual count付きmanifestとunavailable stdoutを出し、valid 600 overrideはrequested/resolved/count付きで成功する。all-record capは`max_model_records`として別に再計算し、snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`はexit 2・Artifactなしとする。 | I05-AT-007 |
 | I05-AC-008 | stdout selectorのvalid/invalid/duplicate/domain/format、exact-byte、not_applicable/payload_unavailable/fatal/interrupt result、selectorなしsummaryをtable-drivenに満たす。run-level terminal branchはmanifest/domain/artifactを捏造せず、usage/fatal/interruptのstdout/stderr/exitと、untrusted interrupt診断のredactionをselector全種で検証する。 | I05-AT-008 |
 | I05-AC-009 | target `node_modules`/type roots/networkなしでTrustedTypeEnvironmentを使い、reserved module/global/pathのshadow/augmentation/mergeをfail-closedで拒否し、実fixture bytesのmanifest/version/digest/license、TypeScript 5.9.2 Programのparse/semantic diagnostics 0、AST/TypeChecker由来certified symbolを検証する。 | I05-AT-009 |
-| I05-AC-010 | Next semantic/private protocol/diagnostic/manifest/stdout/PlantUML/writerのclosed schema/grammar/pathをmutation testで固定し、wheel/sdistにcompiled runtime/trusted declarations/lock/licenseを正しく収録してcheckout外offline Next runが成功する。 | I05-AT-010 |
+| I05-AC-010 | Next semantic/private protocol/diagnostic/manifest/stdout/PlantUML/writerのclosed schema/grammar/pathをmutation testで固定し、production実装後はwheel/sdistにcompiled runtime/trusted declarations/lock/licenseを正しく収録してcheckout外offline Next runが成功する。後半はG11の将来package gateであり、current reference laneのgreenだけでは満たさない。 | I05-AT-010 |
 | I05-AC-011 | domain config/source-plan projectionにより、Next追加前後で既存Python/SQLAlchemyのsource/config/run fingerprint、semantic JSON、PlantUML、manifest、stdout、stderrがbyte-for-byte不変である。 | I05-AT-011 |
 
 - **I05-AC-001〜I05-AC-011がすべて満たされ、planned test commandがclean checkoutで成功すること。**

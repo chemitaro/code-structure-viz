@@ -32,6 +32,12 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["source_kind", "source_path", "package_path", "size_bytes", "sha256", "role"],
+      "allOf": [
+        {"if": {"properties": {"source_kind": {"const": "adapter"}}}, "then": {"properties": {"role": {"const": "adapter"}}}},
+        {"if": {"properties": {"source_kind": {"const": "typescript"}}}, "then": {"properties": {"role": {"const": "typescript_lib"}}}},
+        {"if": {"properties": {"source_kind": {"const": "trusted_declaration"}}}, "then": {"properties": {"role": {"const": "trusted_declaration"}}}},
+        {"if": {"properties": {"source_kind": {"const": "license"}}}, "then": {"properties": {"role": {"const": "license"}}}}
+      ],
       "properties": {
         "source_kind": {"enum": ["adapter", "typescript", "trusted_declaration", "license"]},
         "source_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"},

@@ -34,6 +34,51 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 
 受入では、contract focused test、all contract/full pytest、mypy、ruff、SpecDock、pinned PlantUMLを順に実行します。Windows/OS process-level/将来wheel・sdistはproductionまたは別migrationの計画契約として記録し、実測済みとは主張しません。2026-09-08のユーザー指示により外部ChatGPT系スキルを停止し、主担当GPT-6で修正、独立GPT-6・推論Maxでレビューします。cleanかつpush済みの固定SHAについて必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、production実装を開始しません。後段の外部Strict必須という履歴は現在の検証経路を上書きしません。
 
+## Canonical execution index and future package gate (G10/G11)
+
+### 実装順序の選択規則
+
+実装者は、上の `Current v1 normative authority`、この節の順序表、下記のschema/validator/testを現在の入力として使用します。後半の `Round N` 節は履歴証拠であり、実装順序・受入れ条件・registryの既定値を上書きしません。履歴との不一致を見つけた場合は履歴を編集せず、現行のschema/validator/testと新しいArtifactへ修正理由を記録します。
+
+| 順序 | Plan ID / owner | 現在の成果物またはgate | 状態と停止条件 |
+| --- | --- | --- | --- |
+| 1 | `I05-PLAN-000` | Requirement/Design/Plan、HTML、既存schemaの現行v1採択 | G10で正本境界を明示。production codeは変更しない。 |
+| 2 | `I05-PLAN-001` | fixture、positive/negative vector、reference validator/test、schema cross-check | G09までの現行registryは16件。旧R23 36件はhistorical selectorだけで実行する。 |
+| 3 | `I05-PLAN-008` | clean/pushed fixed SHA、全品質gate、独立GPT-6 Max review | `P0=0 / P1=0 / review_status=pass`になるまで次へ進まない。 |
+| 4 | `I05-PLAN-002`〜`007` | production adapter、Node process、semantic/publication、stdout、hardening | 上記gate通過後だけ開始。現在は未実装・未認定。 |
+| 5 | G11（`I05-PLAN-006`へ接続） | 将来のwheel/sdist runtime build inventoryとpackage受入れ | schema/docsで境界のみ固定。現行commitでbuild・依存・lockfileを変更しない。 |
+
+### G11: reference inventoryとbuild inventoryの分離
+
+同じ「runtime inventory」という名前で、チェックインfixtureと出荷archiveを混ぜません。
+
+| identity | 入力と対象 | 証明するもの | 現在の扱い |
+| --- | --- | --- | --- |
+| `code-structure-viz.next-reference-runtime-inventory/v1` | `tests/fixtures/next_runtime/` の4ファイル、virtual path、実bytes、2件のlicense | reference validatorが読んだ既知fixtureの完全集合・順序・hash・license | 現行のreference testだけで検証。package同梱やNode起動を証明しない。 |
+| `code-structure-viz.next-runtime-build-inventory/v1` | locked build input、source path→package path、wheel/sdistから再読したbytes、license | 将来の出荷runtime resourceの完全集合、archive member、内容hash、再現可能なlicense対応 | schemaと下記受入れ手順だけを先に固定。実inventory・実packageは未生成。 |
+| `code-structure-viz.run-manifest/v1` / Next domain manifest | 一回のsealed decisionとpublication measurement | その実行の観測、status、artifact、diagnostic、exit | inventoryから合成せず、decision projectionだけが作成する。 |
+
+### 将来build inventoryのclosed contract
+
+将来のbuild ownerは `schemas/next-runtime-build-inventory-v1.schema.json` の `inventory_version=1` を使い、次を同じbuild inputから導出します。
+
+- `members` は adapter、固定TypeScript library、trusted declaration、license資材のexact setとし、`source_kind` と `role` の対応（`typescript`→`typescript_lib`を含む）を検査する。
+- `source_path` はrepository-relative、`package_path` は配布物relativeとし、絶対path、`.`/`..` traversal、backslash、NUL/control、正規化後の重複、symlink逃逸を拒否する。`src/` layout prefixをpackage pathの意味として再利用しない。
+- 各memberはsource bytes、build output bytes、archiveから再読したbytesのsize/SHA-256を一致させる。inventory自身、wheel `RECORD`、sdist metadataの自己参照はresource member集合から除外し、循環hashを作らない。
+- `licenses` はlockまたは実contentから得たecosystem/name/version/license ID/source URL/digestの閉じた集合とし、unknown license、未同梱notice、licenseとmemberの不一致を拒否する。
+- `build_input_digest` はrecipeとlocked inputsを含むcanonical入力、`build_output_digest` はmembersのcanonical出力、`license_inventory_digest` はlicense集合、`inventory_attestation.sha256` は自己hashを除いたmembers集合から計算する。build outputの実測なしにdigestだけを受理しない。
+
+### 将来package受入れ手順（I05-PLAN-006の実装時に実行）
+
+1. clean checkoutとlocked inputsからversioned recipeを実行し、期待member集合を先に生成する。
+2. networkなしでwheelとsdistをbuildし、archiveを展開せずに安全な列挙APIでmember名を取得する。wheelは `code_structure_viz/_next_runtime/` 配下、sdistは単一のname/version rootを検査してからrelative化する。
+3. 期待集合とのmissing/extra/duplicate、source→package mapping、role、size、SHA-256、license noticeを完全一致させ、inventoryを更新する。
+4. wheelをclean virtualenvへ `--no-index` でinstallし、checkout外でpackage resourceだけからfixtureを取得する。正常なapplicable Next fixtureではinstalled CLIのsnapshotが必ず`complete`・exit 0となり、semantic JSON・PlantUML・run/domain manifestの存在、member、digestをassertする。Node欠落・不正targetなどのunavailableは別の負例fixtureとして契約したstatus/exit 3をassertし、正常caseの代替として受理しない。target側の`node_modules`、config、script、networkを読まないことをsecurity trapで確認する。
+5. sdistから再buildしたruntime bytesがwheel buildと一致すること、同じlocked inputの再buildでinventory/output digestが一致することを確認する。
+6. missing、extra、duplicate、traversal、symlink、hash、role、license、archive metadataの各mutationを一つずつREDにし、production adapterの起動前に失敗することを確認する。
+
+この将来gateの具体的なテストスイートは `tests/packaging/test_next_runtime_inventory.py`（未作成のplanned path）へ配置し、既存のreference gateは `tests/contracts/test_next_contracts.py` の `test_trusted_and_runtime_manifests_have_exact_sets_order_and_known_digests` と `tests/contracts/test_json_schemas.py` で継続します。未作成のfuture testを現行のgreen evidenceとして数えず、`uv build`、依存、`pyproject.toml`、`uv.lock`の変更やpackage実測をこのG10/G11作業へ持ち込みません。
+
 ## Planning Level
 
 - **selected level: `strict`**
@@ -309,7 +354,7 @@ fresh current-SHA Strictはpending/readiness unconfirmed、production implementa
 
 | I05-PLAN-000 | implementation判断を残さないfield-level identity/source/protocol/type/taint/public schema/config/package contractをcanonical Designへ固定する。 | I05-DES-001〜007 |
 | I05-PLAN-001 | identity/export、project/target、protocol、type IR、relations/boundary、outcome/publication、TrustedTypeEnvironment、packaging/regressionのI05-AT-001〜011 fixtures/schemaを先に固定する。 | I05-DES-001〜007 |
-| I05-PLAN-008 | actual schema/docs/catalog/golden/mutation fixtureを含むclean pushed exact SHAでChatGPT Use Strictを再実行し、P0/P1=0をproduction implementation gateとする。 | I05-DES-001〜007 |
+| I05-PLAN-008 | actual schema/docs/catalog/golden/mutation fixtureを含むclean pushed exact SHAを固定し、現在許可された独立GPT-6 Max reviewを実行してP0/P1=0をproduction implementation gateとする。外部ChatGPT Strictの過去結果は別のhistorical evidenceとして扱う。 | I05-DES-001〜007 |
 | I05-PLAN-002 | domain-owned SourceAcquisitionPlan、Next config/project/target parser、frozen-bytes request、hardened one-shot Node boundaryを実装する。 | I05-DES-002, I05-DES-006 |
 | I05-PLAN-003 | declaration identity、bindings、Component recognition、closed props IR、two-plane relations、positive-evidence boundaryを実装する。 | I05-DES-003 |
 | I05-PLAN-004 | untrusted response strict validation/ID再計算、semantic JSON、PlantUML、manifest、closed registry/publicationを接続する。 | I05-DES-004 |
@@ -344,7 +389,7 @@ fresh current-SHA Strictはpending/readiness unconfirmed、production implementa
 
 - private request/response/model、TrustedTypeEnvironment、Next semantic/domain manifest/config/runtime member/licenseのJSON Schema、diagnostic catalog、semantic/PlantUML contract docs、positive/negative mutation vectorsを実ファイルとして固定する。
 - P0/P1 closureのローカル証拠は、`tests/contracts/test_json_schemas.py`（schema registry、既存Python/SQLAlchemy golden、public Next branch）と `tests/contracts/test_next_contracts.py`（cross-record reference validator、status matrix、known-answer/golden vectors）で再実行できる形にする。新しいNext production behavior、Node adapter、依存関係はこのstepへ含めない。
-- SpecDock/schema/HTML/format validation、clean commit/push、exact upstream SHA binding後にChatGPT Use StrictでP0/P1とcontract gapをレビューする。
+- SpecDock/schema/HTML/format validation、clean commit/push、exact upstream SHA binding後に、現在許可された独立GPT-6 Max reviewerでP0/P1とcontract gapをレビューする。外部ChatGPT系skillが利用可能になった場合も、別経路の証拠として固定SHA・clean stateを再確認する。
 - findingをcanonical authority/current sourceへ照合して修復し、fresh exact SHAでP0/P1=0まで再レビューする。passはIssue実装完了ではない。
 
 ### I05-PLAN-002 bridge and adapter boundary
@@ -412,7 +457,7 @@ explicit project rootのdirect Next dependencyをPythonで判定し、不在を�
 | I05-AT-007 | entity budget publication and diff-only option rejection | tests/acceptance/next/test_snapshot_budget.py | uv run pytest tests/acceptance/next/test_snapshot_budget.py -q |
 | I05-AT-008 | stdout selector matrix | tests/acceptance/next/test_stdout_selector.py | uv run pytest tests/acceptance/next/test_stdout_selector.py -q |
 | I05-AT-009 | TrustedTypeEnvironment / no target types | tests/acceptance/next/test_trusted_type_environment.py | uv run pytest tests/acceptance/next/test_trusted_type_environment.py -q |
-| I05-AT-010 | closed contracts / wheel/sdist / offline/license | tests/packaging/test_distribution.py + test_next_distribution.py | uv run pytest tests/contracts/next tests/packaging/test_distribution.py tests/packaging/test_next_distribution.py -q |
+| I05-AT-010 | current closed contracts; future wheel/sdist/offline/license gate | `tests/contracts/test_json_schemas.py` + `tests/contracts/test_next_contracts.py`; future `tests/packaging/test_next_runtime_inventory.py` | current: `uv run pytest tests/contracts/test_json_schemas.py tests/contracts/test_next_contracts.py -q`; future package commandはG11のproduction実装後に追加 |
 | I05-AT-011 | Python/SQLAlchemy byte compatibility | tests/regression/test_next_domain_compatibility.py | uv run pytest tests/regression/test_next_domain_compatibility.py -q |
 
 ### issue gate commands
@@ -427,9 +472,13 @@ uv run pytest tests/acceptance/next/test_optionality.py -q
 uv run pytest tests/acceptance/next/test_snapshot_budget.py -q
 uv run pytest tests/acceptance/next/test_stdout_selector.py -q
 uv run pytest tests/acceptance/next/test_trusted_type_environment.py -q
-uv run pytest tests/contracts/next tests/packaging/test_distribution.py tests/packaging/test_next_distribution.py -q
+# current reference contract gate
+uv run pytest tests/contracts/test_json_schemas.py tests/contracts/test_next_contracts.py -q
+# future package gate (I05-PLAN-006 / G11; test file is planned, not current evidence)
+uv run pytest tests/packaging/test_distribution.py tests/packaging/test_next_runtime_inventory.py -q
 uv run pytest tests/regression/test_next_domain_compatibility.py -q
 uv run pytest tests/contracts/test_next_contracts.py -q -k 'round23_rg_12_coverage or runtime_registry'
+# future package gate only: run after the production adapter and build inputs exist
 uv build --offline
 ./spec-dock/scripts/spec-dock validate
 uv run ruff check .

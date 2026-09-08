@@ -137,6 +137,54 @@ def test_next_path_schema_rejects_fragment_marker() -> None:
         validator.validate("src/Button#shadow.tsx")
 
 
+def test_next_runtime_build_inventory_binds_source_kind_to_role() -> None:
+    validator = _validator("next-runtime-build-inventory-v1.schema.json")
+    member: dict[str, Any] = {
+        "source_kind": "typescript",
+        "source_path": "adapters/next/typescript-lib.d.ts",
+        "package_path": "code_structure_viz/_next_runtime/typescript-lib.d.ts",
+        "size_bytes": 1,
+        "sha256": "0" * 64,
+        "role": "typescript_lib",
+    }
+    license_record: dict[str, Any] = {
+        "ecosystem": "resource",
+        "name": "fixture",
+        "version": "1",
+        "license_id": "MIT",
+        "source_url": "https://example.invalid/license",
+        "content_or_lock_digest": "1" * 64,
+    }
+    inventory: dict[str, Any] = {
+        "schema": "code-structure-viz.next-runtime-build-inventory/v1",
+        "inventory_version": 1,
+        "build_input_digest": "2" * 64,
+        "build_output_digest": "3" * 64,
+        "license_inventory_digest": "4" * 64,
+        "members": [member],
+        "licenses": [license_record],
+        "inventory_attestation": {
+            "schema": "code-structure-viz.next-runtime-build-inventory/v1",
+            "inventory_version": 1,
+            "members": [member],
+            "sha256": "5" * 64,
+        },
+    }
+    validator.validate(inventory)
+    for source_kind, role in (
+        ("adapter", "typescript_lib"),
+        ("typescript", "adapter"),
+        ("trusted_declaration", "license"),
+        ("license", "trusted_declaration"),
+    ):
+        invalid = deepcopy(inventory)
+        invalid["members"][0]["source_kind"] = source_kind
+        invalid["members"][0]["role"] = role
+        invalid["inventory_attestation"]["members"] = deepcopy(invalid["members"])
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_next_diagnostic_catalog_is_unique_and_closed() -> None:
     catalog = _schema("next-diagnostic-catalog-v1.json")
     assert catalog["schema"] == "code-structure-viz.next-diagnostic-catalog/v1"
