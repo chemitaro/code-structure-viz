@@ -18,7 +18,7 @@ from functools import cache, lru_cache
 from itertools import combinations
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, TypedDict, TypeGuard, cast
+from typing import Any, Literal, TypedDict, TypeGuard, cast
 from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
@@ -16541,20 +16541,38 @@ def validate_selected_stdout_measurement(value: dict[str, Any]) -> None:
     assert value["diagnostic_code"] is None
 
 
+def _runtime_registry_records(
+    authority: Literal["current", "historical_r23"],
+) -> list[dict[str, Any]]:
+    """Resolve one of the two closed registry authorities."""
+
+    if authority == "current":
+        return [dict(item) for item in RUNTIME_VECTOR_REGISTRY]
+    if authority == "historical_r23":
+        return [dict(item) for item in HISTORICAL_R23_RUNTIME_VECTOR_REGISTRY]
+    raise AssertionError(f"unknown runtime registry authority: {authority}")
+
+
 def validate_runtime_vector_registry(
     records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
     *,
     known_vector_ids: set[str],
-    authority_registry: Iterable[Mapping[str, Any]] | None = None,
+    authority: Literal["current", "historical_r23"] = "current",
+    positive_vector_ids: Iterable[str] | None = None,
+    negative_vector_ids: Iterable[str] | None = None,
 ) -> None:
     """Validate registry identity, polarity pairs, and callable/validator names."""
 
-    expected_records = (
-        list(RUNTIME_VECTOR_REGISTRY)
-        if authority_registry is None
-        else [dict(item) for item in authority_registry]
-    )
+    expected_records = _runtime_registry_records(authority)
     expected = {item["vector_id"]: item for item in expected_records}
+    catalogs_provided = positive_vector_ids is not None or negative_vector_ids is not None
+    if catalogs_provided:
+        assert positive_vector_ids is not None and negative_vector_ids is not None
+        positive_catalog = list(positive_vector_ids)
+        negative_catalog = list(negative_vector_ids)
+        assert len(positive_catalog) == len(set(positive_catalog))
+        assert len(negative_catalog) == len(set(negative_catalog))
+        assert not set(positive_catalog) & set(negative_catalog)
     assert len(records) == len(expected)
     seen: set[str] = set()
     by_criterion: dict[str, set[str]] = {}
@@ -16581,26 +16599,36 @@ def validate_runtime_vector_registry(
         by_criterion.setdefault(record["criterion"], set()).add(record["polarity"])
     assert seen == set(expected)
     assert all(polarities == {"positive", "negative"} for polarities in by_criterion.values())
+    if catalogs_provided:
+        expected_ids = set(expected)
+        expected_positive = {
+            item["vector_id"] for item in expected_records if item["polarity"] == "positive"
+        }
+        expected_negative = {
+            item["vector_id"] for item in expected_records if item["polarity"] == "negative"
+        }
+        assert set(positive_catalog) & expected_ids == expected_positive
+        assert set(negative_catalog) & expected_ids == expected_negative
 
 
 def execute_runtime_vector_registry(
     records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
     *,
     known_vector_ids: set[str],
-    authority_registry: Iterable[Mapping[str, Any]] | None = None,
+    authority: Literal["current", "historical_r23"] = "current",
+    positive_vector_ids: Iterable[str] | None = None,
+    negative_vector_ids: Iterable[str] | None = None,
 ) -> set[str]:
     """Resolve and execute every registered vector and its named validator."""
 
     validate_runtime_vector_registry(
         records,
         known_vector_ids=known_vector_ids,
-        authority_registry=authority_registry,
+        authority=authority,
+        positive_vector_ids=positive_vector_ids,
+        negative_vector_ids=negative_vector_ids,
     )
-    expected_records = (
-        list(RUNTIME_VECTOR_REGISTRY)
-        if authority_registry is None
-        else [dict(item) for item in authority_registry]
-    )
+    expected_records = _runtime_registry_records(authority)
     executed: set[str] = set()
     for record in records:
         producer = globals().get(record["callable"])
@@ -18872,7 +18900,8 @@ def validate_r23_fixture_evidence_map(
         for record in runtime_records
         if str(record.get("criterion", "")).startswith("round23.")
     ]
-    if positive_vector_ids is not None or negative_vector_ids is not None:
+    catalogs_provided = positive_vector_ids is not None or negative_vector_ids is not None
+    if catalogs_provided:
         assert positive_vector_ids is not None and negative_vector_ids is not None
         positive_catalog = list(positive_vector_ids)
         negative_catalog = list(negative_vector_ids)
@@ -18905,14 +18934,14 @@ def validate_r23_fixture_evidence_map(
         assert len(row["negative_vectors"]) == len(set(row["negative_vectors"])) == 1
         assert set(row["positive_vectors"]) == positives
         assert set(row["negative_vectors"]) == negatives
-        if positive_catalog or negative_catalog:
+        if catalogs_provided:
             assert set(row["positive_vectors"]) <= set(positive_catalog)
             assert set(row["negative_vectors"]) <= set(negative_catalog)
         validators = {record["validator"] for record in criterion_records}
         assert validators == {row["validator"]}
         assert all(record["callable"] in globals() for record in criterion_records)
         assert len(criterion_records) == 2
-    if positive_catalog or negative_catalog:
+    if catalogs_provided:
         expected_ids = {record["vector_id"] for record in records}
         expected_positive = {
             record["vector_id"] for record in records if record["polarity"] == "positive"

@@ -11966,10 +11966,18 @@ def test_round22_runtime_registry_executes_vectors_and_named_validators() -> Non
     assert records == runtime_vector_registry()
     assert all(record["criterion"].startswith("round22.") for record in records)
     known_vector_ids = set(fixture["positive"]) | set(fixture["negative"])
-    validate_runtime_vector_registry(records, known_vector_ids=known_vector_ids)
-    assert execute_runtime_vector_registry(records, known_vector_ids=known_vector_ids) == {
-        record["vector_id"] for record in records
-    }
+    validate_runtime_vector_registry(
+        records,
+        known_vector_ids=known_vector_ids,
+        positive_vector_ids=fixture["positive"],
+        negative_vector_ids=fixture["negative"],
+    )
+    assert execute_runtime_vector_registry(
+        records,
+        known_vector_ids=known_vector_ids,
+        positive_vector_ids=fixture["positive"],
+        negative_vector_ids=fixture["negative"],
+    ) == {record["vector_id"] for record in records}
 
     missing = records[:-1]
     with pytest.raises(AssertionError):
@@ -11986,6 +11994,19 @@ def test_round22_runtime_registry_executes_vectors_and_named_validators() -> Non
     wrong_criterion[0]["criterion"] = "round22.rg-99"
     with pytest.raises(AssertionError):
         validate_runtime_vector_registry(wrong_criterion, known_vector_ids=known_vector_ids)
+    misplaced_positive = [
+        vector_id
+        for vector_id in fixture["positive"]
+        if vector_id != "round22-runtime-config-provenance"
+    ]
+    misplaced_negative = [*fixture["negative"], "round22-runtime-config-provenance"]
+    with pytest.raises(AssertionError):
+        validate_runtime_vector_registry(
+            records,
+            known_vector_ids=known_vector_ids,
+            positive_vector_ids=misplaced_positive,
+            negative_vector_ids=misplaced_negative,
+        )
 
 
 def _round23_context() -> NextRunContext:
@@ -12330,12 +12351,16 @@ def test_round23_rg_12_coverage_index_is_bidirectional_and_substantive() -> None
     validate_runtime_vector_registry(
         records,
         known_vector_ids=known_vector_ids,
-        authority_registry=historical_runtime_vector_registry(),
+        authority="historical_r23",
+        positive_vector_ids=fixture["positive"],
+        negative_vector_ids=fixture["negative"],
     )
     assert execute_runtime_vector_registry(
         records,
         known_vector_ids=known_vector_ids,
-        authority_registry=historical_runtime_vector_registry(),
+        authority="historical_r23",
+        positive_vector_ids=fixture["positive"],
+        negative_vector_ids=fixture["negative"],
     ) == {record["vector_id"] for record in records}
     declared_tests = set(
         re.findall(
@@ -12387,6 +12412,14 @@ def test_round23_rg_12_coverage_index_is_bidirectional_and_substantive() -> None
             test_names=declared_tests,
             positive_vector_ids=misplaced_positive,
             negative_vector_ids=misplaced_negative,
+        )
+    with pytest.raises(AssertionError):
+        validate_r23_fixture_evidence_map(
+            round23_evidence,
+            records,
+            test_names=declared_tests,
+            positive_vector_ids=[],
+            negative_vector_ids=[],
         )
 
 

@@ -413,3 +413,21 @@ Round23のsubstantive testsとcoverage evidenceは歴史的registryを明示的�
 check/format、mypy 139 files、SpecDock validate nodes=10、git diff hygieneを修復後に再実行して
 通過した。独立レビューで残ったP1/P2はこの修正範囲では解消したが、R21実OS/process、G10
 canonical R/D/P、G11 package計画、全体fixed-SHA review、production adapter実装は未完了である。
+
+### G09 authority and catalog API closure (2026-09-08)
+
+レビューの追加反例を受け、registry実行APIのauthorityを自由なiterable注入から
+`current` / `historical_r23` の二択へ閉じた。validatorとexecutorは同じ一度だけ解決した
+authority snapshotを使うため、iterableの二重消費や、current IDを旧R23 producerへ協調差替えする
+経路を受け付けない。current registryの16件とhistorical registryの36件は、既定経路と明示経路を
+分離したまま defensive copyを返す。
+
+current/historical共通のfixture catalog検査は、引数が`None`かどうかで有効化を判定し、空配列も
+検査対象とする。各authorityのpositive/negative ID集合、catalog内重複、相互交差、registry polarity
+を完全照合するため、Round22にもpolarity誤配置のnegative回帰を追加した。Round23 evidenceにも
+空catalog拒否回帰を追加した。
+
+修復後の確認は focused G09 `2 passed`、全repository `1459 passed, 1 skipped`（198.71秒）、
+ruff check/format、mypy 139 files、SpecDock validate nodes=10、diff hygiene pass。これは
+次の固定SHAレビューへ渡すreference-contract候補であり、外部Strict pass、production adapter、
+実OS/process、G10/G11、Issue完了を意味しない。
