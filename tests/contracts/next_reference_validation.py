@@ -1577,7 +1577,10 @@ def decision_public_diagnostics(decision: NextRunDecision) -> list[dict[str, Any
         owners = sorted(
             {
                 witness["owner_module_id"]
-                for witness in decision.validated_proof.get("export_reexport_witness", ())
+                for witness in (
+                    *decision.validated_proof.get("export_reexport_witness", ()),
+                    *decision.validated_proof.get("export_observations", ()),
+                )
                 if witness["syntax_identity"] in failed_syntax
             }
         )
@@ -2771,6 +2774,16 @@ def _decode_module_string(value: str) -> str:
         elif escaped in {"\\", "'", '"'}:
             decoded.append(escaped)
             index += 1
+        elif escaped == "0" and (index + 1 == len(value) or not value[index + 1].isdigit()):
+            decoded.append("\0")
+            index += 1
+        elif escaped == "u" and value[index + 1 : index + 2] == "{":
+            end = value.find("}", index + 2)
+            digits = value[index + 2 : end] if end >= 0 else ""
+            if not re.fullmatch(r"[0-9a-fA-F]{1,6}", digits) or int(digits, 16) > 0x10FFFF:
+                raise SourceGraphScanError("invalid module string unicode escape")
+            decoded.append(chr(int(digits, 16)))
+            index = end + 1
         elif escaped == "u" and index + 4 < len(value):
             digits = value[index + 1 : index + 5]
             if not re.fullmatch(r"[0-9a-fA-F]{4}", digits):
@@ -2787,10 +2800,16 @@ def _decode_module_string(value: str) -> str:
             if escaped == "\r" and index + 1 < len(value) and value[index + 1] == "\n":
                 index += 1
             index += 1
+        elif escaped in "ux0123456789":
+            raise SourceGraphScanError("invalid module string escape")
         else:
             decoded.append(escaped)
             index += 1
-    return "".join(decoded)
+    # JavaScript string escapes describe UTF-16 code units. Preserve lone
+    # surrogates privately, but join valid pairs before identifier checks.
+    return (
+        "".join(decoded).encode("utf-16-be", "surrogatepass").decode("utf-16-be", "surrogatepass")
+    )
 
 
 def _scan_module_specifiers(
@@ -5368,7 +5387,6 @@ def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]
         if character in "'\"":
             quote = character
             index += 1
-            value_chars: list[str] = []
             while index < length:
                 current = text[index]
                 if current in "\r\n":
@@ -5379,17 +5397,17 @@ def _export_tokens(content: bytes) -> tuple[list[dict[str, Any]], str, list[int]
                 if current == "\\":
                     index += 1
                     assert index < length
-                    value_chars.append(text[index])
+                    if text[index : index + 2] == "\r\n":
+                        index += 1
                     index += 1
                     continue
-                value_chars.append(current)
                 index += 1
             else:
                 raise AssertionError("unterminated export string")
             append_token(
                 {
                     "kind": "string",
-                    "value": "".join(value_chars),
+                    "value": _decode_module_string(text[start + 1 : index - 1]),
                     "char_start": start,
                     "char_end": index,
                 }
@@ -5622,13 +5640,14 @@ def _export_observation_row(
     start_token: dict[str, Any],
     end_token: dict[str, Any],
     syntax_kind: str,
-    exported_name: str,
+    exported_name: str | None,
     role: str,
     reexport: bool,
     star: bool = False,
     source_specifier: str | None = None,
     imported_name: str | None = None,
     target_declaration_id: str | None = None,
+    string_names: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     char_start = cast(int, start_token["char_start"])
     char_end = cast(int, end_token["char_end"])
@@ -5643,6 +5662,7 @@ def _export_observation_row(
             "token_bytes_sha256": hashlib.sha256(token_bytes).hexdigest(),
             "imported_name": imported_name,
             "exported_name": exported_name,
+            **({"string_names": string_names} if string_names is not None else {}),
         }
     )
     return {
@@ -5650,7 +5670,10 @@ def _export_observation_row(
         "byte_start": byte_start,
         "byte_end": byte_end,
         "token_identity": token_identity,
-        "syntax_identity": (f"export:{path}:{byte_start}:{byte_end}:{syntax_kind}:{exported_name}"),
+        "syntax_identity": (
+            f"export:{path}:{byte_start}:{byte_end}:{syntax_kind}"
+            + (f":{exported_name}" if string_names is None else "")
+        ),
         "syntax_kind": syntax_kind,
         "exported_name": exported_name,
         "role": role,
@@ -5659,6 +5682,27 @@ def _export_observation_row(
         "source_specifier": source_specifier,
         "imported_name": imported_name,
         "target_declaration_id": target_declaration_id,
+        **({"string_names": string_names} if string_names is not None else {}),
+    }
+
+
+def _private_export_name(token: dict[str, Any]) -> dict[str, Any]:
+    """Classify a decoded name without serializing opaque source spelling."""
+
+    assert token["kind"] in {"identifier", "string", "namespace"}
+    value = cast(str, token["value"])
+    normalized = (
+        normalize_nfc(value) if not any(0xD800 <= ord(char) <= 0xDFFF for char in value) else ""
+    )
+    safe = (
+        normalized
+        if _is_export_identifier(normalized, allow_default=True, allow_keyword=True)
+        else None
+    )
+    return {
+        "form": token["kind"],
+        "safe_identifier": safe,
+        "decoded_sha256": hashlib.sha256(value.encode("utf-16-be", "surrogatepass")).hexdigest(),
     }
 
 
@@ -5668,7 +5712,8 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
     position = 0
     while position < len(tokens):
         if (
-            tokens[position]["value"] != "export"
+            tokens[position]["kind"] != "identifier"
+            or tokens[position]["value"] != "export"
             or tokens[position]["brace_depth"] != 0
             or tokens[position]["paren_depth"] != 0
             or tokens[position]["bracket_depth"] != 0
@@ -5685,6 +5730,34 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
         assert cursor < len(tokens)
         source_specifier: str | None = None
         if tokens[cursor]["value"] == "*":
+            if cursor + 2 < len(tokens) and tokens[cursor + 1]["value"] == "as":
+                # A string-named namespace export is an occurrence, not an
+                # export-all expansion and not a public binding named '*'.
+                name_token = tokens[cursor + 2]
+                assert name_token["kind"] == "string"
+                assert cursor + 4 < len(tokens) and tokens[cursor + 3]["value"] == "from"
+                source_specifier = _export_string(tokens, cursor + 4)
+                assert cursor + 5 < len(tokens) and tokens[cursor + 5]["value"] == ";"
+                rows.append(
+                    _export_observation_row(
+                        path=path,
+                        content=content,
+                        offsets=offsets,
+                        start_token=export_token,
+                        end_token=tokens[cursor + 5],
+                        syntax_kind="string_export",
+                        exported_name=None,
+                        role=role,
+                        reexport=True,
+                        source_specifier=source_specifier,
+                        string_names={
+                            "imported": _private_export_name({"kind": "namespace", "value": "*"}),
+                            "exported": _private_export_name(name_token),
+                        },
+                    )
+                )
+                position = cursor + 6
+                continue
             assert cursor + 2 < len(tokens)
             assert tokens[cursor + 1]["value"] == "from"
             source_specifier = _export_string(tokens, cursor + 2)
@@ -5717,7 +5790,8 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
                 (
                     candidate
                     for candidate in range(open_brace + 1, len(tokens))
-                    if tokens[candidate]["value"] == "}"
+                    if tokens[candidate]["kind"] == "punctuation"
+                    and tokens[candidate]["value"] == "}"
                 ),
                 None,
             )
@@ -5737,45 +5811,72 @@ def _scan_export_file(path: str, content: bytes) -> list[dict[str, Any]]:
                 raise AssertionError("export list must end with semicolon")
             item = open_brace + 1
             while item < close_brace:
-                if tokens[item]["value"] == ",":
+                if tokens[item]["kind"] == "punctuation" and tokens[item]["value"] == ",":
                     item += 1
                     continue
                 item_start = item
                 item_role = role
-                if tokens[item]["value"] == "type":
+                if (
+                    tokens[item]["kind"] == "identifier"
+                    and tokens[item]["value"] == "type"
+                    and item + 1 < close_brace
+                    and tokens[item + 1]["value"] not in {"as", ",", "}"}
+                ):
                     item_role = "type"
                     item += 1
                 assert item < close_brace
+                imported_token = tokens[item]
                 item_imported_name = cast(str, tokens[item]["value"])
-                assert tokens[item]["kind"] == "identifier"
-                assert _is_export_identifier(
-                    item_imported_name, allow_default=True, allow_keyword=True
-                )
+                assert imported_token["kind"] in {"identifier", "string"}
+                if imported_token["kind"] == "identifier":
+                    assert _is_export_identifier(
+                        item_imported_name, allow_default=True, allow_keyword=True
+                    )
+                else:
+                    assert source_specifier is not None, (
+                        "local export reference must be an identifier"
+                    )
                 item += 1
                 exported_name = item_imported_name
+                exported_token = imported_token
                 if item < close_brace and tokens[item]["value"] == "as":
                     assert item + 1 < close_brace
+                    exported_token = tokens[item + 1]
+                    assert exported_token["kind"] in {"identifier", "string"}
                     exported_name = cast(str, tokens[item + 1]["value"])
-                    assert _is_export_identifier(
-                        exported_name, allow_default=True, allow_keyword=True
-                    )
+                    if exported_token["kind"] == "identifier":
+                        assert _is_export_identifier(
+                            exported_name, allow_default=True, allow_keyword=True
+                        )
                     item += 2
                 item_end = item - 1
-                rows.append(
-                    _export_observation_row(
-                        path=path,
-                        content=content,
-                        offsets=offsets,
-                        start_token=tokens[item_start],
-                        end_token=tokens[item_end],
-                        syntax_kind="reexport" if source_specifier is not None else "named_export",
-                        exported_name=exported_name,
-                        role=item_role,
-                        reexport=source_specifier is not None,
-                        source_specifier=source_specifier,
-                        imported_name=item_imported_name,
-                    )
+                string_named = "string" in {imported_token["kind"], exported_token["kind"]}
+                row = _export_observation_row(
+                    path=path,
+                    content=content,
+                    offsets=offsets,
+                    start_token=tokens[item_start],
+                    end_token=tokens[item_end],
+                    syntax_kind=(
+                        "string_export"
+                        if string_named
+                        else "reexport"
+                        if source_specifier is not None
+                        else "named_export"
+                    ),
+                    exported_name=None if string_named else exported_name,
+                    role=item_role,
+                    reexport=source_specifier is not None,
+                    source_specifier=source_specifier,
+                    imported_name=None if string_named else item_imported_name,
+                    string_names={
+                        "imported": _private_export_name(imported_token),
+                        "exported": _private_export_name(exported_token),
+                    }
+                    if string_named
+                    else None,
                 )
+                rows.append(row)
                 assert item < len(tokens)
                 if tokens[item]["value"] == ",":
                     item += 1
@@ -7806,6 +7907,7 @@ TARGET_FAILURE_REASONS = frozenset(
         "control_context",
         "project_ambiguity",
         "selected_taint",
+        "unsupported_export",
     }
 )
 
@@ -8099,6 +8201,16 @@ def export_reexport_failure_rows(proof: dict[str, Any]) -> list[dict[str, Any]]:
         for witness in proof["export_reexport_witness"]
         if witness["diagnostic"] in {"cycle", "conflict"}
     ]
+    rows.extend(
+        {
+            "syntax_identity": row["syntax_identity"],
+            "original_exported_name": None,
+            "exported_name": None,
+            "diagnostic": "unsupported_string_export",
+        }
+        for row in proof.get("export_observations", ())
+        if row.get("disposition") == "export_failure"
+    )
     rows.sort(key=canonical_json_bytes)
     return rows
 
@@ -10876,6 +10988,20 @@ def _wire_observation_state(row: Mapping[str, Any]) -> dict[str, Any]:
     return {"state": "observed", "value": value["sha256"]}
 
 
+def _public_adapter_request_descriptor(
+    request: ValidatedAdapterRequest | None,
+) -> dict[str, Any] | None:
+    if request is None:
+        return None
+    raw = canonical_json_bytes(request.snapshot())
+    return {
+        "request_id": request["request_id"],
+        "raw_sha256": hashlib.sha256(raw).hexdigest(),
+        "byte_length": len(raw),
+        "canonical_json": True,
+    }
+
+
 def next_run_decision_projection(decision: NextRunDecision) -> dict[str, Any]:
     """Serialize the actual closed decision union for the public schema.
 
@@ -10890,7 +11016,7 @@ def next_run_decision_projection(decision: NextRunDecision) -> dict[str, Any]:
     request_value: dict[str, Any] | None
     response_value: dict[str, Any] | None = None
     if isinstance(decision, NextValidatedDecision):
-        request_value = decision.request.snapshot()
+        request_value = _public_adapter_request_descriptor(decision.request)
         outcome = decision.gate["outcome"]
         if outcome in {"complete", "partial_safe"}:
             kind = "request_bound_success"
@@ -10913,10 +11039,7 @@ def next_run_decision_projection(decision: NextRunDecision) -> dict[str, Any]:
                 # Failure changes the disposition, not the observations.
                 provenance.update(kind=kind, stage=stage, failure_code=code)
         raw = decision.raw_response_bytes
-        decoded = json.loads(raw.decode("utf-8"))
-        assert isinstance(decoded, dict)
         response_value = {
-            "validated_response": decoded,
             "raw_sha256": hashlib.sha256(raw).hexdigest(),
             "byte_length": len(raw),
             "canonical_json": True,
@@ -10928,7 +11051,7 @@ def next_run_decision_projection(decision: NextRunDecision) -> dict[str, Any]:
         # its pre-response marker.
         provenance["observed"]["response"] = _observation_row("response", True, observed_value=raw)
     else:
-        request_value = decision.request.snapshot() if decision.request is not None else None
+        request_value = _public_adapter_request_descriptor(decision.request)
         outcome = decision.outcome
         kind = (
             "request_independent_not_applicable"
@@ -13939,7 +14062,9 @@ def join_reexport_observations_to_edges(
     selected_syntax = [
         row
         for row in syntax_rows
-        if row.get("reexport") and (owner_paths is None or row["owner_file_path"] in owner_paths)
+        if row.get("reexport")
+        and row["syntax_kind"] != "string_export"
+        and (owner_paths is None or row["owner_file_path"] in owner_paths)
     ]
     selected_edges = [
         edge for edge in raw_edges if owner_paths is None or edge["owner_file_path"] in owner_paths
@@ -14031,6 +14156,52 @@ def _export_syntax_rows_for_model(model: dict[str, Any]) -> list[dict[str, Any]]
     return sorted(rows, key=canonical_json_bytes)
 
 
+def _string_export_resolution(
+    syntax: dict[str, Any], content: bytes, components: list[dict[str, Any]]
+) -> tuple[str, str, str | None]:
+    """Classify only independently visible evidence in the closed fixture grammar.
+
+    This is not a production TypeChecker substitute. An absent Component is
+    never evidence of a non-component value; unproven aliases/re-exports fail
+    closed. The future adapter must supply actual checker evidence.
+    """
+
+    if syntax["role"] == "type":
+        return "type", "type_only_syntax", None
+    imported = syntax["string_names"]["imported"]
+    if not syntax["reexport"]:
+        for component in components:
+            if component["declaration_key"] == imported["safe_identifier"]:
+                return "component", "component_witness", component["id"]
+        tokens, _text, _offsets = _export_tokens(content)
+        for index, token in enumerate(tokens):
+            if (
+                token["kind"] != "identifier"
+                or token["value"] != "const"
+                or token["brace_depth"] != 0
+                or token["paren_depth"] != 0
+                or token["bracket_depth"] != 0
+            ):
+                continue
+            declaration = tokens[index + 1 : index + 5]
+            if len(declaration) != 4:
+                continue
+            name, equals, value, end = declaration
+            if (
+                name["kind"] == "identifier"
+                and _private_export_name(name) == imported
+                and equals["value"] == "="
+                and end["value"] == ";"
+                and (
+                    value["kind"] == "string"
+                    or value["value"] in {"true", "false", "null"}
+                    or re.fullmatch(r"[0-9]", value["value"])
+                )
+            ):
+                return "value", "primitive_const", None
+    return "unknown", "open_world", None
+
+
 def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
     """Bind frozen source syntax rows to modules and a separate graph witness."""
 
@@ -14038,6 +14209,7 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
     modules_by_path = {module["path"]: module for module in model["modules"]}
     assert len(modules_by_path) == len(model["modules"])
     fixture_by_path = {item["path"]: item for item in load_export_census_fixture()}
+    content_by_path: dict[str, bytes] = {}
     for module in model["modules"]:
         file = files_by_path.get((module["project_id"], module["path"]))
         assert file is not None
@@ -14056,6 +14228,7 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
         content = cast(bytes, fixture["content"])
         assert file["size_bytes"] == len(content)
         assert file["sha256"] == hashlib.sha256(content).hexdigest()
+        content_by_path[module["path"]] = content
 
     components_by_module: dict[str, list[dict[str, Any]]] = {}
     for component_record in model["components"]:
@@ -14083,6 +14256,28 @@ def _export_census_for_model(model: dict[str, Any]) -> list[dict[str, Any]]:
             # acquire semantic Module ownership.
             continue
         candidates = components_by_module.get(module["id"], [])
+        if syntax["syntax_kind"] == "string_export":
+            resolution, basis, component_id = _string_export_resolution(
+                syntax, content_by_path[module["path"]], candidates
+            )
+            observations.append(
+                {
+                    "owner_module_id": module["id"],
+                    **syntax,
+                    "resolution": resolution,
+                    "resolution_basis": basis,
+                    "component_id": component_id,
+                    "target_declaration_id": component_id,
+                    "resolved_source_module_id": None if syntax["reexport"] else module["id"],
+                    "expanded_exported_name": None,
+                    "disposition": (
+                        "intentional_unsupported"
+                        if resolution in {"value", "type"}
+                        else "export_failure"
+                    ),
+                }
+            )
+            continue
         graph_witnesses: list[dict[str, Any]] | None
         if syntax["reexport"]:
             edge = edge_by_syntax_key.get(_reexport_join_key(syntax))
@@ -14263,10 +14458,66 @@ def expected_export_reexport_witness(model: dict[str, Any]) -> list[dict[str, An
     return sorted(witnesses, key=canonical_json_bytes)
 
 
-def expected_export_observations(model: dict[str, Any]) -> list[dict[str, Any]]:
+def _target_contains_export(target: str, observation: dict[str, Any]) -> bool:
+    path = canonical_target_key(target).removeprefix("path:")
+    owner = observation["owner_file_path"]
+    return path == "." or path == owner or owner.startswith(path.rstrip("/") + "/")
+
+
+def expected_export_observations(
+    model: dict[str, Any], request_targets: Iterable[str] = ()
+) -> list[dict[str, Any]]:
     """Build observations from the frozen source census, not public bindings."""
 
-    return _export_census_for_model(model)
+    observations = _export_census_for_model(model)
+    targets = tuple(request_targets)
+    for observation in observations:
+        if observation["syntax_kind"] == "string_export" and any(
+            _target_contains_export(target, observation) for target in targets
+        ):
+            observation["disposition"] = "target_failure"
+    return sorted(observations, key=canonical_json_bytes)
+
+
+def string_export_target_resolutions(
+    resolutions: list[dict[str, Any]], observations: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Apply the explicit-target failure only after normal target resolution."""
+
+    rows = copy.deepcopy(resolutions)
+    for row in rows:
+        if row["status"] == "resolved" and any(
+            observation.get("disposition") == "target_failure"
+            and _target_contains_export(row["target_key"], observation)
+            for observation in observations
+        ):
+            row.update(status="failed", record_ids=[], reason="unsupported_export")
+    return sorted(rows, key=canonical_json_bytes)
+
+
+def expected_string_export_diagnostics(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for row in observations:
+        if row.get("disposition") == "intentional_unsupported":
+            owner = row["owner_module_id"]
+            counts[owner] = counts.get(owner, 0) + 1
+    entry = _diagnostic_catalog()["CSV-NEXT-UNSUPPORTED-001"]
+    return sorted(
+        [
+            {
+                "code": "CSV-NEXT-UNSUPPORTED-001",
+                "severity": entry["severity"],
+                "recoverable": entry["recoverable"],
+                "outcome": entry["outcome"],
+                "ref_permission": entry["ref_permission"],
+                "count": count,
+                "path_ref": None,
+                "symbol_ref": owner,
+            }
+            for owner, count in counts.items()
+        ],
+        key=canonical_json_bytes,
+    )
 
 
 def _export_binding_projection_from_observations(
@@ -14277,7 +14528,7 @@ def _export_binding_projection_from_observations(
     projected: list[dict[str, Any]] = []
     for observation in observations:
         resolution = observation["resolution"]
-        if resolution != "component":
+        if resolution != "component" or observation["syntax_kind"] == "string_export":
             # Only a value export resolved to one Component is public.  Value,
             # type, and unknown observations remain coverage-only evidence.
             continue
@@ -14355,12 +14606,12 @@ def expected_export_coverage_counts(model: dict[str, Any]) -> dict[str, int]:
         "value": sum(
             observation["resolution"] == "value"
             for observation in observations
-            if not observation["reexport"]
+            if not observation["reexport"] or observation["syntax_kind"] == "string_export"
         ),
         "type": sum(
             observation["resolution"] == "type"
             for observation in observations
-            if not observation["reexport"]
+            if not observation["reexport"] or observation["syntax_kind"] == "string_export"
         ),
     }
     for witness in expected_export_reexport_witness(model):
@@ -14372,12 +14623,15 @@ def expected_export_coverage_counts(model: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def validate_export_observations(observations: list[dict[str, Any]], model: dict[str, Any]) -> None:
+def validate_export_observations(
+    observations: list[dict[str, Any]], model: dict[str, Any], request_targets: Iterable[str] = ()
+) -> None:
     """Validate the complete source census and its independent resolution."""
 
     modules = {item["id"]: item for item in model["modules"]}
     components = {item["id"]: item for item in model["components"]}
-    expected = expected_export_observations(model)
+    expected = expected_export_observations(model, request_targets)
+    assert observations == expected
     syntax_fields = (
         "owner_file_path",
         "byte_start",
@@ -14412,8 +14666,15 @@ def validate_export_observations(observations: list[dict[str, Any]], model: dict
             "type_export",
             "reexport",
             "export_all",
+            "string_export",
         }
         assert re.fullmatch(r"[0-9a-f]{64}", observation["token_identity"])
+        if observation["syntax_kind"] == "string_export":
+            assert observation["exported_name"] is None
+            assert observation["imported_name"] is None
+            assert observation["expanded_exported_name"] is None
+            assert observation["star"] is False
+            continue
         if observation["star"]:
             assert observation["syntax_kind"] == "export_all"
             assert observation["exported_name"] == "*"
@@ -14628,7 +14889,17 @@ def validate_proof(
 
     assert proof["causal_edges"] == derive_required_causal_edges(proof, discovered)
 
-    validate_export_observations(proof["export_observations"], model)
+    validate_export_observations(proof["export_observations"], model, request_targets or ())
+    string_owners = {
+        row["owner_module_id"]
+        for row in proof["export_observations"]
+        if row["syntax_kind"] == "string_export"
+    }
+    assert [
+        row
+        for row in model["diagnostics"]
+        if row["code"] == "CSV-NEXT-UNSUPPORTED-001" and row["symbol_ref"] in string_owners
+    ] == expected_string_export_diagnostics(proof["export_observations"])
     assert {
         "non_component_value_export_count": model["coverage"]["non_component_value_export_count"],
         "type_only_export_count": model["coverage"]["type_only_export_count"],
@@ -14673,10 +14944,13 @@ def validate_proof(
             for collection in COLLECTIONS
             for record_id in (excluded[collection] | failed[collection])
         }
-        assert proof["target_resolutions"] == resolve_target_resolutions(
-            request_targets,
-            discovered_model,
-            unavailable_record_ids=unavailable_ids,
+        assert proof["target_resolutions"] == string_export_target_resolutions(
+            resolve_target_resolutions(
+                request_targets,
+                discovered_model,
+                unavailable_record_ids=unavailable_ids,
+            ),
+            proof["export_observations"],
         )
     coverage_targets = {
         item["target_key"]: (item["status"], tuple(item["record_ids"]))

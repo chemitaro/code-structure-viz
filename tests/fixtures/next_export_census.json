@@ -98,6 +98,30 @@
       "content_base64": "aW1wb3J0ICogYXMgQ2FyZHMgZnJvbSAiLi9DYXJkIjsKaW1wb3J0ICogYXMgT3RoZXJDYXJkcyBmcm9tICIuL0NhcmQiOwo="
     },
     {
+      "path": "src/string-component.tsx",
+      "content_base64": "ZnVuY3Rpb24gVmlldygpIHsgcmV0dXJuIDxkaXYgLz47IH0KZXhwb3J0IHsgVmlldyBhcyAib3BhcXVlLXB1YmxpYy1uYW1lIiB9Owo="
+    },
+    {
+      "path": "src/string-namespace.tsx",
+      "content_base64": "ZXhwb3J0ICogYXMgIm9wYXF1ZS1wdWJsaWMtbmFtZSIgZnJvbSAiLi9CdXR0b24iOwo="
+    },
+    {
+      "path": "src/string-reexport.tsx",
+      "content_base64": "ZXhwb3J0IHsgIm9wYXF1ZS1pbXBvcnQtbmFtZSIgYXMgVmFsdWUgfSBmcm9tICIuL0J1dHRvbiI7Cg=="
+    },
+    {
+      "path": "src/string-type.tsx",
+      "content_base64": "aW50ZXJmYWNlIFByb3BzIHt9CmV4cG9ydCB0eXBlIHsgUHJvcHMgYXMgIm9wYXF1ZS1wdWJsaWMtbmFtZSIgfTsK"
+    },
+    {
+      "path": "src/string-unknown.tsx",
+      "content_base64": "Y29uc3QgdmFsdWUgPSBtYWtlVmFsdWUoKTsKZXhwb3J0IHsgdmFsdWUgYXMgIm9wYXF1ZS1wdWJsaWMtbmFtZSIgfTsK"
+    },
+    {
+      "path": "src/string-value.tsx",
+      "content_base64": "Y29uc3QgdmFsdWUgPSAxOwpleHBvcnQgeyB2YWx1ZSBhcyAib3BhcXVlLXB1YmxpYy1uYW1lIiB9Owo="
+    },
+    {
       "path": "src/types.d.ts",
       "content_base64": "ZXhwb3J0IGludGVyZmFjZSBQcm9wcyB7fQo="
     }

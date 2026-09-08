@@ -358,7 +358,7 @@
             "target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"},
             "status": {"const": "failed"},
             "record_ids": {"type": "array", "maxItems": 0, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
-            "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]}
+            "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint", "unsupported_export"]}
           }
         }
       ]
@@ -375,7 +375,7 @@
         "path_ref": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
         "symbol_ref": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
         "outcome": {"enum": ["complete", "partial_safe", "payload_unavailable", "not_applicable", "usage", "fatal"]},
-        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]},
+        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint", "unsupported_export"]},
         "ref_permission": {"enum": ["none", "path", "symbol", "path_or_symbol"]}
       }
     }

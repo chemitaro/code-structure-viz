@@ -111,7 +111,7 @@
         "target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"},
         "status": {"enum": ["resolved", "failed"]},
         "record_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^next:(project|file|module|component|member|relation|fact):[0-9a-f]{64}$"}},
-        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]}
+        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint", "unsupported_export"]}
       },
       "oneOf": [
         {
@@ -179,8 +179,11 @@
         "byte_end": {"type": "integer", "minimum": 1},
         "token_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "syntax_identity": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!.*[\\u0000-\\u001f\\u007f]).+$"},
-        "syntax_kind": {"enum": ["default_export", "named_export", "type_export", "reexport", "export_all"]},
-        "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"const": "*"}]},
+        "syntax_kind": {"enum": ["default_export", "named_export", "type_export", "reexport", "export_all", "string_export"]},
+        "exported_name": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"const": "*"}, {"type": "null"}]},
+        "string_names": {"type": "object", "additionalProperties": false, "required": ["imported", "exported"], "properties": {"imported": {"$ref": "#/$defs/private_export_name"}, "exported": {"$ref": "#/$defs/private_export_name"}}, "anyOf": [{"properties": {"imported": {"properties": {"form": {"const": "string"}}}}}, {"properties": {"exported": {"properties": {"form": {"const": "string"}}}}}]},
+        "resolution_basis": {"enum": ["component_witness", "type_only_syntax", "primitive_const", "open_world"]},
+        "disposition": {"enum": ["target_failure", "intentional_unsupported", "export_failure"]},
         "role": {"enum": ["value", "type"]},
         "reexport": {"type": "boolean"},
         "star": {"type": "boolean"},
@@ -193,15 +196,26 @@
         "component_id": {"anyOf": [{"type": "string", "pattern": "^next:component:[0-9a-f]{64}$"}, {"type": "null"}]}
       },
       "allOf": [
+        {"if": {"properties": {"syntax_kind": {"const": "string_export"}}}, "then": {"required": ["string_names", "resolution_basis", "disposition"], "properties": {"exported_name": {"const": null}, "imported_name": {"const": null}, "expanded_exported_name": {"const": null}, "star": {"const": false}}}, "else": {"properties": {"exported_name": {"not": {"type": "null"}}}, "not": {"anyOf": [{"required": ["string_names"]}, {"required": ["resolution_basis"]}, {"required": ["disposition"]}]}}},
         {"if": {"properties": {"star": {"const": true}}}, "then": {"properties": {"syntax_kind": {"const": "export_all"}, "exported_name": {"const": "*"}, "reexport": {"const": true}, "resolution": {"const": "unknown"}, "component_id": {"type": "null"}}}},
         {"if": {"properties": {"star": {"const": false}}}, "then": {"not": {"properties": {"exported_name": {"const": "*"}}}}},
-        {"if": {"properties": {"reexport": {"const": true}}}, "then": {"properties": {"source_specifier": {"type": "string"}, "imported_name": {"not": {"type": "null"}}}}},
+        {"if": {"properties": {"reexport": {"const": true}}}, "then": {"properties": {"source_specifier": {"type": "string"}}}},
+        {"if": {"properties": {"reexport": {"const": true}, "syntax_kind": {"not": {"const": "string_export"}}}}, "then": {"properties": {"imported_name": {"not": {"type": "null"}}}}},
         {"if": {"properties": {"reexport": {"const": false}}}, "then": {"properties": {"source_specifier": {"type": "null"}}}},
         {"if": {"properties": {"resolution": {"const": "component"}}}, "then": {"properties": {"role": {"const": "value"}, "component_id": {"type": "string"}}}},
         {"if": {"properties": {"resolution": {"enum": ["value", "type", "unknown"]}}}, "then": {"properties": {"component_id": {"type": "null"}}}},
         {"if": {"properties": {"resolution": {"const": "value"}}}, "then": {"properties": {"role": {"const": "value"}}}},
         {"if": {"properties": {"resolution": {"const": "type"}}}, "then": {"properties": {"role": {"const": "type"}}}}
       ]
+    },
+    "private_export_name": {
+      "type": "object", "additionalProperties": false,
+      "required": ["form", "safe_identifier", "decoded_sha256"],
+      "properties": {
+        "form": {"enum": ["identifier", "string", "namespace"]},
+        "safe_identifier": {"anyOf": [{"$ref": "#/$defs/identifier_name"}, {"const": "default"}, {"type": "null"}]},
+        "decoded_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
     },
     "excluded_record": {
       "type": "object",

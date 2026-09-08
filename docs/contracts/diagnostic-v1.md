@@ -10,6 +10,12 @@ safe reference permission. The public `schemas/diagnostic-v1.schema.json`
 requires those values for every `CSV-NEXT-*` record; `run-manifest` domain and
 top-level diagnostics use the same public record.
 
+現行のstring-named exportは[3経路の契約](next-export-observations-v1.md)に従う。
+明示targetでの失敗には9番目のreason `unsupported_export`を用いる。
+非component/type-onlyの証明済み対象外はUNSUPPORTED-001と既存value/type coverage、
+componentの可能性が残る場合はEXPORT-001である。後続の「8種類」という記述は履歴であり、
+reasonの現行列挙はschemaとreference validatorの`TARGET_FAILURE_REASONS`に従う。
+
 `ref_permission` is structural, not advisory:
 
 | permission | public fields |

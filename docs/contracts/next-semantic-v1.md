@@ -6,6 +6,11 @@
 
 Status: pre-implementation normative contract for Issue #8.
 
+string-named exportの現行規則・private occurrence・3経路・fixture referenceの限界は
+[Next export observation v1](next-export-observations-v1.md)を参照。
+公開decisionはprivate request/response本文を持たず、digest/byte lengthのdescriptorだけを持つ。
+旧Roundの一律TARGET扱い、8種類だけのtarget reason、private envelopeの公開複製は現行規則ではない。
+
 Round 12 review state: ChatGPT Use Strict returned `review_status: fail` with
 P0=0, P1=8, P2=0 at exact SHA `48266f813353a7fd78e4e15d72ff6d33c4142827`
 (CI `33435802167`, 7/7 success). Round 12 adds the same-model inverse-order

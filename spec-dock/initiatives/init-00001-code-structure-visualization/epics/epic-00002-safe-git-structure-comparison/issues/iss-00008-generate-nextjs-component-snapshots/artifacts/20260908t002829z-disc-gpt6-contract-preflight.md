@@ -197,10 +197,71 @@ issue active showはiss-00008を確認。src、pyproject.toml、uv.lockのdiff�
 ### 未完了の順序
 
 1. G02: early failureの実観測prefix、package permission→actual decision、usage/fatal/interruptのNextRunDecision全経路。
-2. G07: string-named exportのprivate syntax observation→coverage/diagnostic→実public contract接続。
+2. G07: 下記の限定再検証で閉鎖。全体の固定SHA認定とは区別する。
 3. G09: finding→criterion→vector→producer→validator→testの意味の一致。旧R23 surrogateとfixture-only censusの位置づけ。
 4. G10: canonical Requirement/Design/Planからround追記の競合を除き、現行規則と履歴証拠を分離。
 5. G11: inventoryを参照fixtureと将来buildへ分けたschema/docsをcanonical実装計画に反映。実package検証は将来実装gate。
 6. 全検証、checkpoint commit/push、修復後のclean/pushed固定SHAに対する独立レビュー。
 
 承認済み作業範囲は資料と実装前の契約・参照テストです。src、依存、lockfile、製品adapterは変更していません。
+
+## G07 string exports・R22 privacyの限定閉鎖
+
+基点はpush済み`00abcf9b090aac6e65e10c8d10b6e7967ad6587b`。上記のstring export未修復という
+時点別記録をこの節で更新する。独立レビュアーは同じGPT-6 Max agentであり、外部Strictは利用していない。
+
+G07のprivate occurrenceをactual `next-adapter-response-v1`のclosed branchへ接続した。
+凍結fixtureのraw UTF-8 span/token identity、decoded UTF-16BE name digest、form/safe_identifier、
+resolution/basis/dispositionを保持する。生のstring名はpublic bindingへ変換しない。
+list export、quoted imported name、string-named namespace export、type-only、empty/escaped/control/
+補助平面文字を検証する。文字列内の`type`・`}`・`,`を構文として消費しない。
+
+3経路は次のとおり。以前のcaller booleanだけのR23 helperは閉鎖根拠に使わない。
+
+| 条件 | actual結果 |
+| --- | --- |
+| 明示path targetのownerに該当 | TARGET-001 / unsupported_export / unavailable / exit 3 |
+| 非component/valueまたはtype-onlyの証明あり | UNSUPPORTED-001 / complete / exit 0。既存value/type coverageとinfo countへ計上 |
+| component、可能性あり、未解決 | EXPORT-001 / unavailable / exit 3。private evidence保持、public binding/artifactsなし |
+
+参照分類は閉じたfixture grammarのもので、汎用AST/TypeCheckerの実装証明ではない。
+`docs/contracts/next-export-observations-v1.md`にwire fields、根拠、優先順位、制限、製品経路の将来gateを記載した。
+
+### GPT6-R22（P1）: private envelopeのpublic sidecar漏出
+
+G07の新しい公開bytes検査で発見し、レビュアーが基点00abcf9にも存在する既存の漏れと確認した。
+旧`next_run_decision_projection`がrequest.snapshot()とdecoded response全体をpublic decisionへコピーし、
+domain/root manifestにsource `content_base64`とprivate proofを公開していた。public schemaもこれを許可していた。
+Requirementのsource body/comment/literal/secret禁止、public/private requestの区別、semanticのcontent除外と矛盾する。
+
+修正はpublic projectionとそのschemaに限定し、request/responseを実canonical bytesのSHA-256・byte length・
+canonical flag（requestにはrequest_idも）のdescriptorへ変更した。private request/raw/proofとR18の全bindingは維持する。
+safe semantic recordsやsource-graph frontier全体を一律hash化する変更ではない。
+
+### 検証と独立判断
+
+- 主担当: `-k 'string_export or public_decision_exports'`は37 passed（3.55s）。
+- lexical hardening後の広めのexport/privacy回帰は71 passed（4.63s）。
+- 直前のNext+schema全体は522 passed（63.64s）。最新テスト追加前に収集した実行なので最新版全体の件数とはしない。
+- 独立レビュアー: 修正後36 passed（3.49s）。追加probeで6 source cases × auto/explicit × 4 selectorsの48 publicationと、
+  不正private response × 4 selectorsの4 publicationを確認。private source/proof/string_namesの流出なし。
+- 独立probeでname metadata/解決根拠の協調偽装7件を拒否。request/raw response/proofの内部保持も確認。
+- 新規privacy testの初回4件は必須引数不足のTypeError。既存`_run_context`の利用へ修正後に通過。失敗を隠していない。
+- 独立判断はG07 string exports＋R22に限るP0/P1=0。dirty candidateの限定preflightであり、全体の固定SHA passではない。
+- 全repository実行: 1414 passed, 1 skipped（180.78s）。最後のkeyword/type token hardeningは、この実行の開始後に変更したため、最新版のfocused 71 passedに加えNext+schema全体も再実行し、528 passed（64.82s）を確認した。
+- ruff format/check、mypy139 files、SpecDock validate nodes=10、active iss-00008、git diff --checkを確認。
+- `src`、`pyproject.toml`、`uv.lock`のdiffは空。新規ファイル名はlowercaseのみ。
+
+### G02で独立再確認した未修復P1
+
+同じ基点に対するread-only独立調査で、以下の3件を確認した。関連既存テスト20 passed（0.74s）でも残る。
+
+| ID | 現在の再現 | 必要な修正 |
+| --- | --- | --- |
+| GPT6-R19 | apps/a、apps/bでpackage読取後のmalformed configがcode/stageだけになり、異なる実観測値が同じmarker digestへ戻る（schema-valid） | 早期取得結果に実観測prefixを保持し、decision/publicationへ渡す。未観測suffixのみnull |
+| GPT6-R20 | actual NotApplicableDecisionがmatrixを受けず、applicable/malformedからもNA・exit 0を生成可能。request-bound互換constructorにも矛盾 | actual matrixをsealし、non_applicableだけ許可。malformedは専用failureへ接続 |
+| GPT6-R21 | usage/fatalはSourceAcquisitionDecisionProjectionで止まり、NextRunDecision/finalizerへ接続せず、interruptの実variantもない | 既存RunOutcomeへの対応を含む純粋run-level→publication契約を定義・検証 |
+
+実Git reader、Node非起動の実観測、OS signal/process-group、CLI filesystem/stdout/stderr/exitは実装時gateへ分離できる。
+上の値レベルの矛盾は未実装adapterの証拠不足として除外しない。次はR19–R21、G09、G10、G11を閉じる。
+人間向けHTMLは今回未変更で、既存の8図検証済み資料を保持。製品実装には着手していない。

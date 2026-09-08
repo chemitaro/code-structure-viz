@@ -115,6 +115,7 @@ from tests.contracts.next_reference_validation import (
     expected_export_observations,
     expected_export_reexport_witness,
     expected_export_resolution_witness,
+    expected_string_export_diagnostics,
     export_failure_decision,
     export_reexport_failure_rows,
     finalize_publication_decision,
@@ -173,6 +174,7 @@ from tests.contracts.next_reference_validation import (
     seal_source_acquisition_result,
     source_acquisition_result_decision,
     source_plan_descriptor,
+    string_export_target_resolutions,
     target_completeness_failure,
     target_failure_from_proof,
     validate_adapter_request,
@@ -1749,6 +1751,7 @@ def _response(
         context = canonical_run_context(**run_context)
         assert context == request_context
     response_proof = None if proof is None else copy.deepcopy(proof)
+    automatic_proof = response_proof is None
     if response_proof is None:
         target_failure = target_completeness_failure(model, request_value["targets"])
         if target_failure is not None:
@@ -1783,6 +1786,25 @@ def _response(
                 response_proof["discovered_records"].append(
                     {"collection": "files", "record_id": record["id"], "taints": []}
                 )
+    if automatic_proof and any(
+        row["syntax_kind"] == "string_export" for row in response_proof["export_observations"]
+    ):
+        observations = expected_export_observations(model, request_value["targets"])
+        response_proof["export_observations"] = observations
+        response_proof["target_resolutions"] = string_export_target_resolutions(
+            resolve_target_resolutions(request_value["targets"], model), observations
+        )
+        model["coverage"]["target_completeness"] = [
+            {
+                **row,
+                "status": "complete" if row["status"] == "resolved" else "failed",
+            }
+            for row in response_proof["target_resolutions"]
+        ]
+        model["diagnostics"] = sorted(
+            [*model["diagnostics"], *expected_string_export_diagnostics(observations)],
+            key=canonical_json_bytes,
+        )
     return {
         "schema": "code-structure-viz.next-adapter-response/v1",
         "protocol": "code-structure-viz.next-adapter/v1",
@@ -4337,6 +4359,7 @@ def test_export_scanner_closes_unicode_bom_crlf_comments_and_reexport_forms() ->
         "type_export",
         "reexport",
         "export_all",
+        "string_export",
     }
     assert any(row["role"] == "type" and row["reexport"] for row in rows)
     assert any(row["imported_name"] == "*" and row["star"] for row in rows)
@@ -10537,6 +10560,253 @@ def test_actual_namespace_imports_keep_alias_identity_through_publication(role: 
         changed["members"].sort(key=lambda row: row["id"])
         with pytest.raises(AssertionError):
             validate_model(changed)
+
+
+def _string_export_model(case: str) -> dict[str, Any]:
+    model = _model()
+    fixture = next(
+        row for row in load_export_census_fixture() if row["path"] == f"src/string-{case}.tsx"
+    )
+    file = _file("string", fixture["path"], "program", fixture["content"])
+    file["id"] = recompute_record_id(file)
+    module = {
+        "kind": "module",
+        "project_id": file["project_id"],
+        "path": file["path"],
+        "router_context": "none",
+        "client_entry": False,
+        "derived_roles": [],
+    }
+    module["id"] = recompute_record_id(module)
+    fact = {"kind": "router_context", "owner_id": module["id"], "value": "none"}
+    fact["id"] = recompute_record_id(fact)
+    model["files"].append(file)
+    model["modules"].append(module)
+    model["facts"].append(fact)
+    model["projects"][0]["file_ids"] = sorted([*model["projects"][0]["file_ids"], file["id"]])
+    if case == "component":
+        component = {
+            "kind": "component",
+            "module_id": module["id"],
+            "declaration_key": "View",
+            "recognition_evidence": ["jsx_output"],
+            "props_state": "no_props",
+        }
+        component["id"] = recompute_record_id(component)
+        model["components"].append(component)
+    for collection in COLLECTIONS:
+        model[collection].sort(key=lambda row: row["id"])
+    _refresh_model_counts(model)
+    model["coverage"].update(expected_export_coverage_counts(model))
+    return model
+
+
+@pytest.mark.parametrize("case", ["value", "type", "component", "unknown", "reexport", "namespace"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_actual_string_export_disposition_reaches_every_public_surface(
+    case: str, explicit: bool
+) -> None:
+    model = _string_export_model(case)
+    targets = [f"path:src/string-{case}.tsx"] if explicit else []
+    request = _request(model=model, targets=targets)
+    response = _response(model, request=request)
+    observation = next(
+        row
+        for row in response["proof"]["export_observations"]
+        if row["syntax_kind"] == "string_export"
+    )
+    expected = (
+        "target_failure"
+        if explicit
+        else ("intentional_unsupported" if case in {"value", "type"} else "export_failure")
+    )
+    assert observation["disposition"] == expected
+    assert (
+        observation["resolution"]
+        == {
+            "value": "value",
+            "type": "type",
+            "component": "component",
+            "unknown": "unknown",
+            "reexport": "unknown",
+            "namespace": "unknown",
+        }[case]
+    )
+    assert observation["string_names"]["exported"]["safe_identifier"] == (
+        "Value" if case == "reexport" else None
+    )
+    raw = canonical_json_bytes(response)
+    validate_response_envelope(raw, request)
+    decision = response_boundary_decision(raw, validate_adapter_request(request))
+    assert isinstance(decision, NextValidatedDecision)
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=(raw,))
+    domain, manifest, stdout, artifacts, stderr = _validate_publication_chain(publication)
+    code = {
+        "target_failure": "CSV-NEXT-TARGET-001",
+        "export_failure": "CSV-NEXT-EXPORT-001",
+        "intentional_unsupported": "CSV-NEXT-UNSUPPORTED-001",
+    }[expected]
+    assert any(row["code"] == code for row in domain["diagnostics"])
+    available = expected == "intentional_unsupported"
+    assert domain["payload_available"] is available
+    assert domain["status"] == ("complete" if available else "incomplete")
+    if explicit:
+        assert domain["coverage"]["target_completeness"] == [
+            {
+                "target_key": targets[0],
+                "status": "failed",
+                "record_ids": [],
+                "reason": "unsupported_export",
+            }
+        ]
+    if available:
+        semantic = json.loads(artifacts["next.snapshot.semantic.json"])
+        assert semantic["coverage"] == response["model"]["coverage"]
+        assert semantic["diagnostics"] == response["model"]["diagnostics"]
+        assert any(row["code"] == code and row["count"] == 1 for row in semantic["diagnostics"])
+    else:
+        assert not artifacts
+    public_bytes = (
+        canonical_json_bytes([domain, manifest, stdout]) + stderr + b"".join(artifacts.values())
+    )
+    assert b"opaque-public-name" not in public_bytes
+    assert b"opaque-import-name" not in public_bytes
+    assert b"string_names" not in public_bytes
+
+
+@pytest.mark.parametrize(
+    "change", ["omit", "span", "name", "disposition", "basis", "count", "diagnostic", "extra"]
+)
+def test_actual_string_export_rejects_coordinated_proof_mutations(change: str) -> None:
+    model = _string_export_model("value")
+    request = _request(model=model)
+    response = _response(model, request=request)
+    row = next(
+        item
+        for item in response["proof"]["export_observations"]
+        if item["syntax_kind"] == "string_export"
+    )
+    if change == "omit":
+        response["proof"]["export_observations"].remove(row)
+        response["model"]["diagnostics"] = []
+        response["model"]["coverage"]["non_component_value_export_count"] -= 1
+    elif change == "span":
+        row["byte_end"] -= 1
+    elif change == "name":
+        row["string_names"]["exported"]["decoded_sha256"] = "f" * 64
+    elif change == "disposition":
+        row["disposition"] = "export_failure"
+    elif change == "basis":
+        row["resolution_basis"] = "open_world"
+    elif change == "count":
+        response["model"]["coverage"]["non_component_value_export_count"] -= 1
+    elif change == "diagnostic":
+        response["model"]["diagnostics"] = []
+    else:
+        row["string_names"]["exported"]["raw_name"] = "opaque-public-name"
+    response["proof"]["export_observations"].sort(key=canonical_json_bytes)
+    response["model_digest"] = digest(response["model"])
+    with pytest.raises((AssertionError, ValidationError)):
+        validate_response_envelope(canonical_json_bytes(response), request)
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_public_decision_exports_descriptors_never_private_request_or_proof(
+    selector: str | None,
+) -> None:
+    request = _request(
+        model=_string_export_model("value"),
+        run_context=_run_context(selector=selector),
+    )
+    raw = canonical_json_bytes(_response(_string_export_model("value"), request=request))
+    decision = response_boundary_decision(raw, validate_adapter_request(request))
+    assert isinstance(decision, NextValidatedDecision)
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=(raw,))
+    domain, manifest, stdout, artifacts, stderr = _validate_publication_chain(publication)
+    wire = domain["decision"]
+    assert wire["request"] == {
+        "request_id": request["request_id"],
+        "raw_sha256": hashlib.sha256(canonical_json_bytes(request)).hexdigest(),
+        "byte_length": len(canonical_json_bytes(request)),
+        "canonical_json": True,
+    }
+    assert wire["response"] == {
+        "raw_sha256": hashlib.sha256(raw).hexdigest(),
+        "byte_length": len(raw),
+        "canonical_json": True,
+    }
+    _validator("next-run-decision-v1.schema.json").validate(wire)
+    public = (
+        canonical_json_bytes([domain, manifest, stdout]) + stderr + b"".join(artifacts.values())
+    )
+    for key in (
+        "content_base64",
+        "validated_response",
+        "export_observations",
+        "discovered_records",
+        "string_names",
+    ):
+        assert f'"{key}"'.encode() not in public
+    for file in request["files"]:
+        if file["content_base64"]:
+            assert file["content_base64"].encode() not in public
+    for field in ("request", "response"):
+        changed = copy.deepcopy(wire)
+        changed[field]["raw_sha256"] = "f" * 64
+        with pytest.raises(AssertionError):
+            validate_next_run_decision_projection(changed, decision)
+        changed = copy.deepcopy(wire)
+        changed[field]["private_body"] = request if field == "request" else json.loads(raw)
+        with pytest.raises(ValidationError):
+            _validator("next-run-decision-v1.schema.json").validate(changed)
+
+
+@pytest.mark.parametrize(
+    "spelling,decoded",
+    [
+        (r'"a\nline"', "a\nline"),
+        (r'"\0"', "\0"),
+        (r'"\u0061"', "a"),
+        (r'"\u{1F600}"', "😀"),
+        (r'"\uD83D\uDE00"', "😀"),
+        (r'"\uD800"', "\ud800"),
+        ('"}"', "}"),
+        ('","', ","),
+        ('"type"', "type"),
+        ('""', ""),
+        ('"a\\\r\nb"', "ab"),
+    ],
+)
+def test_string_export_scanner_keeps_raw_span_and_decoded_name_digest(
+    spelling: str, decoded: str
+) -> None:
+    content = f"const value = 1;\nexport {{ value as {spelling} }};\n".encode()
+    row = _scan_export_file("src/string-value.tsx", content)[0]
+    assert row["syntax_kind"] == "string_export"
+    assert content[row["byte_start"] : row["byte_end"]] == f"value as {spelling}".encode()
+    assert (
+        row["string_names"]["exported"]["decoded_sha256"]
+        == hashlib.sha256(decoded.encode("utf-16-be", "surrogatepass")).hexdigest()
+    )
+    assert row["exported_name"] is None
+    canonical_json_bytes(row)
+
+
+def test_string_export_scanner_does_not_consume_quoted_import_as_syntax() -> None:
+    for name in ("type", "}", ",", "from"):
+        row = _scan_export_file(
+            "src/string-reexport.tsx",
+            f'export {{ "{name}" as "opaque-public-name" }} from "./Button";'.encode(),
+        )[0]
+        assert row["role"] == "value"
+        assert row["string_names"]["imported"]["form"] == "string"
+        assert row["source_specifier"] == "./Button"
+    assert _scan_export_file("src/string-value.tsx", b'"export";') == []
+    row = _scan_export_file(
+        "src/string-value.tsx", b'const type = 1; export { type as "opaque-public-name" };'
+    )[0]
+    assert row["role"] == "value"
+    assert row["string_names"]["imported"]["safe_identifier"] == "type"
 
 
 def test_canonical_digest_normalizes_unicode_before_hashing() -> None:

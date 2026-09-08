@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:code-structure-viz:schema:next-run-decision-v1",
   "title": "CodeStructureViz Next run decision v1",
-  "description": "The closed semantic decision at the Next trust boundary. Every later surface consumes this decision; null fields mean that the corresponding observation did not occur.",
+  "description": "Public projection of the closed semantic decision. Request and response are digest-only descriptors: source bytes, validated response bodies, and private proof never cross this surface. Null means the corresponding observation did not occur.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "version", "kind", "outcome", "request_independent", "payload_available", "exit_code", "provenance", "context", "request", "response"],
@@ -16,7 +16,7 @@
     "exit_code": {"enum": [0, 1, 2, 3, 130]},
     "provenance": {"$ref": "urn:code-structure-viz:schema:next-provenance-v1"},
     "context": {"$ref": "#/$defs/context"},
-    "request": {"oneOf": [{"$ref": "urn:code-structure-viz:schema:next-adapter-request-v1"}, {"type": "null"}]},
+    "request": {"oneOf": [{"$ref": "#/$defs/request_descriptor"}, {"type": "null"}]},
     "response": {"oneOf": [{"$ref": "#/$defs/validated_response"}, {"type": "null"}]}
   },
   "oneOf": [
@@ -28,7 +28,7 @@
         "payload_available": {"const": true},
         "exit_code": {"enum": [0, 3]},
         "context": {"$ref": "#/$defs/bound_context"},
-        "request": {"$ref": "urn:code-structure-viz:schema:next-adapter-request-v1"},
+        "request": {"$ref": "#/$defs/request_descriptor"},
         "response": {"$ref": "#/$defs/validated_response"},
         "provenance": {"properties": {"kind": {"const": "request_bound_success"}}}
       }
@@ -41,7 +41,7 @@
         "payload_available": {"const": false},
         "exit_code": {"const": 3},
         "context": {"$ref": "#/$defs/bound_context"},
-        "request": {"$ref": "urn:code-structure-viz:schema:next-adapter-request-v1"},
+        "request": {"$ref": "#/$defs/request_descriptor"},
         "response": {"oneOf": [{"$ref": "#/$defs/validated_response"}, {"type": "null"}]},
         "provenance": {"properties": {"kind": {"const": "request_bound_failure"}}}
       }
@@ -130,12 +130,22 @@
         {"properties": {"request_id": {"const": null}, "source_plan_digest": {"const": null}, "source_view_fingerprint": {"const": null}, "compatibility_id": {"const": null}, "process_observation_digest": {"const": null}}}
       ]
     },
+    "request_descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "raw_sha256", "byte_length", "canonical_json"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/digest"},
+        "raw_sha256": {"$ref": "#/$defs/digest"},
+        "byte_length": {"type": "integer", "minimum": 1},
+        "canonical_json": {"const": true}
+      }
+    },
     "validated_response": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["validated_response", "raw_sha256", "byte_length", "canonical_json"],
+      "required": ["raw_sha256", "byte_length", "canonical_json"],
       "properties": {
-        "validated_response": {"$ref": "urn:code-structure-viz:schema:next-adapter-response-v1"},
         "raw_sha256": {"$ref": "#/$defs/digest"},
         "byte_length": {"type": "integer", "minimum": 1},
         "canonical_json": {"const": true}

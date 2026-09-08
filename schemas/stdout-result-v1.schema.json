@@ -270,7 +270,7 @@
       "required": ["target_key", "reason"],
       "properties": {
         "target_key": {"$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"},
-        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint"]}
+        "reason": {"enum": ["missing", "component_only", "duplicate", "out_of_scope", "non_program", "control_context", "project_ambiguity", "selected_taint", "unsupported_export"]}
       }
     }
   }
