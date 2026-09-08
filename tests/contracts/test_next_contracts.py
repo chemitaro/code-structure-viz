@@ -124,6 +124,7 @@ from tests.contracts.next_reference_validation import (
     export_failure_decision,
     export_reexport_failure_rows,
     finalize_publication_decision,
+    historical_runtime_vector_registry,
     identifier_classification_digest,
     internal_entity_count,
     is_binding_identifier,
@@ -11963,6 +11964,7 @@ def test_round22_runtime_registry_executes_vectors_and_named_validators() -> Non
     )
     records = fixture["runtime_vector_registry"]
     assert records == runtime_vector_registry()
+    assert all(record["criterion"].startswith("round22.") for record in records)
     known_vector_ids = set(fixture["positive"]) | set(fixture["negative"])
     validate_runtime_vector_registry(records, known_vector_ids=known_vector_ids)
     assert execute_runtime_vector_registry(records, known_vector_ids=known_vector_ids) == {
@@ -12322,12 +12324,19 @@ def test_round23_rg_12_coverage_index_is_bidirectional_and_substantive() -> None
     fixture = json.loads(
         (ROOT / "tests" / "fixtures" / "next_contract_vectors.json").read_text(encoding="utf-8")
     )
-    records = fixture["runtime_vector_registry"]
+    records = fixture["historical_runtime_vector_registry"]
+    assert records == historical_runtime_vector_registry()
     known_vector_ids = set(fixture["positive"]) | set(fixture["negative"])
-    validate_runtime_vector_registry(records, known_vector_ids=known_vector_ids)
-    assert execute_runtime_vector_registry(records, known_vector_ids=known_vector_ids) == {
-        record["vector_id"] for record in records
-    }
+    validate_runtime_vector_registry(
+        records,
+        known_vector_ids=known_vector_ids,
+        authority_registry=historical_runtime_vector_registry(),
+    )
+    assert execute_runtime_vector_registry(
+        records,
+        known_vector_ids=known_vector_ids,
+        authority_registry=historical_runtime_vector_registry(),
+    ) == {record["vector_id"] for record in records}
     declared_tests = set(
         re.findall(
             r"^def (test_[A-Za-z0-9_]+)\(", Path(__file__).read_text(encoding="utf-8"), re.MULTILINE
@@ -12338,7 +12347,13 @@ def test_round23_rg_12_coverage_index_is_bidirectional_and_substantive() -> None
         for key, value in fixture["criterion_evidence"].items()
         if key.startswith("round23.")
     }
-    validate_r23_fixture_evidence_map(round23_evidence, records, test_names=declared_tests)
+    validate_r23_fixture_evidence_map(
+        round23_evidence,
+        records,
+        test_names=declared_tests,
+        positive_vector_ids=fixture["positive"],
+        negative_vector_ids=fixture["negative"],
+    )
     evidence_mutation = copy.deepcopy(round23_evidence)
     evidence_mutation["round23.rg-01"]["negative_vectors"] = ["round23-runtime-config-mutation"]
     with pytest.raises(AssertionError):
@@ -12349,6 +12364,30 @@ def test_round23_rg_12_coverage_index_is_bidirectional_and_substantive() -> None
     ]
     with pytest.raises(AssertionError):
         validate_r23_fixture_evidence_map(evidence_test_swap, records, test_names=declared_tests)
+    evidence_duplicate = copy.deepcopy(round23_evidence)
+    evidence_duplicate["round23.rg-02"]["positive_vectors"].append(
+        evidence_duplicate["round23.rg-02"]["positive_vectors"][0]
+    )
+    with pytest.raises(AssertionError):
+        validate_r23_fixture_evidence_map(
+            evidence_duplicate,
+            records,
+            test_names=declared_tests,
+            positive_vector_ids=fixture["positive"],
+            negative_vector_ids=fixture["negative"],
+        )
+    misplaced_positive = [
+        vector_id for vector_id in fixture["positive"] if vector_id != "round23-runtime-config"
+    ]
+    misplaced_negative = [*fixture["negative"], "round23-runtime-config"]
+    with pytest.raises(AssertionError):
+        validate_r23_fixture_evidence_map(
+            round23_evidence,
+            records,
+            test_names=declared_tests,
+            positive_vector_ids=misplaced_positive,
+            negative_vector_ids=misplaced_negative,
+        )
 
 
 def test_round23_rg_13_decision_is_the_only_publication_input() -> None:

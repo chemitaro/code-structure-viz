@@ -17,6 +17,13 @@
 
 The Strict packet is source-native review evidence. The analysis log is advisory triage/route evidence. Local tests and this artifact are remediation evidence; none of them substitute for a fresh exact-SHA Strict pass.
 
+Historical registry note (2026-09-08): the Round23 registry described below is retained as
+non-normative historical evidence. It is no longer part of the current `runtime_vector_registry`;
+the fixture stores it under `historical_runtime_vector_registry`, while current-v1 executable
+authority is limited to the schema-bound Round22 reference registry. Earlier wording that called
+the 36 Round23 records “current” describes the prior checkpoint and must not be used as an
+implementation or current-schema claim.
+
 ## Adopted decisions
 
 The parent explicitly adopted these seven decisions under the zero-base best-practice mandate; they are canonical requirements, not candidate text:

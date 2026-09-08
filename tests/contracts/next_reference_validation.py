@@ -16254,6 +16254,12 @@ def runtime_vector_registry() -> list[dict[str, Any]]:
     return copy.deepcopy(list(RUNTIME_VECTOR_REGISTRY))
 
 
+def historical_runtime_vector_registry() -> list[dict[str, Any]]:
+    """Return the non-normative Round23 registry for historical evidence only."""
+
+    return copy.deepcopy(list(HISTORICAL_R23_RUNTIME_VECTOR_REGISTRY))
+
+
 def _runtime_provenance_value(*, field: str = "source_plan") -> dict[str, Any]:
     return _decision_provenance(
         kind="request_independent",
@@ -16539,10 +16545,16 @@ def validate_runtime_vector_registry(
     records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
     *,
     known_vector_ids: set[str],
+    authority_registry: Iterable[Mapping[str, Any]] | None = None,
 ) -> None:
     """Validate registry identity, polarity pairs, and callable/validator names."""
 
-    expected = {item["vector_id"]: item for item in RUNTIME_VECTOR_REGISTRY}
+    expected_records = (
+        list(RUNTIME_VECTOR_REGISTRY)
+        if authority_registry is None
+        else [dict(item) for item in authority_registry]
+    )
+    expected = {item["vector_id"]: item for item in expected_records}
     assert len(records) == len(expected)
     seen: set[str] = set()
     by_criterion: dict[str, set[str]] = {}
@@ -16575,10 +16587,20 @@ def execute_runtime_vector_registry(
     records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
     *,
     known_vector_ids: set[str],
+    authority_registry: Iterable[Mapping[str, Any]] | None = None,
 ) -> set[str]:
     """Resolve and execute every registered vector and its named validator."""
 
-    validate_runtime_vector_registry(records, known_vector_ids=known_vector_ids)
+    validate_runtime_vector_registry(
+        records,
+        known_vector_ids=known_vector_ids,
+        authority_registry=authority_registry,
+    )
+    expected_records = (
+        list(RUNTIME_VECTOR_REGISTRY)
+        if authority_registry is None
+        else [dict(item) for item in authority_registry]
+    )
     executed: set[str] = set()
     for record in records:
         producer = globals().get(record["callable"])
@@ -16593,7 +16615,7 @@ def execute_runtime_vector_registry(
         else:
             assert record["expected_valid"] is True, record["vector_id"]
         executed.add(record["vector_id"])
-    assert executed == {item["vector_id"] for item in RUNTIME_VECTOR_REGISTRY}
+    assert executed == {item["vector_id"] for item in expected_records}
     return executed
 
 
@@ -18423,7 +18445,7 @@ def runtime_vector_round23_namespace_mutation() -> dict[str, Any]:
 
 def _r23_registry_coverage_entries() -> list[dict[str, Any]]:
     records_by_criterion: dict[str, list[dict[str, Any]]] = {}
-    for record in R23_RUNTIME_VECTOR_REGISTRY:
+    for record in HISTORICAL_R23_RUNTIME_VECTOR_REGISTRY:
         records_by_criterion.setdefault(record["criterion"], []).append(dict(record))
     entries: list[dict[str, Any]] = []
     for criterion in sorted(records_by_criterion):
@@ -18454,7 +18476,7 @@ def runtime_vector_round23_coverage() -> list[dict[str, Any]]:
 def validate_r23_coverage_registry(value: Iterable[Mapping[str, Any]]) -> None:
     validate_r23_executable_coverage(
         value,
-        R23_RUNTIME_VECTOR_REGISTRY,
+        HISTORICAL_R23_RUNTIME_VECTOR_REGISTRY,
         test_names=set(R23_COVERAGE_TEST_NAMES.values()),
     )
 
@@ -18534,7 +18556,7 @@ def validate_r23_graph_digest_registry(value: Mapping[str, Any]) -> None:
     validate_r23_source_graph(value)
 
 
-R23_RUNTIME_VECTOR_REGISTRY: tuple[dict[str, Any], ...] = (
+HISTORICAL_R23_RUNTIME_VECTOR_REGISTRY: tuple[dict[str, Any], ...] = (
     {
         "vector_id": "round23-runtime-applicability",
         "criterion": "round23.rg-01",
@@ -18825,10 +18847,10 @@ R23_RUNTIME_VECTOR_REGISTRY: tuple[dict[str, Any], ...] = (
     },
 )
 
-# Keep the historical Round22 records intact while making the current R23
-# registry the one executable coverage authority for all newly materialized
-# criteria.
-RUNTIME_VECTOR_REGISTRY = RUNTIME_VECTOR_REGISTRY + R23_RUNTIME_VECTOR_REGISTRY
+# Round23 records are retained as historical evidence and are intentionally
+# excluded from the current registry.  The current authority must resolve to
+# the current-v1 reference chain and its public schemas; the old R23 helpers
+# use a superseded round-specific model and are not an implementation claim.
 
 
 def validate_r23_fixture_evidence_map(
@@ -18836,6 +18858,8 @@ def validate_r23_fixture_evidence_map(
     runtime_records: Iterable[Mapping[str, Any]],
     *,
     test_names: set[str],
+    positive_vector_ids: Iterable[str] | None = None,
+    negative_vector_ids: Iterable[str] | None = None,
 ) -> None:
     """Cross-check fixture evidence against the executable registry.
 
@@ -18848,6 +18872,15 @@ def validate_r23_fixture_evidence_map(
         for record in runtime_records
         if str(record.get("criterion", "")).startswith("round23.")
     ]
+    if positive_vector_ids is not None or negative_vector_ids is not None:
+        assert positive_vector_ids is not None and negative_vector_ids is not None
+        positive_catalog = list(positive_vector_ids)
+        negative_catalog = list(negative_vector_ids)
+        assert len(positive_catalog) == len(set(positive_catalog))
+        assert len(negative_catalog) == len(set(negative_catalog))
+        assert not set(positive_catalog) & set(negative_catalog)
+    else:
+        positive_catalog = negative_catalog = []
     by_criterion: dict[str, list[dict[str, Any]]] = {}
     for record in records:
         by_criterion.setdefault(record["criterion"], []).append(record)
@@ -18866,9 +18899,26 @@ def validate_r23_fixture_evidence_map(
         negatives = {
             record["vector_id"] for record in criterion_records if record["polarity"] == "negative"
         }
+        assert isinstance(row["positive_vectors"], list)
+        assert isinstance(row["negative_vectors"], list)
+        assert len(row["positive_vectors"]) == len(set(row["positive_vectors"])) == 1
+        assert len(row["negative_vectors"]) == len(set(row["negative_vectors"])) == 1
         assert set(row["positive_vectors"]) == positives
         assert set(row["negative_vectors"]) == negatives
+        if positive_catalog or negative_catalog:
+            assert set(row["positive_vectors"]) <= set(positive_catalog)
+            assert set(row["negative_vectors"]) <= set(negative_catalog)
         validators = {record["validator"] for record in criterion_records}
         assert validators == {row["validator"]}
         assert all(record["callable"] in globals() for record in criterion_records)
         assert len(criterion_records) == 2
+    if positive_catalog or negative_catalog:
+        expected_ids = {record["vector_id"] for record in records}
+        expected_positive = {
+            record["vector_id"] for record in records if record["polarity"] == "positive"
+        }
+        expected_negative = {
+            record["vector_id"] for record in records if record["polarity"] == "negative"
+        }
+        assert set(positive_catalog) & expected_ids == expected_positive
+        assert set(negative_catalog) & expected_ids == expected_negative

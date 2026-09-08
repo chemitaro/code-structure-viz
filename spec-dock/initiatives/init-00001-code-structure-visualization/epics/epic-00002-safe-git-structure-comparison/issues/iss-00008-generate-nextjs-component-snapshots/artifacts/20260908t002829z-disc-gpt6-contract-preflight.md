@@ -387,3 +387,29 @@ criterion→vector→producer→validator→testの実体を検証せず、fixtu
 1 skipped、ruff check、ruff format 163 files、mypy 139 files、SpecDock validate nodes=10。これはR23/G09の
 限定的なローカル契約修復であり、R21実OS/process、G10 canonical R/D/P整理、G11 package計画、全体の
 fixed-SHA Strict reviewは未完了。製品adapter/CLI/依存/lockfileは変更していない。
+
+### G09 independent review follow-up (2026-09-08)
+
+固定SHA `354fe76cd94f4a2832955daf86fa40526abad2af` に対する独立GPT-6 Maxレビューは、
+metadataの双方向検査自体は通過（P0=0）したが、current registryに旧Round23 surrogateを
+認定しているP1を検出した。RG-02/05/06/08のpositive producerは現行
+`next-config-v1`、`next-provenance-v1`、`next-run-decision-v1`、
+`next-publication-decision-v1`へ適合せず、publication mappingは実際の
+`finalize_publication_decision`を呼ばなかった。これはproduction adapterの不具合ではなく、
+currentとhistoricalのregistry境界が誤っていた証拠である。
+
+最小修復として旧Round23 36レコードを`historical_runtime_vector_registry`へ移し、
+`runtime_vector_registry`を現行v1 reference chainを表すRound22レコードだけに限定した。
+Round23のsubstantive testsとcoverage evidenceは歴史的registryを明示的なauthorityとして
+実行し、current v1の実装可能性を主張しない。旧round専用modelを第二のcurrent authorityへ
+修理・拡張することは行わない。
+
+同レビューのP2指摘（fixture evidenceのvector重複、およびpositive/negative catalogの
+誤配置）も、配列の一意性、catalog相互排他、registry polarityとの一致を検証することで修復した。
+追加negative回帰は両方のmutationを拒否する。
+
+検証: G09 focused `2 passed`、contracts/schema `573 passed`、全repository `1459 passed, 1 skipped`
+（174.70秒）、current registry 16 records、historical Round23 registry 36 records、ruff
+check/format、mypy 139 files、SpecDock validate nodes=10、git diff hygieneを修復後に再実行して
+通過した。独立レビューで残ったP1/P2はこの修正範囲では解消したが、R21実OS/process、G10
+canonical R/D/P、G11 package計画、全体fixed-SHA review、production adapter実装は未完了である。

@@ -749,135 +749,7 @@
       "validator": "validate_r23_decision_registry"
     }
   },
-  "runtime_vector_registry": [
-    {
-      "vector_id": "round22-runtime-applicability",
-      "criterion": "round22.rg-01",
-      "polarity": "positive",
-      "callable": "runtime_vector_round22_applicability",
-      "validator": "validate_package_applicability_projection",
-      "expected_valid": true
-    },
-    {
-      "vector_id": "round22-runtime-applicability-mutation",
-      "criterion": "round22.rg-01",
-      "polarity": "negative",
-      "callable": "runtime_vector_round22_applicability_mutation",
-      "validator": "validate_package_applicability_projection",
-      "expected_valid": false
-    },
-    {
-      "vector_id": "round22-runtime-config-provenance",
-      "criterion": "round22.rg-02",
-      "polarity": "positive",
-      "callable": "runtime_vector_round22_config_provenance",
-      "validator": "validate_stage_dependent_provenance",
-      "expected_valid": true
-    },
-    {
-      "vector_id": "round22-runtime-config-provenance-mutation",
-      "criterion": "round22.rg-02",
-      "polarity": "negative",
-      "callable": "runtime_vector_round22_config_provenance_mutation",
-      "validator": "validate_stage_dependent_provenance",
-      "expected_valid": false
-    },
-    {
-      "vector_id": "round22-runtime-source-graph",
-      "criterion": "round22.rg-03",
-      "polarity": "positive",
-      "callable": "runtime_vector_round22_source_graph",
-      "validator": "validate_source_graph_projection",
-      "expected_valid": true
-    },
-    {
-      "vector_id": "round22-runtime-source-graph-mutation",
-      "criterion": "round22.rg-03",
-      "polarity": "negative",
-      "callable": "runtime_vector_round22_source_graph_mutation",
-      "validator": "validate_source_graph_projection",
-      "expected_valid": false
-    },
-    {
-      "vector_id": "round22-runtime-process-observation",
-      "criterion": "round22.rg-04",
-      "polarity": "positive",
-      "callable": "runtime_vector_round22_process_observation",
-      "validator": "validate_process_launch_observation",
-      "expected_valid": true
-    },
-    {
-      "vector_id": "round22-runtime-process-observation-mutation",
-      "criterion": "round22.rg-04",
-      "polarity": "negative",
-      "callable": "runtime_vector_round22_process_observation_mutation",
-      "validator": "validate_process_launch_observation",
-      "expected_valid": false
-    },
-    {
-      "vector_id": "round22-runtime-provenance-value",
-      "criterion": "round22.rg-05",
-      "polarity": "positive",
-      "callable": "runtime_vector_round22_provenance_value",
-      "validator": "validate_stage_dependent_provenance",
-      "expected_valid": true
-    },
-    {
-      "vector_id": "round22-runtime-provenance-value-mutation",
-      "criterion": "round22.rg-05",
-      "polarity": "negative",
-      "callable": "runtime_vector_round22_provenance_value_mutation",
-      "validator": "validate_stage_dependent_provenance",
-      "expected_valid": false
-    },
-    {
-      "vector_id": "round22-runtime-integrity",
-      "criterion": "round22.rg-06",
-      "polarity": "positive",
-      "callable": "runtime_vector_round22_integrity",
-      "validator": "validate_source_acquisition_result_projection",
-      "expected_valid": true
-    },
-    {
-      "vector_id": "round22-runtime-integrity-mutation",
-      "criterion": "round22.rg-06",
-      "polarity": "negative",
-      "callable": "runtime_vector_round22_integrity_mutation",
-      "validator": "validate_source_acquisition_result_projection",
-      "expected_valid": false
-    },
-    {
-      "vector_id": "round22-runtime-project-overlap",
-      "criterion": "round22.rg-07",
-      "polarity": "positive",
-      "callable": "runtime_vector_round22_project_overlap",
-      "validator": "validate_source_acquisition_result_projection",
-      "expected_valid": true
-    },
-    {
-      "vector_id": "round22-runtime-project-overlap-mutation",
-      "criterion": "round22.rg-07",
-      "polarity": "negative",
-      "callable": "runtime_vector_round22_project_overlap_mutation",
-      "validator": "validate_source_acquisition_result_projection",
-      "expected_valid": false
-    },
-    {
-      "vector_id": "round22-runtime-selected-copy",
-      "criterion": "round22.rg-14",
-      "polarity": "positive",
-      "callable": "runtime_vector_round22_selected_copy",
-      "validator": "validate_selected_stdout_measurement",
-      "expected_valid": true
-    },
-    {
-      "vector_id": "round22-runtime-selected-copy-mutation",
-      "criterion": "round22.rg-14",
-      "polarity": "negative",
-      "callable": "runtime_vector_round22_selected_copy_mutation",
-      "validator": "validate_selected_stdout_measurement",
-      "expected_valid": false
-    },
+  "historical_runtime_vector_registry": [
     {
       "vector_id": "round23-runtime-applicability",
       "criterion": "round23.rg-01",
@@ -1164,6 +1036,136 @@
       "polarity": "negative",
       "callable": "runtime_vector_round23_current_authority_mutation",
       "validator": "validate_r23_decision_registry",
+      "expected_valid": false
+    }
+  ],
+  "runtime_vector_registry": [
+    {
+      "vector_id": "round22-runtime-applicability",
+      "criterion": "round22.rg-01",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_applicability",
+      "validator": "validate_package_applicability_projection",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-applicability-mutation",
+      "criterion": "round22.rg-01",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_applicability_mutation",
+      "validator": "validate_package_applicability_projection",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-config-provenance",
+      "criterion": "round22.rg-02",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_config_provenance",
+      "validator": "validate_stage_dependent_provenance",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-config-provenance-mutation",
+      "criterion": "round22.rg-02",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_config_provenance_mutation",
+      "validator": "validate_stage_dependent_provenance",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-source-graph",
+      "criterion": "round22.rg-03",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_source_graph",
+      "validator": "validate_source_graph_projection",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-source-graph-mutation",
+      "criterion": "round22.rg-03",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_source_graph_mutation",
+      "validator": "validate_source_graph_projection",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-process-observation",
+      "criterion": "round22.rg-04",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_process_observation",
+      "validator": "validate_process_launch_observation",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-process-observation-mutation",
+      "criterion": "round22.rg-04",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_process_observation_mutation",
+      "validator": "validate_process_launch_observation",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-provenance-value",
+      "criterion": "round22.rg-05",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_provenance_value",
+      "validator": "validate_stage_dependent_provenance",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-provenance-value-mutation",
+      "criterion": "round22.rg-05",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_provenance_value_mutation",
+      "validator": "validate_stage_dependent_provenance",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-integrity",
+      "criterion": "round22.rg-06",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_integrity",
+      "validator": "validate_source_acquisition_result_projection",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-integrity-mutation",
+      "criterion": "round22.rg-06",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_integrity_mutation",
+      "validator": "validate_source_acquisition_result_projection",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-project-overlap",
+      "criterion": "round22.rg-07",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_project_overlap",
+      "validator": "validate_source_acquisition_result_projection",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-project-overlap-mutation",
+      "criterion": "round22.rg-07",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_project_overlap_mutation",
+      "validator": "validate_source_acquisition_result_projection",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-selected-copy",
+      "criterion": "round22.rg-14",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_selected_copy",
+      "validator": "validate_selected_stdout_measurement",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-selected-copy-mutation",
+      "criterion": "round22.rg-14",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_selected_copy_mutation",
+      "validator": "validate_selected_stdout_measurement",
       "expected_valid": false
     }
   ]
