@@ -16553,17 +16553,16 @@ def _runtime_registry_records(
     raise AssertionError(f"unknown runtime registry authority: {authority}")
 
 
-def validate_runtime_vector_registry(
+def _validate_runtime_vector_registry_snapshot(
     records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
     *,
     known_vector_ids: set[str],
-    authority: Literal["current", "historical_r23"] = "current",
+    expected_records: list[dict[str, Any]],
     positive_vector_ids: Iterable[str] | None = None,
     negative_vector_ids: Iterable[str] | None = None,
 ) -> None:
     """Validate registry identity, polarity pairs, and callable/validator names."""
 
-    expected_records = _runtime_registry_records(authority)
     expected = {item["vector_id"]: item for item in expected_records}
     catalogs_provided = positive_vector_ids is not None or negative_vector_ids is not None
     if catalogs_provided:
@@ -16611,6 +16610,25 @@ def validate_runtime_vector_registry(
         assert set(negative_catalog) & expected_ids == expected_negative
 
 
+def validate_runtime_vector_registry(
+    records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    *,
+    known_vector_ids: set[str],
+    authority: Literal["current", "historical_r23"] = "current",
+    positive_vector_ids: Iterable[str] | None = None,
+    negative_vector_ids: Iterable[str] | None = None,
+) -> None:
+    """Validate one of the two closed runtime registry authorities."""
+
+    _validate_runtime_vector_registry_snapshot(
+        records,
+        known_vector_ids=known_vector_ids,
+        expected_records=_runtime_registry_records(authority),
+        positive_vector_ids=positive_vector_ids,
+        negative_vector_ids=negative_vector_ids,
+    )
+
+
 def execute_runtime_vector_registry(
     records: list[dict[str, Any]] | tuple[dict[str, Any], ...],
     *,
@@ -16621,14 +16639,14 @@ def execute_runtime_vector_registry(
 ) -> set[str]:
     """Resolve and execute every registered vector and its named validator."""
 
-    validate_runtime_vector_registry(
+    expected_records = _runtime_registry_records(authority)
+    _validate_runtime_vector_registry_snapshot(
         records,
         known_vector_ids=known_vector_ids,
-        authority=authority,
+        expected_records=expected_records,
         positive_vector_ids=positive_vector_ids,
         negative_vector_ids=negative_vector_ids,
     )
-    expected_records = _runtime_registry_records(authority)
     executed: set[str] = set()
     for record in records:
         producer = globals().get(record["callable"])

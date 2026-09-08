@@ -10,6 +10,7 @@ from dataclasses import FrozenInstanceError, replace
 from itertools import combinations
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 from jsonschema import ValidationError  # type: ignore[import-untyped]
@@ -11972,12 +11973,17 @@ def test_round22_runtime_registry_executes_vectors_and_named_validators() -> Non
         positive_vector_ids=fixture["positive"],
         negative_vector_ids=fixture["negative"],
     )
-    assert execute_runtime_vector_registry(
-        records,
-        known_vector_ids=known_vector_ids,
-        positive_vector_ids=fixture["positive"],
-        negative_vector_ids=fixture["negative"],
-    ) == {record["vector_id"] for record in records}
+    with patch(
+        "tests.contracts.next_reference_validation._runtime_registry_records",
+        wraps=sys.modules["tests.contracts.next_reference_validation"]._runtime_registry_records,
+    ) as resolver:
+        assert execute_runtime_vector_registry(
+            records,
+            known_vector_ids=known_vector_ids,
+            positive_vector_ids=fixture["positive"],
+            negative_vector_ids=fixture["negative"],
+        ) == {record["vector_id"] for record in records}
+    assert resolver.call_count == 1
 
     missing = records[:-1]
     with pytest.raises(AssertionError):

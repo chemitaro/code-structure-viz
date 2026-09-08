@@ -431,3 +431,16 @@ current/historical共通のfixture catalog検査は、引数が`None`かどう�
 ruff check/format、mypy 139 files、SpecDock validate nodes=10、diff hygiene pass。これは
 次の固定SHAレビューへ渡すreference-contract候補であり、外部Strict pass、production adapter、
 実OS/process、G10/G11、Issue完了を意味しない。
+
+### G09 single-snapshot closure (2026-09-08)
+
+固定SHA `98c3719` の再レビューで、authority selector自体は閉じているものの、validatorと
+executorがresolverを各1回呼ぶため「同一snapshotを一度だけ」の要件が未達と判定された。
+private `_validate_runtime_vector_registry_snapshot` を分離し、executorが一度だけ取得した
+current/historical snapshotを検証・producer実行・最終集合比較へ共有する構造へ修正した。
+Round22 focused regressionはresolver呼出し回数が1であることを固定する。
+
+修復後の証拠は focused G09 `2 passed`、全repository `1459 passed, 1 skipped`（193.30秒）、
+ruff check/format、mypy 139 files、SpecDock validate nodes=10、diff hygiene pass。修復候補は
+次の固定SHAで独立レビューを再実施する。P0/P1の未解決、production adapter、実OS/process、
+G10/G11、Issue完了は主張しない。
