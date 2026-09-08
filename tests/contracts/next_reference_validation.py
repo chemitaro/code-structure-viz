@@ -544,6 +544,7 @@ class NextPublicationContext:
             assert preimage["protocol"] is None
             assert preimage["process_launch_descriptor_digest"] is None
             assert preimage["process_launch_observation_digest"] == digest(process_observation)
+            assert preimage["observation_provenance_digest"] == digest(provenance)
             assert preimage["targets"] == self.public_next_config["targets"]
             assert preimage["formats"] == self.run_context["requested_formats"]
             assert preimage["stdout_selector"] == self.run_context["stdout_selector"]
@@ -1416,6 +1417,8 @@ class PreResponseFailureDecision:
         assert context is not None
         assert context.run_context == self.run_context
         assert tuple(context.source_failure_ledger) == tuple(decision_context.source_failure_ledger)
+        if self.request is None:
+            assert context.observation_provenance == decision_context.provenance_observation
         object.__setattr__(self, "publication_context", context)
 
     def __getattribute__(self, name: str) -> Any:
@@ -1447,9 +1450,13 @@ class NotApplicableDecision:
     exit_code: int = 0
     decision_context: NextDecisionContext
     publication_context: NextPublicationContext
+    package_applicability: PackageApplicabilityMatrix
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "request", copy.deepcopy(self.request))
+        assert self.request is None, "applicability preflight cannot carry an adapter request"
+        object.__setattr__(self, "package_applicability", copy.deepcopy(self.package_applicability))
+        assert isinstance(self.package_applicability, PackageApplicabilityMatrix)
+        assert self.package_applicability.aggregate_state == "non_applicable"
         object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
         assert self.diagnostic["code"] == "CSV-NEXT-APPLICABILITY-001"
         assert set(self.known_counts) == set(KNOWN_COUNT_KEYS)
@@ -1468,19 +1475,19 @@ class NotApplicableDecision:
         assert decision_context.exit_code == self.exit_code
         assert decision_context.known_counts == self.known_counts
         assert decision_context.run_context == self.run_context
-        if self.request is None:
-            assert decision_context.provenance == "request_independent_not_applicable"
-            assert decision_context.request_id is None
-            assert decision_context.limits is None
-        else:
-            assert self.request["run_context"] == self.run_context
-            assert decision_context.request_id == self.request.get("request_id")
-            assert tuple(decision_context.targets) == tuple(self.request.get("targets", ()))
-            assert decision_context.limits == self.request.get("limits")
+        assert decision_context.provenance == "request_independent_not_applicable"
+        assert decision_context.request_id is None
+        assert decision_context.limits is None
+        assert decision_context.provenance_observation["observed"][
+            "applicability"
+        ] == _observation_row(
+            "applicability", True, observed_value=self.package_applicability.observation_value()
+        )
         object.__setattr__(self, "decision_context", decision_context)
         context = self.publication_context
         assert context is not None
         assert context.run_context == self.run_context
+        assert context.observation_provenance == decision_context.provenance_observation
         object.__setattr__(self, "publication_context", context)
 
     def __getattribute__(self, name: str) -> Any:
@@ -1493,6 +1500,7 @@ class NotApplicableDecision:
             "artifact_paths",
             "decision_context",
             "publication_context",
+            "package_applicability",
         }:
             return copy.deepcopy(value)
         return value
@@ -2109,6 +2117,94 @@ EXPORT_GRAPH_CASES_PATH = REPO_ROOT / "tests/fixtures/next_export_graph_cases.js
 EXPORT_GRAPH_CASES_SCHEMA = "code-structure-viz.next-export-graph-cases/v1"
 
 
+@dataclass(frozen=True, kw_only=True)
+class EarlySourceReadPrefix:
+    """Private immutable read evidence, separate from its public identities."""
+
+    project_roots: tuple[str, ...]
+    enumerated_paths: tuple[str, ...]
+    captured_files: tuple[tuple[str, bytes], ...]
+    failed_reads: tuple[tuple[str, str], ...]
+    diagnostic_code: str
+    stage: str
+    path: str | None
+
+    def __post_init__(self) -> None:
+        assert self.stage in {"applicability", "source_control"}
+        decision_failure_spec(self.diagnostic_code, self.stage)
+        assert self.project_roots
+        for paths in (self.project_roots, self.enumerated_paths):
+            assert isinstance(paths, tuple)
+            assert paths == tuple(sorted(set(paths), key=_path_sort_key))
+        for root in self.project_roots:
+            _assert_path(root, allow_root=True)
+        for path in self.enumerated_paths:
+            _assert_file_path(path)
+            assert any(_under(path, root) for root in self.project_roots)
+        for rows in (self.captured_files, self.failed_reads):
+            assert isinstance(rows, tuple)
+            assert all(isinstance(row, tuple) and len(row) == 2 for row in rows)
+            assert tuple(path for path, _ in rows) == tuple(
+                sorted({path for path, _ in rows}, key=_path_sort_key)
+            )
+            assert {path for path, _ in rows} <= set(self.enumerated_paths)
+        assert all(isinstance(payload, bytes) for _, payload in self.captured_files)
+        assert all(isinstance(code, str) for _, code in self.failed_reads)
+        assert set(dict(self.captured_files)).isdisjoint(dict(self.failed_reads))
+        if _diagnostic_catalog()[self.diagnostic_code]["ref_permission"] == "path":
+            assert self.path in dict(self.failed_reads)
+        else:
+            assert self.path is None
+
+    def provenance(self) -> dict[str, Any]:
+        self.__post_init__()
+        captured = dict(self.captured_files)
+        failures = dict(self.failed_reads)
+        package_paths = tuple(
+            "package.json" if root == "." else f"{root}/package.json" for root in self.project_roots
+        )
+
+        def observation(path: str) -> dict[str, Any]:
+            payload = captured.get(path)
+            failure = failures.get(path)
+            return {
+                "path": path,
+                "state": "read"
+                if payload is not None
+                else "failed"
+                if failure
+                else "missing"
+                if path not in self.enumerated_paths
+                else "unobserved",
+                "sha256": hashlib.sha256(payload).hexdigest() if payload is not None else None,
+                "size_bytes": len(payload) if payload is not None else None,
+                "failure_code": failure,
+            }
+
+        packages = [observation(path) for path in package_paths]
+        matrix = (
+            derive_package_applicability_matrix(captured, self.project_roots).as_dict()
+            if all(row["state"] in {"read", "missing"} for row in packages)
+            else None
+        )
+        values: dict[str, Any] = {"applicability": {"packages": packages, "matrix": matrix}}
+        if self.stage == "source_control":
+            assert matrix is not None and matrix["aggregate_state"] == "applicable"
+            values["config"] = [
+                observation(path)
+                for path in sorted(
+                    (set(captured) | set(failures)) - set(package_paths), key=_path_sort_key
+                )
+            ]
+        return _publication_provenance(
+            kind="request_independent_failure",
+            failure_stage=self.stage,
+            failure_code=self.diagnostic_code,
+            budget_observed=False,
+            observed_values=values,
+        )
+
+
 class InstrumentedSourceReader:
     """Trusted snapshot reader used to model one bounded source acquisition."""
 
@@ -2128,6 +2224,10 @@ class InstrumentedSourceReader:
         self.revision_after = revision if revision_after is None else revision_after
         self._source_graph = copy.deepcopy(source_graph)
         self._read_failures = dict(read_failures or {})
+        self._observed_files: dict[str, bytes] = {}
+        self._observed_read_failures: dict[str, str] = {}
+        self._enumerated_paths: tuple[str, ...] = ()
+        self._project_roots: tuple[str, ...] = ()
         self.read_counts: dict[str, int] = {}
         self.enumeration_calls = 0
         self.sealed = False
@@ -2150,7 +2250,9 @@ class InstrumentedSourceReader:
                 for name, prefix in zip(hard_exclusions, excluded, strict=True)
             )
         ]
-        return tuple(sorted(paths, key=_path_sort_key))
+        self._project_roots = tuple(sorted(project_roots, key=_path_sort_key))
+        self._enumerated_paths = tuple(sorted(paths, key=_path_sort_key))
+        return self._enumerated_paths
 
     def read(self, path: str) -> bytes:
         assert not self.sealed, "SourceView is sealed; filesystem reads are forbidden"
@@ -2158,12 +2260,34 @@ class InstrumentedSourceReader:
         self.read_counts[path] = self.read_counts.get(path, 0) + 1
         assert self.read_counts[path] == 1, path
         if path in self._read_failures:
+            self._observed_read_failures[path] = self._read_failures[path]
             raise SourceAcquisitionError(
                 self._read_failures[path],
                 "source_read",
                 f"trusted snapshot read failed: {path}",
+                path=path,
             )
-        return self._files[path]
+        payload = self._files[path]
+        self._observed_files[path] = payload
+        return payload
+
+    def early_read_prefix(self, code: str, stage: str, path: str | None) -> EarlySourceReadPrefix:
+        """Freeze actual bytes and failure metadata without a second read."""
+
+        assert self._project_roots and self.enumeration_calls == 1
+        return EarlySourceReadPrefix(
+            project_roots=self._project_roots,
+            enumerated_paths=self._enumerated_paths,
+            captured_files=tuple(
+                sorted(self._observed_files.items(), key=lambda row: _path_sort_key(row[0]))
+            ),
+            failed_reads=tuple(
+                sorted(self._observed_read_failures.items(), key=lambda row: _path_sort_key(row[0]))
+            ),
+            diagnostic_code=code,
+            stage=stage,
+            path=path,
+        )
 
     def seal(self) -> int:
         assert not self.sealed
@@ -2187,9 +2311,10 @@ class InstrumentedSourceReader:
 class SourceAcquisitionError(AssertionError):
     """Typed fail-closed result for malformed or drifting source snapshots."""
 
-    def __init__(self, code: str, stage: str, message: str) -> None:
+    def __init__(self, code: str, stage: str, message: str, *, path: str | None = None) -> None:
         self.code = code
         self.stage = stage
+        self.path = path
         super().__init__(message)
 
 
@@ -2257,6 +2382,8 @@ class PackageApplicabilityMatrix:
 
     entries: tuple[PackageApplicabilityEntry, ...]
     aggregate_state: str
+    # None is only for structural public-wire validation, never NA authority.
+    observed_package_bytes: tuple[tuple[str, bytes | None], ...] | None = None
 
     def __post_init__(self) -> None:
         entries = tuple(self.entries)
@@ -2273,6 +2400,47 @@ class PackageApplicabilityMatrix:
         )
         assert self.aggregate_state == expected
         object.__setattr__(self, "entries", entries)
+        if self.observed_package_bytes is not None:
+            self._validate_observed_bytes()
+
+    def _validate_observed_bytes(self) -> None:
+        observations = self.observed_package_bytes
+        assert isinstance(observations, tuple)
+        assert all(isinstance(row, tuple) and len(row) == 2 for row in observations)
+        roots = tuple(entry.project_root for entry in self.entries)
+        assert tuple(path for path, _ in observations) == tuple(
+            "package.json" if root == "." else f"{root}/package.json" for root in roots
+        )
+        assert all(payload is None or isinstance(payload, bytes) for _, payload in observations)
+        assert self.entries == _derive_package_applicability_entries(
+            {path: payload for path, payload in observations if payload is not None}, roots
+        )
+        assert self.aggregate_state == (
+            "malformed"
+            if any(entry.state == "malformed" for entry in self.entries)
+            else "applicable"
+            if any(entry.state == "applicable" for entry in self.entries)
+            else "non_applicable"
+        )
+
+    def observation_value(self) -> dict[str, Any]:
+        """Revalidate private bytes, then expose only their safe identities."""
+
+        self._validate_observed_bytes()
+        assert self.observed_package_bytes is not None
+        return {
+            "matrix": self.as_dict(),
+            "packages": [
+                {
+                    "path": path,
+                    "state": "read" if payload is not None else "missing",
+                    "sha256": hashlib.sha256(payload).hexdigest() if payload is not None else None,
+                    "size_bytes": len(payload) if payload is not None else None,
+                    "failure_code": None,
+                }
+                for path, payload in self.observed_package_bytes
+            ],
+        }
 
     @property
     def applicable_projects(self) -> tuple[str, ...]:
@@ -2328,9 +2496,9 @@ def _package_json(payload: bytes, path: str) -> dict[str, Any]:
     return value
 
 
-def derive_package_applicability_matrix(
+def _derive_package_applicability_entries(
     package_bytes: Mapping[str, bytes], project_roots: tuple[str, ...] | list[str]
-) -> PackageApplicabilityMatrix:
+) -> tuple[PackageApplicabilityEntry, ...]:
     """Derive the closed applicability matrix from observed package bytes.
 
     ``package_bytes`` is an observation map, not a caller-supplied state map.
@@ -2400,6 +2568,15 @@ def derive_package_applicability_matrix(
                 evidence=evidence,
             )
         )
+    return tuple(entries)
+
+
+def derive_package_applicability_matrix(
+    package_bytes: Mapping[str, bytes], project_roots: tuple[str, ...] | list[str]
+) -> PackageApplicabilityMatrix:
+    """Seal the actual package bytes and their derived applicability."""
+
+    entries = _derive_package_applicability_entries(package_bytes, project_roots)
     aggregate_state = (
         "malformed"
         if any(entry.state == "malformed" for entry in entries)
@@ -2407,7 +2584,13 @@ def derive_package_applicability_matrix(
         if any(entry.state == "applicable" for entry in entries)
         else "non_applicable"
     )
-    return PackageApplicabilityMatrix(entries=tuple(entries), aggregate_state=aggregate_state)
+    return PackageApplicabilityMatrix(
+        entries=entries,
+        aggregate_state=aggregate_state,
+        observed_package_bytes=tuple(
+            (entry.package_path, package_bytes.get(entry.package_path)) for entry in entries
+        ),
+    )
 
 
 APPLICABILITY_PROJECTION_SCHEMA = "code-structure-viz.next-applicability-decision/v1"
@@ -4372,7 +4555,7 @@ def seal_source_acquisition(
             continue
         try:
             contents[path] = reader.read(path)
-        except SourceAcquisitionError:
+        except SourceAcquisitionError as failure:
             # Control bytes define the membership and applicability proof.
             # A failed control read cannot be represented as an empty config
             # or a partial project because that would change the authority
@@ -4381,7 +4564,12 @@ def seal_source_acquisition(
             # discovered local-extends closure.  Every member is therefore a
             # control observation, including a dynamically named extends file;
             # ``allow_partial`` applies only after membership is sealed.
-            raise
+            raise SourceAcquisitionError(
+                failure.code if failure.code != "CSV-NEXT-SOURCE-001" else "CSV-NEXT-SOURCE-003",
+                "source_control",
+                str(failure),
+                path=failure.path,
+            ) from failure
         # Package bytes were already read above, so every newly read queue
         # member is a config, including arbitrarily named local parents.
         control_value = _control_json(contents, path)
@@ -7012,6 +7200,8 @@ def _seal_publication_context(
     }
     if ledger_digest is not None:
         preimage["source_failure_ledger_digest"] = ledger_digest
+    if source_seal is None:
+        preimage["observation_provenance_digest"] = digest(observation_provenance)
     if public_request is not None:
         request_snapshot = _public_request_snapshot(
             public_request,
@@ -7193,12 +7383,7 @@ def _publication_context_for_request_independent_failure(
         fingerprint_projects=[],
         source_failure_ledger=source_failure_ledger,
         process_launch_observation=process_launch_observation_from_descriptor(None),
-        observation_provenance=_publication_provenance(
-            kind="request_independent",
-            failure_stage=stage,
-            failure_code=diagnostic_code,
-            budget_observed=run_context["budget_source"] != "unobserved",
-        ),
+        observation_provenance=decision_context.provenance_observation,
     )
 
 
@@ -8601,6 +8786,9 @@ class SourceAcquisitionUnavailable:
 
     diagnostic_code: str
     stage: str
+    early_read_prefix: EarlySourceReadPrefix | None = None
+    observation_provenance: dict[str, Any] | None = field(init=False, default=None)
+    path: str | None = None
 
     def __post_init__(self) -> None:
         assert self.diagnostic_code in {
@@ -8614,6 +8802,34 @@ class SourceAcquisitionUnavailable:
         assert (
             decision_failure_spec(self.diagnostic_code, self.stage)["outcome"]
             == "payload_unavailable"
+        )
+        if self.early_read_prefix is not None:
+            prefix = self.early_read_prefix
+            assert isinstance(prefix, EarlySourceReadPrefix)
+            object.__setattr__(self, "early_read_prefix", copy.deepcopy(prefix))
+            assert (self.diagnostic_code, self.stage, self.path) == (
+                prefix.diagnostic_code,
+                prefix.stage,
+                prefix.path,
+            )
+            provenance = prefix.provenance()
+            validate_stage_dependent_provenance(provenance)
+            assert provenance["kind"] == "request_independent_failure"
+            assert provenance["stage"] == self.stage
+            assert provenance["failure_code"] == self.diagnostic_code
+            if _diagnostic_catalog()[self.diagnostic_code]["ref_permission"] == "path":
+                assert self.path is not None
+                _assert_file_path(self.path)
+            else:
+                assert self.path is None
+            object.__setattr__(self, "observation_provenance", provenance)
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        return (
+            copy.deepcopy(value)
+            if name in {"early_read_prefix", "observation_provenance"}
+            else value
         )
 
 
@@ -8815,11 +9031,15 @@ def seal_source_acquisition_result(
             return SourceIntegrityFatal(
                 diagnostic_code="CSV-NEXT-SOURCE-INTEGRITY-001", stage=failure.stage
             )
+        code = failure.code if failure.code != "CSV-NEXT-SOURCE-001" else "CSV-NEXT-SOURCE-003"
+        path = failure.path if _diagnostic_catalog()[code]["ref_permission"] == "path" else None
         return SourceAcquisitionUnavailable(
-            diagnostic_code=failure.code
-            if failure.code != "CSV-NEXT-SOURCE-001"
-            else "CSV-NEXT-SOURCE-003",
+            diagnostic_code=code,
             stage=failure.stage,
+            early_read_prefix=reader.early_read_prefix(code, failure.stage, path)
+            if failure.stage in {"applicability", "source_control"}
+            else None,
+            path=path,
         )
     failed_paths = tuple(row["path"] for row in seal.source_view["read_failures"])
     if not failed_paths:
@@ -8843,6 +9063,56 @@ def seal_source_acquisition_result(
         seal=seal,
         ledger=ledger,
         safe_file_set=ledger.safe_file_set,
+    )
+
+
+def source_acquisition_failure_decision(
+    result: SourceAcquisitionUnavailable,
+    run_context: NextRunContext,
+    *,
+    targets: tuple[str, ...] = (),
+) -> PreResponseFailureDecision:
+    """Connect an actual early acquisition failure to the publication union.
+
+    Status-only historical fixtures deliberately cannot cross this seam.
+    Later source-isolation/fatal routes have separate acceptance gates; this
+    constructor does not manufacture their missing source plan or runtime.
+    """
+
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert result.stage in {"applicability", "source_control"}
+    assert result.early_read_prefix is not None
+    assert result.observation_provenance == result.early_read_prefix.provenance()
+    assert (result.diagnostic_code, result.stage, result.path) == (
+        result.early_read_prefix.diagnostic_code,
+        result.early_read_prefix.stage,
+        result.early_read_prefix.path,
+    )
+    assert result.observation_provenance is not None
+    context = canonical_run_context(**run_context)
+    assert context["budget_source"] == "unobserved"
+    decision_context = NextDecisionContext(
+        run_context=context,
+        request_id=None,
+        targets=targets,
+        limits=None,
+        stage=result.stage,
+        diagnostic_code=result.diagnostic_code,
+        failure_kind=decision_failure_kind(result.diagnostic_code),
+        known_counts=_decision_known_counts(None),
+        source_failure_ledger=(),
+        outcome="payload_unavailable",
+        payload_unavailable=True,
+        exit_code=3,
+        provenance_observation=result.observation_provenance,
+        provenance="request_independent_failure",
+    )
+    return pre_response_failure_decision(
+        None,
+        stage=result.stage,
+        diagnostic_code=result.diagnostic_code,
+        decision_context=decision_context,
+        path=result.path,
     )
 
 
@@ -11061,32 +11331,10 @@ def next_run_decision_projection(decision: NextRunDecision) -> dict[str, Any]:
             else "request_independent_failure"
         )
         if provenance["kind"] != kind:
-            if kind == "request_independent_not_applicable":
-                # The request-bearing NotApplicableDecision is retained as a
-                # compatibility constructor.  Its public projection is the
-                # same request-independent no-op used by the package
-                # preflight branch, so it must carry the corresponding
-                # unobserved-prefix provenance rather than relabeling the
-                # old observed rows in place.
-                provenance = _decision_provenance(
-                    kind="request_independent",
-                    stage="applicability",
-                    failure_code="CSV-NEXT-APPLICABILITY-001",
-                    request=False,
-                    limits=False,
-                    source_plan=False,
-                    toolchain=False,
-                    trusted_environment=False,
-                    budget=decision.run_context["budget_source"] != "unobserved",
-                )
-            else:
-                provenance["kind"] = kind
-                if kind == "request_independent_not_applicable":
-                    provenance["stage"] = "applicability"
-                    provenance["failure_code"] = "CSV-NEXT-APPLICABILITY-001"
-                else:
-                    provenance["stage"] = decision.stage
-                    provenance["failure_code"] = decision.diagnostic_code
+            assert isinstance(decision, PreResponseFailureDecision)
+            provenance["kind"] = kind
+            provenance["stage"] = decision.stage
+            provenance["failure_code"] = decision.diagnostic_code
             validate_stage_dependent_provenance(provenance)
 
     independent = kind in {
@@ -12564,79 +12812,10 @@ def pre_response_failure_decision(
     )
 
 
-def not_applicable_decision(request: dict[str, Any]) -> NotApplicableDecision:
-    """Create the closed authority for an intentional non-Next project."""
-
-    validated_request = validate_adapter_request(request)
-    context = canonical_run_context(**validated_request["run_context"])
-    decision_context = NextDecisionContext(
-        run_context=context,
-        request_id=validated_request["request_id"],
-        targets=tuple(validated_request["targets"]),
-        limits=copy.deepcopy(validated_request["limits"]),
-        stage="applicability",
-        diagnostic_code="CSV-NEXT-APPLICABILITY-001",
-        failure_kind="applicability",
-        known_counts=_decision_known_counts(validated_request),
-        source_failure_ledger=(),
-        outcome="not_applicable",
-        payload_unavailable=False,
-        exit_code=0,
-        provenance_observation=_decision_provenance(
-            kind="request_bound",
-            stage="applicability",
-            request=True,
-            limits=True,
-            source_plan=False,
-            toolchain=False,
-            trusted_environment=False,
-        ),
-        provenance="request_bound",
-    )
-    entry = _diagnostic_catalog()["CSV-NEXT-APPLICABILITY-001"]
-    return NotApplicableDecision(
-        request=validated_request,
-        run_context=context,
-        diagnostic={
-            "type": "diagnostic",
-            "schema": "code-structure-viz.diagnostic/v1",
-            "code": "CSV-NEXT-APPLICABILITY-001",
-            "severity": entry["severity"],
-            "domain": "next",
-            "path": None,
-            "symbol": None,
-            "line": None,
-            "recoverable": entry["recoverable"],
-            "message": entry["message"],
-            "outcome": entry["outcome"],
-            "ref_permission": entry["ref_permission"],
-        },
-        known_counts=_decision_known_counts(validated_request),
-        decision_context=decision_context,
-        publication_context=_publication_context_for_validated_request(
-            validated_request,
-            context,
-            failure_stage="applicability",
-            failure_code="CSV-NEXT-APPLICABILITY-001",
-            source_seal=_trusted_fixture_source_seal(validated_request, None),
-            toolchain=_toolchain_snapshot(node_status="not_applicable"),
-            trusted_environment=_trusted_environment_snapshot(),
-            source_failure_ledger=(),
-            process_launch_observation=process_launch_observation_from_descriptor(
-                _process_launch_for_toolchain(
-                    _toolchain_snapshot(node_status="not_applicable"),
-                    node_realpath=None,
-                    node_sha256=None,
-                    spawn_executable=None,
-                )
-            ),
-        ),
-    )
-
-
 def request_independent_not_applicable_decision(
     run_context: NextRunContext,
     *,
+    package_applicability: PackageApplicabilityMatrix,
     targets: tuple[str, ...] = (),
 ) -> NotApplicableDecision:
     """Seal the all-non-applicable result before any request exists.
@@ -12647,6 +12826,8 @@ def request_independent_not_applicable_decision(
     fact through the same closed decision union used by later projections.
     """
 
+    assert isinstance(package_applicability, PackageApplicabilityMatrix)
+    assert package_applicability.aggregate_state == "non_applicable"
     context = canonical_run_context(**run_context)
     assert context["budget_source"] == "unobserved"
     normalized_targets = tuple(canonical_target_key(item) for item in targets)
@@ -12666,16 +12847,12 @@ def request_independent_not_applicable_decision(
         outcome="not_applicable",
         payload_unavailable=False,
         exit_code=0,
-        provenance_observation=_decision_provenance(
+        provenance_observation=_publication_provenance(
             kind="request_independent",
-            stage="applicability",
+            failure_stage="applicability",
             failure_code="CSV-NEXT-APPLICABILITY-001",
-            request=False,
-            limits=False,
-            source_plan=False,
-            toolchain=False,
-            trusted_environment=False,
-            budget=False,
+            budget_observed=False,
+            observed_values={"applicability": package_applicability.observation_value()},
         ),
         provenance="request_independent",
     )
@@ -12696,6 +12873,7 @@ def request_independent_not_applicable_decision(
     }
     return NotApplicableDecision(
         request=None,
+        package_applicability=package_applicability,
         run_context=context,
         diagnostic=diagnostic,
         known_counts=known_counts,

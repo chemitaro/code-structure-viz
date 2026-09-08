@@ -4,6 +4,11 @@
 
 この節が現在のsource contractの唯一の正本です。以下のRound節はhistorical evidence（非normative）です。`SourceDiscoveryIntent`はroots、known control candidates、fixed rulesだけを受け、trusted frozen bytesからcontrol closure、membership、roles、resolved/open source graphをsealします。source graphは`resolved|open` unionを必須とし、open edgeはsafe frontierまたはsource identity+byte spanのopaque occurrence identityだけを公開します。callerがfinal paths、roles、graph、digestを注入する経路はありません。`FinalSourceAcquisitionPlan`と`SourceView`は一度のsealで生成され、post-seal read、revision drift、duplicate readは`CSV-NEXT-SOURCE-INTEGRITY-001`です。全non-applicableはこの処理より前に停止します。
 
+早期取得失敗もcode/stageだけへ縮退させない。package/configの取得済みidentityとcatalogで許可したfailure pathを
+typed resultからpublicationへ引き継ぐ。全non-applicableのactual decisionは実matrixを必須とし、
+requestやruntimeを作らない。具体的な接続と未検証の後段経路は
+[Next provenance v1](next-provenance-v1.md#実観測に結び付く早期分岐)に定義する。
+
 Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA
 `48266f813353a7fd78e4e15d72ff6d33c4142827` (CI `33435802167`, 7/7 success).
 The closed descriptor and digest vectors below are local data-only remediation;

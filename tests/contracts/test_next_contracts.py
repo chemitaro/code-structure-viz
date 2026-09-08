@@ -78,6 +78,7 @@ from tests.contracts.next_reference_validation import (
     _is_export_identifier,
     _is_jsx_identifier_part,
     _is_jsx_identifier_start,
+    _observation_row,
     _path_sort_key,
     _process_launch_for_toolchain,
     _publication_context_for_validated_request,
@@ -134,7 +135,6 @@ from tests.contracts.next_reference_validation import (
     model_wire_record_count,
     next_publication_decision_projection,
     next_run_decision_projection,
-    not_applicable_decision,
     package_applicability_projection,
     pre_response_failure_decision,
     process_launch_descriptor,
@@ -172,6 +172,7 @@ from tests.contracts.next_reference_validation import (
     scan_export_syntax_census,
     seal_source_acquisition,
     seal_source_acquisition_result,
+    source_acquisition_failure_decision,
     source_acquisition_result_decision,
     source_plan_descriptor,
     string_export_target_resolutions,
@@ -5828,6 +5829,106 @@ def test_round24_applicability_preflight_grants_permission_without_node_observat
     assert projection["stdout_result"]["reason"] == "applicable_pending"
 
 
+@pytest.mark.parametrize("state", ["applicable", "malformed", "mixed"])
+def test_not_applicable_rejects_observed_non_na_matrix(state: str) -> None:
+    package_bytes = {
+        "package.json": b'{"dependencies":{"next":"15"}}' if state != "malformed" else b"{"
+    }
+    roots = (".",) if state != "mixed" else ("apps/a", "apps/b")
+    if state == "mixed":
+        package_bytes = {
+            "apps/a/package.json": b'{"name":"plain"}',
+            "apps/b/package.json": b'{"dependencies":{"next":"15"}}',
+        }
+    matrix = derive_package_applicability_matrix(package_bytes, roots)
+    with pytest.raises(AssertionError):
+        request_independent_not_applicable_decision(
+            _run_context(independent=True), package_applicability=matrix
+        )
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_not_applicable_binds_actual_matrix_through_publication(selector: str | None) -> None:
+    decisions = []
+    for root in ("apps/a", "apps/b"):
+        matrix = derive_package_applicability_matrix(
+            {f"{root}/package.json": b'{"name":"plain"}'}, (root,)
+        )
+        decision = request_independent_not_applicable_decision(
+            _run_context(selector=selector, independent=True), package_applicability=matrix
+        )
+        expected = _observation_row(
+            "applicability", True, observed_value=matrix.observation_value()
+        )
+        assert (
+            decision.decision_context.provenance_observation["observed"]["applicability"]
+            == expected
+        )
+        assert (
+            decision.publication_context.observation_provenance["observed"]["applicability"]
+            == expected
+        )
+        publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+        domain, manifest, _metadata, artifacts, _stderr = _validate_publication_chain(publication)
+        assert domain["payload_available"] is False and artifacts == {}
+        assert manifest["run"]["exit_code"] == 0
+        assert decision.request is None
+        assert decision.publication_context.toolchain is None
+        foreign = derive_package_applicability_matrix(
+            {f"{root}/package.json": b'{"dependencies":{"next":"15"}}'}, (root,)
+        )
+        for alias in (matrix, decision.package_applicability):
+            for name in ("entries", "aggregate_state", "observed_package_bytes"):
+                object.__setattr__(alias, name, getattr(foreign, name))
+        assert decision.package_applicability.aggregate_state == "non_applicable"
+        assert (
+            _observation_row(
+                "applicability",
+                True,
+                observed_value=decision.package_applicability.observation_value(),
+            )
+            == expected
+        )
+        assert next_publication_decision_projection(
+            finalize_publication_decision(decision, adapter_stdout_chunks=())
+        ) == next_publication_decision_projection(publication)
+        decisions.append(decision)
+    assert digest(decisions[0].publication_context.run_fingerprint_preimage) != digest(
+        decisions[1].publication_context.run_fingerprint_preimage
+    )
+    with pytest.raises(AssertionError):
+        replace(decisions[0], package_applicability=decisions[1].package_applicability)
+    with pytest.raises(AssertionError):
+        replace(decisions[0], publication_context=decisions[1].publication_context)
+    with pytest.raises(AssertionError):
+        replace(decisions[0], request=validate_adapter_request(_request()))
+
+
+@pytest.mark.parametrize("package", [b'{"dependencies":{"next":"15"}}', b"{"])
+def test_applicability_classification_cannot_replace_frozen_package_evidence(
+    package: bytes,
+) -> None:
+    matrix = derive_package_applicability_matrix({"package.json": package}, (".",))
+    forged_entry = replace(matrix.entries[0], state="non_applicable", evidence="no_direct_next")
+    with pytest.raises(AssertionError):
+        replace(matrix, entries=(forged_entry,), aggregate_state="non_applicable")
+    public_only = replace(matrix, observed_package_bytes=None)
+    with pytest.raises(AssertionError):
+        request_independent_not_applicable_decision(
+            _run_context(independent=True),
+            package_applicability=replace(
+                public_only, entries=(forged_entry,), aggregate_state="non_applicable"
+            ),
+        )
+    object.__setattr__(matrix, "entries", (forged_entry,))
+    object.__setattr__(matrix, "aggregate_state", "non_applicable")
+    with pytest.raises(AssertionError):
+        request_independent_not_applicable_decision(
+            _run_context(independent=True),
+            package_applicability=matrix,
+        )
+
+
 def test_round24_all_non_applicable_is_request_independent_end_to_end() -> None:
     """All-non-applicable package bytes short-circuit every later authority."""
 
@@ -5836,7 +5937,7 @@ def test_round24_all_non_applicable_is_request_independent_end_to_end() -> None:
     )
     assert matrix.aggregate_state == "non_applicable"
     decision = request_independent_not_applicable_decision(
-        _run_context(independent=True), targets=()
+        _run_context(independent=True), package_applicability=matrix, targets=()
     )
     assert decision.request is None
     decision_wire = next_run_decision_projection(decision)
@@ -8944,7 +9045,10 @@ def test_round16_publication_context_requires_explicit_launch_and_decision_conte
     decisions: tuple[NextRunDecision, ...] = (
         validated,
         pre_response,
-        not_applicable_decision(request),
+        request_independent_not_applicable_decision(
+            _run_context(independent=True),
+            package_applicability=derive_package_applicability_matrix({}, (".",)),
+        ),
     )
 
     assert (
@@ -8983,11 +9087,18 @@ def test_round16_publication_context_requires_explicit_launch_and_decision_conte
         publication_context = decision.publication_context
         assert publication_context is not None
         assert publication_context.process_launch_descriptor is not None
-        assert publication_context.toolchain is not None
-        assert (
-            publication_context.process_launch_descriptor["node_status"]
-            == publication_context.toolchain["node"]["status"]
-        )
+        if isinstance(decision, NotApplicableDecision):
+            assert publication_context.toolchain is None
+            assert publication_context.observation_provenance["observed"]["process_launch"] == {
+                "state": "unobserved",
+                "value": None,
+            }
+        else:
+            assert publication_context.toolchain is not None
+            assert (
+                publication_context.process_launch_descriptor["node_status"]
+                == publication_context.toolchain["node"]["status"]
+            )
         mismatched_status = (
             "unavailable"
             if publication_context.process_launch_descriptor["node_status"] != "unavailable"
@@ -9031,7 +9142,7 @@ def test_round16_publication_context_requires_explicit_launch_and_decision_conte
     with pytest.raises(AssertionError):
         replace(pre_response, decision_context=None)  # type: ignore[arg-type]
     with pytest.raises(AssertionError):
-        replace(not_applicable_decision(request), decision_context=None)  # type: ignore[arg-type]
+        replace(decisions[-1], decision_context=None)  # type: ignore[arg-type]
 
 
 def test_public_diagnostic_stderr_is_utf8_jsonl_all_or_none() -> None:
@@ -9463,7 +9574,10 @@ def test_all_decision_variants_project_without_legacy_fixture_authority(
                 source_failure_ledger=(),
             ),
         ),
-        not_applicable_decision(request),
+        request_independent_not_applicable_decision(
+            _run_context(independent=True),
+            package_applicability=derive_package_applicability_matrix({}, (".",)),
+        ),
     ]
 
     def legacy_must_not_be_called(*_args: Any, **_kwargs: Any) -> _DomainProjection:
@@ -9485,6 +9599,10 @@ def test_all_decision_variants_project_without_legacy_fixture_authority(
         assert domain["toolchain"] == context.toolchain
         assert domain["trusted_environment"] == context.trusted_environment
         assert domain["compatibility_descriptor"] == context.compatibility_descriptor
+        if isinstance(decision, NotApplicableDecision):
+            assert context.compatibility_descriptor is None
+            validate_domain_manifest(domain)
+            continue
         assert context.compatibility_descriptor is not None
         compatibility_descriptor = context.compatibility_descriptor
         assert domain["semantic_compatibility_id"] == compatibility_descriptor["compatibility_id"]
@@ -12258,7 +12376,9 @@ def test_actual_publication_selector_matrix_and_measured_candidate_identity(
 ) -> None:
     context = _run_context(selector=selector, independent=state == "not_applicable")
     if state == "not_applicable":
-        decision: NextRunDecision = request_independent_not_applicable_decision(context)
+        decision: NextRunDecision = request_independent_not_applicable_decision(
+            context, package_applicability=derive_package_applicability_matrix({}, (".",))
+        )
         raw = b""
     else:
         limits = _next_limits()
@@ -12750,6 +12870,158 @@ def test_actual_acquisition_failure_preserves_its_catalog_stage_and_code(
     assert (result.diagnostic_code, result.stage) == (code, stage)
     projection = source_acquisition_result_decision(result)
     assert (projection.diagnostic_code, projection.stage, projection.exit_code) == (code, stage, 3)
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize(
+    "failure", ["malformed_package", "package_read", "malformed_config", "config_read"]
+)
+def test_actual_early_failure_preserves_observations_through_publication(
+    selector: str | None, failure: str
+) -> None:
+    decisions = []
+    for root in ("apps/a", "apps/b"):
+        files = {
+            f"{root}/package.json": b"{"
+            if failure == "malformed_package"
+            else b'{"dependencies":{"next":"15"}}',
+            f"{root}/tsconfig.json": b"{" if failure == "malformed_config" else b"{}",
+            f"{root}/src/untouched.tsx": b"private-source-marker",
+        }
+        failed_path = f"{root}/{'package.json' if failure == 'package_read' else 'tsconfig.json'}"
+        reader = InstrumentedSourceReader(
+            files,
+            read_failures={failed_path: "CSV-NEXT-SOURCE-001"} if failure.endswith("_read") else {},
+        )
+        result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(project_roots=(root,), control_candidates=()),
+            reader,
+        )
+        assert isinstance(result, SourceAcquisitionUnavailable)
+        observed = result.observation_provenance
+        assert observed is not None
+        reads_at_failure = dict(reader.read_counts)
+        assert reads_at_failure == {
+            f"{root}/package.json": 1,
+            **({f"{root}/tsconfig.json": 1} if "config" in failure else {}),
+        }
+        decision = source_acquisition_failure_decision(
+            result,
+            _run_context(selector=selector, independent=True),
+        )
+        assert decision.decision_context.provenance_observation == observed
+        assert decision.publication_context.observation_provenance == observed
+        wire = next_run_decision_projection(decision)
+        _validator("next-run-decision-v1.schema.json").validate(wire)
+        assert wire["provenance"] == observed
+        for field in (
+            "source",
+            "request",
+            "source_plan",
+            "limits",
+            "toolchain",
+            "trusted_environment",
+            "process_launch",
+            "response",
+            "budget",
+        ):
+            assert observed["observed"][field] == {"state": "unobserved", "value": None}
+        assert observed["observed"]["config"]["state"] == (
+            "observed" if "config" in failure else "unobserved"
+        )
+        publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+        domain, manifest, _metadata, artifacts, _stderr = _validate_publication_chain(publication)
+        assert domain["payload_available"] is False and artifacts == {}
+        assert manifest["run"]["exit_code"] == 3
+        assert reader.read_counts == reads_at_failure
+        assert b"private-source-marker" not in canonical_json_bytes(manifest)
+        observed["observed"]["applicability"]["value"]["sha256"] = "0" * 64
+        assert result.observation_provenance != observed
+        assert decision.publication_context.observation_provenance != observed
+        decisions.append(decision)
+    assert digest(decisions[0].publication_context.run_fingerprint_preimage) != digest(
+        decisions[1].publication_context.run_fingerprint_preimage
+    )
+    with pytest.raises(AssertionError):
+        replace(decisions[0], publication_context=decisions[1].publication_context)
+
+
+def test_early_failure_rejects_foreign_provenance_and_unread_diagnostic_path() -> None:
+    results = []
+    for config in (b"{", b"["):
+        result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+            InstrumentedSourceReader(
+                {
+                    "package.json": b'{"dependencies":{"next":"15"}}',
+                    "tsconfig.json": config,
+                }
+            ),
+        )
+        assert isinstance(result, SourceAcquisitionUnavailable)
+        results.append(result)
+    with pytest.raises(ValueError):
+        replace(results[0], observation_provenance=results[1].observation_provenance)
+    object.__setattr__(results[0], "observation_provenance", results[1].observation_provenance)
+    with pytest.raises(AssertionError):
+        source_acquisition_failure_decision(results[0], _run_context(independent=True))
+    failed = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        InstrumentedSourceReader(
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b"{}",
+            },
+            read_failures={"tsconfig.json": "CSV-NEXT-SOURCE-001"},
+        ),
+    )
+    assert isinstance(failed, SourceAcquisitionUnavailable)
+    prefix = failed.early_read_prefix
+    assert prefix is not None
+    object.__setattr__(prefix, "path", "src/never-read.tsx")
+    with pytest.raises(AssertionError):
+        prefix.provenance()
+    assert failed.early_read_prefix is not None
+    assert failed.early_read_prefix.path == "tsconfig.json"
+    with pytest.raises(AssertionError):
+        replace(failed, early_read_prefix=prefix, path="src/never-read.tsx")
+    for changes in (
+        {"path": "src/never-read.tsx"},
+        {"diagnostic_code": "CSV-NEXT-CONFIG-001", "path": None},
+        {"stage": "source_read"},
+    ):
+        with pytest.raises(AssertionError):
+            replace(failed, **changes)
+    object.__setattr__(failed, "path", "src/never-read.tsx")
+    with pytest.raises(AssertionError):
+        source_acquisition_failure_decision(failed, _run_context(independent=True))
+
+
+def test_early_failure_identity_binds_read_bytes_not_unread_suffix() -> None:
+    results = []
+    for bad_config, unread_source in ((b"{", b"a"), (b"[", b"a"), (b"{", b"b")):
+        reader = InstrumentedSourceReader(
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": bad_config,
+                "src/unread.tsx": unread_source,
+            }
+        )
+        result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+            reader,
+        )
+        assert isinstance(result, SourceAcquisitionUnavailable)
+        results.append(result.observation_provenance)
+    assert results[0] != results[1]
+    assert results[0] == results[2]
+    with pytest.raises(AssertionError):
+        source_acquisition_failure_decision(
+            SourceAcquisitionUnavailable(
+                diagnostic_code="CSV-NEXT-CONFIG-001", stage="source_control"
+            ),
+            _run_context(independent=True),
+        )
 
 
 def test_applicability_cannot_accept_caller_claimed_node_or_response_success() -> None:

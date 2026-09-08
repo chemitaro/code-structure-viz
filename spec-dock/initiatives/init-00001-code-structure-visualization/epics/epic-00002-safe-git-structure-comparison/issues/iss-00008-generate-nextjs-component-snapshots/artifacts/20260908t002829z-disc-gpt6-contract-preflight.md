@@ -265,3 +265,95 @@ safe semantic recordsやsource-graph frontier全体を一律hash化する変更�
 実Git reader、Node非起動の実観測、OS signal/process-group、CLI filesystem/stdout/stderr/exitは実装時gateへ分離できる。
 上の値レベルの矛盾は未実装adapterの証拠不足として除外しない。次はR19–R21、G09、G10、G11を閉じる。
 人間向けHTMLは今回未変更で、既存の8図検証済み資料を保持。製品実装には着手していない。
+
+## G02 R19/R20: 実観測から公開結果への接続候補
+
+G07/R22の検証済みcheckpointは`af151dd2620eeda084a780ea335ec80bcf2c95e6`として通常commit/push済み。
+parentは`00abcf9b090aac6e65e10c8d10b6e7967ad6587b`。branch維持とリモートSHA一致を確認した。
+以下はその後の候補修正であり、独立再レビューが完了するまで閉鎖とは扱わない。
+
+### 変更と根拠
+
+- R20: actual NA constructorは`PackageApplicabilityMatrix`を必須化。non_applicableだけを許可し、
+  applicable/malformed/mixedを拒否する。requestを引数にする旧NA互換constructorを削除した。
+  `NotApplicableDecision`自体でrequest保持を拒否し、matrixと両contextの観測identityを照合する。
+- R19: readerは実読取bytes・実読取失敗・列挙したroot/pathを保持。失敗後の再readをせず、
+  packageのread/failed/missing/unobserved、configのpath/size/SHA/failureからidentityを作る。
+  package観測が未完了ならmatrixを合成しない。成功して読んだことと解析成功を区別する。
+- `SourceAcquisitionUnavailable`の早期実結果はprovenanceを保持し、
+  `source_acquisition_failure_decision`でactual `PreResponseFailureDecision`へ接続する。
+  provenanceなしのstatus-only fixtureはこのseamを通れない。対象はapplicability/source_controlのみ。
+- publicationはdecision contextの観測をそのまま保持する。独立run fingerprintへ
+  `observation_provenance_digest`を加え、別root/別取得bytesを区別する。未読sourceだけの変更は区別しない。
+- actual公開までテストした結果、root manifestのdiagnostic enumにAPPLICABILITY-002が欠落していると判明。
+  当該1codeを追加した。またcontrol read failureのSOURCE-003に必要なpathをtyped resultへ保持した。
+  不正packageは専用APPLICABILITY-002 / exit 3へ進み、NA / exit 0にはならない。
+- raw source/control本文は公開していない。取得前のrequest/source plan/limits/runtime/budgetを作らない。
+
+### 直接検証
+
+- R20の新規7ケースは未接続時のTypeErrorでREDを確認。その後、NAと既存publication関連30 passed。
+- actual early failure 16ケース（4原因×4selector）とmatrix/identity関連は36 passed（2.74s）。
+- その初回実行は12 failed。8件はAPPLICABILITY-002のroot schema欠落、4件はSOURCE-003のpath欠落。
+  上記の契約不整合を修正して通過させた。schemaを外して回避していない。
+- Next/schema全体: `uv run pytest -q tests/contracts/test_next_contracts.py tests/contracts/test_json_schemas.py --tb=short`
+  は552 passed（68.14s）。この時点の全repositoryは1438 passed, 1 skipped（188.63s）。
+- ruff check、ruff format --check（163 files）、mypy（139 files）、SpecDock validate（nodes=10）、
+  active iss-00008、git diff --checkを確認。src/pyproject.toml/uv.lockの差分なし。
+- 存在しない`test_schema_examples.py`を指定した実行はcollection前exit 4で検証0件。
+  実在する`test_json_schemas.py`へ訂正した上記552件と区別する。
+
+### private evidenceの追加結合
+
+最初の限定独立再レビューはP0=0/P1=2で、R19/R20はまだ閉じなかった。指定25 passedと正常公開8例でも、
+次の協調差替えが残っていた。新しい別findingではなく同じ2件の未完部分として扱う。
+
+| ID | 独立再現 | 補強 |
+| --- | --- | --- |
+| R19 | tsconfigが`{`の結果へ`[`のprovenanceを交換して4selectorで公開。read failure pathを未読fileへ変更しても公開 | private `EarlySourceReadPrefix`に凍結bytes・実failure・rootsを保持し、provenanceをinit=Falseで導出。code/stage/pathを同じ原本と照合 |
+| R20 | 実Next dependencyのmatrixでentry/aggregateをnon_applicableへ協調変更し、4selectorでNA exit 0を公開 | missingを含むprivate package bytesを保持し、constructorとNA入口で分類を再導出。bytesなしのpublic構造検証用matrixにはNA authorityを与えない |
+
+補強後のfocused回帰は50 passed（3.07s）、ruff/mypy139 files pass。
+通常replaceに加え、object.__setattr__によるprovenance/path/分類差替えを入口で拒否する。
+frozen tupleの内側もtupleとbytesに制限し、mutableな観測原本を受け取らない。
+公開するmatrix identityはpackageのraw digest/sizeも含むが、package/control本文は非公開のままである。
+上記1438件は補強前の証拠なので、最終全体検証として再利用せず再実行する。独立再判定も依頼済み。
+
+次の限定再判定は指定28 passed・正常公開8例を確認したが、同根P1が2つ残った。
+prefix.pathとresult.pathの同時交換（実failed_readsは変更しない）と、NA作成後の呼出元matrixの3fields交換である。
+前者はprefix.provenance()でも構造とfailure path所属を再検証し、prefixのconstructor/getterの所有コピーで補強した。
+後者はNotApplicableDecisionがmatrixをconstructor/getter双方でコピーし、外部aliasから切り離した。
+回帰には呼出元・返却matrixの全fields変更後も元のNAの公開bytesが変わらないことを追加した。
+再度focused50 passed（3.27s）、ruff/mypy pass。555件のNext/schema実行はこのalias補強前なので、最終候補と区別する。
+
+最終の限定独立再確認でR19/R20はP0/P1=0となった。対象回帰28 passedと正常公開8例を確認し、
+prefix.path/result.pathの協調偽装・直接不正prefixを拒否、constructor/getter両側のalias隔離、
+呼出元/返却matrixの変更後も封印済みNAと公開bytesが不変、4selectorのschema/privacyを確認した。
+dirty candidateの限定閉鎖であり、R21・後段source・G09・全体固定SHA認定は対象外である。
+最終候補の全repositoryテストは`1441 passed, 1 skipped`（201.45秒）で完了した。ruff check、ruff format --check（163 files）、
+mypy（139 files）、SpecDock validate（nodes=10）、`git diff --cached --check`も通過した。製品adapter、CLI、依存関係は変更していない。
+
+### R21の独立設計助言（未修正）
+
+同じGPT-6 Max reviewerが、既存`src/code_structure_viz/core/outcomes.py`の`RunOutcome`と
+`artifacts/streams.py`の`StdoutEmitter`を使う最小経路を確認した。terminal結果をNext semantic
+finalizerの手前で分岐させ、新しい包括unionや同じstatus決定表を増やさない方針を推奨する。
+
+| 原因 | 既存結果 | 診断 |
+| --- | --- | --- |
+| 実root overlap | RunOutcome.usage、exit 2、domain/manifestなし | CSV-NEXT-PROJECT-001 |
+| 実snapshot revision drift | RunOutcome.fatal、exit 1、domain/manifestなし | CSV-NEXT-SOURCE-INTEGRITY-001 |
+| 捕捉済みPublicationInterrupted / KeyboardInterrupt | RunOutcome.interrupted、exit 130 | CSV-INTERRUPT-001 |
+
+referenceに小さい`next_terminal_run_publication(cause, selector)`を置き、既存outcomeと
+stdout/stderr bytesを返す案。Next diagnosticは現時点のcore enumに押し込まず、既存reference catalogと
+JSONL rendererで構築・schema照合する。interruptは既存core stderrを利用できる。
+
+残る具体的修正点: PROJECT-001のcatalog/schemaがpayload_unavailableのままでusageと矛盾すること、
+`validate_run_status_vector`が余計なpublished bytesを受理し正しいselectorなしsummaryを拒否すること。
+独立probeは既存emitterの3原因×4selectorの12セルがschema-valid、artifact read 0を確認した。
+これは実現可能性の証拠で、R21実修正やOS signal/cleanup/実プロセスの証明ではない。
+
+R19/R20の限定独立判定はP0/P1=0で閉じたが、これはdirty candidateの限定preflightである。次はR21、G09の証拠対応、
+G10のcanonical R/D/P統合、G11の将来package計画、ならびに全体の固定SHA認定である。
+このcheckpointで全体P0/P1=0、外部Strict pass、implementation readiness、Issue完了を宣言しない。
