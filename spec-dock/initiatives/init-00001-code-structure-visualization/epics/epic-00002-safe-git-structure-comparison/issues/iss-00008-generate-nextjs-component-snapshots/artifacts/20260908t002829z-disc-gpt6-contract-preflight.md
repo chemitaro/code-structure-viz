@@ -462,8 +462,8 @@ Next adapter、G10 canonical R/D/P、G11 package計画、全体fixed-SHA Strict�
 ### G10 canonical R/D/P consolidation (2026-09-08)
 
 現行の要件・設計・計画を履歴追記の集合から選択できるよう、3文書のcurrent-v1直後に
-canonical indexを追加した。Round 8〜24の本文と過去Artifactは削除・改変せず、非normative
-evidenceとして保持する。新しい選択規則は、(1) current-v1 authority、(2) stable ID、
+canonical indexを追加した。Round 8〜24の過去の判定・件数と過去Artifactは保持し、現行参照行だけを
+current-v1の経路に合わせて更新した。新しい選択規則は、(1) current-v1 authority、(2) stable ID、
 (3) schema、(4) reference validator/testの順に解決し、履歴節・旧API・旧registryを
 実装入力やfallbackに使わないことを明記する。
 
