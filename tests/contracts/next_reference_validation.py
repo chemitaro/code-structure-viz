@@ -18060,7 +18060,12 @@ def validate_r23_coverage_index(
     """Require executable positive/negative evidence for every criterion."""
 
     rows = [dict(entry) for entry in entries]
-    assert {row["criterion"] for row in rows} == {f"r23.rg-{index:02d}" for index in range(1, 19)}
+    prefixes = {str(row["criterion"]).split(".", 1)[0] for row in rows}
+    assert prefixes in ({"r23"}, {"round23"})
+    prefix = next(iter(prefixes))
+    assert {row["criterion"] for row in rows} == {
+        f"{prefix}.rg-{index:02d}" for index in range(1, 19)
+    }
     assert len(rows) == 18
     for row in rows:
         assert set(row) == {
@@ -18080,6 +18085,81 @@ def validate_r23_coverage_index(
         assert set(row["tests"]) <= test_names and row["tests"]
     criteria = [row["criterion"] for row in rows]
     assert criteria == sorted(criteria)
+
+
+# The criterion-specific test is part of the executable evidence contract.
+# Keeping this mapping beside the reference registry makes a generic coverage
+# meta-test unable to pass by naming the coverage test itself for every row.
+R23_COVERAGE_TEST_NAMES: dict[str, str] = {
+    "round23.rg-01": "test_round23_rg_01_applicability_is_package_first_and_project_filtered",
+    "round23.rg-02": "test_round23_rg_02_config_subset_has_one_closed_jsonc_grammar",
+    "round23.rg-03": "test_round23_rg_03_source_scanner_preserves_role_and_open_uncertainty",
+    "round23.rg-04": "test_round23_rg_04_source_graph_is_frozen_resolved_or_private_open",
+    "round23.rg-05": "test_round23_rg_05_provenance_is_four_kind_value_bound_union",
+    "round23.rg-06": "test_round23_rg_06_decision_projection_has_no_request_independent_defaults",
+    "round23.rg-07": (
+        "test_round23_rg_07_process_policy_observation_separates_portable_and_local_identity"
+    ),
+    "round23.rg-08": "test_round23_rg_08_publication_owns_exact_bytes_and_selected_overflow",
+    "round23.rg-09": "test_round23_rg_09_string_export_uses_target_or_export_owner",
+    "round23.rg-10": "test_round23_rg_10_unicode_profile_is_pinned_and_versioned",
+    "round23.rg-11": "test_round23_rg_11_namespace_import_is_a_closed_binding_member",
+    "round23.rg-12": "test_round23_rg_12_coverage_index_is_bidirectional_and_substantive",
+    "round23.rg-13": "test_round23_rg_13_decision_is_the_only_publication_input",
+    "round23.rg-14": "test_round23_rg_14_open_frontier_has_safe_public_identity_only",
+    "round23.rg-15": "test_round23_rg_15_process_platform_scope_rejects_windows_and_toctou",
+    "round23.rg-16": "test_round23_rg_16_config_files_and_include_are_explicit_authority",
+    "round23.rg-17": "test_round23_rg_17_graph_digest_binds_source_bytes_and_edge_occurrence",
+    "round23.rg-18": "test_round23_rg_18_current_schema_and_history_contract_are_explicit",
+}
+
+
+def validate_r23_executable_coverage(
+    entries: Iterable[Mapping[str, Any]],
+    runtime_records: Iterable[Mapping[str, Any]],
+    *,
+    test_names: set[str],
+) -> None:
+    """Validate criterion/vector/producer/validator/test bijection.
+
+    ``validate_r23_coverage_index`` remains a structural checker for old
+    historical fixtures.  This stricter checker is the current authority: a
+    criterion's positive and negative vectors must be the registered pair,
+    the producer must be the positive callable, both records must share the
+    validator, and the row must point at its substantive test.
+    """
+
+    rows = [dict(entry) for entry in entries]
+    records = [dict(record) for record in runtime_records]
+    vector_by_id = {record["vector_id"]: record for record in records}
+    assert len(vector_by_id) == len(records)
+    validate_r23_coverage_index(
+        rows,
+        vector_ids=set(vector_by_id),
+        test_names=test_names,
+    )
+    assert set(R23_COVERAGE_TEST_NAMES) == {row["criterion"] for row in rows}
+    owned_vectors: set[str] = set()
+    for row in rows:
+        criterion = row["criterion"]
+        positive_ids = row["positive_vectors"]
+        negative_ids = row["negative_vectors"]
+        assert len(positive_ids) == len(negative_ids) == 1
+        assert not set(positive_ids) & owned_vectors
+        assert not set(negative_ids) & owned_vectors
+        owned_vectors.update((*positive_ids, *negative_ids))
+        positive = vector_by_id[positive_ids[0]]
+        negative = vector_by_id[negative_ids[0]]
+        assert positive["criterion"] == negative["criterion"] == criterion
+        assert positive["polarity"] == "positive"
+        assert negative["polarity"] == "negative"
+        assert positive["expected_valid"] is True
+        assert negative["expected_valid"] is False
+        assert row["producer"] == positive["callable"]
+        assert positive["validator"] == negative["validator"] == row["validator"]
+        assert row["tests"] == [R23_COVERAGE_TEST_NAMES[criterion]]
+        assert set(row["tests"]) <= test_names
+    assert owned_vectors == set(vector_by_id)
 
 
 # The R23 registry is deliberately assembled from executable producers below,
@@ -18342,17 +18422,29 @@ def runtime_vector_round23_namespace_mutation() -> dict[str, Any]:
 
 
 def _r23_registry_coverage_entries() -> list[dict[str, Any]]:
-    return [
-        {
-            "criterion": f"r23.rg-{index:02d}",
-            "positive_vectors": [f"r23-positive-{index:02d}"],
-            "negative_vectors": [f"r23-negative-{index:02d}"],
-            "producer": "runtime_vector_round23_applicability",
-            "validator": "validate_r23_applicability_projection",
-            "tests": ["test_round23_rg_12_coverage_index_is_bidirectional_and_substantive"],
-        }
-        for index in range(1, 19)
-    ]
+    records_by_criterion: dict[str, list[dict[str, Any]]] = {}
+    for record in R23_RUNTIME_VECTOR_REGISTRY:
+        records_by_criterion.setdefault(record["criterion"], []).append(dict(record))
+    entries: list[dict[str, Any]] = []
+    for criterion in sorted(records_by_criterion):
+        records = records_by_criterion[criterion]
+        positive = [record for record in records if record["polarity"] == "positive"]
+        negative = [record for record in records if record["polarity"] == "negative"]
+        assert len(positive) == len(negative) == 1
+        positive_record = positive[0]
+        negative_record = negative[0]
+        assert positive_record["validator"] == negative_record["validator"]
+        entries.append(
+            {
+                "criterion": criterion,
+                "positive_vectors": [positive_record["vector_id"]],
+                "negative_vectors": [negative_record["vector_id"]],
+                "producer": positive_record["callable"],
+                "validator": positive_record["validator"],
+                "tests": [R23_COVERAGE_TEST_NAMES[criterion]],
+            }
+        )
+    return entries
 
 
 def runtime_vector_round23_coverage() -> list[dict[str, Any]]:
@@ -18360,19 +18452,16 @@ def runtime_vector_round23_coverage() -> list[dict[str, Any]]:
 
 
 def validate_r23_coverage_registry(value: Iterable[Mapping[str, Any]]) -> None:
-    validate_r23_coverage_index(
+    validate_r23_executable_coverage(
         value,
-        vector_ids={
-            *(f"r23-positive-{index:02d}" for index in range(1, 19)),
-            *(f"r23-negative-{index:02d}" for index in range(1, 19)),
-        },
-        test_names={"test_round23_rg_12_coverage_index_is_bidirectional_and_substantive"},
+        R23_RUNTIME_VECTOR_REGISTRY,
+        test_names=set(R23_COVERAGE_TEST_NAMES.values()),
     )
 
 
 def runtime_vector_round23_coverage_mutation() -> list[dict[str, Any]]:
     value = _r23_registry_coverage_entries()
-    value[0]["criterion"] = "r23.rg-18"
+    value[0]["producer"] = value[1]["producer"]
     return value
 
 
@@ -18768,7 +18857,8 @@ def validate_r23_fixture_evidence_map(
     for criterion in sorted(expected):
         row = evidence[criterion]
         assert set(row) == {"tests", "positive_vectors", "negative_vectors", "validator"}
-        assert row["tests"] and set(row["tests"]) <= test_names
+        assert row["tests"] == [R23_COVERAGE_TEST_NAMES[criterion]]
+        assert set(row["tests"]) <= test_names
         criterion_records = by_criterion[criterion]
         positives = {
             record["vector_id"] for record in criterion_records if record["polarity"] == "positive"
@@ -18780,4 +18870,5 @@ def validate_r23_fixture_evidence_map(
         assert set(row["negative_vectors"]) == negatives
         validators = {record["validator"] for record in criterion_records}
         assert validators == {row["validator"]}
+        assert all(record["callable"] in globals() for record in criterion_records)
         assert len(criterion_records) == 2

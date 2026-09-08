@@ -368,3 +368,22 @@ R19/R20の限定独立判定はP0/P1=0で閉じ、R21は参照seamの限定回�
 限定preflightである。次はOS/process境界を含むR21後段、G09の証拠対応、G10のcanonical R/D/P統合、
 G11の将来package計画、ならびに全体の固定SHA認定である。
 このcheckpointで全体P0/P1=0、外部Strict pass、implementation readiness、Issue完了を宣言しない。
+
+### G09 executable coverage bijection (2026-09-08)
+
+R23のcoverage helperが全18 criterionを同じ`runtime_vector_round23_applicability` producer、同じ
+validator、同じcoverage meta-test、synthetic `r23-positive/negative` vectorで埋めていた。これは
+criterion→vector→producer→validator→testの実体を検証せず、fixture-only surrogateを通してしまうため、
+実装前のG09 gapとして扱った。
+
+`tests/contracts/next_reference_validation.py`にcriterionごとのsubstantive test名を固定し、登録済み
+`R23_RUNTIME_VECTOR_REGISTRY`からpositive/negative pair、positive producer、共通validatorを導出する
+`_r23_registry_coverage_entries`へ置き換えた。`validate_r23_executable_coverage`は、criterion prefix、
+全vectorの一意所有、polarity/expected_valid、producer/validator一致、test名一致を双方向に検証する。
+古いstructural checkerはhistorical synthetic fixture用に残すが、current registry validatorはsurrogate
+を受理しない。producer差替え、fixture vector差替え、substantive test差替えをnegativeで確認した。
+
+検証: G09 focused 2 passed（coverage/runtime registry）、Next/schema 573 passed、全repository 1459 passed
+1 skipped、ruff check、ruff format 163 files、mypy 139 files、SpecDock validate nodes=10。これはR23/G09の
+限定的なローカル契約修復であり、R21実OS/process、G10 canonical R/D/P整理、G11 package計画、全体の
+fixed-SHA Strict reviewは未完了。製品adapter/CLI/依存/lockfileは変更していない。

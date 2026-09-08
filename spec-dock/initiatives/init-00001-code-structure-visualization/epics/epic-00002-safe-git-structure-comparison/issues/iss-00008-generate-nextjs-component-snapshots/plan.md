@@ -30,6 +30,8 @@ frozen package bytes
 
 実装前の順序は、(1) package-only preflight、(2) project-relative controlsとJSONC/local-extends/membership、(3) source graph resolved/open/privacy、(4) process policy/observation、(5) provenance stage matrix、(6) semantic and publication projection、(7) executable coverage registryです。各段階はpositive/negative vector、実schema、reference validatorを同時に追加し、caller-supplied graph/paths/roles/status/bytesを拒否します。`files`/`include`の空配列も明示値として扱い、defaultsは双方が無いときだけです。run/publication provenanceは`run-manifest/v1`とNext domain manifest、checked-in reference/build inventoryは別schema identityです。
 
+run-level terminalはsemantic/finalizerの前段にある独立した一回限りの分岐として計画する。project-root overlapは`CSV-NEXT-PROJECT-001` usage/exit 2（reader・decoder・finalizer・Artifactなし）、source-integrity driftは`CSV-NEXT-SOURCE-INTEGRITY-001` fatal/exit 1（manifestなし）、handled interruptはcore `CSV-INTERRUPT-001` interrupted/exit 130（cleanup後）へ投影する。全selectorでterminal branchのstdout/stderr/exitを同じdecisionから生成し、付属診断やcandidate bytesを再利用しない。G09では各criterionのpositive/negative vector、実callable producer、validator、substantive testをregistryから双方向に検証し、全criterionを同じcoverage helperで埋める代理表を拒否する。
+
 受入では、contract focused test、all contract/full pytest、mypy、ruff、SpecDock、pinned PlantUMLを順に実行します。Windows/OS process-level/将来wheel・sdistはproductionまたは別migrationの計画契約として記録し、実測済みとは主張しません。2026-09-08のユーザー指示により外部ChatGPT系スキルを停止し、主担当GPT-6で修正、独立GPT-6・推論Maxでレビューします。cleanかつpush済みの固定SHAについて必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、production実装を開始しません。後段の外部Strict必須という履歴は現在の検証経路を上書きしません。
 
 ## Planning Level
@@ -313,7 +315,7 @@ fresh current-SHA Strictはpending/readiness unconfirmed、production implementa
 | I05-PLAN-004 | untrusted response strict validation/ID再計算、semantic JSON、PlantUML、manifest、closed registry/publicationを接続する。 | I05-DES-004 |
 | I05-PLAN-005 | intentional unknown、partial_safe、payload_unavailable、explicit target all-or-nothing、entity/transport/type limitsをoutcomeへ接続する。 | I05-DES-005 |
 | I05-PLAN-006 | non-execution/redaction、determinism、Node optionality、offline bundle、lock/license、resource cap、CI、full regressionを完了する。 | I05-DES-006 |
-| I05-PLAN-007 | parserに部分実装済みのNext stdout syntaxをdomain/format/schema/stream pathと一貫して有効化し、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを検証する。 | I05-DES-007 |
+| I05-PLAN-007 | parserに部分実装済みのNext stdout syntaxをdomain/format/schema/stream pathと一貫して有効化し、exact-byte copy、unavailable result、no-selector summary、usage no-publicationを検証する。run-level fatal/interruptのmanifest-free投影と、terminal付属診断のsafe core再構築もselector全種で検証する。 | I05-DES-007 |
 
 ## 実装step
 
@@ -427,6 +429,7 @@ uv run pytest tests/acceptance/next/test_stdout_selector.py -q
 uv run pytest tests/acceptance/next/test_trusted_type_environment.py -q
 uv run pytest tests/contracts/next tests/packaging/test_distribution.py tests/packaging/test_next_distribution.py -q
 uv run pytest tests/regression/test_next_domain_compatibility.py -q
+uv run pytest tests/contracts/test_next_contracts.py -q -k 'round23_rg_12_coverage or runtime_registry'
 uv build --offline
 ./spec-dock/scripts/spec-dock validate
 uv run ruff check .

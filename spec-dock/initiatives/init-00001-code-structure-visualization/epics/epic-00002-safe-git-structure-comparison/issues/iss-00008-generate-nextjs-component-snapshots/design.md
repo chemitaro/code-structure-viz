@@ -43,6 +43,8 @@ note bottom of O : No external reconstruction or fallback
 
 semantic rendererはdecisionだけを受け、publication finalizerは実際のcandidate bytesとmeasurementを一度sealします。summary/root-manifest/artifact/typed-unavailableはそのsealed bytesを返すだけで再render/retryしません。selected copy overrunはsemantic statusを変えず、persisted descriptorを保持したpublication-incomplete/exit 3です。canonical JSONはsort_keys/NFC/UTF-8/LF、path-only rowsはNFC UTF-8 bytes、object rowsはcanonical JSON bytesです。
 
+run-level terminal branchはpublication finalizerの前に一度だけ分岐します。project-rootのancestor/descendant overlapは`SourceProjectUsage`としてusage/exit 2、stdout空、Artifactなし、reader・decoder・finalizer・artifact readなしで終了します。source revision driftなどのintegrity violationは`SourceIntegrityFatal`としてfatal/exit 1、manifest/Artifactなし、Next catalog診断をstderrへ出します。捕捉済み`PublicationInterrupted`/`KeyboardInterrupt`はcore `CSV-INTERRUPT-001`を再構築してinterrupted/exit 130とし、付属diagnosticのmessage/path/domainを信頼しません。selectorは全4形（省略、manifest、semantic-json、PlantUML）で同じ分岐表を使い、terminal stdoutは空またはtyped unavailable/summaryのsealed bytesだけを返します。
+
 現在の整備対象はdata-only reference contractです。production adapter、OS process-level証明、Node runtimeの実測は未実施です。2026-09-08のユーザー指示により、外部ChatGPT系スキルは停止し、独立GPT-6・推論Maxの固定SHAレビューへ切り替えます。必要な検証と重要指摘ゼロを確認するまでimplementation readinessを確定しません。内部レビューと過去の外部Strict結果を混同しません。
 
 ## 設計目標
@@ -137,7 +139,7 @@ greenはStrict passを意味せず、fresh current-SHA Strictが`P0=0 / P1=0 / r
 | I05-DES-004 | I05-REQ-004 | `next-adapter/v1` responseをuntrusted inputとしてPythonがstrict validate/recomputeし、public semantic/PlantUML/manifestをPython側でrenderする。 |
 | I05-DES-005 | I05-REQ-005 | promised semanticsの欠落に基づきcomplete/partial_safe/payload_unavailableを分類し、explicit target、budget、transport failureをfail-closedにする。 |
 | I05-DES-006 | I05-REQ-006 | fixed process boundary、in-memory CompilerHost、finite limits、redaction、offline bundle、Node optionality、same-input determinismを検証する。 |
-| I05-DES-007 | I05-REQ-007 | closed stdout selectorをsource acquisition前に検証し、publication後exact bytesまたはtyped unavailable resultをstderr diagnosticsと分離して出す。 |
+| I05-DES-007 | I05-REQ-007 | closed stdout selectorをsource acquisition前に検証し、publication後exact bytesまたはtyped unavailable resultをstderr diagnosticsと分離して出す。run-level usage/fatal/interruptはmanifest/domain/artifactを生成せず、core/Nextの診断authorityとselector別stdoutを一つのterminal projectionで閉じる。 |
 
 ## Current / Target
 

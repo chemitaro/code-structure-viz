@@ -85,6 +85,7 @@ from tests.contracts.next_reference_validation import (
     _path_sort_key,
     _process_launch_for_toolchain,
     _publication_context_for_validated_request,
+    _r23_registry_coverage_entries,
     _scan_export_file,
     _scan_module_specifiers,
     _toolchain_snapshot,
@@ -200,6 +201,7 @@ from tests.contracts.next_reference_validation import (
     validate_published_projection,
     validate_r23_applicability_projection,
     validate_r23_coverage_index,
+    validate_r23_coverage_registry,
     validate_r23_decision,
     validate_r23_fixture_evidence_map,
     validate_r23_process_launch_observation,
@@ -12311,6 +12313,12 @@ def test_round23_rg_12_coverage_index_is_bidirectional_and_substantive() -> None
             vector_ids=vector_ids,
             test_names={"test_round23_rg_12_coverage_index_is_bidirectional_and_substantive"},
         )
+    executable = _r23_registry_coverage_entries()
+    validate_r23_coverage_registry(executable)
+    producer_mutation = copy.deepcopy(executable)
+    producer_mutation[0]["producer"] = producer_mutation[1]["producer"]
+    with pytest.raises(AssertionError):
+        validate_r23_coverage_registry(producer_mutation)
     fixture = json.loads(
         (ROOT / "tests" / "fixtures" / "next_contract_vectors.json").read_text(encoding="utf-8")
     )
@@ -12335,6 +12343,12 @@ def test_round23_rg_12_coverage_index_is_bidirectional_and_substantive() -> None
     evidence_mutation["round23.rg-01"]["negative_vectors"] = ["round23-runtime-config-mutation"]
     with pytest.raises(AssertionError):
         validate_r23_fixture_evidence_map(evidence_mutation, records, test_names=declared_tests)
+    evidence_test_swap = copy.deepcopy(round23_evidence)
+    evidence_test_swap["round23.rg-01"]["tests"] = [
+        "test_round23_rg_02_config_subset_has_one_closed_jsonc_grammar"
+    ]
+    with pytest.raises(AssertionError):
+        validate_r23_fixture_evidence_map(evidence_test_swap, records, test_names=declared_tests)
 
 
 def test_round23_rg_13_decision_is_the_only_publication_input() -> None:
