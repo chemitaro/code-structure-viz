@@ -23,8 +23,9 @@ reflected_to: []
   - design.md current-v1のSourceDiscoveryIntentからSourceAcquisitionPlan/v1への導出とdocs/contracts/next-config-v1.mdが、凍結bytesからduplicate-key rejecting JSONCを扱い、control parse failureをfail-closedにする契約を定める。
   - docs/contracts/next-source-plan-v1.mdはsource controlsを一度だけ観測し、後続の設定導出で生bytesを再読しないことを要求する。今回のdecoder自体はbytesだけを受け取り、filesystemには触れない。
   - 固定SHAレビュー中のStandards reviewerによる補助観測（最終所見とは区別）: b'{"value":1/*x*/2}' が {"value":12}、b'{,}' が {}、b'{"value":[,]}' が {"value":[]} として受理された。
-  - 修正候補はこれらの不正構文を拒否し、正しい末尾カンマ、コメント内のカンマ、string内の//と/*...*/を保つ。focused testsは24件成功、full pytestは1521 passed, 1 skipped。Ruff、format、mypy、SpecDock validate (nodes=10)、git diff --checkも成功。これらはpush・固定SHA再レビュー前のローカル検証。
-  - 初期candidate 621b972...のレビューは、この補助観測により対象SHAを再び作り直す必要が生じた。最終candidateの独立レビューは未実施で、修正版をcommit/pushした後に再実施する。
+  - 初期candidate 621b972...のレビューは、この補助観測により対象SHAを再び作り直す必要が生じた。修正版 `d1260edf7e9e66204b10d93eb2f24fe0940ba492` の独立レビューではSpecがP0/P1/P2=0でpass、Standardsの文書化規約違反は0件だった。Standardsの判断事項ST-1は、block-comment終端位置と未終端エラー処理がlookahead/main scanに重複しているというもの。
+  - ST-1は振る舞い変更なしの小さな共通化として採用し、`block_comment_end`へ終端検索とtyped errorを集約した。修正後はfocused tests 24件、full pytest 1521 passed/1 skipped、Ruff check、format check（169 files）、mypy（145 source files）、SpecDock validate（nodes=10）、`git diff --check`がすべて成功した。
+  - これらは現在の未commit修正候補のローカル検証であり、この候補のcommit/pushおよび新しい固定SHAでの独立レビューはまだ行っていない。
 
 ## Synthesis
 
@@ -47,4 +48,4 @@ reflected_to: []
 
 - durable な結論を Requirement / Design / Plan または accepted ADR に再記述する。
   - Current-v1は既にduplicate-key rejecting JSONCとmalformed control rejectionを定めているため、canonical文書は変更しない。
-  - 修正版commit/push後に、その正確なSHAを基準として独立Spec / Standardsレビューと品質gateを再実行する。P0/P1=0、Spec review_status=passになるまで次のextends/membership実装段階へ進まず、このparser sliceまたはIssue #8全体を完了扱いにしない。
+  - `d1260edf...`のレビューはSpec pass、Standardsの文書化規約違反0件だったが、判断事項ST-1への小さな修正を追加した。現在の候補をcommit/pushし、その正確なSHAで独立Spec / Standardsレビューを再実行する。P0/P1=0、Spec review_status=passになるまで次のextends/membership実装段階へ進まず、このparser sliceまたはIssue #8全体を完了扱いにしない。

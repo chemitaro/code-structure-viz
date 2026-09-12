@@ -59,6 +59,12 @@ def _strip_jsonc(text: str, *, path: str) -> str:
     def append_comment_as_whitespace(start: int, end: int) -> None:
         output.extend(character if character in "\r\n" else " " for character in text[start:end])
 
+    def block_comment_end(start: int) -> int:
+        terminator = text.find("*/", start + 2)
+        if terminator < 0:
+            raise NextConfigurationError("control has an unterminated comment", path=path)
+        return terminator + 2
+
     def next_value_index(start: int) -> int:
         cursor = start
         while cursor < len(text):
@@ -70,10 +76,7 @@ def _strip_jsonc(text: str, *, path: str) -> str:
                     cursor += 1
                 continue
             if text.startswith("/*", cursor):
-                end = text.find("*/", cursor + 2)
-                if end < 0:
-                    raise NextConfigurationError("control has an unterminated comment", path=path)
-                cursor = end + 2
+                cursor = block_comment_end(cursor)
                 continue
             break
         return cursor
@@ -108,10 +111,7 @@ def _strip_jsonc(text: str, *, path: str) -> str:
             index = end
             continue
         if text.startswith("/*", index):
-            end = text.find("*/", index + 2)
-            if end < 0:
-                raise NextConfigurationError("control has an unterminated comment", path=path)
-            end += 2
+            end = block_comment_end(index)
             append_comment_as_whitespace(index, end)
             index = end
             continue
