@@ -7,6 +7,7 @@ import pytest
 from code_structure_viz.adapters.next.configuration import (
     NextConfigurationError,
     parse_control_jsonc,
+    resolve_compiler_options,
     resolve_control_closure,
 )
 
@@ -138,6 +139,140 @@ def test_project_control_closure_preserves_explicit_empty_membership_values() ->
     assert resolved.values["include"] == []
     assert resolved.values["exclude"] == ["dist/**"]
     assert resolved.declaring_paths["include"] == "tsconfig.json"
+
+
+def test_project_compiler_options_apply_defaults_and_declaring_config_paths() -> None:
+    closure = resolve_control_closure(
+        {
+            "apps/web/config/base.json": (
+                b'{"compilerOptions":{"jsx":"react-jsx","baseUrl":".",'
+                b'"paths":{"@shared/*":["src/shared/*"]}}}'
+            ),
+            "apps/web/tsconfig.json": (
+                b'{"extends":"./config/base.json","compilerOptions":{"allowJs":false}}'
+            ),
+        },
+        project_root="apps/web",
+        config_path="apps/web/tsconfig.json",
+    )
+
+    resolved = resolve_compiler_options(closure, project_root="apps/web")
+
+    assert resolved.as_dict() == {
+        "allow_js": False,
+        "check_js": False,
+        "jsx": "react-jsx",
+        "module": "esnext",
+        "module_resolution": "bundler",
+        "base_url": "apps/web/config",
+        "paths": {"@shared/*": ["apps/web/config/src/shared/*"]},
+    }
+    assert resolved.path_resolution_order == ("@shared/*",)
+
+
+def test_project_compiler_options_use_closed_defaults_without_a_base_url() -> None:
+    closure = resolve_control_closure(
+        {"tsconfig.json": b"{}"}, project_root=".", config_path="tsconfig.json"
+    )
+
+    resolved = resolve_compiler_options(closure, project_root=".")
+
+    assert resolved.as_dict() == {
+        "allow_js": True,
+        "check_js": False,
+        "jsx": "preserve",
+        "module": "esnext",
+        "module_resolution": "bundler",
+        "base_url": None,
+        "paths": {},
+    }
+    assert resolved.path_resolution_order == ()
+
+
+def test_project_compiler_options_order_path_aliases_by_specificity() -> None:
+    closure = resolve_control_closure(
+        {
+            "tsconfig.json": (
+                b'{"compilerOptions":{"paths":{"@*":["src/*"],'
+                b'"@ui/*":["ui/*"],"@ui/Button":["button"]}}}'
+            )
+        },
+        project_root=".",
+        config_path="tsconfig.json",
+    )
+
+    resolved = resolve_compiler_options(closure, project_root=".")
+
+    assert resolved.path_resolution_order == ("@ui/Button", "@ui/*", "@*")
+    assert resolved.as_dict()["paths"] == {
+        "@*": ["src/*"],
+        "@ui/*": ["ui/*"],
+        "@ui/Button": ["button"],
+    }
+
+
+def test_project_compiler_options_validate_ignored_build_options_without_using_them() -> None:
+    closure = resolve_control_closure(
+        {
+            "tsconfig.json": (
+                b'{"compilerOptions":{"noEmit":true,"outDir":"dist",'
+                b'"target":"ES2022","lib":["ES2022"]}}'
+            )
+        },
+        project_root=".",
+        config_path="tsconfig.json",
+    )
+
+    resolved = resolve_compiler_options(closure, project_root=".")
+
+    assert resolved.as_dict() == {
+        "allow_js": True,
+        "check_js": False,
+        "jsx": "preserve",
+        "module": "esnext",
+        "module_resolution": "bundler",
+        "base_url": None,
+        "paths": {},
+    }
+    assert "compilerOptions.noEmit" in closure.declaring_paths
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_code"),
+    [
+        (b'{"compilerOptions":{"plugins":[]}}', "CSV-NEXT-CONFIG-002"),
+        (b'{"compilerOptions":{"typeRoots":["types"]}}', "CSV-NEXT-CONFIG-002"),
+        (b'{"compilerOptions":{"types":[]}}', "CSV-NEXT-CONFIG-002"),
+        (b'{"compilerOptions":{"unknownOption":true}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"allowJs":"yes"}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"checkJs":null}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"jsx":"automatic"}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"jsx":[]}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"module":"commonjs"}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"moduleResolution":"node"}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"baseUrl":"../outside"}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"declaration":"yes"}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"lib":"ES2022"}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"paths":null}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"paths":{"@/*":[]}}}', "CSV-NEXT-CONFIG-001"),
+        (
+            b'{"compilerOptions":{"paths":{"@/*":["../outside/*"]}}}',
+            "CSV-NEXT-CONFIG-001",
+        ),
+    ],
+)
+def test_project_compiler_options_reject_unsupported_values(
+    payload: bytes, expected_code: str
+) -> None:
+    closure = resolve_control_closure(
+        {"tsconfig.json": payload}, project_root=".", config_path="tsconfig.json"
+    )
+
+    with pytest.raises(NextConfigurationError) as error:
+        resolve_compiler_options(closure, project_root=".")
+
+    assert error.value.code == expected_code
+    assert error.value.stage == "source_control"
 
 
 @pytest.mark.parametrize(
