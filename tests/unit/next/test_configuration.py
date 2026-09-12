@@ -170,6 +170,18 @@ def test_project_compiler_options_apply_defaults_and_declaring_config_paths() ->
     assert resolved.path_resolution_order == ("@shared/*",)
 
 
+def test_project_compiler_options_allow_paths_replacement_at_nested_project_root() -> None:
+    closure = resolve_control_closure(
+        {"apps/web/tsconfig.json": (b'{"compilerOptions":{"paths":{"@app":["."]}}}')},
+        project_root="apps/web",
+        config_path="apps/web/tsconfig.json",
+    )
+
+    resolved = resolve_compiler_options(closure, project_root="apps/web")
+
+    assert resolved.as_dict()["paths"] == {"@app": ["apps/web"]}
+
+
 def test_project_compiler_options_use_closed_defaults_without_a_base_url() -> None:
     closure = resolve_control_closure(
         {"tsconfig.json": b"{}"}, project_root=".", config_path="tsconfig.json"
@@ -255,6 +267,7 @@ def test_project_compiler_options_validate_ignored_build_options_without_using_t
         (b'{"compilerOptions":{"lib":"ES2022"}}', "CSV-NEXT-CONFIG-001"),
         (b'{"compilerOptions":{"paths":null}}', "CSV-NEXT-CONFIG-001"),
         (b'{"compilerOptions":{"paths":{"@/*":[]}}}', "CSV-NEXT-CONFIG-001"),
+        (b'{"compilerOptions":{"paths":{"@app":["."]}}}', "CSV-NEXT-CONFIG-001"),
         (
             b'{"compilerOptions":{"paths":{"@/*":["../outside/*"]}}}',
             "CSV-NEXT-CONFIG-001",

@@ -18,40 +18,6 @@ _CONFIG_ERROR_STAGE = "source_control"
 _JSON_WHITESPACE = frozenset(" \t\r\n")
 _CONTROL_KEYS = frozenset({"compilerOptions", "include", "exclude", "files", "extends"})
 _FORBIDDEN_COMPILER_OPTIONS = frozenset({"plugins", "typeRoots", "types"})
-_IGNORED_COMPILER_OPTIONS = frozenset(
-    {
-        "outDir",
-        "rootDir",
-        "declaration",
-        "declarationMap",
-        "sourceMap",
-        "noEmit",
-        "incremental",
-        "composite",
-        "target",
-        "lib",
-        "strict",
-        "esModuleInterop",
-        "skipLibCheck",
-        "resolveJsonModule",
-        "isolatedModules",
-        "verbatimModuleSyntax",
-    }
-)
-_SUPPORTED_COMPILER_OPTIONS = (
-    frozenset(
-        {
-            "allowJs",
-            "checkJs",
-            "jsx",
-            "module",
-            "moduleResolution",
-            "baseUrl",
-            "paths",
-        }
-    )
-    | _IGNORED_COMPILER_OPTIONS
-)
 _BOOLEAN_COMPILER_OPTIONS = frozenset(
     {
         "declaration",
@@ -67,6 +33,23 @@ _BOOLEAN_COMPILER_OPTIONS = frozenset(
         "isolatedModules",
         "verbatimModuleSyntax",
     }
+)
+_IGNORED_COMPILER_OPTIONS = _BOOLEAN_COMPILER_OPTIONS | frozenset(
+    {"outDir", "rootDir", "target", "lib"}
+)
+_SUPPORTED_COMPILER_OPTIONS = (
+    frozenset(
+        {
+            "allowJs",
+            "checkJs",
+            "jsx",
+            "module",
+            "moduleResolution",
+            "baseUrl",
+            "paths",
+        }
+    )
+    | _IGNORED_COMPILER_OPTIONS
 )
 
 
@@ -390,10 +373,6 @@ def _resolve_declaring_config_path(
         candidate = project_root
     elif project_root != "." and not _path_is_within(candidate, project_root):
         raise NextConfigurationError("compiler path is outside the project root", path=config_path)
-    if candidate == project_root and not allow_project_root:
-        raise NextConfigurationError(
-            "paths replacement cannot target the project root", path=config_path
-        )
     return candidate
 
 
