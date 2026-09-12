@@ -43,3 +43,12 @@ reflected_to: []
 
 - canonical Requirement/Planの順序は変えない。ユーザーがmembership originを選んだら、Designの食い違う行を修正する必要性を判定し、正本修正は別scopeとして記録する。
 - このArtifactは調査/進捗証拠であり、compiler options全体、membership、source seal、CLI、Issue #8の受入れ完了を主張しない。
+
+## Fixed-SHA compiler-options review and remediation evidence
+
+- Candidate: `4f49ac9e7ccdf2c5d1b4846d5345a8c209f639d4`; fixed point: `c769b18eb8fce1a81f94c1aca12cad97357c1deb`. The compiler-options review covered its implementation/remediation slice through this candidate. At review start/end, local `HEAD`, configured upstream, and GitHub branch matched the candidate and the checkout was clean.
+- Spec review: `P0=0 / P1=0 / P2=0 / review_status=pass`; no findings. The reviewer confirmed `apps/web/tsconfig.json` `paths` replacement `"."` resolves at the selected nested project root while repository-root `"."` remains rejected, root `baseUrl` remains permitted, boolean-option handling is preserved, and the `allow_root_sentinel` rename is behavior-neutral.
+- Standards review: pass; hard violations `0` and unresolved judgement calls `0`.
+- Focused evidence: compiler-options unit tests `63 passed`. Primary verification for the same code-content candidate: full suite `1560 passed, 1 skipped`, mypy `145` source files, Ruff check/format, and SpecDock validation passed. The independent reviewer did not rerun those broad checks.
+- The nested-project fix is commit `65a0848`; the sentinel-name clarification is commit `4f49ac9`. Together with the implementation commit `c93cb00`, these are the compiler-options changes in this slice. The separate package-applicability review evidence is recorded in `20260912t042823z-disc-package-applicability-review-remediation.md`.
+- This pass is limited to compiler-option resolution. It does not resolve the material `files/include/exclude` membership-origin conflict: `design.md:1045` says project-root-relative, while the executable source-seal tests and TypeScript `extends` semantics point to declaring-config-relative. No membership resolver or canonical Design change is authorized by this evidence; obtain the user's choice before that work. It also does not certify source seal, CLI, output generation, or Issue #8 acceptance. Updating this record changes the candidate SHA and requires a separate documentation-only review.

@@ -54,8 +54,17 @@ reflected_to: []
 - Primary response route: `test-remediation`. Keep the production and reference `RecursionError -> malformed` fail-closed handling, replace parser-version-dependent deep-input assertions with scoped injection of `RecursionError` into `json.loads`, and verify unit plus production/reference parity. No product semantics, canonical requirement, or package depth limit changes; no human decision is needed.
 - The 514b6fc review result is historical evidence for this response. Any record of the next verdict changes the candidate itself and therefore requires review of the resulting SHA.
 
+## SP-4 remediation fixed-SHA re-review
+
+- Candidate: `4f49ac9e7ccdf2c5d1b4846d5345a8c209f639d4`; fixed point: `514b6fc785a8f523070993b2d224d4bb4ad081ee`. The package-only review covered the remediation through the candidate; at review start and end the worktree was clean and local `HEAD`, configured upstream, and GitHub branch all matched this SHA.
+- Remediation: commit `337c04a` replaces parser-depth-dependent assertions in `tests/unit/next/test_applicability.py` and `tests/contracts/test_next_contracts.py` with scoped `monkeypatch.context()` injection of `RecursionError` from `json.loads`, asserting `malformed` in both production and reference models. Production and reference fail-closed handling remains unchanged; no package JSON depth limit or other package policy was introduced.
+- Spec re-review: `P0=0 / P1=0 / P2=0 / review_status=pass`; missing/partial, unrequested-scope, and implemented-but-wrong classifications are all zero. `SP-4` is resolved, and `SP-1` through `SP-3` were rechecked as resolved. The reviewer ran on Python 3.12.11: applicability unit `31 passed` and the targeted parity contract `1 passed`; full-scalar Unicode NFC KAT, immutable-observation regression, and multibyte 4096-byte accepted / 4097-byte rejected boundaries were also checked.
+- Standards re-review: pass; hard violations `0`, unresolved judgement calls `0`. The earlier `_package_path` duplication finding remains resolved.
+- Primary verification evidence for this code-content candidate: full suite `1560 passed, 1 skipped`, mypy `145` source files, Ruff check/format, SpecDock validation, and `git diff --check` passed. The reviewer did not rerun those broad checks; the two focused tests above are the independent re-review lane's direct test evidence.
+- Scope remains package applicability only. This pass does not certify source sealing, config membership, CLI behavior, semantic analysis, output generation, or Issue #8 acceptance. Recording this result changes the repository candidate; review the resulting documentation-only SHA before treating the evidence record as final.
+
 ## Reflection
 
 - durable な結論を Requirement / Design / Plan または accepted ADR に再記述する。
   - Current-v1正本は既に必要な意味を定めているため、canonical Requirement / Design / Planは変更しない。このArtifactはレビューと修正判断のevidenceのみ。
-  - 現候補のSpec軸review statusはfailであり、次の計画実装段階へ進む前に修正・検証・固定SHA再レビューを行う。re-reviewの最終SHA/verdictをこのArtifactへ追記する場合、その追記自体が新しい候補SHAを作るため、更新後のSHAも改めて固定してレビューする。レビュー証拠はこの記録のまま保ち、P0/P1=0とreview passを証明するまではIssue実装全体を完了扱いにしない。
+  - 514b6fcのSpec failはSP-4のtest-remediation後、4f49ac9でpackage-only再レビューpassとなった。上記レビュー証拠はpackage sliceにだけ適用し、記録追記後のSHAも別途固定してレビューする。Issue実装全体は完了扱いにしない。
