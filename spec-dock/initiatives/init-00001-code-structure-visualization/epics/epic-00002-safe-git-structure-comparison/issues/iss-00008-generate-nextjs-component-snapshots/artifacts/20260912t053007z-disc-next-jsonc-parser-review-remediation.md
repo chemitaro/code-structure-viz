@@ -23,9 +23,11 @@ reflected_to: []
   - design.md current-v1のSourceDiscoveryIntentからSourceAcquisitionPlan/v1への導出とdocs/contracts/next-config-v1.mdが、凍結bytesからduplicate-key rejecting JSONCを扱い、control parse failureをfail-closedにする契約を定める。
   - docs/contracts/next-source-plan-v1.mdはsource controlsを一度だけ観測し、後続の設定導出で生bytesを再読しないことを要求する。今回のdecoder自体はbytesだけを受け取り、filesystemには触れない。
   - 固定SHAレビュー中のStandards reviewerによる補助観測（最終所見とは区別）: b'{"value":1/*x*/2}' が {"value":12}、b'{,}' が {}、b'{"value":[,]}' が {"value":[]} として受理された。
-  - 初期candidate 621b972...のレビューは、この補助観測により対象SHAを再び作り直す必要が生じた。修正版 `d1260edf7e9e66204b10d93eb2f24fe0940ba492` の独立レビューではSpecがP0/P1/P2=0でpass、Standardsの文書化規約違反は0件だった。Standardsの判断事項ST-1は、block-comment終端位置と未終端エラー処理がlookahead/main scanに重複しているというもの。
-  - ST-1は振る舞い変更なしの小さな共通化として採用し、`block_comment_end`へ終端検索とtyped errorを集約した。修正後はfocused tests 24件、full pytest 1521 passed/1 skipped、Ruff check、format check（169 files）、mypy（145 source files）、SpecDock validate（nodes=10）、`git diff --check`がすべて成功した。
-  - これらは現在の未commit修正候補のローカル検証であり、この候補のcommit/pushおよび新しい固定SHAでの独立レビューはまだ行っていない。
+  - 初期candidate 621b972...のレビューは、この補助観測により対象SHAを再び作り直す必要が生じた。candidate `d1260edf7e9e66204b10d93eb2f24fe0940ba492` のレビューではSpecがP0/P1/P2=0でpass、Standardsの文書化規約違反は0件だった。判断事項ST-1はblock-comment終端処理の重複。
+  - ST-1は振る舞い変更なしで採用し、`block_comment_end`に終端検索とtyped errorを集約して `b898f030994d18725011866e658c743f86f1127e` をcommit/pushした。同SHAの独立レビューはSpec `P0=0/P1=0/P2=0/review_status=pass`、Standardsの文書化規約違反0件。ST-1は解消済みだが、Standards判断事項ST-2としてline-comment終端走査の短い重複が新たに報告された。
+  - ST-2は規約違反・動作不良ではないが、同じ局所的走査を共有する小さな共通化として採用し、`line_comment_end`を追加した。修正後はfocused tests 24件、full pytest 1521 passed/1 skipped、Ruff check、format check（169 files）、mypy（145 source files）、SpecDock validate（nodes=10）がすべて成功した。
+  - このline-comment修正とレビュー記録更新は現在の未commit候補に含まれ、この候補のcommit/pushおよび新しい固定SHAでの独立レビューはまだ行っていない。
+  - `analyze-review-findings` と `chatgpt-analyze-review-findings-strict` はこのsessionの利用可能skill一覧になかったため、primaryが両レビューをcurrent-v1 authorityと照合して判断した。ユーザーの現行方針に従い、外部ChatGPTレビューskillは呼び出さず、独立レビューはGPT-6 Max local agentsで実施した。
 
 ## Synthesis
 
@@ -48,4 +50,4 @@ reflected_to: []
 
 - durable な結論を Requirement / Design / Plan または accepted ADR に再記述する。
   - Current-v1は既にduplicate-key rejecting JSONCとmalformed control rejectionを定めているため、canonical文書は変更しない。
-  - `d1260edf...`のレビューはSpec pass、Standardsの文書化規約違反0件だったが、判断事項ST-1への小さな修正を追加した。現在の候補をcommit/pushし、その正確なSHAで独立Spec / Standardsレビューを再実行する。P0/P1=0、Spec review_status=passになるまで次のextends/membership実装段階へ進まず、このparser sliceまたはIssue #8全体を完了扱いにしない。
+  - `b898f030...`のレビューはSpec pass、Standardsの文書化規約違反0件だった。判断事項ST-2への小さな修正を追加したため、現在の候補をcommit/pushし、その正確なSHAで独立Spec / Standardsレビューを再実行する。P0/P1=0、Spec review_status=passになるまで次のextends/membership実装段階へ進まず、このparser sliceまたはIssue #8全体を完了扱いにしない。
