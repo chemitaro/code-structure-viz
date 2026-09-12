@@ -15,6 +15,9 @@ from unittest.mock import patch
 import pytest
 from jsonschema import ValidationError  # type: ignore[import-untyped]
 
+from code_structure_viz.adapters.next.applicability import (
+    derive_package_applicability_matrix as derive_product_applicability_matrix,
+)
 from code_structure_viz.artifacts.streams import StdoutEmitter
 from code_structure_viz.artifacts.writer import PublicationInterrupted
 from code_structure_viz.cli.parser import DomainFormatSelector, ManifestSelector
@@ -5835,6 +5838,31 @@ def test_round24_applicability_preflight_grants_permission_without_node_observat
     assert projection["domain"]["project_roots"] == ["."]
     assert projection["root_manifest"]["status"] == "summary"
     assert projection["stdout_result"]["reason"] == "applicable_pending"
+
+
+@pytest.mark.parametrize(
+    ("package_bytes", "project_roots"),
+    [
+        ({"package.json": b'{"dependencies":{"next":"15"}}'}, (".",)),
+        (
+            {
+                "apps/web/package.json": b'{"devDependencies":{"next":"^15"}}',
+                "apps/plain/package.json": b'{"optionalDependencies":{"next":"15"}}',
+            },
+            ("apps/plain", "apps/web"),
+        ),
+        ({"package.json": b'{"dependencies":{"next":null}}'}, (".",)),
+        ({}, (".",)),
+    ],
+)
+def test_production_package_applicability_matches_current_v1_reference(
+    package_bytes: dict[str, bytes], project_roots: tuple[str, ...]
+) -> None:
+    production = derive_product_applicability_matrix(package_bytes, project_roots)
+    reference = derive_package_applicability_matrix(package_bytes, project_roots)
+
+    assert production.as_dict() == reference.as_dict()
+    assert production.observation_value() == reference.observation_value()
 
 
 @pytest.mark.parametrize("state", ["applicable", "malformed", "mixed"])

@@ -78,10 +78,15 @@ def test_runtime_dependency_import_and_package_surfaces_are_closed() -> None:
             )
 
     assert forbidden == []
-    assert not any(
-        path.is_dir() and path.name.lower() in {"diff", "next", "html"}
+    allowed_next_adapter = SOURCE_ROOT / "adapters" / "next"
+    forbidden_surfaces = tuple(
+        path
         for path in SOURCE_ROOT.rglob("*")
+        if path.is_dir()
+        and path.name.lower() in {"diff", "next", "html"}
+        and path != allowed_next_adapter
     )
+    assert forbidden_surfaces == ()
     assert not any(path.suffix.lower() in {".html", ".htm"} for path in SOURCE_ROOT.rglob("*"))
 
 
