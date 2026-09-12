@@ -283,7 +283,7 @@ def resolve_compiler_options(
             raw_base_url,
             config_path=_declaring_path(closure, "compilerOptions.baseUrl", failure_path),
             project_root=project_root,
-            allow_project_root=True,
+            allow_root_sentinel=True,
         )
         if isinstance(raw_base_url, str)
         else None
@@ -312,7 +312,7 @@ def resolve_compiler_options(
                 value,
                 config_path=declaring_path,
                 project_root=project_root,
-                allow_project_root=False,
+                allow_root_sentinel=False,
             )
             for value in replacements
         )
@@ -345,7 +345,7 @@ def _resolve_declaring_config_path(
     *,
     config_path: str,
     project_root: str,
-    allow_project_root: bool,
+    allow_root_sentinel: bool,
 ) -> str:
     if (
         not isinstance(value, str)
@@ -365,7 +365,7 @@ def _resolve_declaring_config_path(
     parts = tuple(part for part in raw_parts if part not in {"", ".", "/"})
     candidate = "/".join(parts) or "."
     try:
-        _validate_path(candidate, allow_root=allow_project_root)
+        _validate_path(candidate, allow_root=allow_root_sentinel)
         _validate_control_location(project_root, config_path)
     except (TypeError, ValueError) as error:
         raise NextConfigurationError("compiler path is invalid", path=config_path) from error
