@@ -28,16 +28,17 @@
   },
   "$defs": {
     "path": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
+      "$ref": "urn:code-structure-viz:schema:next-path-v1"
+    },
+    "root_path": {
+      "$ref": "urn:code-structure-viz:schema:next-root-or-path-v1"
     },
     "project": {
       "type": "object",
       "additionalProperties": false,
       "required": ["project_root", "package_path", "state", "evidence"],
       "properties": {
-        "project_root": {"oneOf": [{"const": "."}, {"$ref": "#/$defs/path"}]},
+        "project_root": {"$ref": "#/$defs/root_path"},
         "package_path": {"$ref": "#/$defs/path"},
         "state": {"enum": ["applicable", "non_applicable", "malformed"]},
         "evidence": {"enum": ["direct_next_dependency", "no_direct_next", "missing_package", "malformed_package"]}

@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any
 
+from code_structure_viz.core.unicode_15_0_nfc import normalize_nfc
+
 _SCHEMA = "code-structure-viz.next-package-applicability/v1"
+_MAX_PATH_BYTES = 4096
 
 
 class PackageApplicabilityState(StrEnum):
@@ -34,9 +36,8 @@ class PackageApplicabilityEntry:
 
     def __post_init__(self) -> None:
         _validate_project_root(self.project_root)
-        expected_path = (
-            "package.json" if self.project_root == "." else f"{self.project_root}/package.json"
-        )
+        expected_path = _package_path(self.project_root)
+        _validate_path(expected_path, allow_root=False)
         if self.package_path != expected_path:
             raise ValueError("package path must be the selected project's direct package.json")
         try:
@@ -90,7 +91,11 @@ class PackageApplicabilityMatrix:
         if aggregate_state is not _aggregate_state(entries):
             raise ValueError("package applicability aggregate state does not match its entries")
 
-        observations = tuple(self._observed_package_bytes)
+        observations = self._observed_package_bytes
+        if not isinstance(observations, tuple) or any(
+            not isinstance(row, tuple) or len(row) != 2 for row in observations
+        ):
+            raise ValueError("package observations must use immutable rows")
         expected_paths = tuple(_package_path(root) for root in roots)
         if tuple(path for path, _payload in observations) != expected_paths:
             raise ValueError("package observations must exactly match the project roots")
@@ -153,25 +158,32 @@ class PackageApplicabilityMatrix:
 
 
 def _validate_project_root(project_root: str) -> None:
-    if not isinstance(project_root, str):
-        raise ValueError("project root must be a string")
+    _validate_path(project_root, allow_root=True)
+
+
+def _validate_path(value: str, *, allow_root: bool) -> None:
+    if not isinstance(value, str):
+        raise ValueError("path must be a string")
     try:
-        project_root.encode("utf-8", errors="strict")
+        encoded = value.encode("utf-8", errors="strict")
     except UnicodeEncodeError as error:
-        raise ValueError("project root must be valid UTF-8") from error
-    if project_root == ".":
+        raise ValueError("path must be valid UTF-8") from error
+    if not 1 <= len(encoded) <= _MAX_PATH_BYTES:
+        raise ValueError("path must be between 1 and 4096 UTF-8 bytes")
+    if normalize_nfc(value) != value:
+        raise ValueError("path must use the Unicode 15.0.0 NFC profile")
+    if allow_root and value == ".":
         return
-    path = PurePosixPath(project_root)
+    path = PurePosixPath(value)
     if (
-        not project_root
-        or unicodedata.normalize("NFC", project_root) != project_root
-        or "\\" in project_root
+        "#" in value
+        or "\\" in value
         or path.is_absolute()
-        or path.as_posix() != project_root
-        or any(part in {"", ".", ".."} for part in project_root.split("/"))
-        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in project_root)
+        or path.as_posix() != value
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
     ):
-        raise ValueError("project root must be a canonical repository-relative path")
+        raise ValueError("path must be a canonical repository-relative value")
 
 
 def _package_path(project_root: str) -> str:
@@ -188,6 +200,8 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _parse_package(payload: bytes) -> dict[str, Any]:
+    if not isinstance(payload, bytes):
+        raise ValueError("package.json payload must be bytes")
     text = payload.decode("utf-8-sig")
     if text.startswith("\ufeff"):
         raise ValueError("package.json contains multiple byte-order marks")
@@ -218,6 +232,8 @@ def _derive_entries(
                 )
             )
             continue
+        if not isinstance(payload, bytes):
+            raise ValueError("package observations must contain frozen bytes or be missing")
 
         try:
             package = _parse_package(payload)
@@ -239,7 +255,7 @@ def _derive_entries(
                     direct_versions.append(version.strip())
             if len(direct_versions) > 1:
                 malformed = True
-        except (UnicodeDecodeError, ValueError):
+        except (UnicodeDecodeError, ValueError, RecursionError):
             malformed = True
             direct_versions = []
 

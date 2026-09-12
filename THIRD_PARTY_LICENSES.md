@@ -28,3 +28,11 @@ platform-conditional dependencies, are locked by `uv.lock`.
 | ruff | 0.16.4 | MIT | https://github.com/astral-sh/ruff |
 | trove-classifiers | 2026.6.1.19 | Apache-2.0 | https://github.com/pypa/trove-classifiers |
 | typing-extensions | 4.16.0 | PSF-2.0 | https://github.com/python/typing_extensions |
+
+## Vendored runtime data
+
+`src/code_structure_viz/core/unicode_15_0_nfc.py` contains the frozen Unicode
+15.0.0 normalization tables derived from UnicodeData.txt and
+DerivedNormalizationProps.txt. It adds no runtime package dependency. The full
+Unicode License V3 notice is embedded in that module and retained separately
+at `tests/fixtures/unicode-license.txt`.

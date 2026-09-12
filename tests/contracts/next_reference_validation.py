@@ -2573,7 +2573,7 @@ def _derive_package_applicability_entries(
                 if malformed
                 else ("direct_next_dependency" if direct_next else "no_direct_next")
             )
-        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError, RecursionError):
             state = "malformed"
             evidence = "malformed_package"
         entries.append(

@@ -1,7 +1,8 @@
 # Next Unicode NFC profile v1
 
 Issue #8 のパスと文字列を、実行環境の Unicode database に依存せず正規化する契約です。
-実プロダクトではなく、実装前の参照検証を対象とします。
+production helper は `src/code_structure_viz/core/unicode_15_0_nfc.py`、独立したreference oracle は
+`tests/contracts/unicode_15_0_nfc.py` に置き、両者のtable digestとfull-scalar known-answerを検証します。
 
 ## 固定する意味
 
@@ -17,7 +18,9 @@ NFC は文字を canonical decomposition へ展開し、結合クラス順に並
 
 ## データと出典
 
-参照実装は [unicode_15_0_nfc.py](../../tests/contracts/unicode_15_0_nfc.py) です。
+production implementation は [unicode_15_0_nfc.py](../../src/code_structure_viz/core/unicode_15_0_nfc.py)、
+独立reference implementation は [unicode_15_0_nfc.py](../../tests/contracts/unicode_15_0_nfc.py) です。
+二つの実装は同じtable bytesからimportせず、契約テストがdigest・scalar KAT・path edgeを照合します。
 圧縮JSONには非ゼロの canonical combining class 922件、canonical decomposition
 2,061件、Hangulを除く composition pair 941件を含みます。Hangul は規定のアルゴリズムで処理します。
 
@@ -29,8 +32,9 @@ NFC は文字を canonical decomposition へ展開し、結合クラス順に並
 | [DerivedNormalizationProps.txt](https://www.unicode.org/Public/15.0.0/ucd/DerivedNormalizationProps.txt) | `d5687a48c95c7d6e1ec59cb29c0f2e8b052018eb069a4371b7368d0561e12a29` |
 | [NormalizationTest.txt](https://www.unicode.org/Public/15.0.0/ucd/NormalizationTest.txt) | `fb9ac8cc154a80cad6caac9897af55a4e75176af6f4e2bb6edc2bf8b1d57f326` |
 
-元データの表記は「© 2022 Unicode®, Inc.」です。
-配布の著作権・許諾通知は [unicode-license.txt](../../tests/fixtures/unicode-license.txt) に保存します。
+元データの表記は「© 2022 Unicode®, Inc.」です。Unicode License V3の完全な通知はproduction module、
+[third-party inventory](../../THIRD_PARTY_LICENSES.md)、および
+[unicode-license.txt](../../tests/fixtures/unicode-license.txt) に保存します。
 
 表を再生成・照合する規則は次のとおりです。
 
@@ -40,7 +44,7 @@ NFC は文字を canonical decomposition へ展開し、結合クラス順に並
 4. decomposition が2コードポイントで、対象が除外集合にない場合だけ、元のコードポイントを `compose` に格納します。
 5. `ccc`/`decomp` のキーはコードポイントの10進文字列、`compose` のキーは2コードポイントの16進表記をカンマで連結した値です。表の照合はキー表記を正規化した後の全項目比較で行います。
 
-実行時には `unicodedata`、追加ライブラリ、ネットワークを参照しません。
+production helperは実行時に `unicodedata`、追加ライブラリ、ネットワークを参照しません。
 
 ## 完全性を確かめる二つの証拠
 
@@ -71,5 +75,5 @@ uv run pytest tests/contracts/test_next_contracts.py -k round24_unicode -q
 NFC table/profile/algorithm の変更はsemantic compatibilityに影響するため、
 [compatibility契約](next-compatibility-v1.md) と既知の期待値を同時に更新します。
 Nodeの実行場所、FD番号などの実行ごとの値は、このprofileに混入させません。
-製品実装では同じ固定データと等式を使ってクロスランタイム適合を検証します。
-今回の参照Pythonテストは将来のNode実装の適合証拠を兼ねません。
+Python production helperと独立reference oracleは同じ固定profileを検証します。将来Nodeへ正規化を実装する場合は、
+このprofileとNode側の実装を別途照合し、Python同士の一致をNode適合の証拠として流用しません。

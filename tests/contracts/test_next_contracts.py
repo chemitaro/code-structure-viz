@@ -5851,6 +5851,10 @@ def test_round24_applicability_preflight_grants_permission_without_node_observat
             },
             ("apps/plain", "apps/web"),
         ),
+        (
+            {"apps/\U000105d2\u0307/package.json": b'{"dependencies":{"next":"15"}}'},
+            ("apps/\U000105d2\u0307",),
+        ),
         ({"package.json": b'{"dependencies":{"next":null}}'}, (".",)),
         ({}, (".",)),
     ],
@@ -5863,6 +5867,17 @@ def test_production_package_applicability_matches_current_v1_reference(
 
     assert production.as_dict() == reference.as_dict()
     assert production.observation_value() == reference.observation_value()
+
+
+def test_deeply_nested_package_json_is_malformed_in_both_applicability_models() -> None:
+    payload = b'{"other":' + b"[" * 10000 + b"0" + b"]" * 10000 + b"}"
+    package_bytes = {"package.json": payload}
+
+    production = derive_product_applicability_matrix(package_bytes, (".",))
+    reference = derive_package_applicability_matrix(package_bytes, (".",))
+
+    assert production.as_dict() == reference.as_dict()
+    assert production.aggregate_state.value == "malformed"
 
 
 @pytest.mark.parametrize("state", ["applicable", "malformed", "mixed"])
