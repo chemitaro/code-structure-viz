@@ -54,6 +54,10 @@ def parse_control_jsonc(payload: bytes, *, path: str) -> dict[str, Any]:
 
 def _strip_jsonc(text: str, *, path: str) -> str:
     output: list[str] = []
+    last_significant: str | None = None
+
+    def append_comment_as_whitespace(start: int, end: int) -> None:
+        output.extend(character if character in "\r\n" else " " for character in text[start:end])
 
     def next_value_index(start: int) -> int:
         cursor = start
@@ -87,6 +91,7 @@ def _strip_jsonc(text: str, *, path: str) -> str:
                 escaped = True
             elif character == '"':
                 in_string = False
+                last_significant = '"'
             index += 1
             continue
 
@@ -96,23 +101,33 @@ def _strip_jsonc(text: str, *, path: str) -> str:
             index += 1
             continue
         if text.startswith("//", index):
-            index += 2
-            while index < len(text) and text[index] not in "\r\n":
-                index += 1
+            end = index + 2
+            while end < len(text) and text[end] not in "\r\n":
+                end += 1
+            append_comment_as_whitespace(index, end)
+            index = end
             continue
         if text.startswith("/*", index):
             end = text.find("*/", index + 2)
             if end < 0:
                 raise NextConfigurationError("control has an unterminated comment", path=path)
-            index = end + 2
+            end += 2
+            append_comment_as_whitespace(index, end)
+            index = end
             continue
         if character == ",":
             lookahead = next_value_index(index + 1)
-            if lookahead < len(text) and text[lookahead] in "]}":
+            if (
+                lookahead < len(text)
+                and text[lookahead] in "]}"
+                and last_significant not in {None, "{", "[", ",", ":"}
+            ):
                 index += 1
                 continue
 
         output.append(character)
+        if character not in _JSON_WHITESPACE:
+            last_significant = character
         index += 1
 
     if in_string or escaped:

@@ -16,6 +16,7 @@ def test_project_control_jsonc_accepts_bom_comments_and_trailing_commas() -> Non
         b"  // root comment\r\n"
         b'  "extends": "./config/base.json", /* comma before comment */\r\n'
         b'  "include": ["src/**/*.tsx", /* trailing comment */],\r\n'
+        b'  "count": 1/* separating comment */, /* trailing comment */\r\n'
         b'  "metadata": {"url": "https://example.test/a//b", "note": "/* literal */"},\r\n'
         b"}"
     )
@@ -23,6 +24,7 @@ def test_project_control_jsonc_accepts_bom_comments_and_trailing_commas() -> Non
     assert parse_control_jsonc(payload, path="tsconfig.json") == {
         "extends": "./config/base.json",
         "include": ["src/**/*.tsx"],
+        "count": 1,
         "metadata": {
             "url": "https://example.test/a//b",
             "note": "/* literal */",
@@ -39,6 +41,11 @@ def test_project_control_jsonc_accepts_bom_comments_and_trailing_commas() -> Non
         b'{"value":Infinity}',
         b'{"value":-Infinity}',
         b'{"value":1e999}',
+        b'{"value":1/* comment */2}',
+        b'{"value":1// comment\n2}',
+        b"{,}",
+        b'{"value":[,]}',
+        b'{"value":[1,,]}',
         b"\xef\xbb\xbf\xef\xbb\xbf{}",
         b'{"value": [1, /* never closed],}',
         b'{"value": "never closed}',
