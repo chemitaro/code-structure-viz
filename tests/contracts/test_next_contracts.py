@@ -5869,12 +5869,16 @@ def test_production_package_applicability_matches_current_v1_reference(
     assert production.observation_value() == reference.observation_value()
 
 
-def test_deeply_nested_package_json_is_malformed_in_both_applicability_models() -> None:
-    payload = b'{"other":' + b"[" * 10000 + b"0" + b"]" * 10000 + b"}"
-    package_bytes = {"package.json": payload}
+def test_package_json_recursion_error_is_malformed_in_both_applicability_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_recursion_error(*_args: Any, **_kwargs: Any) -> Any:
+        raise RecursionError("injected parser recursion limit")
 
-    production = derive_product_applicability_matrix(package_bytes, (".",))
-    reference = derive_package_applicability_matrix(package_bytes, (".",))
+    with monkeypatch.context() as scoped_monkeypatch:
+        scoped_monkeypatch.setattr(json, "loads", raise_recursion_error)
+        production = derive_product_applicability_matrix({"package.json": b"{}"}, (".",))
+        reference = derive_package_applicability_matrix({"package.json": b"{}"}, (".",))
 
     assert production.as_dict() == reference.as_dict()
     assert production.aggregate_state.value == "malformed"

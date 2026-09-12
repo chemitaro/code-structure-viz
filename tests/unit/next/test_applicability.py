@@ -116,10 +116,13 @@ def test_non_byte_package_input_is_rejected_as_invalid_observation(payload: obje
         derive_package_applicability_matrix(package_bytes, (".",))
 
 
-def test_deeply_nested_package_json_fails_closed() -> None:
-    payload = b'{"other":' + b"[" * 10000 + b"0" + b"]" * 10000 + b"}"
+def test_package_json_recursion_error_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_recursion_error(*_args: Any, **_kwargs: Any) -> Any:
+        raise RecursionError("injected parser recursion limit")
 
-    matrix = derive_package_applicability_matrix({"package.json": payload}, (".",))
+    with monkeypatch.context() as scoped_monkeypatch:
+        scoped_monkeypatch.setattr(json, "loads", raise_recursion_error)
+        matrix = derive_package_applicability_matrix({"package.json": b"{}"}, (".",))
 
     assert matrix.aggregate_state is PackageApplicabilityState.MALFORMED
     assert matrix.entries[0].evidence == "malformed_package"

@@ -45,6 +45,15 @@ reflected_to: []
   - 不採用: host Unicode databaseへの依存継続（cross-runtimeでpath classificationが変わる）。RecursionErrorを未処理のまま残す案（JSON parser失敗が閉じたmalformed結果を迂回して呼出元へ漏れる）。
   - Human decision: 不要。SP-1〜3はIssueのcurrent-v1 requirement/schema/referenceを満たす実装修正で、目的・公開意味・リスク許容を変更しない。深いJSONも既存のmalformed branchへ閉じ、成功判定を緩めない。`None`は既存referenceと同じく欠落package sentinelとして維持する。
 
+## Fixed-SHA re-review evidence
+
+- Re-review candidate: `514b6fc785a8f523070993b2d224d4bb4ad081ee`; fixed point remains `8f17f40055f6dc892bd53f8d51349a2f607ade8b`. Local branch, upstream, and GitHub origin matched the candidate and the tree was clean.
+- Spec re-review: `P0=0 / P1=1 / P2=0 / review_status=fail`. `SP-1` through `SP-3` were confirmed resolved. Standards re-review: documented violations 0, unresolved judgement calls 0; `ST-1` is resolved by sharing `_package_path`.
+- `SP-4 [P1, acceptance-test implementation error]`: the two new tests assumed 10,000 nested arrays must trigger `RecursionError`. The same valid JSON returns `malformed` under Python 3.12.11 and `non_applicable` under Python 3.14.6. This makes the latest-stable test lane fail even though the product catches `RecursionError` when the runtime parser raises it.
+- Authority analysis: requirement current-v1 line 146 places the nesting-64 limit under transport/process; design line 1120 scopes that limit to request/response. The package-applicability contract specifies UTF-8/BOM/duplicate/root/table/value handling but no package JSON depth ceiling. Extending the 64-depth policy to `package.json` would reject otherwise valid packages under a new package-input policy, so it is not adopted.
+- Primary response route: `test-remediation`. Keep the production and reference `RecursionError -> malformed` fail-closed handling, replace parser-version-dependent deep-input assertions with scoped injection of `RecursionError` into `json.loads`, and verify unit plus production/reference parity. No product semantics, canonical requirement, or package depth limit changes; no human decision is needed.
+- The 514b6fc review result is historical evidence for this response. Any record of the next verdict changes the candidate itself and therefore requires review of the resulting SHA.
+
 ## Reflection
 
 - durable な結論を Requirement / Design / Plan または accepted ADR に再記述する。
