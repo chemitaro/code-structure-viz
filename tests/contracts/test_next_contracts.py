@@ -6059,6 +6059,7 @@ def test_round21_jsonc_extends_grammar_is_closed_and_trailing_comment_is_determi
     invalid_extends = (
         ("base.json", "CSV-NEXT-CONFIG-002"),
         ("@scope/base", "CSV-NEXT-CONFIG-002"),
+        (None, "CSV-NEXT-CONFIG-001"),
         (["./base.json"], "CSV-NEXT-CONFIG-001"),
         ("/base.json", "CSV-NEXT-CONFIG-001"),
         ("../base.json", "CSV-NEXT-CONFIG-001"),

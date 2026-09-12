@@ -4068,12 +4068,12 @@ def _derive_project_descriptors_from_control_bytes(
         origins: dict[str, str] = {}
         closure: list[str] = []
         edges: list[dict[str, Any]] = []
-        extends = control.get("extends")
-        if extends is not None and not isinstance(extends, str):
-            raise SourceAcquisitionError(
-                "CSV-NEXT-CONFIG-001", "source_control", "extends must be one local path"
-            )
-        if isinstance(extends, str):
+        if "extends" in control:
+            extends = control["extends"]
+            if not isinstance(extends, str):
+                raise SourceAcquisitionError(
+                    "CSV-NEXT-CONFIG-001", "source_control", "extends must be one local path"
+                )
             parent = control_parent_path(path, root, extends)
             if parent not in path_set:
                 raise SourceAcquisitionError(
@@ -4589,9 +4589,9 @@ def seal_source_acquisition(
         # Package bytes were already read above, so every newly read queue
         # member is a config, including arbitrarily named local parents.
         control_value = _control_json(contents, path)
-        extends_value = control_value.get("extends")
-        if extends_value is None:
+        if "extends" not in control_value:
             continue
+        extends_value = control_value["extends"]
         if not isinstance(extends_value, str):
             raise SourceAcquisitionError(
                 "CSV-NEXT-CONFIG-001", "source_control", "extends must be one local path"
@@ -17315,8 +17315,8 @@ def r23_resolve_config_subset(
             return parsed[path]
         visiting.add(path)
         value = _control_json(dict(configs), path)
-        extends = value.get("extends")
-        if extends is not None:
+        if "extends" in value:
+            extends = value["extends"]
             if not isinstance(extends, str):
                 raise SourceAcquisitionError(
                     "CSV-NEXT-CONFIG-001", "source_control", "extends must be one string"

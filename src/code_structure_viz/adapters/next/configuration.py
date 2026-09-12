@@ -4,21 +4,38 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any, NoReturn
 
+from .applicability import _validate_path
+
 _CONFIG_ERROR_CODE = "CSV-NEXT-CONFIG-001"
+_EXTERNAL_CONFIG_ERROR_CODE = "CSV-NEXT-CONFIG-002"
 _CONFIG_ERROR_STAGE = "source_control"
 _JSON_WHITESPACE = frozenset(" \t\r\n")
+_CONTROL_KEYS = frozenset({"compilerOptions", "include", "exclude", "files", "extends"})
 
 
 class NextConfigurationError(ValueError):
     """A project control cannot be safely decoded under the Next v1 policy."""
 
-    def __init__(self, message: str, *, path: str) -> None:
-        self.code = _CONFIG_ERROR_CODE
+    def __init__(self, message: str, *, path: str, code: str = _CONFIG_ERROR_CODE) -> None:
+        self.code = code
         self.stage = _CONFIG_ERROR_STAGE
         self.path = path
         super().__init__(message)
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedControlClosure:
+    """Effective values derived from one project's already-frozen controls."""
+
+    values: dict[str, Any]
+    declaring_paths: dict[str, str]
+    control_paths: tuple[str, ...]
+    extends_edges: tuple[tuple[str, str], ...]
 
 
 def parse_control_jsonc(payload: bytes, *, path: str) -> dict[str, Any]:
@@ -50,6 +67,122 @@ def parse_control_jsonc(payload: bytes, *, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise NextConfigurationError("control root must be an object", path=path)
     return value
+
+
+def resolve_control_closure(
+    frozen_controls: Mapping[str, bytes], *, project_root: str, config_path: str
+) -> ResolvedControlClosure:
+    """Resolve one local ``extends`` chain from captured bytes, without I/O.
+
+    Paths and effective control values are derived only from the supplied
+    frozen map. The result is an intermediate for source sealing; callers must
+    not use it as a substitute for the final plan/view seal.
+    """
+
+    _validate_control_location(project_root, config_path)
+    if not isinstance(frozen_controls, Mapping):
+        raise NextConfigurationError("frozen controls must be a mapping", path=config_path)
+
+    chain: list[tuple[str, dict[str, Any], str | None]] = []
+    visited: set[str] = set()
+    current_path = config_path
+    while True:
+        if current_path in visited:
+            raise NextConfigurationError(
+                "control extends chain contains a cycle", path=current_path
+            )
+        if current_path not in frozen_controls:
+            raise NextConfigurationError("control bytes were not captured", path=current_path)
+
+        control = parse_control_jsonc(frozen_controls[current_path], path=current_path)
+        unknown = set(control) - _CONTROL_KEYS
+        if unknown:
+            raise NextConfigurationError("control contains an unknown key", path=current_path)
+
+        visited.add(current_path)
+        parent_path: str | None = None
+        if "extends" in control:
+            specifier = control["extends"]
+            if not isinstance(specifier, str):
+                raise NextConfigurationError("extends must be one local path", path=current_path)
+            parent_path = _resolve_local_extends_path(
+                current_path, project_root=project_root, specifier=specifier
+            )
+            if parent_path not in frozen_controls:
+                raise NextConfigurationError(
+                    "extends control bytes were not captured", path=parent_path
+                )
+
+        chain.append((current_path, control, parent_path))
+        if parent_path is None:
+            break
+        current_path = parent_path
+
+    values: dict[str, Any] = {}
+    declaring_paths: dict[str, str] = {}
+    control_paths: list[str] = []
+    extends_edges: list[tuple[str, str]] = []
+    for path, control, parent_path in reversed(chain):
+        parent_options = values.get("compilerOptions", {})
+        child_options = control.get("compilerOptions", {})
+        if not isinstance(parent_options, dict) or not isinstance(child_options, dict):
+            raise NextConfigurationError("compilerOptions must be an object", path=path)
+
+        values["compilerOptions"] = {**parent_options, **child_options}
+        declaring_paths.update({f"compilerOptions.{key}": path for key in child_options})
+        for key in ("include", "exclude", "files"):
+            if key in control:
+                values[key] = control[key]
+                declaring_paths[key] = path
+
+        control_paths.append(path)
+        if parent_path is not None:
+            extends_edges.append((path, parent_path))
+
+    return ResolvedControlClosure(
+        values=values,
+        declaring_paths=declaring_paths,
+        control_paths=tuple(control_paths),
+        extends_edges=tuple(extends_edges),
+    )
+
+
+def _validate_control_location(project_root: str, config_path: str) -> None:
+    try:
+        _validate_path(project_root, allow_root=True)
+        _validate_path(config_path, allow_root=False)
+    except (TypeError, ValueError) as error:
+        raise NextConfigurationError("control location is invalid", path=config_path) from error
+    if config_path == project_root or not _path_is_within(config_path, project_root):
+        raise NextConfigurationError("control is outside the project root", path=config_path)
+
+
+def _resolve_local_extends_path(config_path: str, *, project_root: str, specifier: str) -> str:
+    if specifier.startswith(("../", "/", "\\")):
+        raise NextConfigurationError(
+            "extends must remain within the project root", path=config_path
+        )
+    if not specifier.startswith("./") or "://" in specifier:
+        raise NextConfigurationError(
+            "extends requests external resolution",
+            path=config_path,
+            code=_EXTERNAL_CONFIG_ERROR_CODE,
+        )
+    relative_path = specifier[2:]
+    try:
+        _validate_path(relative_path, allow_root=False)
+        parent = PurePosixPath(config_path).parent
+        resolved_path = (parent / relative_path).as_posix()
+        _validate_path(resolved_path, allow_root=False)
+    except (TypeError, ValueError) as error:
+        raise NextConfigurationError("extends path is invalid", path=config_path) from error
+    if not _path_is_within(resolved_path, project_root):
+        raise NextConfigurationError("extends escapes the project root", path=config_path)
+    return resolved_path
+
+
+def _path_is_within(path: str, root: str) -> bool:
+    return root == "." or path == root or path.startswith(f"{root.rstrip('/')}/")
 
 
 def _strip_jsonc(text: str, *, path: str) -> str:
