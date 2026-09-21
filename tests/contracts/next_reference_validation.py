@@ -8796,6 +8796,49 @@ class PartialSourceSeal:
         return copy.deepcopy(value) if name in {"seal", "ledger", "safe_file_set"} else value
 
 
+def _source_read_failure_provenance(seal: SourceAcquisitionSeal) -> dict[str, Any]:
+    """Derive source-stage identities from the actual frozen acquisition seal."""
+
+    assert isinstance(seal, SourceAcquisitionSeal)
+    plan = seal.final_plan
+    projects = [
+        {
+            key: copy.deepcopy(project[key])
+            for key in ("root", "source_roots", "config_path", "compiler_options")
+        }
+        for project in plan["projects"]
+    ]
+    return _publication_provenance(
+        kind="request_independent_failure",
+        failure_stage="source_read",
+        failure_code="CSV-NEXT-SOURCE-003",
+        budget_observed=False,
+        observed_values={
+            "applicability": seal.package_applicability.as_dict(),
+            "config": projects,
+            "source": seal.source_view,
+            "limits": plan["limits"],
+            "source_plan": plan,
+        },
+    )
+
+
+def _source_read_failure_path(seal: SourceAcquisitionSeal) -> str | None:
+    """Choose the canonical catalog-permitted path for a sealed source failure."""
+
+    assert isinstance(seal, SourceAcquisitionSeal)
+    failures = seal.source_view["read_failures"]
+    assert failures
+    permission = _diagnostic_catalog()["CSV-NEXT-SOURCE-003"]["ref_permission"]
+    if permission == "path":
+        path = failures[0]["path"]
+        assert isinstance(path, str)
+        _assert_file_path(path)
+        return path
+    assert permission == "none"
+    return None
+
+
 @dataclass(frozen=True, kw_only=True)
 class SourceAcquisitionUnavailable:
     """Closed result for a source failure whose payload cannot be isolated."""
@@ -8805,6 +8848,7 @@ class SourceAcquisitionUnavailable:
     early_read_prefix: EarlySourceReadPrefix | None = None
     observation_provenance: dict[str, Any] | None = field(init=False, default=None)
     path: str | None = None
+    seal: SourceAcquisitionSeal | None = None
 
     def __post_init__(self) -> None:
         assert self.diagnostic_code in {
@@ -8820,6 +8864,7 @@ class SourceAcquisitionUnavailable:
             == "payload_unavailable"
         )
         if self.early_read_prefix is not None:
+            assert self.seal is None
             prefix = self.early_read_prefix
             assert isinstance(prefix, EarlySourceReadPrefix)
             object.__setattr__(self, "early_read_prefix", copy.deepcopy(prefix))
@@ -8839,12 +8884,25 @@ class SourceAcquisitionUnavailable:
             else:
                 assert self.path is None
             object.__setattr__(self, "observation_provenance", provenance)
+        elif self.seal is not None:
+            assert isinstance(self.seal, SourceAcquisitionSeal)
+            seal = copy.deepcopy(self.seal)
+            assert seal.source_view["read_failures"]
+            assert (self.diagnostic_code, self.stage) == (
+                "CSV-NEXT-SOURCE-003",
+                "source_read",
+            )
+            assert self.path == _source_read_failure_path(seal)
+            object.__setattr__(self, "seal", seal)
+            provenance = _source_read_failure_provenance(seal)
+            validate_stage_dependent_provenance(provenance)
+            object.__setattr__(self, "observation_provenance", provenance)
 
     def __getattribute__(self, name: str) -> Any:
         value = object.__getattribute__(self, name)
         return (
             copy.deepcopy(value)
-            if name in {"early_read_prefix", "observation_provenance"}
+            if name in {"early_read_prefix", "observation_provenance", "seal"}
             else value
         )
 
@@ -9133,9 +9191,13 @@ def seal_source_acquisition_result(
     if not failed_paths:
         return CompleteSourceSeal(seal=seal)
     failures = tuple({"path": path, "stage": "source_read"} for path in failed_paths)
+    failure_path = _source_read_failure_path(seal)
     if not proof_roots:
         return SourceAcquisitionUnavailable(
-            diagnostic_code="CSV-NEXT-SOURCE-003", stage="source_read"
+            diagnostic_code="CSV-NEXT-SOURCE-003",
+            stage="source_read",
+            path=failure_path,
+            seal=seal,
         )
     ledger = SourceFailureLedger.from_seal(
         seal,
@@ -9145,7 +9207,10 @@ def seal_source_acquisition_result(
     )
     if not ledger.safe_subset_proven:
         return SourceAcquisitionUnavailable(
-            diagnostic_code="CSV-NEXT-SOURCE-003", stage="source_read"
+            diagnostic_code="CSV-NEXT-SOURCE-003",
+            stage="source_read",
+            path=failure_path,
+            seal=seal,
         )
     return PartialSourceSeal(
         seal=seal,
@@ -9160,22 +9225,33 @@ def source_acquisition_failure_decision(
     *,
     targets: tuple[str, ...] = (),
 ) -> PreResponseFailureDecision:
-    """Connect an actual early acquisition failure to the publication union.
+    """Connect an actual sealed acquisition failure to the publication union.
 
     Status-only historical fixtures deliberately cannot cross this seam.
-    Later source-isolation/fatal routes have separate acceptance gates; this
-    constructor does not manufacture their missing source plan or runtime.
+    A source-read failure crosses only with its actual seal-derived provenance;
+    this constructor does not manufacture a source plan or runtime.
     """
 
     assert isinstance(result, SourceAcquisitionUnavailable)
-    assert result.stage in {"applicability", "source_control"}
-    assert result.early_read_prefix is not None
-    assert result.observation_provenance == result.early_read_prefix.provenance()
-    assert (result.diagnostic_code, result.stage, result.path) == (
-        result.early_read_prefix.diagnostic_code,
-        result.early_read_prefix.stage,
-        result.early_read_prefix.path,
-    )
+    if result.stage in {"applicability", "source_control"}:
+        assert result.early_read_prefix is not None
+        assert result.seal is None
+        assert result.observation_provenance == result.early_read_prefix.provenance()
+        assert (result.diagnostic_code, result.stage, result.path) == (
+            result.early_read_prefix.diagnostic_code,
+            result.early_read_prefix.stage,
+            result.early_read_prefix.path,
+        )
+    else:
+        assert result.stage == "source_read"
+        assert result.early_read_prefix is None
+        assert result.seal is not None
+        assert (result.diagnostic_code, result.stage) == (
+            "CSV-NEXT-SOURCE-003",
+            "source_read",
+        )
+        assert result.path == _source_read_failure_path(result.seal)
+        assert result.observation_provenance == _source_read_failure_provenance(result.seal)
     assert result.observation_provenance is not None
     context = canonical_run_context(**run_context)
     assert context["budget_source"] == "unobserved"

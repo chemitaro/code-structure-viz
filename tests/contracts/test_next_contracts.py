@@ -13095,6 +13095,173 @@ def test_exported_or_uncertain_module_calls_cannot_hide_failed_target_dependenci
     assert reader.read_counts["src/dep.ts"] == 1
 
 
+def test_nonisolatable_source_read_failure_retains_seal_derived_provenance() -> None:
+    reader = InstrumentedSourceReader(
+        {
+            "package.json": b'{"dependencies":{"next":"15"}}',
+            "src/entry.ts": b'/* private-source-marker */ export const x=require("./dep" + name);',
+            "src/dep.ts": b"export const dep=1;",
+            "src/other.ts": b"export const other=1;",
+            "src/safe.ts": b"export const safe=1;",
+        },
+        read_failures={"src/other.ts": "read-failed", "src/dep.ts": "read-failed"},
+    )
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert (result.diagnostic_code, result.stage, result.path) == (
+        "CSV-NEXT-SOURCE-003",
+        "source_read",
+        "src/dep.ts",
+    )
+    seal = result.seal
+    assert seal is not None
+    assert seal.source_view["read_failures"] == [
+        {"path": "src/dep.ts", "stage": "source_read"},
+        {"path": "src/other.ts", "stage": "source_read"},
+    ]
+    with pytest.raises(AssertionError):
+        SourceAcquisitionUnavailable(
+            diagnostic_code="CSV-NEXT-SOURCE-003",
+            stage="source_read",
+            path="src/safe.ts",
+            seal=seal,
+        )
+
+    provenance = result.observation_provenance
+    assert provenance is not None
+    validate_stage_dependent_provenance(provenance)
+    _validator("next-provenance-v1.schema.json").validate(provenance)
+    assert (provenance["kind"], provenance["stage"], provenance["failure_code"]) == (
+        "request_independent_failure",
+        "source_read",
+        "CSV-NEXT-SOURCE-003",
+    )
+    observed = provenance["observed"]
+    assert {name for name, row in observed.items() if row["state"] == "observed"} == {
+        "applicability",
+        "config",
+        "source",
+        "limits",
+        "source_plan",
+    }
+    assert observed["applicability"]["value"]["sha256"] == digest(
+        seal.package_applicability.as_dict()
+    )
+    project_config = [
+        {key: project[key] for key in ("root", "source_roots", "config_path", "compiler_options")}
+        for project in seal.final_plan["projects"]
+    ]
+    assert observed["config"]["value"]["sha256"] == digest(project_config)
+    assert observed["source"]["value"]["sha256"] == digest(seal.source_view)
+    assert observed["limits"]["value"]["sha256"] == digest(seal.final_plan["limits"])
+    assert observed["source_plan"]["value"]["sha256"] == digest(seal.final_plan)
+    assert all(
+        observed[field] == {"state": "unobserved", "value": None}
+        for field in (
+            "request",
+            "toolchain",
+            "trusted_environment",
+            "compatibility",
+            "process_launch",
+            "response",
+            "budget",
+        )
+    )
+    assert reader.read_counts["src/dep.ts"] == 1
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_actual_nonisolatable_source_read_failure_reaches_publication(
+    selector: str | None,
+) -> None:
+    reader = InstrumentedSourceReader(
+        {
+            "package.json": b'{"dependencies":{"next":"15"}}',
+            "src/entry.ts": b'/* private-source-marker */ export const x=require("./dep" + name);',
+            "src/dep.ts": b"export const dep=1;",
+            "src/safe.ts": b"export const safe=1;",
+        },
+        read_failures={"src/dep.ts": "read-failed"},
+    )
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+        targets=("path:src/entry.ts",),
+        proof_roots=({"id": "dep-failure", "path_ref": "src/dep.ts"},),
+    )
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert result.stage == "source_read" and result.observation_provenance is not None
+    assert result.path == "src/dep.ts"
+    observed = result.observation_provenance
+    reads_at_failure = dict(reader.read_counts)
+    assert reads_at_failure["src/dep.ts"] == 1
+
+    decision = source_acquisition_failure_decision(
+        result,
+        _run_context(selector=selector, independent=True),
+    )
+    assert decision.decision_context.provenance_observation == observed
+    assert decision.publication_context.observation_provenance == observed
+    run_wire = next_run_decision_projection(decision)
+    _validator("next-run-decision-v1.schema.json").validate(run_wire)
+    assert run_wire["provenance"] == observed
+
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+    publication_wire = next_publication_decision_projection(publication)
+    _validator("next-publication-decision-v1.schema.json").validate(publication_wire)
+    validate_next_publication_decision_projection(publication_wire, publication)
+    assert publication_wire["semantic_decision"] == run_wire
+    domain, manifest, stdout, artifacts, stderr = _validate_publication_chain(publication)
+    assert domain["payload_available"] is False and artifacts == {}
+    assert [(diagnostic["code"], diagnostic["path"]) for diagnostic in domain["diagnostics"]] == [
+        ("CSV-NEXT-SOURCE-003", "src/dep.ts")
+    ]
+    assert [(diagnostic["code"], diagnostic["path"]) for diagnostic in manifest["diagnostics"]] == [
+        ("CSV-NEXT-SOURCE-003", "src/dep.ts")
+    ]
+    assert manifest["run"]["exit_code"] == publication.exit_code == 3
+    assert stdout["selector"] == selector
+    assert (
+        stdout["stable_reason"]
+        == {
+            None: "run_summary",
+            "manifest": "run_manifest",
+            "next:semantic-json": "domain_payload_unavailable",
+            "next:plantuml": "domain_payload_unavailable",
+        }[selector]
+    )
+    assert stdout["availability"] is (selector == "manifest")
+    assert reader.read_counts == reads_at_failure
+
+    public_bytes = b"\n".join(
+        (
+            canonical_json_bytes(run_wire),
+            canonical_json_bytes(publication_wire),
+            canonical_json_bytes(domain),
+            canonical_json_bytes(manifest),
+            canonical_json_bytes(stdout),
+            _publication_stdout_bytes(publication),
+            stderr,
+            *artifacts.values(),
+        )
+    )
+    assert b"src/dep.ts" in public_bytes
+    for private_value in (b"private-source-marker", b"dep-failure"):
+        assert private_value not in public_bytes
+
+
 def test_opaque_source_frontier_identity_binds_bytes_and_each_occurrence() -> None:
     files = {
         "package.json": b'{"dependencies":{"next":"15"}}',

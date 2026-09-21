@@ -34,16 +34,20 @@ packageについては`read`、`failed`、列挙で不在を確認した`missing
 configのidentityは読み取ったbytesのSHA-256・byte length・pathと失敗情報から導出する。
 `observed`は取得の証拠であり、JSON解析や設定解決の成功を意味しない。
 
-実際の`seal_source_acquisition_result`が返す早期`SourceAcquisitionUnavailable`は、
+実際の`seal_source_acquisition_result`が返す`SourceAcquisitionUnavailable`は、
 code/stageに加えこのprovenanceと、catalogが許す場合だけfailure pathを保持する。
-その非公開原本は`EarlySourceReadPrefix`（roots、列挙path、取得bytes、実read failure、code/stage/path）である。
-provenanceはcaller入力ではなく原本から導出するread-only値とし、code/stage/pathも原本と照合する。
+applicability/source_control failureの非公開原本は`EarlySourceReadPrefix`
+（roots、列挙path、取得bytes、実read failure、code/stage/path）、sealed source_read failureの
+非公開原本は実際の`SourceAcquisitionSeal`である。source_readの失敗pathは
+`source_view.read_failures`のcanonical JSON順で先頭のpathを選び、catalogが許す場合の診断参照にする。
+いずれのprovenanceもcaller入力ではなく原本から導出するread-only値とし、code/stage/pathを原本と照合する。
 別入力のdigestや未読pathへの交換、mutable aliasによる原本変更を許可しない。
-`source_acquisition_failure_decision`はapplicability/source_controlの実結果を既存の
+`source_acquisition_failure_decision`はapplicability/source_control/source_readの実結果を既存の
 `PreResponseFailureDecision`へ接続する。malformed packageはAPPLICABILITY-002、
-config読取不能はSOURCE-003/source_controlとし、後者のpathを落とさない。
+config読取不能はSOURCE-003/source_control、non-isolatableなsource readはSOURCE-003/source_readとし、
+catalogが許す後者のpathを落とさない。source本文やfailure proofは公開診断へ含めない。
 provenanceを持たない旧status-only fixtureはこの接続関数に渡せない。
-後段source-isolation、usage/fatal/interruptの接続を、この早期経路の成功から証明したとは扱わない。
+safe subsetを公開するsource-isolation経路やusage/fatal/interruptの接続は、ここで扱うfailure branchの成功から証明したとは扱わない。
 
 公開側はdecision contextのprovenanceをそのまま引き継ぎ、field名だけのmarkerを再生成しない。
 request-independent run fingerprintのpreimageには`observation_provenance_digest`を含める。
