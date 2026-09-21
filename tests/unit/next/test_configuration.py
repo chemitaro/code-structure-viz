@@ -9,6 +9,7 @@ from code_structure_viz.adapters.next.configuration import (
     parse_control_jsonc,
     resolve_compiler_options,
     resolve_control_closure,
+    resolve_membership,
 )
 
 
@@ -139,6 +140,214 @@ def test_project_control_closure_preserves_explicit_empty_membership_values() ->
     assert resolved.values["include"] == []
     assert resolved.values["exclude"] == ["dist/**"]
     assert resolved.declaring_paths["include"] == "tsconfig.json"
+
+
+def test_project_membership_resolves_files_from_declaring_config() -> None:
+    closure = resolve_control_closure(
+        {
+            "apps/web/config/base.json": (
+                b'{"files":["component.tsx","legacy.jsx"],"exclude":["ignored.tsx"]}'
+            ),
+            "apps/web/tsconfig.json": b'{"extends":"./config/base.json"}',
+        },
+        project_root="apps/web",
+        config_path="apps/web/tsconfig.json",
+    )
+
+    resolved = resolve_membership(
+        closure,
+        project_root="apps/web",
+        inventory_paths=(
+            "apps/web/config/component.tsx",
+            "apps/web/config/legacy.jsx",
+            "apps/web/config/ignored.tsx",
+            "apps/web/component.tsx",
+        ),
+    )
+
+    assert resolved.kind == "files"
+    assert resolved.patterns == (
+        "apps/web/config/component.tsx",
+        "apps/web/config/legacy.jsx",
+    )
+    assert resolved.exclude == ()
+    assert resolved.source_roots == ("apps/web/config",)
+    assert resolved.paths == (
+        "apps/web/config/component.tsx",
+        "apps/web/config/legacy.jsx",
+    )
+
+
+def test_project_membership_applies_segment_globs_and_excludes_to_descendants() -> None:
+    closure = resolve_control_closure(
+        {
+            "apps/web/config/base.json": (
+                b'{"include":["src/**/*.tsx"],"exclude":["src/**/*-ignored.tsx"]}'
+            ),
+            "apps/web/tsconfig.json": b'{"extends":"./config/base.json"}',
+        },
+        project_root="apps/web",
+        config_path="apps/web/tsconfig.json",
+    )
+
+    resolved = resolve_membership(
+        closure,
+        project_root="apps/web",
+        inventory_paths=(
+            "apps/web/config/src/index.tsx",
+            "apps/web/config/src/pages/home.tsx",
+            "apps/web/config/src/pages/home-ignored.tsx",
+            "apps/web/config/src/pages/types.d.ts",
+            "apps/web/src/root-home.tsx",
+        ),
+    )
+
+    assert resolved.kind == "include"
+    assert resolved.patterns == ("apps/web/config/src/**/*.tsx",)
+    assert resolved.exclude == ("apps/web/config/src/**/*-ignored.tsx",)
+    assert resolved.source_roots == ("apps/web/config/src",)
+    assert resolved.paths == (
+        "apps/web/config/src/index.tsx",
+        "apps/web/config/src/pages/home.tsx",
+    )
+
+
+def test_project_membership_question_mark_matches_one_character() -> None:
+    closure = resolve_control_closure(
+        {"tsconfig.json": b'{"include":["src/page?.tsx"]}'},
+        project_root=".",
+        config_path="tsconfig.json",
+    )
+
+    resolved = resolve_membership(
+        closure,
+        project_root=".",
+        inventory_paths=("src/page1.tsx", "src/page.tsx", "src/page12.tsx"),
+    )
+
+    assert resolved.patterns == ("src/page?.tsx",)
+    assert resolved.paths == ("src/page1.tsx",)
+
+
+def test_project_membership_defaults_to_src_and_respects_allow_js() -> None:
+    closure = resolve_control_closure(
+        {
+            "apps/web/tsconfig.json": (
+                b'{"compilerOptions":{"allowJs":false},"exclude":["src/**/excluded-*.tsx"]}'
+            )
+        },
+        project_root="apps/web",
+        config_path="apps/web/tsconfig.json",
+    )
+
+    resolved = resolve_membership(
+        closure,
+        project_root="apps/web",
+        inventory_paths=(
+            "apps/web/src/app.tsx",
+            "apps/web/src/global.d.ts",
+            "apps/web/src/legacy.js",
+            "apps/web/src/legacy.jsx",
+            "apps/web/src/pages/excluded-private.tsx",
+            "apps/web/pages/outside-src.tsx",
+        ),
+    )
+
+    assert resolved.kind == "default"
+    assert resolved.patterns == ("apps/web/src",)
+    assert resolved.exclude == ("apps/web/src/**/excluded-*.tsx",)
+    assert resolved.source_roots == ("apps/web/src",)
+    assert resolved.paths == ("apps/web/src/app.tsx", "apps/web/src/global.d.ts")
+
+
+@pytest.mark.parametrize(
+    ("authority", "expected_source_root"),
+    [("files", "apps/web"), ("include", "apps/web/src")],
+)
+def test_project_membership_empty_authority_does_not_select_default_files(
+    authority: str, expected_source_root: str
+) -> None:
+    closure = resolve_control_closure(
+        {"apps/web/tsconfig.json": f'{{"{authority}":[]}}'.encode()},
+        project_root="apps/web",
+        config_path="apps/web/tsconfig.json",
+    )
+
+    resolved = resolve_membership(
+        closure,
+        project_root="apps/web",
+        inventory_paths=("apps/web/src/app.tsx", "apps/web/app.tsx"),
+    )
+
+    assert resolved.kind == authority
+    assert resolved.patterns == ()
+    assert resolved.exclude == ()
+    assert resolved.source_roots == (expected_source_root,)
+    assert resolved.paths == ()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"files":[],"include":[]}',
+        b'{"include":"src/**/*.tsx"}',
+        b'{"include":["src/foo**/nested.tsx"]}',
+        b'{"include":["src/[ab].tsx"]}',
+        b'{"files":["src/**/*.tsx"]}',
+    ],
+)
+def test_project_membership_rejects_ambiguous_or_unsupported_patterns(payload: bytes) -> None:
+    closure = resolve_control_closure(
+        {"tsconfig.json": payload}, project_root=".", config_path="tsconfig.json"
+    )
+
+    with pytest.raises(NextConfigurationError) as error:
+        resolve_membership(closure, project_root=".", inventory_paths=("src/app.tsx",))
+
+    assert error.value.code == "CSV-NEXT-CONFIG-001"
+    assert error.value.stage == "source_control"
+    assert error.value.path == "tsconfig.json"
+
+
+def test_project_membership_rejects_declaring_config_escape() -> None:
+    closure = resolve_control_closure(
+        {"apps/web/tsconfig.json": b'{"include":["../../shared/**/*.tsx"]}'},
+        project_root="apps/web",
+        config_path="apps/web/tsconfig.json",
+    )
+
+    with pytest.raises(NextConfigurationError) as error:
+        resolve_membership(
+            closure,
+            project_root="apps/web",
+            inventory_paths=("apps/web/src/app.tsx",),
+        )
+
+    assert error.value.code == "CSV-NEXT-CONFIG-001"
+    assert error.value.stage == "source_control"
+    assert error.value.path == "apps/web/tsconfig.json"
+
+
+@pytest.mark.parametrize(
+    "inventory_paths",
+    [
+        ("src//app.tsx",),
+        ("src/cafe\u0301.tsx",),
+        ("src/app.tsx", "src/app.tsx"),
+    ],
+)
+def test_project_membership_rejects_noncanonical_or_duplicated_inventory_paths(
+    inventory_paths: tuple[str, ...],
+) -> None:
+    closure = resolve_control_closure(
+        {"tsconfig.json": b"{}"}, project_root=".", config_path="tsconfig.json"
+    )
+
+    with pytest.raises(NextConfigurationError) as error:
+        resolve_membership(closure, project_root=".", inventory_paths=inventory_paths)
+
+    assert error.value.code == "CSV-NEXT-CONFIG-001"
+    assert error.value.stage == "source_control"
 
 
 def test_project_compiler_options_apply_defaults_and_declaring_config_paths() -> None:

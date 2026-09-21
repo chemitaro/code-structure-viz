@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 from .applicability import _validate_path
 
@@ -96,6 +96,17 @@ class ResolvedCompilerOptions:
             "base_url": self.base_url,
             "paths": {key: list(values) for key, values in self.paths},
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedMembership:
+    """Canonical project membership derived from controls and path inventory."""
+
+    kind: Literal["files", "include", "default"]
+    patterns: tuple[str, ...]
+    exclude: tuple[str, ...]
+    source_roots: tuple[str, ...]
+    paths: tuple[str, ...]
 
 
 def parse_control_jsonc(payload: bytes, *, path: str) -> dict[str, Any]:
@@ -217,6 +228,8 @@ def resolve_compiler_options(
     except (TypeError, ValueError) as error:
         raise NextConfigurationError("project root is invalid", path=project_root) from error
 
+    if not isinstance(closure, ResolvedControlClosure):
+        raise NextConfigurationError("control closure is invalid", path=project_root)
     failure_path = closure.control_paths[-1] if closure.control_paths else project_root
     options = closure.values.get("compilerOptions", {})
     if not isinstance(options, dict):
@@ -333,6 +346,164 @@ def resolve_compiler_options(
     )
 
 
+def resolve_membership(
+    closure: ResolvedControlClosure,
+    *,
+    project_root: str,
+    inventory_paths: Sequence[str],
+) -> ResolvedMembership:
+    """Resolve project file membership without reading or importing target files.
+
+    ``files`` and ``include`` are mutually exclusive authorities. Their values
+    are interpreted relative to the control file that declared them. The path
+    inventory supplies names only; the caller retains ownership of reading and
+    freezing selected bytes.
+    """
+
+    if not isinstance(closure, ResolvedControlClosure):
+        raise NextConfigurationError("control closure is invalid", path=project_root)
+    failure_path = closure.control_paths[-1] if closure.control_paths else project_root
+    try:
+        _validate_path(project_root, allow_root=True)
+    except (TypeError, ValueError) as error:
+        raise NextConfigurationError("project root is invalid", path=project_root) from error
+    if not isinstance(closure.values, Mapping) or not isinstance(closure.declaring_paths, Mapping):
+        raise NextConfigurationError("control closure is invalid", path=failure_path)
+    if isinstance(inventory_paths, (str, bytes)) or not isinstance(inventory_paths, Sequence):
+        raise NextConfigurationError("source inventory paths must be a sequence", path=failure_path)
+
+    paths = tuple(inventory_paths)
+    try:
+        for path in paths:
+            _validate_path(path, allow_root=False)
+    except (TypeError, ValueError) as error:
+        raise NextConfigurationError(
+            "source inventory path is invalid", path=failure_path
+        ) from error
+    if len(set(paths)) != len(paths):
+        raise NextConfigurationError("source inventory path is duplicated", path=failure_path)
+
+    control_values = closure.values
+    include_present = "include" in control_values
+    files_present = "files" in control_values
+    if include_present and files_present:
+        raise NextConfigurationError(
+            "files and include are mutually exclusive authorities", path=failure_path
+        )
+
+    raw_values: dict[str, list[str]] = {}
+    declaring_paths: dict[str, str] = {}
+    for name in ("include", "exclude", "files"):
+        if name not in control_values:
+            raw_values[name] = []
+            continue
+        value = control_values[name]
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise NextConfigurationError(f"{name} must be an array of paths", path=failure_path)
+        declaring_path = closure.declaring_paths.get(name)
+        if not isinstance(declaring_path, str):
+            raise NextConfigurationError(f"{name} has no declaring config path", path=failure_path)
+        _validate_control_location(project_root, declaring_path)
+        declaring_paths[name] = declaring_path
+        raw_values[name] = value
+
+    def resolve_values(name: str, *, allow_root_sentinel: bool, glob: bool) -> tuple[str, ...]:
+        if name not in declaring_paths:
+            return ()
+        origin = declaring_paths[name]
+        resolved: list[str] = []
+        for value in raw_values[name]:
+            path = _resolve_declaring_config_path(
+                value,
+                config_path=origin,
+                project_root=project_root,
+                allow_root_sentinel=allow_root_sentinel,
+            )
+            if glob:
+                _validate_segment_glob(path, config_path=origin)
+            resolved.append(path)
+        return tuple(dict.fromkeys(resolved))
+
+    include_values = resolve_values("include", allow_root_sentinel=True, glob=True)
+    exclude_values = resolve_values("exclude", allow_root_sentinel=True, glob=True)
+    explicit_values = resolve_values("files", allow_root_sentinel=False, glob=False)
+    if any(any(token in path for token in "*?[]{}()!+") for path in explicit_values):
+        raise NextConfigurationError(
+            "files requires literal paths", path=declaring_paths.get("files", failure_path)
+        )
+
+    compiler_options = resolve_compiler_options(closure, project_root=project_root)
+    source_roots: list[str] = []
+    for pattern in include_values:
+        static_prefix = re.split(r"[*?]", pattern, maxsplit=1)[0].rstrip("/")
+        source_roots.append(static_prefix or project_root)
+    if not source_roots and files_present:
+        source_roots.extend(PurePosixPath(path).parent.as_posix() for path in explicit_values)
+        if not source_roots:
+            source_roots.append(project_root)
+    if not source_roots:
+        default_src = "src" if project_root == "." else f"{project_root.rstrip('/')}/src"
+        has_default_src = any(
+            _has_source_suffix(path) and _path_is_within(path, default_src) for path in paths
+        )
+        source_roots.append(default_src if has_default_src else project_root)
+    canonical_source_roots = tuple(sorted(set(source_roots), key=lambda path: path.encode("utf-8")))
+
+    kind: Literal["files", "include", "default"]
+    if files_present:
+        kind = "files"
+        patterns = explicit_values
+        public_excludes: tuple[str, ...] = ()
+    elif include_present:
+        kind = "include"
+        patterns = include_values
+        public_excludes = exclude_values
+    else:
+        kind = "default"
+        patterns = canonical_source_roots
+        public_excludes = exclude_values
+
+    members: set[str] = set()
+    explicit_set = set(explicit_values)
+    for candidate in paths:
+        if not _path_is_within(candidate, project_root):
+            continue
+        if files_present:
+            included = candidate in explicit_set
+        elif include_present:
+            included = any(
+                _segment_glob_matches_path_or_descendant(
+                    _relative_to_project(pattern, project_root),
+                    _relative_to_project(candidate, project_root),
+                )
+                for pattern in include_values
+            )
+        else:
+            included = any(_path_is_within(candidate, root) for root in canonical_source_roots)
+        excluded = not files_present and any(
+            _segment_glob_matches_path_or_descendant(
+                _relative_to_project(pattern, project_root),
+                _relative_to_project(candidate, project_root),
+            )
+            for pattern in exclude_values
+        )
+        if (
+            included
+            and not excluded
+            and _has_source_suffix(candidate)
+            and (compiler_options.allow_js or not candidate.endswith((".js", ".jsx")))
+        ):
+            members.add(candidate)
+
+    return ResolvedMembership(
+        kind=kind,
+        patterns=patterns,
+        exclude=public_excludes,
+        source_roots=canonical_source_roots,
+        paths=tuple(sorted(members, key=lambda path: path.encode("utf-8"))),
+    )
+
+
 def _declaring_path(closure: ResolvedControlClosure, option: str, fallback: str) -> str:
     path = closure.declaring_paths.get(option)
     if path is None:
@@ -416,6 +587,90 @@ def _resolve_local_extends_path(config_path: str, *, project_root: str, specifie
 
 def _path_is_within(path: str, root: str) -> bool:
     return root == "." or path == root or path.startswith(f"{root.rstrip('/')}/")
+
+
+def _has_source_suffix(path: str) -> bool:
+    return path.endswith((".js", ".jsx", ".ts", ".tsx", ".d.ts"))
+
+
+def _relative_to_project(path: str, project_root: str) -> str:
+    if project_root == ".":
+        return path
+    return path.removeprefix(f"{project_root.rstrip('/')}/")
+
+
+def _validate_segment_glob(pattern: str, *, config_path: str) -> None:
+    """Reject glob syntax outside ``*``, ``?``, and whole-segment ``**``."""
+
+    for segment in pattern.split("/"):
+        if segment == "**":
+            continue
+        if "**" in segment or any(token in segment for token in "[]{}()!+"):
+            raise NextConfigurationError(
+                "include/exclude contains unsupported glob syntax", path=config_path
+            )
+
+
+def _single_segment_matches(pattern: str, value: str) -> bool:
+    """Match one path segment using only ``*`` and ``?`` without regex rules."""
+
+    pattern_index = 0
+    value_index = 0
+    last_star = -1
+    retry_value_index = 0
+    while value_index < len(value):
+        if pattern_index < len(pattern) and (
+            pattern[pattern_index] == "?" or pattern[pattern_index] == value[value_index]
+        ):
+            pattern_index += 1
+            value_index += 1
+        elif pattern_index < len(pattern) and pattern[pattern_index] == "*":
+            last_star = pattern_index
+            pattern_index += 1
+            retry_value_index = value_index
+        elif last_star >= 0:
+            retry_value_index += 1
+            value_index = retry_value_index
+            pattern_index = last_star + 1
+        else:
+            return False
+
+    while pattern_index < len(pattern) and pattern[pattern_index] == "*":
+        pattern_index += 1
+    return pattern_index == len(pattern)
+
+
+def _glob_epsilon_closure(states: set[int], segments: tuple[str, ...]) -> set[int]:
+    expanded = set(states)
+    pending = list(states)
+    while pending:
+        index = pending.pop()
+        if index < len(segments) and segments[index] == "**" and index + 1 not in expanded:
+            expanded.add(index + 1)
+            pending.append(index + 1)
+    return expanded
+
+
+def _segment_glob_matches_path_or_descendant(pattern: str, candidate: str) -> bool:
+    """Match a path pattern against a candidate or any directory prefix."""
+
+    segments = (*pattern.split("/"), "**")
+    states = _glob_epsilon_closure({0}, segments)
+    terminal = len(segments)
+    for candidate_segment in candidate.split("/"):
+        next_states: set[int] = set()
+        for index in states:
+            if index == terminal:
+                continue
+            segment = segments[index]
+            if segment == "**":
+                next_states.add(index)
+            elif _single_segment_matches(segment, candidate_segment):
+                next_states.add(index + 1)
+        states = _glob_epsilon_closure(next_states, segments)
+        if terminal in states:
+            return True
+    return terminal in states
 
 
 def _strip_jsonc(text: str, *, path: str) -> str:
