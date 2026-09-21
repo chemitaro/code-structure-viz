@@ -10,6 +10,7 @@ from code_structure_viz.adapters.next.configuration import (
     resolve_compiler_options,
     resolve_control_closure,
     resolve_membership,
+    resolve_project_configuration,
 )
 
 
@@ -345,6 +346,140 @@ def test_project_membership_rejects_noncanonical_or_duplicated_inventory_paths(
 
     with pytest.raises(NextConfigurationError) as error:
         resolve_membership(closure, project_root=".", inventory_paths=inventory_paths)
+
+    assert error.value.code == "CSV-NEXT-CONFIG-001"
+    assert error.value.stage == "source_control"
+
+
+def test_project_configuration_seals_selected_config_and_derived_membership() -> None:
+    resolved = resolve_project_configuration(
+        {
+            "apps/web/tsconfig.json": b'{"extends":"./config/base.json"}',
+            "apps/web/jsconfig.json": b"{",
+            "apps/web/config/base.json": (
+                b'{"include":["src/**/*.tsx"],"compilerOptions":{"allowJs":false}}'
+            ),
+        },
+        project_root="apps/web",
+        control_candidates=("jsconfig.json", "tsconfig.json"),
+        inventory_paths=(
+            "apps/web/config/src/app.tsx",
+            "apps/web/src/not-selected.tsx",
+        ),
+    )
+
+    assert resolved.config_path == "apps/web/tsconfig.json"
+    assert resolved.control_paths == (
+        "apps/web/config/base.json",
+        "apps/web/tsconfig.json",
+    )
+    assert resolved.extends_edges == (("apps/web/tsconfig.json", "apps/web/config/base.json"),)
+    assert resolved.project_value() == {
+        "root": "apps/web",
+        "source_roots": ["apps/web/config/src"],
+        "config_path": "apps/web/tsconfig.json",
+        "compiler_options": {
+            "allow_js": False,
+            "check_js": False,
+            "jsx": "preserve",
+            "module": "esnext",
+            "module_resolution": "bundler",
+            "base_url": None,
+            "paths": {},
+        },
+    }
+    assert resolved.config_resolution_value() == {
+        "project_root": "apps/web",
+        "config_path": "apps/web/tsconfig.json",
+        "declaring_paths": [
+            {"option": "allowJs", "path": "apps/web/config/base.json"},
+            {"option": "include", "path": "apps/web/config/base.json"},
+        ],
+        "membership": {
+            "kind": "include",
+            "patterns": ["apps/web/config/src/**/*.tsx"],
+            "exclude": [],
+        },
+        "path_resolution_order": [],
+    }
+
+
+def test_project_configuration_uses_builtin_defaults_when_no_candidate_is_observed() -> None:
+    resolved = resolve_project_configuration(
+        {},
+        project_root=".",
+        control_candidates=(),
+        inventory_paths=("src/app.tsx", "pages/app.tsx"),
+    )
+
+    assert resolved.config_path is None
+    assert resolved.control_paths == ()
+    assert resolved.project_value() == {
+        "root": ".",
+        "source_roots": ["src"],
+        "config_path": None,
+        "compiler_options": {
+            "allow_js": True,
+            "check_js": False,
+            "jsx": "preserve",
+            "module": "esnext",
+            "module_resolution": "bundler",
+            "base_url": None,
+            "paths": {},
+        },
+    }
+    assert resolved.config_resolution_value() == {
+        "project_root": ".",
+        "config_path": None,
+        "declaring_paths": [],
+        "membership": {"kind": "default", "patterns": ["src"], "exclude": []},
+        "path_resolution_order": [],
+    }
+
+
+def test_project_configuration_rejects_observed_root_config_omitted_from_candidates() -> None:
+    with pytest.raises(NextConfigurationError) as error:
+        resolve_project_configuration(
+            {"apps/web/tsconfig.json": b"{}"},
+            project_root="apps/web",
+            control_candidates=(),
+            inventory_paths=(),
+        )
+
+    assert error.value.code == "CSV-NEXT-CONFIG-001"
+    assert error.value.stage == "source_control"
+
+
+def test_project_configuration_can_select_jsconfig_without_reading_tsconfig() -> None:
+    resolved = resolve_project_configuration(
+        {
+            "jsconfig.json": b'{"compilerOptions":{"allowJs":false}}',
+        },
+        project_root=".",
+        control_candidates=("jsconfig.json",),
+        inventory_paths=("src/app.jsx", "src/app.tsx"),
+    )
+
+    assert resolved.config_path == "jsconfig.json"
+    assert resolved.control_paths == ("jsconfig.json",)
+    assert resolved.compiler_options.allow_js is False
+    assert resolved.membership.paths == ("src/app.tsx",)
+
+
+@pytest.mark.parametrize(
+    "control_candidates",
+    [("package.json",), ("tsconfig.json", "tsconfig.json")],
+)
+def test_project_configuration_rejects_open_or_duplicated_control_candidates(
+    control_candidates: tuple[str, ...],
+) -> None:
+    with pytest.raises(NextConfigurationError) as error:
+        resolve_project_configuration(
+            {},
+            project_root=".",
+            control_candidates=control_candidates,
+            inventory_paths=(),
+        )
 
     assert error.value.code == "CSV-NEXT-CONFIG-001"
     assert error.value.stage == "source_control"

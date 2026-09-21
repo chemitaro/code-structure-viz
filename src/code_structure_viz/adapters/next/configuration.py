@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal, NoReturn
 
+from code_structure_viz.semantic.canonical_json import encode_canonical_json
+
 from .applicability import _validate_path
 
 _CONFIG_ERROR_CODE = "CSV-NEXT-CONFIG-001"
@@ -51,6 +53,7 @@ _SUPPORTED_COMPILER_OPTIONS = (
     )
     | _IGNORED_COMPILER_OPTIONS
 )
+_PROJECT_CONTROL_CANDIDATES = ("tsconfig.json", "jsconfig.json")
 
 
 class NextConfigurationError(ValueError):
@@ -107,6 +110,51 @@ class ResolvedMembership:
     exclude: tuple[str, ...]
     source_roots: tuple[str, ...]
     paths: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "patterns": list(self.patterns),
+            "exclude": list(self.exclude),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedProjectConfiguration:
+    """One project config projection derived from selected frozen controls."""
+
+    project_root: str
+    config_path: str | None
+    compiler_options: ResolvedCompilerOptions
+    membership: ResolvedMembership
+    declaring_paths: tuple[tuple[str, str], ...]
+    control_paths: tuple[str, ...]
+    extends_edges: tuple[tuple[str, str], ...]
+
+    def project_value(self) -> dict[str, object]:
+        return {
+            "root": self.project_root,
+            "source_roots": list(self.membership.source_roots),
+            "config_path": self.config_path,
+            "compiler_options": self.compiler_options.as_dict(),
+        }
+
+    def config_resolution_value(self) -> dict[str, object]:
+        declaring_paths = [
+            {
+                "option": key.removeprefix("compilerOptions."),
+                "path": path,
+            }
+            for key, path in self.declaring_paths
+        ]
+        declaring_paths.sort(key=encode_canonical_json)
+        return {
+            "project_root": self.project_root,
+            "config_path": self.config_path,
+            "declaring_paths": declaring_paths,
+            "membership": self.membership.as_dict(),
+            "path_resolution_order": list(self.compiler_options.path_resolution_order),
+        }
 
 
 def parse_control_jsonc(payload: bytes, *, path: str) -> dict[str, Any]:
@@ -504,6 +552,82 @@ def resolve_membership(
     )
 
 
+def resolve_project_configuration(
+    frozen_controls: Mapping[str, bytes],
+    *,
+    project_root: str,
+    inventory_paths: Sequence[str],
+    control_candidates: Sequence[str] = _PROJECT_CONTROL_CANDIDATES,
+) -> ResolvedProjectConfiguration:
+    """Resolve the selected root config and its derived project membership.
+
+    Only the declared root candidates participate in config selection. A
+    selected ``tsconfig.json`` takes precedence over ``jsconfig.json``; an
+    unselected candidate is never parsed. With no selected config, the closed
+    built-in compiler and membership defaults apply.
+    """
+
+    try:
+        _validate_path(project_root, allow_root=True)
+    except (TypeError, ValueError) as error:
+        raise NextConfigurationError("project root is invalid", path=project_root) from error
+    if not isinstance(frozen_controls, Mapping):
+        raise NextConfigurationError("frozen controls must be a mapping", path=project_root)
+    if isinstance(control_candidates, (str, bytes)) or not isinstance(control_candidates, Sequence):
+        raise NextConfigurationError("control candidates must be a sequence", path=project_root)
+    candidates = tuple(control_candidates)
+    if any(
+        not isinstance(candidate, str) or candidate not in _PROJECT_CONTROL_CANDIDATES
+        for candidate in candidates
+    ) or len(set(candidates)) != len(candidates):
+        raise NextConfigurationError("control candidates are invalid", path=project_root)
+
+    candidate_set = set(candidates)
+    observed_root_candidates = {
+        candidate
+        for candidate in _PROJECT_CONTROL_CANDIDATES
+        if _project_control_path(project_root, candidate) in frozen_controls
+    }
+    if not observed_root_candidates.issubset(candidate_set):
+        raise NextConfigurationError(
+            "frozen root config observations are not declared as candidates",
+            path=project_root,
+        )
+    selected_config_path = next(
+        (
+            _project_control_path(project_root, candidate)
+            for candidate in _PROJECT_CONTROL_CANDIDATES
+            if candidate in candidate_set
+            and _project_control_path(project_root, candidate) in frozen_controls
+        ),
+        None,
+    )
+    closure = (
+        resolve_control_closure(
+            frozen_controls,
+            project_root=project_root,
+            config_path=selected_config_path,
+        )
+        if selected_config_path is not None
+        else ResolvedControlClosure({}, {}, (), ())
+    )
+    compiler_options = resolve_compiler_options(closure, project_root=project_root)
+    membership = resolve_membership(
+        closure,
+        project_root=project_root,
+        inventory_paths=inventory_paths,
+    )
+    return ResolvedProjectConfiguration(
+        project_root=project_root,
+        config_path=selected_config_path,
+        compiler_options=compiler_options,
+        membership=membership,
+        declaring_paths=tuple(closure.declaring_paths.items()),
+        control_paths=closure.control_paths,
+        extends_edges=closure.extends_edges,
+    )
+
+
 def _declaring_path(closure: ResolvedControlClosure, option: str, fallback: str) -> str:
     path = closure.declaring_paths.get(option)
     if path is None:
@@ -587,6 +711,10 @@ def _resolve_local_extends_path(config_path: str, *, project_root: str, specifie
 
 def _path_is_within(path: str, root: str) -> bool:
     return root == "." or path == root or path.startswith(f"{root.rstrip('/')}/")
+
+
+def _project_control_path(project_root: str, control_name: str) -> str:
+    return control_name if project_root == "." else f"{project_root.rstrip('/')}/{control_name}"
 
 
 def _has_source_suffix(path: str) -> bool:
