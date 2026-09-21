@@ -2704,11 +2704,13 @@ def _decision_target_resolutions(
         if proof_rows:
             return copy.deepcopy(proof_rows)
         return resolve_target_resolutions(targets, model)
+    if isinstance(decision, PreResponseFailureDecision):
+        return []
     if isinstance(decision, NotApplicableDecision):
         return [
             {"target_key": target, "status": "resolved", "record_ids": []} for target in targets
         ]
-    return [{"target_key": target, "status": "failed", "record_ids": []} for target in targets]
+    raise AssertionError(f"unsupported Next run decision: {type(decision).__name__}")
 
 
 def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
@@ -13178,9 +13180,19 @@ def test_nonisolatable_source_read_failure_retains_seal_derived_provenance() -> 
     assert reader.read_counts["src/dep.ts"] == 1
 
 
+@pytest.mark.parametrize(
+    "proof_roots",
+    [
+        pytest.param((), id="no-proof-roots"),
+        pytest.param(
+            ({"id": "dep-failure", "path_ref": "src/dep.ts"},),
+            id="unsafe-proof-roots",
+        ),
+    ],
+)
 @pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
 def test_actual_nonisolatable_source_read_failure_reaches_publication(
-    selector: str | None,
+    selector: str | None, proof_roots: tuple[dict[str, str], ...]
 ) -> None:
     reader = InstrumentedSourceReader(
         {
@@ -13199,7 +13211,7 @@ def test_actual_nonisolatable_source_read_failure_reaches_publication(
             "observed_trusted_environment_digest": _trusted_environment()["sha256"],
         },
         targets=("path:src/entry.ts",),
-        proof_roots=({"id": "dep-failure", "path_ref": "src/dep.ts"},),
+        proof_roots=proof_roots,
     )
     assert isinstance(result, SourceAcquisitionUnavailable)
     assert result.stage == "source_read" and result.observation_provenance is not None
@@ -13211,7 +13223,9 @@ def test_actual_nonisolatable_source_read_failure_reaches_publication(
     decision = source_acquisition_failure_decision(
         result,
         _run_context(selector=selector, independent=True),
+        targets=("path:src/entry.ts",),
     )
+    assert decision.decision_context.targets == ("path:src/entry.ts",)
     assert decision.decision_context.provenance_observation == observed
     assert decision.publication_context.observation_provenance == observed
     run_wire = next_run_decision_projection(decision)
@@ -13224,6 +13238,9 @@ def test_actual_nonisolatable_source_read_failure_reaches_publication(
     validate_next_publication_decision_projection(publication_wire, publication)
     assert publication_wire["semantic_decision"] == run_wire
     domain, manifest, stdout, artifacts, stderr = _validate_publication_chain(publication)
+    assert domain["targets"] == ["path:src/entry.ts"]
+    assert domain["config"]["targets"] == ["path:src/entry.ts"]
+    assert domain["coverage"]["target_completeness"] == []
     assert domain["payload_available"] is False and artifacts == {}
     assert [(diagnostic["code"], diagnostic["path"]) for diagnostic in domain["diagnostics"]] == [
         ("CSV-NEXT-SOURCE-003", "src/dep.ts")
