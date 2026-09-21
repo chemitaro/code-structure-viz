@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-08"
+最終更新: "2026-09-21"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -28,7 +28,7 @@ frozen package bytes
   -> domain/root/manifest/stdout/stderr/exit
 ```
 
-実装前の順序は、(1) package-only preflight、(2) project-relative controlsとJSONC/local-extends/membership、(3) source graph resolved/open/privacy、(4) process policy/observation、(5) provenance stage matrix、(6) semantic and publication projection、(7) executable coverage registryです。各段階はpositive/negative vector、実schema、reference validatorを同時に追加し、caller-supplied graph/paths/roles/status/bytesを拒否します。`files`/`include`の空配列も明示値として扱い、defaultsは双方が無いときだけです。run/publication provenanceは`run-manifest/v1`とNext domain manifest、checked-in reference/build inventoryは別schema identityです。
+実装前の順序は、(1) package-only preflight、(2) project-relative controlsとJSONC/local-extends/membership、(3) source graph resolved/open/privacy、(4) process policy/observation、(5) provenance stage matrix、(6) semantic and publication projection、(7) executable coverage registryです。各段階はpositive/negative vector、実schema、reference validatorを同時に追加し、caller-supplied graph/paths/roles/status/bytesを拒否します。`files`/`include`の空配列も明示値として扱い、defaultsは双方が無いときだけです。membership値は宣言元config directoryから解決し、repository-relative POSIX pathへ正規化した後にselected project root containmentを検証します。`test_config_inheritance_retains_origins_through_actual_source_seal`がこのjoinのcurrent-v1 regression authorityです。run/publication provenanceは`run-manifest/v1`とNext domain manifest、checked-in reference/build inventoryは別schema identityです。
 
 run-level terminalはsemantic/finalizerの前段にある独立した一回限りの分岐として計画する。project-root overlapは`CSV-NEXT-PROJECT-001` usage/exit 2（reader・decoder・finalizer・Artifactなし）、source-integrity driftは`CSV-NEXT-SOURCE-INTEGRITY-001` fatal/exit 1（manifestなし）、handled interruptはcore `CSV-INTERRUPT-001` interrupted/exit 130（cleanup後）へ投影する。全selectorでterminal branchのstdout/stderr/exitを同じdecisionから生成し、付属診断やcandidate bytesを再利用しない。G09のcurrent authorityは現行v1 reference chainを使うRound22 runtime registryに限定し、各criterionのpositive/negative vector、実callable producer、validator、substantive testを双方向に検証する。Round23の旧helperとregistryは`historical_runtime_vector_registry`へ隔離し、current coverageを同じsurrogateで埋めない。
 

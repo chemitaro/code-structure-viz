@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-08"
+最終更新: "2026-09-21"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -38,6 +38,8 @@ note bottom of O : No external reconstruction or fallback
 ```
 
 `PackageApplicabilityMatrix`が最初にpackage bytesから適用可否を閉じ、全non-applicableなら後続のconfig/source/Node観測は発生しません。applicable rootだけをtrusted frozen inventoryへ渡し、`SourceDiscoveryIntent`はroots、known controls、fixed rulesに限定します。seal内でJSONC、local extends、membership、compiler options、source graphを導出し、resolved/open edgeとsafe frontierをdigestへ含めます。
+
+Membershipの`files`/`include`/`exclude`値は、各値を宣言したconfig fileのdirectory（extendsされたconfigを含む）から解決します。解決した値はrepository-relative POSIX pathへ正規化し、selected project root内に限ります。`..`を含むunsafe pathはclosed path grammarにより拒否します。解決基準とcanonicalな出力形式を混同しません。
 
 `NextDecisionContext`/`NextPublicationContext`は全variantで同じsealed valuesを運びます。provenanceは四つのdiscriminator（request-independent not-applicable/failure、request-bound failure/success）とstage/code matrixを共有し、observed prefixの各値にfield schema/versionと実値digestを要求します。processは`ProcessLaunchPolicy`と`ProcessLaunchObservation`を分離し、legacy descriptorはobservationからの一方向compatibility viewに限ります。run/publication provenanceは`code-structure-viz.run-manifest/v1`とNext domain manifestだけが所有し、checked-in reference inventoryと将来のbuild inventoryを別schema identityへ分離します。
 
@@ -505,6 +507,7 @@ serializer と manifest builder は `incomplete_kind` と `payload_available` �
 - immutable `SourceAcquisitionPlan`はproject roots、program/context/control files、include roots、hard exclusions、finite limits、plan versionを持つ。
 - program filesは`.ts/.tsx/.js/.jsx`、`.d.ts`はcontext-only。hard excludeは`.git`、`node_modules`、`.next`、`out`、`dist`、`build`、`coverage`。
 - test/spec/storyはdefault excludeにしない。config lookupは`tsconfig.json`、`jsconfig.json`、versioned built-in safe configの順。
+- `files`/`include`/`exclude`は各値のdeclaring config directoryから解決し、repository-relative POSIX pathへ正規化した後にselected project root containmentを検査する。extendsによる継承後も各値の宣言元を保持する。実行可能なsource-seal証拠は`test_config_inheritance_retains_origins_through_actual_source_seal`である。
 - repository-local `extends/baseUrl/paths`だけをfrozen SourceView内で解決し、package-based extends/target node_modulesを暗黙に読まない。
 - Python coreがplanに従いsource bytesを一度だけ凍結し、Node requestへrepository-relative path、base64 content、digest、project/config/target/limitだけを渡す。target root path/cwdを渡さない。
 

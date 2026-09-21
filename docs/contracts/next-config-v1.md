@@ -2,6 +2,8 @@
 
 ## Current v1 normative authority
 
+`files`/`include`/`exclude`の各membership値は、その値を宣言したconfig fileのdirectory（extendsされたconfigを含む）から解決します。解決後の表現はrepository-relative POSIX pathに正規化され、selected project root内への包含を検証します。raw解決基準とcanonical表示形式を分け、宣言元・raw値・最終membershipのjoinは`test_config_inheritance_retains_origins_through_actual_source_seal`で検証します。
+
 この節がconfig/requestの現在の唯一の正本です。後続のRound節はhistorical evidence（非normative）であり、別のdefaultsやresolverを導入しません。package applicability後、duplicate-key rejecting JSONCがBOM、comments、trailing commaを決定的に合成します。`extends`はプロジェクト内の明示的`./...`一つだけです。`files`と`include`の同時存在は`CONFIG-001`、presentな空配列もauthority、両方が無い場合だけdefaultです。path-valued optionsはdeclaring config pathを保持し、`baseUrl`/`paths` replacementsはそのディレクトリから解決します。pathsはexactまたは一wildcard、exact→specific wildcard→declaration orderです。plugins/typeRoots/types、package/bare/absolute/parent/cycle extends、invalid module/moduleResolutionはglobal unavailableです。全surfaceが同一compiler-options schemaとrequest-independent/bound provenance unionを参照します。
 
 Round 12 review state: `review_status: fail` (P0=0, P1=8, P2=0) at exact SHA

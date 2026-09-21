@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-08"
+最終更新: "2026-09-21"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -22,7 +22,7 @@ package_sequence_key: "ISSUE-05"
 現行v1で固定する判断は次のとおりです。
 
 1. applicabilityは`package.json`の`dependencies`/`devDependencies`にある直接`next`だけを観測し、全non-applicableはNode/config/sourceを読まずrequest-independent `not_applicable`、mixedはapplicable rootだけを通します。malformed packageは専用`CSV-NEXT-APPLICABILITY-002`でfail-closedです。
-2. configはBOM/comment/trailing commaを合成する閉じたJSONCとし、local `./...` extends、declaring config path、`files`/`include`の排他的membership、宣言場所相対の`baseUrl`/`paths`、exact-before-wildcardを同じresolverで決定します。
+2. configはBOM/comment/trailing commaを合成する閉じたJSONCとし、local `./...` extends、declaring config path、`files`/`include`の排他的membership、宣言場所相対の`baseUrl`/`paths`、exact-before-wildcardを同じresolverで決定します。`files`/`include`/`exclude`各値は、その値を宣言したconfig（extends先を含む）のディレクトリを解決基準とします。解決後にrepository-relative POSIX pathへ正規化し、selected project root内への包含を検証します。raw解決基準とcanonical表示形式は別の意味として扱います。
 3. source graphはfrozen bytesからprovableなresolved/open unionを導出します。type/value role、dynamic import、export-from、requireを保持し、不確実なedgeは安全なfrontierまたはbyte-span由来のopaque identityだけを公開します。
 4. processはpolicyとobserved launchを分離し、observationを唯一の測定authorityとします。macOS/Linuxの実装はNode実体、adapter、argv、cwd、env、stdio/FD、group、TOCTOUを相互拘束し、証明できなければunavailableです。
 5. provenanceはrequest-independent not-applicable/failureとrequest-bound failure/successのclosed unionです。観測行はschema/versionと実値のSHA-256を持ち、失敗stage以後だけ`unobserved/null`になります。
@@ -47,6 +47,8 @@ package_sequence_key: "ISSUE-05"
 現行の節と履歴節が衝突する場合は、現行v1の表、schema、validator、fixture/testの組を採用し、履歴節の判定や件数を書き換えません。ラウンド専用umbrella schemaや、履歴producerを現行producerの代用にする経路はありません。
 
 ### 現行v1の実体対応
+
+`files`/`include`/`exclude`の宣言元directoryからrepository-relative pathへの解決とproject containmentは`I05-REQ-002`に属します。raw値・宣言元・最終membershipの対応は`test_config_inheritance_retains_origins_through_actual_source_seal`が、root/nested project、`files`/`include`、継承元、除外、同名root file、child empty override、read-onceを通じて検証します。
 
 | 現行契約 | Requirement | schema / canonical owner | 実行可能な対応 |
 | --- | --- | --- | --- |
