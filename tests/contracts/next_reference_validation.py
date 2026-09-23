@@ -7040,18 +7040,20 @@ _TRUSTED_SOURCE_LEDGERS: dict[str, SourceFailureLedger] = {}
 
 
 def _validate_request_matches_source_seal(
-    request: ValidatedAdapterRequest,
+    request: Mapping[str, Any],
     source_seal: SourceAcquisitionSeal,
     ledger: SourceFailureLedger | None = None,
 ) -> None:
     """Bind a validated request to the seal observed before request creation."""
 
+    applicable_roots = set(source_seal.package_applicability.applicable_projects)
     plan_projects = [
         {
             key: copy.deepcopy(project[key])
             for key in ("root", "source_roots", "config_path", "compiler_options")
         }
         for project in source_seal.final_plan["projects"]
+        if project["root"] in applicable_roots
     ]
     request_projects = [
         {
@@ -7063,13 +7065,21 @@ def _validate_request_matches_source_seal(
     assert request_projects == plan_projects
     captured = source_seal.captured_files
     request_files = {record["path"]: record for record in request["files"]}
+    applicable_role_paths = {
+        row["path"]
+        for row in source_seal.final_plan["file_role_map"]
+        if row["project_root"] in applicable_roots
+    }
     if ledger is not None:
         assert ledger.source_seal.seal_id == source_seal.seal_id
         assert ledger.safe_subset_proven
-        assert set(request_files) == set(ledger.safe_file_set)
+        safe_applicable_paths = set(ledger.safe_file_set) & applicable_role_paths
+        assert safe_applicable_paths.issubset(captured)
+        assert set(request_files) == safe_applicable_paths
     else:
         assert not source_seal.source_view["read_failures"]
-        assert set(request_files) == set(captured)
+        assert applicable_role_paths.issubset(captured)
+        assert set(request_files) == applicable_role_paths
     sealed_rows = {row["path"]: row for row in source_seal.source_view["files"]}
     assert set(sealed_rows) == set(captured)
     for path, record in request_files.items():

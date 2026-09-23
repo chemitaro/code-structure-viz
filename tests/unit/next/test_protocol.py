@@ -70,6 +70,7 @@ def _build_request(
     *,
     environment_version: str = "1",
     semantic_profile_id: str | None = None,
+    target: str = "path:src/page.tsx",
 ) -> NextAdapterRequest:
     profile_version = environment_version.removeprefix("v")
     profile_id = semantic_profile_id or f"next-trusted-profile-v{profile_version}"
@@ -82,7 +83,7 @@ def _build_request(
             "semantic_profile_id": profile_id,
             "sha256": "e" * 64,
         },
-        targets=("path:src/page.tsx",),
+        targets=(target,),
         run_context={
             "requested_formats": ["semantic-json"],
             "budget_requested": None,
@@ -91,6 +92,69 @@ def _build_request(
             "stdout_selector": None,
         },
     )
+
+
+def test_mixed_request_projects_only_applicable_roots_and_files(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    source_files = {
+        "apps/web/package.json": b'{"dependencies":{"next":"15"}}',
+        "apps/web/tsconfig.json": b'{"include":["src/**/*"]}',
+        "apps/web/src/page.tsx": b"export default function Page() { return null; }",
+        "apps/web/src/global.d.ts": b"declare interface Window { marker: string; }",
+        "packages/ui/package.json": b'{"name":"ui"}',
+        "packages/ui/src/widget.tsx": b"not selected by Next acquisition",
+    }
+    for relative_path, content in source_files.items():
+        path = repository / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    entries = tuple(
+        EnumeratedPath(path, PurePosixPath(path))
+        for path in sorted(source_files, key=lambda value: value.encode("utf-8"))
+    )
+    head = Commit("2" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=20_000,
+        max_file_bytes=4 * 1024 * 1024,
+        max_total_bytes=64 * 1024 * 1024,
+    )
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(("apps/web", "packages/ui")),
+        reader,
+        trusted_environment_digest="e" * 64,
+    )
+    assert isinstance(seal, SourceAcquisitionSeal)
+
+    sealed_roots = [project["root"] for project in seal.final_plan["projects"]]
+    assert sealed_roots == ["apps/web", "packages/ui"]
+    sealed_files = {item.path.as_posix(): item.content for item in seal.source_view.files}
+    assert sealed_files["packages/ui/package.json"] == source_files["packages/ui/package.json"]
+
+    request = _build_request(seal, target="path:packages/ui/src/widget.tsx")
+    payload = json.loads(request.canonical_bytes)
+    request_roots = [project["root"] for project in payload["projects"]]
+    request_paths = {record["path"] for record in payload["files"]}
+    applicable_paths = {
+        "apps/web/package.json",
+        "apps/web/tsconfig.json",
+        "apps/web/src/page.tsx",
+        "apps/web/src/global.d.ts",
+    }
+
+    assert request_roots == ["apps/web"]
+    assert request_paths == applicable_paths
+    assert payload["targets"] == ["path:packages/ui/src/widget.tsx"]
+    encoded_request = request.canonical_bytes.decode("utf-8")
+    assert "packages/ui/package.json" not in encoded_request
+    assert '"name":"ui"' not in encoded_request
+    assert "Widget()" not in encoded_request
 
 
 def test_request_is_derived_from_one_source_seal_and_matches_closed_contract(

@@ -94,6 +94,7 @@ from tests.contracts.next_reference_validation import (
     _scan_module_specifiers,
     _toolchain_snapshot,
     _trusted_fixture_source_seal,
+    _validate_request_matches_source_seal,
     assert_encoded_stdin_boundary,
     assert_limit_boundary,
     bounded_decode_json,
@@ -5336,6 +5337,69 @@ def test_source_seal_derives_plan_and_view_from_one_intent_and_rejects_drift() -
             },
             InstrumentedSourceReader(files),
             inventory,
+        )
+
+
+def test_reference_source_binding_accepts_only_applicable_projects_and_files() -> None:
+    files = {
+        "apps/web/package.json": b'{"dependencies":{"next":"15"}}',
+        "apps/web/tsconfig.json": b'{"include":["src/**/*"]}',
+        "apps/web/src/page.tsx": b"export default function Page() { return null; }",
+        "packages/ui/package.json": b'{"name":"ui"}',
+        "packages/ui/src/widget.tsx": b"export function Widget() { return null; }",
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(
+            project_roots=("apps/web", "packages/ui"),
+            control_candidates=(),
+        ),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+    applicable_roots = set(seal.package_applicability.applicable_projects)
+    assert applicable_roots == {"apps/web"}
+
+    request_projects = [
+        {
+            key: copy.deepcopy(project[key])
+            for key in ("root", "source_roots", "config_path", "compiler_options")
+        }
+        for project in seal.final_plan["projects"]
+        if project["root"] in applicable_roots
+    ]
+    applicable_paths = {
+        row["path"]
+        for row in seal.final_plan["file_role_map"]
+        if row["project_root"] in applicable_roots
+    }
+    request_files = [
+        {
+            "path": path,
+            "content_base64": base64.b64encode(seal.captured_files[path]).decode("ascii"),
+            "size_bytes": len(seal.captured_files[path]),
+            "sha256": hashlib.sha256(seal.captured_files[path]).hexdigest(),
+        }
+        for path in applicable_paths
+    ]
+    request = {"projects": request_projects, "files": request_files}
+
+    _validate_request_matches_source_seal(request, seal)
+    with pytest.raises(AssertionError):
+        _validate_request_matches_source_seal(
+            {
+                "projects": [
+                    {
+                        key: copy.deepcopy(project[key])
+                        for key in ("root", "source_roots", "config_path", "compiler_options")
+                    }
+                    for project in seal.final_plan["projects"]
+                ],
+                "files": request_files,
+            },
+            seal,
         )
 
 

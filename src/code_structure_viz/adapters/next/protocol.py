@@ -130,14 +130,22 @@ def build_next_adapter_request(
                 raise ValueError("sealed config paths must remain within their project")
         projects_by_root[root] = project
 
-    roots = sorted(projects_by_root, key=lambda value: value.encode("utf-8"))
-    for index, root in enumerate(roots):
-        for other_root in roots[:index]:
+    all_roots = sorted(projects_by_root, key=lambda value: value.encode("utf-8"))
+    matrix_roots = {entry.project_root for entry in seal.package_applicability.entries}
+    if set(all_roots) != matrix_roots:
+        raise ValueError("sealed projects must match package applicability roots")
+    for index, root in enumerate(all_roots):
+        for other_root in all_roots[:index]:
             if _under(root, other_root) or _under(other_root, root):
                 raise ValueError("sealed project roots must not overlap")
 
+    applicable_roots = set(seal.package_applicability.applicable_projects)
+    if not applicable_roots or not applicable_roots.issubset(projects_by_root):
+        raise ValueError("a complete source seal must contain applicable project rows")
+
     project_records: dict[str, dict[str, Any]] = {}
     project_id_by_root: dict[str, str] = {}
+    roots = sorted(applicable_roots, key=lambda value: value.encode("utf-8"))
     for root in roots:
         project = projects_by_root[root]
         identity = _identity_digest("project", {"root": root})
@@ -159,6 +167,7 @@ def build_next_adapter_request(
 
     file_records: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
+    applicable_role_paths: set[str] = set()
     decoded_bytes = 0
     for role_row in role_rows:
         if not isinstance(role_row, dict):
@@ -170,7 +179,7 @@ def build_next_adapter_request(
         if (
             not isinstance(path, str)
             or not isinstance(root, str)
-            or root not in project_id_by_root
+            or root not in projects_by_root
             or not isinstance(roles, list)
             or path in seen_paths
             or not _under(path, root)
@@ -194,6 +203,11 @@ def build_next_adapter_request(
             or hashlib.sha256(content).hexdigest() != source_file.sha256
         ):
             raise ValueError("sealed source file identity is inconsistent")
+        seen_paths.add(path)
+        if root not in applicable_roots:
+            continue
+
+        applicable_role_paths.add(path)
         decoded_bytes += len(content)
         if decoded_bytes > limits["max_decoded_bytes"]:
             raise ValueError("sealed source exceeds the decoded-byte contract")
@@ -214,10 +228,11 @@ def build_next_adapter_request(
             }
         )
         project_records[root]["file_ids"].append(file_id)
-        seen_paths.add(path)
 
     if seen_paths != set(source_by_path):
         raise ValueError("sealed file-role rows must match the complete frozen source set")
+    if {record["path"] for record in file_records} != applicable_role_paths:
+        raise ValueError("adapter request files must match applicable project roles")
     file_records.sort(key=lambda value: value["id"])
     projects = [project_records[root] for root in roots]
     for project in projects:
