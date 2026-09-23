@@ -5403,6 +5403,97 @@ def test_reference_source_binding_accepts_only_applicable_projects_and_files() -
         )
 
 
+def test_mixed_request_publication_preserves_complete_source_and_applicable_semantics() -> None:
+    trusted_environment = _trusted_environment()
+    files = {
+        "apps/web/package.json": b'{"dependencies":{"next":"15.0.0"}}',
+        "apps/web/tsconfig.json": b"{}",
+        "apps/web/src/Button.tsx": (
+            b"export default Button;\n"
+            b"export const renderValue = 1;\n"
+            b"export type Props = { title: string };\n"
+            b'export * from "./Other";\n'
+        ),
+        "apps/web/src/Card.tsx": b"const Card = 1;\n",
+        "apps/web/src/types.d.ts": b"export interface Props {}\n",
+        "packages/ui/package.json": b'{"name":"ui"}',
+        "packages/ui/src/widget.tsx": b"export function Widget() { return null; }\n",
+    }
+    seal = seal_source_acquisition(
+        SourceDiscoveryIntent(
+            project_roots=("apps/web", "packages/ui"),
+            control_candidates=(),
+        ),
+        InstrumentedSourceReader(files),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": trusted_environment["sha256"],
+        },
+    )
+    assert seal.package_applicability.applicable_projects == ("apps/web",)
+    assert seal.source_view["file_count"] == 6
+
+    request_value = _request(_rebase_model(_model(), "apps/web"))
+    register_source_acquisition_seal(request_value, seal)
+    request = validate_adapter_request(request_value)
+    assert [project["root"] for project in request["projects"]] == ["apps/web"]
+    assert len(request["files"]) == 5
+    assert all(not record["path"].startswith("packages/ui/") for record in request["files"])
+
+    response_bytes = canonical_json_bytes(
+        _response(_rebase_model(_model(), "apps/web"), request=request_value)
+    )
+    decision = response_boundary_decision(response_bytes, request)
+    assert isinstance(decision, NextValidatedDecision)
+    publication = finalize_publication_decision(
+        decision,
+        adapter_stdout_chunks=(response_bytes,),
+    )
+    domain, _manifest, _stdout, artifacts, _stderr = _validate_publication_chain(publication)
+    semantic = json.loads(artifacts["next.snapshot.semantic.json"].decode("utf-8"))
+
+    assert [project["root"] for project in domain["config"]["source_plan"]["projects"]] == [
+        "apps/web",
+        "packages/ui",
+    ]
+    assert domain["config"]["source_plan"] == seal.final_plan
+    assert domain["config"]["source_plan_digest"] == seal.plan_digest
+    assert [project["root"] for project in domain["projects"]] == ["apps/web"]
+    assert len(domain["projects"][0]["file_ids"]) == 5
+    assert domain["source"]["file_count"] == seal.source_view["file_count"] == 6
+    assert semantic["source"] == domain["source"]
+    assert len(semantic["files"]) == 5
+    assert all(not item["path"].startswith("packages/ui/") for item in semantic["files"])
+
+    altered_domain = copy.deepcopy(domain)
+    altered_domain["source"]["file_count"] = 5
+    with pytest.raises(AssertionError):
+        validate_domain_manifest(altered_domain)
+
+    altered_semantic = copy.deepcopy(semantic)
+    altered_semantic["source"]["file_count"] = 5
+    with pytest.raises(AssertionError):
+        validate_published_projection(
+            domain,
+            {
+                "next.snapshot.semantic.json": canonical_json_bytes(altered_semantic) + b"\n",
+            },
+        )
+
+    altered_plan = copy.deepcopy(domain)
+    altered_plan["config"]["source_plan"]["projects"][1]["root"] = "packages/other"
+    with pytest.raises(AssertionError):
+        validate_domain_manifest(altered_plan)
+
+    leaked_projection = copy.deepcopy(domain["config"])
+    leaked_projection["projects"].append(copy.deepcopy(seal.final_plan["projects"][1]))
+    with pytest.raises(AssertionError):
+        recompute_source_plan_digest(
+            leaked_projection,
+            applicable_roots=seal.package_applicability.applicable_projects,
+        )
+
+
 def test_round17_source_inventory_accepts_observations_only() -> None:
     """Resolved plan fields cannot be injected through the inventory."""
 

@@ -7813,6 +7813,7 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
     assert descriptor["version"] == SOURCE_PLAN_VERSION
     assert descriptor["projects"] == _source_plan_projects({"projects": descriptor["projects"]})
     project_roots = {project["root"] for project in descriptor["projects"]}
+    assert len(project_roots) == len(descriptor["projects"])
     for project in descriptor["projects"]:
         _assert_path(project["root"])
         assert project["source_roots"] == sorted(set(project["source_roots"]), key=_path_sort_key)
@@ -7872,7 +7873,9 @@ def _validate_source_plan_descriptor(descriptor: dict[str, Any]) -> None:
         validate_source_graph_projection(descriptor["source_graph"])
 
 
-def source_plan_digest(config_or_request: dict[str, Any]) -> str:
+def source_plan_digest(
+    config_or_request: dict[str, Any], *, applicable_roots: tuple[str, ...] | None = None
+) -> str:
     """Hash every resolved SourceAcquisitionPlan field, never a partial proxy."""
 
     descriptor = config_or_request.get("source_plan")
@@ -7881,7 +7884,27 @@ def source_plan_digest(config_or_request: dict[str, Any]) -> str:
     else:
         descriptor = copy.deepcopy(descriptor)
         _validate_source_plan_descriptor(descriptor)
-        assert descriptor["projects"] == _source_plan_projects(config_or_request)
+        plan_roots = {project["root"] for project in descriptor["projects"]}
+        resolution_by_root = {row["project_root"]: row for row in descriptor["config_resolution"]}
+        assert len(resolution_by_root) == len(descriptor["config_resolution"])
+        assert set(resolution_by_root) == plan_roots
+        descriptor_applicable_roots = tuple(
+            root
+            for root in sorted(plan_roots, key=_path_sort_key)
+            if resolution_by_root[root]["membership"]["kind"] != "not_applicable"
+        )
+        if applicable_roots is not None:
+            assert applicable_roots == tuple(sorted(set(applicable_roots), key=_path_sort_key))
+            assert applicable_roots == descriptor_applicable_roots
+        expected_project_roots = (
+            descriptor_applicable_roots if applicable_roots is None else applicable_roots
+        )
+        expected_projects = [
+            copy.deepcopy(project)
+            for project in descriptor["projects"]
+            if project["root"] in expected_project_roots
+        ]
+        assert _source_plan_projects(config_or_request) == expected_projects
         assert descriptor["limits"] == config_or_request["limits"]
         assert (
             descriptor["trusted_environment_digest"]
@@ -10092,7 +10115,30 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
     assert value["config"]["source_plan_digest"] == value["source_plan_digest"]
     assert value["config"]["source_plan"] == source_plan_descriptor(value["config"])
     assert value["request"]["source_plan"] == value["config"]["source_plan"]
-    assert value["config"]["source_plan_digest"] == source_plan_digest(value["config"])
+    applicable_roots = None
+    if is_next_run_decision(decision):
+        publication_context = decision.publication_context
+        source_view = publication_context.source_view_descriptor
+        if source_view is not None:
+            assert value["source"] == {
+                "schema": source_view["schema"],
+                "kind": source_view["kind"],
+                "head_commit": source_view["head_commit"],
+                "fingerprint": publication_context.source_view_fingerprint,
+                "file_count": source_view["file_count"],
+            }
+        full_plan = publication_context.final_source_acquisition_plan
+        if full_plan is not None:
+            assert value["config"]["source_plan"] == full_plan
+            assert value["request"]["source_plan"] == full_plan
+            assert value["config"]["source_plan_digest"] == publication_context.source_plan_digest
+            assert value["request"]["source_plan_digest"] == publication_context.source_plan_digest
+            seal = publication_context.source_acquisition_seal
+            assert seal is not None
+            applicable_roots = seal.package_applicability.applicable_projects
+    assert value["config"]["source_plan_digest"] == source_plan_digest(
+        value["config"], applicable_roots=applicable_roots
+    )
     project_records = _assert_sorted_unique(value["projects"], "projects")
     roots: list[tuple[str, str]] = []
     for project in project_records.values():
@@ -10114,9 +10160,8 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
             assert _under(project["config_path"], project["root"])
         assert project["file_ids"] == sorted(set(project["file_ids"]))
         assert all(_id_kind(file_id) == "file" for file_id in project["file_ids"])
-    assert value["source"]["file_count"] == sum(
-        len(project["file_ids"]) for project in value["projects"]
-    )
+    assert type(value["source"]["file_count"]) is int
+    assert value["source"]["file_count"] >= 0
     expected_config_projects = sorted(
         [
             {
@@ -13466,7 +13511,8 @@ def validate_semantic_snapshot(value: dict[str, Any]) -> None:
     assert value["request"]["projects"] == expected_projects
     _assert_target_keys(value["request"]["targets"])
     _assert_formats(value["request"]["formats"])
-    assert value["source"]["file_count"] == len(value["files"])
+    assert type(value["source"]["file_count"]) is int
+    assert value["source"]["file_count"] >= 0
 
 
 def _record_references(record: dict[str, Any]) -> set[str]:
