@@ -948,7 +948,7 @@ Issue #8/current CLI/run-manifest/run-summaryはsingle-domain (`maxItems: 1`)。
 | project/control | malformed package/config/extends/conflict | `CSV-NEXT-CONFIG-001/002` | yes/global domain | payload_unavailable | payloadなし / manifest / 3 |
 | trusted types | digest/version mismatch | `CSV-NEXT-TRUST-001` | yes/global domain | payload_unavailable | payloadなし / manifest / 3 |
 | process/protocol | Node discovery/spawn/timeout/nonzero、adapter stdout capture、stderr/raw cap、noise/schema/ref/ID | `CSV-NEXT-NODE-*` / `CSV-NEXT-PROTOCOL-*` / `CSV-NEXT-LIMIT-003` | yes/global domain | payload_unavailable | payloadなし / manifest / 3 |
-| source/transport/entity | file 4MiB、total 64MiB、20k files、model/entity 501+ | `CSV-NEXT-LIMIT-001/002/005` | yes/global domain | payload_unavailable | payloadなし / manifest count / 3 |
+| source/transport/entity | file 4MiB、total 64MiB、20k files、encoded stdin 96MiB、request JSON per-array 100k、model/entity 501+ | `CSV-NEXT-LIMIT-001/002/005` (`stdin_encode` overrun is `LIMIT-001`) | yes/global domain | payload_unavailable | payloadなし / manifest count / 3 |
 | common source integrity | Git root/inventory/path collision/unsafe symlink/read invariant | existing `CSV-REPO-*`/`CSV-SOURCE-*` | run source untrusted | fatal | payloadなし / final manifestなし / run unavailable / 1 |
 | publication | source drift、writer/serializer/transaction invariant | existing `CSV-SOURCE-001`/`CSV-INTERNAL-001` | run result untrusted | fatal | payloadなし / final manifestなし / 1 |
 | signal | handled SIGINT | `CSV-INTERRUPT-001` | N/A | interrupted | staging cleanup / manifestなし / 130 |

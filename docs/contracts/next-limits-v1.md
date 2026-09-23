@@ -119,6 +119,14 @@ collection; it is not an aggregate JSON-array limit. The reference vector
 `[50000, 50000, 1]` therefore fails at aggregate 100,001 even though every
 individual array is below 100,000 and no large response is allocated.
 
+The request builder applies `max_array_items` to every generated request array,
+including normalized `compilerOptions.paths` replacements, before canonical
+encoding. It does not apply `max_total_array_items` to requests: that aggregate
+is explicitly defined over one adapter response. An encoded request exceeding
+`max_encoded_stdin_bytes`, or a request JSON structure exceeding its applicable
+per-array/string/nesting bound, is rejected before process start as
+`CSV-NEXT-LIMIT-001` at `stdin_encode`.
+
 `max_stderr_bytes` is the public diagnostic encode/write bound.
 `max_adapter_stderr_capture_bytes` is a separate child-process trust boundary:
 the counter is incremental in UTF-8 bytes, equality is accepted, and the first

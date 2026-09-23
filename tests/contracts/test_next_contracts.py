@@ -6815,6 +6815,29 @@ def test_round20_stage_provenance_is_one_canonical_shape_and_rejects_mismatch() 
     validate_stage_dependent_provenance(value)
     _validator("next-provenance-v1.schema.json").validate(value)
     assert set(value) == {"kind", "stage", "failure_code", "observed"}
+
+    encoded_request_limit = {
+        "kind": "request_independent_failure",
+        "stage": "stdin_encode",
+        "failure_code": "CSV-NEXT-LIMIT-001",
+        "observed": {
+            "applicability": row(True),
+            "config": row(True),
+            "source": row(True),
+            "request": row(False),
+            "limits": row(True),
+            "source_plan": row(True),
+            "toolchain": row(True),
+            "trusted_environment": row(True),
+            "compatibility": row(True),
+            "process_launch": row(True),
+            "response": row(False),
+            "budget": row(False),
+        },
+    }
+    validate_stage_dependent_provenance(encoded_request_limit)
+    _validator("next-provenance-v1.schema.json").validate(encoded_request_limit)
+
     observed = cast(dict[str, Any], value["observed"])
     for mutation in (
         {**value, "failure_code": "CSV-NEXT-CONFIG-001"},

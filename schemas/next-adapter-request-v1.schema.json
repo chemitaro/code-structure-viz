@@ -26,8 +26,8 @@
       "required": ["schema", "environment_version", "semantic_profile_id", "sha256"],
       "properties": {
         "schema": {"const": "code-structure-viz.next-trusted-types/v1"},
-        "environment_version": {"type": "string", "minLength": 1},
-        "semantic_profile_id": {"type": "string", "minLength": 1},
+        "environment_version": {"const": "1"},
+        "semantic_profile_id": {"const": "next-trusted-profile-v1"},
         "sha256": {"$ref": "#/$defs/digest"}
       }
     },

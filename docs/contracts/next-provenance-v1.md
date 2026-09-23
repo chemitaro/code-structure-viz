@@ -76,6 +76,6 @@ canonical_jsonだけを持つ。source content_base64、validated_response本文
 同じsafe projectionをdomain/root manifest/publication decisionから再利用し、private sealと照合する。
 公開からの除外を理由に内部のraw responseやproofの検証・保持を省略しない。
 
-raw byte cap → bounded decode/aggregate → closed schema → base/path/reference/proof → actual model/proof-only count → model/entity gate → selected copy の順で、最初のcatalog-valid failureを採用します。`CSV-NEXT-SOURCE-INTEGRITY-001`はrevision drift・duplicate/post-seal read・seal substitution専用のfatal、`CSV-NEXT-SOURCE-003`は普通のnon-isolatable source failureです。`PROJECT-001`はdomain payloadではなくusage exit 2です。
+raw byte cap → bounded decode/aggregate → closed schema → base/path/reference/proof → actual model/proof-only count → model/entity gate → selected copy の順で、最初のcatalog-valid failureを採用します。source acquisitionの上限超過は`CSV-NEXT-LIMIT-001/source_read`、canonical requestのencoded stdinまたはrequest-side JSON structure上限超過は`CSV-NEXT-LIMIT-001/stdin_encode`としてprocess start前に拒否します。`max_total_array_items`だけはresponse aggregate専用です。`CSV-NEXT-SOURCE-INTEGRITY-001`はrevision drift・duplicate/post-seal read・seal substitution専用のfatal、`CSV-NEXT-SOURCE-003`は普通のnon-isolatable source failureです。`PROJECT-001`はdomain payloadではなくusage exit 2です。
 
 後続のRound節はhistorical evidence（非normative）です。これはproduction implementationの完了、Node実測、OS process-level証明、fresh Strict passを意味しません。

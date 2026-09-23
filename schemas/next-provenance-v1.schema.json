@@ -91,7 +91,7 @@
           {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-002"}, "stage": {"const": "node_spawn"}}},
           {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-003"}, "stage": {"const": "node_timeout"}}},
           {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-004"}, "stage": {"const": "node_process"}}},
-          {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-001"}, "stage": {"const": "source_read"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-001"}, "stage": {"enum": ["source_read", "stdin_encode"]}}},
           {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-002"}, "stage": {"const": "source_selection"}}},
           {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-003"}, "stage": {"enum": ["adapter_stdout_capture", "adapter_stderr_capture", "response_raw_bytes", "response_decode", "public_stderr_capture"]}}},
           {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-004"}, "stage": {"const": "adapter_heap"}}},

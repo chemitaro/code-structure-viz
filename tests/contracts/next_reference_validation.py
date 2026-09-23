@@ -1165,7 +1165,7 @@ DECISION_FAILURE_MATRIX: dict[str, dict[str, Any]] = {
         "CSV-NEXT-NODE-002": (("node_spawn",), "payload_unavailable"),
         "CSV-NEXT-NODE-003": (("node_timeout",), "payload_unavailable"),
         "CSV-NEXT-NODE-004": (("node_process",), "payload_unavailable"),
-        "CSV-NEXT-LIMIT-001": (("source_read",), "payload_unavailable"),
+        "CSV-NEXT-LIMIT-001": (("source_read", "stdin_encode"), "payload_unavailable"),
         "CSV-NEXT-LIMIT-002": (("source_selection",), "payload_unavailable"),
         "CSV-NEXT-LIMIT-003": (
             (
@@ -7978,6 +7978,7 @@ def recompute_request_id(request: dict[str, Any]) -> str:
 
 
 def validate_request_envelope(request: dict[str, Any]) -> None:
+    _validate_request_json_limits(request)
     trusted = request["trusted_type_environment"]
     assert set(trusted) == {"schema", "environment_version", "semantic_profile_id", "sha256"}
     assert trusted["schema"] == "code-structure-viz.next-trusted-types/v1"
@@ -7991,6 +7992,25 @@ def validate_request_envelope(request: dict[str, Any]) -> None:
     validate_request_files(request)
     assert canonical_json_bytes(request) == canonical_json_bytes(_canonicalize(request))
     validate_encoded_stdin_size(request)
+
+
+def _validate_request_json_limits(value: object) -> None:
+    """Apply request-side JSON structural caps without response aggregates."""
+
+    pending: list[tuple[object, int]] = [(value, 1)]
+    while pending:
+        current, depth = pending.pop()
+        assert depth <= LIMIT_DEFAULTS["max_json_nesting"]
+        if isinstance(current, str):
+            assert len(current.encode("utf-8")) <= LIMIT_DEFAULTS["max_json_string_bytes"]
+        elif isinstance(current, Mapping):
+            for key, item in current.items():
+                assert isinstance(key, str)
+                assert len(key.encode("utf-8")) <= LIMIT_DEFAULTS["max_json_string_bytes"]
+                pending.append((item, depth + 1))
+        elif isinstance(current, list):
+            assert len(current) <= LIMIT_DEFAULTS["max_array_items"]
+            pending.extend((item, depth + 1) for item in current)
 
 
 def _validate_closed_response_schema(response: dict[str, Any]) -> None:

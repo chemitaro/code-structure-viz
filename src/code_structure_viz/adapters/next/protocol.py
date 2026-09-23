@@ -5,7 +5,7 @@ import hashlib
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from code_structure_viz.semantic.canonical_json import encode_sorted_canonical_json
 from code_structure_viz.source.targets import PathTarget, parse_target
@@ -15,6 +15,8 @@ from .source_acquisition import DEFAULT_NEXT_LIMITS, SourceAcquisitionSeal
 _REQUEST_SCHEMA = "code-structure-viz.next-adapter-request/v1"
 _PROTOCOL = "code-structure-viz.next-adapter/v1"
 _TRUSTED_SCHEMA = "code-structure-viz.next-trusted-types/v1"
+_TRUSTED_ENVIRONMENT_VERSION = "1"
+_TRUSTED_SEMANTIC_PROFILE_ID = "next-trusted-profile-v1"
 _ROLES = ("control", "context", "program")
 _ROLE_PRECEDENCE = {"control": 3, "context": 2, "program": 1}
 _FORMATS = ("semantic-json", "plantuml")
@@ -27,7 +29,13 @@ _SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 class NextAdapterRequestError(ValueError):
     """A bounded request cannot be sent to the adapter."""
 
-    def __init__(self, code: str, stage: str) -> None:
+    def __init__(
+        self,
+        code: Literal["CSV-NEXT-LIMIT-001"],
+        stage: Literal["stdin_encode"],
+    ) -> None:
+        if code != "CSV-NEXT-LIMIT-001" or stage != "stdin_encode":
+            raise ValueError("unsupported Next adapter request failure code/stage")
         self.code = code
         self.stage = stage
         super().__init__(f"{code} at {stage}")
@@ -93,7 +101,7 @@ def build_next_adapter_request(
     if not isinstance(role_rows, list):
         raise ValueError("a complete source seal must contain file-role rows")
     if len(project_rows) > 1000 or len(role_rows) > limits["max_files"]:
-        raise NextAdapterRequestError("CSV-NEXT-LIMIT-001", "request")
+        raise ValueError("sealed source exceeds project or file count contract")
 
     projects_by_root: dict[str, dict[str, Any]] = {}
     for project in project_rows:
@@ -188,7 +196,7 @@ def build_next_adapter_request(
             raise ValueError("sealed source file identity is inconsistent")
         decoded_bytes += len(content)
         if decoded_bytes > limits["max_decoded_bytes"]:
-            raise NextAdapterRequestError("CSV-NEXT-LIMIT-001", "request")
+            raise ValueError("sealed source exceeds the decoded-byte contract")
 
         project_id = project_id_by_root[root]
         file_id = f"next:file:{_identity_digest('file', {'project_id': project_id, 'path': path})}"
@@ -226,13 +234,14 @@ def build_next_adapter_request(
         "limits": limits,
         "run_context": context,
     }
+    _validate_request_json_limits(request, limits)
     request_id = _digest(request)
     request["request_id"] = request_id
     canonical_bytes = encode_sorted_canonical_json(request)
     if canonical_bytes.endswith(b"\n"):
         canonical_bytes = canonical_bytes[:-1]
     if len(canonical_bytes) > limits["max_encoded_stdin_bytes"]:
-        raise NextAdapterRequestError("CSV-NEXT-LIMIT-001", "request")
+        raise NextAdapterRequestError("CSV-NEXT-LIMIT-001", "stdin_encode")
     return NextAdapterRequest._from_builder(
         canonical_bytes=canonical_bytes,
         request_id=request_id,
@@ -264,16 +273,44 @@ def _trusted_environment(value: Mapping[str, object], expected_digest: object) -
     result = dict(value)
     if (
         result["schema"] != _TRUSTED_SCHEMA
-        or not isinstance(result["environment_version"], str)
-        or not result["environment_version"]
-        or not isinstance(result["semantic_profile_id"], str)
-        or not re.fullmatch(r"next-trusted-profile-v[0-9]+", result["semantic_profile_id"])
+        or result["environment_version"] != _TRUSTED_ENVIRONMENT_VERSION
+        or result["semantic_profile_id"] != _TRUSTED_SEMANTIC_PROFILE_ID
         or not isinstance(result["sha256"], str)
         or _DIGEST.fullmatch(result["sha256"]) is None
         or result["sha256"] != expected_digest
     ):
         raise ValueError("trusted type environment must match the source-seal digest")
     return {key: str(item) for key, item in result.items()}
+
+
+def _validate_request_json_limits(value: object, limits: Mapping[str, int]) -> None:
+    """Bound every generated request array and JSON traversal before encoding.
+
+    ``max_total_array_items`` is intentionally response-only in v1; the
+    private request uses the per-array cap plus the common depth/string bounds.
+    """
+
+    pending: list[tuple[object, int]] = [(value, 1)]
+    while pending:
+        current, depth = pending.pop()
+        if depth > limits["max_json_nesting"]:
+            raise NextAdapterRequestError("CSV-NEXT-LIMIT-001", "stdin_encode")
+        if isinstance(current, str):
+            if len(current.encode("utf-8")) > limits["max_json_string_bytes"]:
+                raise NextAdapterRequestError("CSV-NEXT-LIMIT-001", "stdin_encode")
+            continue
+        if isinstance(current, Mapping):
+            for key, item in current.items():
+                if not isinstance(key, str):
+                    raise ValueError("request JSON object keys must be strings")
+                if len(key.encode("utf-8")) > limits["max_json_string_bytes"]:
+                    raise NextAdapterRequestError("CSV-NEXT-LIMIT-001", "stdin_encode")
+                pending.append((item, depth + 1))
+            continue
+        if isinstance(current, (list, tuple)):
+            if len(current) > limits["max_array_items"]:
+                raise NextAdapterRequestError("CSV-NEXT-LIMIT-001", "stdin_encode")
+            pending.extend((item, depth + 1) for item in current)
 
 
 def _run_context(value: Mapping[str, object], *, expected_budget: int) -> dict[str, Any]:

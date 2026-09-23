@@ -86,12 +86,47 @@ does not claim production availability.
 
 Verification:
 
-- `uv run pytest tests/unit/next tests/contracts/test_json_schemas.py -q` —
-  255 passed.
-- `uv run pytest -q` — 1702 passed, 1 skipped.
+- `uv run pytest tests/unit/next/test_protocol.py tests/contracts/test_next_contracts.py tests/contracts/test_json_schemas.py -q` —
+  666 passed.
+- `uv run pytest -q` — 1705 passed, 1 skipped.
 - `uv run ruff check .` — passed.
 - `uv run ruff format --check .` — 174 files already formatted.
 - `uv run mypy src tests` — passed for 150 source files.
+- `./spec-dock/scripts/spec-dock validate` — `nodes=10`, passed.
+
+## Follow-up fixed-SHA review attempt and local adjudication (2026-09-24 JST)
+
+An additional `chatgpt-code-review-strict` run targeted the pushed change from
+`40765dcdf7de75fc35d60866dd8b1dabb0484db4` through
+`ebe28111ebe15ee9effda818cc6017fa07b09660` (Oracle session
+`required-strict-github-connector-verificati-1078`). The browser response did
+not satisfy the wrapper's JSON output contract; the wrapper exited 20 with
+`OUS-O001-OUTPUT-CONTRACT-INVALID`. Therefore this run is neither a valid
+review pass nor an accepted review failure. Its three candidate claims were
+checked independently against the live schemas/reference validator:
+
+1. The request builder had accepted trusted environment/profile v2 even though
+   the v1 reference validator accepts only environment version `1` and profile
+   `next-trusted-profile-v1`; both the builder and request schema now enforce
+   those exact values.
+2. `max_total_array_items` is response-aggregate-only, so applying it to the
+   request would have contradicted the existing contract. However, the
+   normalized request's `compilerOptions.paths` arrays had no per-array bound.
+   A generated source seal with 100,001 replacements reproduced the gap. The
+   request builder now checks per-array count and common JSON string/nesting
+   bounds before canonical encoding; the shared config/request schema declares
+   `maxItems: 100000`. The response-only aggregate remains unchanged.
+3. `stage="request"` is not in the provenance enum and cannot pair with
+   `CSV-NEXT-LIMIT-001`. Request-side structural or encoded-stdin overflow now
+   uses `CSV-NEXT-LIMIT-001/stdin_encode`; the provenance schema, failure
+   matrix, Design, and contract docs now agree. The request builder never
+   spawns Node.
+
+Focused contract/schema/Next tests passed (666 tests at the full focused run;
+the additional targeted regression set passed 5 tests). The whole repository
+suite passed 1705 tests with 1 skipped. This local remediation does not convert
+the malformed Strict review response into a pass and does not close the
+Darwin verified-FD execution gate.
 
 The remaining process backend/OS proof gate is open. Plan-002 and Issue #8 are
 not complete, and this record does not change the supported-platform contract.
