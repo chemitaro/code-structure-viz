@@ -213,6 +213,25 @@ def test_project_membership_applies_segment_globs_and_excludes_to_descendants() 
     )
 
 
+def test_project_configuration_never_selects_hard_excluded_source_paths() -> None:
+    resolved = resolve_project_configuration(
+        {"tsconfig.json": b'{"include":["**/*"]}'},
+        project_root=".",
+        inventory_paths=(
+            "src/app/page.tsx",
+            "node_modules/pkg/index.tsx",
+            ".next/types/app.d.ts",
+            ".git/hooks/config.ts",
+            "out/generated.tsx",
+            "dist/generated.js",
+            "build/generated.jsx",
+            "coverage/generated.ts",
+        ),
+    )
+
+    assert resolved.membership.paths == ("src/app/page.tsx",)
+
+
 def test_project_membership_question_mark_matches_one_character() -> None:
     closure = resolve_control_closure(
         {"tsconfig.json": b'{"include":["src/page?.tsx"]}'},

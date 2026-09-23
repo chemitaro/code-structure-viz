@@ -16,9 +16,12 @@ from code_structure_viz.source.git_repository import (
     Unborn,
 )
 from code_structure_viz.source.source_view import (
+    DescriptorAnchoredSourceReadSession,
     SourceDriftError,
     SourceFileKind,
     SourceInterruptedError,
+    SourceReadFailure,
+    SourceReadFailureKind,
     SourceViewBuilder,
     SourceViewBuildError,
 )
@@ -86,6 +89,224 @@ def test_unborn_source_view_has_null_head_commit(tmp_path: Path) -> None:
     assert view.head_commit is None
     assert view.files == ()
     assert view.failures == ()
+
+
+def test_descriptor_source_session_reads_each_path_once_and_seals_frozen_view(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    package = b'{"dependencies":{"next":"15"}}'
+    source = b"export const Page = () => null;"
+    (repository / "package.json").write_bytes(package)
+    (repository / "page.tsx").write_bytes(source)
+    entries = (_entry("package.json"), _entry("page.tsx"))
+    head = Commit("a" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=4,
+        max_file_bytes=128,
+        max_total_bytes=256,
+    )
+
+    assert reader.enumerate_paths() == ("package.json", "page.tsx")
+    assert reader.read_once("package.json") == package
+    assert reader.read_once("page.tsx") == source
+    view = reader.seal()
+
+    assert tuple(item.content for item in view.files) == (package, source)
+    assert view.head_commit == "a" * 40
+    with pytest.raises(RuntimeError, match="sealed"):
+        reader.read_once("page.tsx")
+
+
+def test_descriptor_source_session_rejects_final_symlink_without_reading_target(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(b"secret target bytes")
+    (repository / "package.json").symlink_to(outside)
+    entries = (_entry("package.json"),)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=Commit("b" * 40),
+        current_entries=lambda: entries,
+        current_head_state=lambda: Commit("b" * 40),
+        max_files=1,
+        max_file_bytes=128,
+        max_total_bytes=128,
+    )
+
+    with pytest.raises(SourceReadFailure) as caught:
+        reader.read_once("package.json")
+
+    assert caught.value.kind is SourceReadFailureKind.SYMLINK
+
+
+def test_descriptor_source_session_rejects_drift_before_seal(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    path = repository / "package.json"
+    path.write_bytes(b"before")
+    entries = (_entry("package.json"),)
+    head = Commit("c" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=1,
+        max_file_bytes=128,
+        max_total_bytes=128,
+    )
+    assert reader.read_once("package.json") == b"before"
+    path.write_bytes(b"changed after source read")
+
+    with pytest.raises(SourceDriftError):
+        reader.seal()
+
+
+def test_descriptor_source_session_detects_same_size_write_with_restored_mtime(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    path = repository / "package.json"
+    path.write_bytes(b"before")
+    initial_stat = path.stat()
+    entries = (_entry("package.json"),)
+    head = Commit("c" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=1,
+        max_file_bytes=128,
+        max_total_bytes=128,
+    )
+
+    assert reader.read_once("package.json") == b"before"
+    path.write_bytes(b"change")
+    os.utime(path, ns=(initial_stat.st_atime_ns, initial_stat.st_mtime_ns))
+
+    with pytest.raises(SourceDriftError):
+        reader.seal()
+
+
+def test_descriptor_source_session_rejects_a_second_read_before_seal(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "package.json").write_bytes(b"{}")
+    entries = (_entry("package.json"),)
+    head = Commit("d" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=1,
+        max_file_bytes=128,
+        max_total_bytes=128,
+    )
+    assert reader.read_once("package.json") == b"{}"
+
+    with pytest.raises(RuntimeError, match="only once"):
+        reader.read_once("package.json")
+
+
+@pytest.mark.parametrize(
+    ("max_file_bytes", "max_total_bytes"),
+    ((3, 128), (128, 3)),
+)
+def test_descriptor_source_session_enforces_inclusive_file_and_total_byte_caps(
+    tmp_path: Path,
+    max_file_bytes: int,
+    max_total_bytes: int,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "package.json").write_bytes(b"four")
+    entries = (_entry("package.json"),)
+    head = Commit("e" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=1,
+        max_file_bytes=max_file_bytes,
+        max_total_bytes=max_total_bytes,
+    )
+
+    with pytest.raises(SourceReadFailure) as caught:
+        reader.read_once("package.json")
+
+    assert caught.value.kind is SourceReadFailureKind.TOO_LARGE
+
+
+def test_descriptor_source_session_limits_reads_not_unselected_inventory_entries(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "package.json").write_bytes(b"{}")
+    (repository / "README.md").write_bytes(b"not selected as Next source")
+    entries = (_entry("package.json"), _entry("README.md"))
+    head = Commit("e" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=1,
+        max_file_bytes=128,
+        max_total_bytes=128,
+    )
+
+    assert reader.enumerate_paths() == ("README.md", "package.json")
+    assert reader.read_once("package.json") == b"{}"
+    source_view = reader.seal()
+
+    assert tuple(item.path.as_posix() for item in source_view.files) == ("package.json",)
+
+
+def test_descriptor_source_session_rejects_parent_symlink_components(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "package.json").write_bytes(b"secret")
+    (repository / "linked").symlink_to(outside, target_is_directory=True)
+    entries = (_entry("linked/package.json"),)
+    head = Commit("f" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=1,
+        max_file_bytes=128,
+        max_total_bytes=128,
+    )
+
+    with pytest.raises(SourceReadFailure) as caught:
+        reader.read_once("linked/package.json")
+
+    assert caught.value.kind is SourceReadFailureKind.UNSAFE_PATH
 
 
 def test_commit_source_view_rejects_non_blob_python_candidate() -> None:

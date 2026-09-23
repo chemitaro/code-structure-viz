@@ -127,6 +127,12 @@ class PackageApplicabilityMatrix:
             if entry.state is PackageApplicabilityState.NON_APPLICABLE
         )
 
+    @property
+    def frozen_package_bytes(self) -> tuple[tuple[str, bytes | None], ...]:
+        """Return the immutable package observations that derive this matrix."""
+
+        return self._observed_package_bytes
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "schema": _SCHEMA,
@@ -288,7 +294,7 @@ def _aggregate_state(
 
 
 def derive_package_applicability_matrix(
-    package_bytes: Mapping[str, bytes], project_roots: tuple[str, ...] | list[str]
+    package_bytes: Mapping[str, bytes | None], project_roots: tuple[str, ...] | list[str]
 ) -> PackageApplicabilityMatrix:
     """Derive and retain the direct-Next evidence for selected project roots."""
 

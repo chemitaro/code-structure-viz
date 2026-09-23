@@ -19,6 +19,15 @@ _EXTERNAL_CONFIG_ERROR_CODE = "CSV-NEXT-CONFIG-002"
 _CONFIG_ERROR_STAGE = "source_control"
 _JSON_WHITESPACE = frozenset(" \t\r\n")
 _CONTROL_KEYS = frozenset({"compilerOptions", "include", "exclude", "files", "extends"})
+SOURCE_PLAN_HARD_EXCLUSIONS = (
+    ".git",
+    "node_modules",
+    ".next",
+    "out",
+    "dist",
+    "build",
+    "coverage",
+)
 _FORBIDDEN_COMPILER_OPTIONS = frozenset({"plugins", "typeRoots", "types"})
 _BOOLEAN_COMPILER_OPTIONS = frozenset(
     {
@@ -266,6 +275,12 @@ def resolve_control_closure(
     )
 
 
+def resolve_local_extends_path(config_path: str, *, project_root: str, specifier: str) -> str:
+    """Resolve one repository-local ``extends`` edge without filesystem access."""
+
+    return _resolve_local_extends_path(config_path, project_root=project_root, specifier=specifier)
+
+
 def resolve_compiler_options(
     closure: ResolvedControlClosure, *, project_root: str
 ) -> ResolvedCompilerOptions:
@@ -430,6 +445,7 @@ def resolve_membership(
         ) from error
     if len(set(paths)) != len(paths):
         raise NextConfigurationError("source inventory path is duplicated", path=failure_path)
+    paths = tuple(path for path in paths if not is_hard_excluded_source_path(path))
 
     control_values = closure.values
     include_present = "include" in control_values
@@ -711,6 +727,12 @@ def _resolve_local_extends_path(config_path: str, *, project_root: str, specifie
 
 def _path_is_within(path: str, root: str) -> bool:
     return root == "." or path == root or path.startswith(f"{root.rstrip('/')}/")
+
+
+def is_hard_excluded_source_path(path: str) -> bool:
+    """Return whether a repository-relative path contains a fixed excluded directory."""
+
+    return bool(set(PurePosixPath(path).parts).intersection(SOURCE_PLAN_HARD_EXCLUSIONS))
 
 
 def _project_control_path(project_root: str, control_name: str) -> str:

@@ -26,6 +26,44 @@ def test_parse_target_returns_typed_normalized_values() -> None:
     )
 
 
+def test_next_target_accepts_repository_relative_directory_paths() -> None:
+    assert parse_target("path:src/app", domain="next") == PathTarget(PurePosixPath("src/app"))
+
+
+def test_next_target_accepts_repository_root_sentinel() -> None:
+    assert parse_target("path:.", domain="next") == PathTarget(PurePosixPath("."))
+
+
+def test_next_target_rejects_fragment_like_hashes_from_the_shared_path_grammar() -> None:
+    with pytest.raises(ValueError):
+        parse_target("path:src/app#section", domain="next")
+
+
+@pytest.mark.parametrize("character", ["\x00", "\x1f", "\x7f"])
+def test_next_target_rejects_ascii_controls_from_the_shared_path_grammar(
+    character: str,
+) -> None:
+    with pytest.raises(ValueError):
+        parse_target(f"path:src/{character}app", domain="next")
+
+
+def test_next_target_enforces_the_inclusive_4096_utf8_byte_limit() -> None:
+    with pytest.raises(ValueError):
+        parse_target(f"path:{'a' * 4097}", domain="next")
+
+
+def test_next_target_accepts_a_path_exactly_4096_utf8_bytes_long() -> None:
+    target = parse_target(f"path:{'a' * 4096}", domain="next")
+    assert isinstance(target, PathTarget)
+    assert len(target.value.as_posix().encode("utf-8")) == 4096
+
+
+@pytest.mark.parametrize("value", ["module:src.app", "class:src.app.Page"])
+def test_next_target_rejects_python_module_and_class_selectors(value: str) -> None:
+    with pytest.raises(ValueError):
+        parse_target(value, domain="next")
+
+
 @pytest.mark.parametrize(
     "value",
     [

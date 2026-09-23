@@ -38,6 +38,16 @@ class AcquisitionStage(StrEnum):
     PATH_SAFETY = "path_safety"
 
 
+class SourceReadFailureKind(StrEnum):
+    UNSAFE_PATH = "unsafe_path"
+    SYMLINK = "symlink"
+    NON_REGULAR = "non_regular"
+    MISSING = "missing"
+    TOO_LARGE = "too_large"
+    TOO_MANY_FILES = "too_many_files"
+    READ = "read"
+
+
 @dataclass(frozen=True, slots=True)
 class SourceFile:
     path: PurePosixPath
@@ -138,15 +148,19 @@ class SourceView:
     collision_groups: tuple[tuple[PurePosixPath, ...], ...] = ()
     inventory: tuple[SourceInventoryEntry, ...] = ()
     state_fingerprint: str | None = None
+    source_graph_digest: str | None = None
 
     def fingerprint_value(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema": self.schema,
             "kind": self.kind,
             "head_commit": self.head_commit,
             "files": [item.descriptor_value() for item in self.files],
             "failures": [item.descriptor_value() for item in self.failures],
         }
+        if self.source_graph_digest is not None:
+            value["source_graph_digest"] = self.source_graph_digest
+        return value
 
 
 class SourceViewBuildError(RuntimeError):
@@ -163,12 +177,240 @@ class SourceInterruptedError(SourceViewBuildError):
     pass
 
 
+class SourceReadFailure(RuntimeError):
+    def __init__(self, path: str, kind: SourceReadFailureKind) -> None:
+        self.path = path
+        self.kind = kind
+        super().__init__(kind.value)
+
+
 class _UnsafeSymlinkError(Exception):
     pass
 
 
 class _ConcurrentMutationError(Exception):
     pass
+
+
+class DescriptorAnchoredSourceReadSession:
+    """Read an inventory through anchored descriptors and seal the frozen view once."""
+
+    def __init__(
+        self,
+        repository: Path,
+        entries: tuple[EnumeratedPath, ...],
+        *,
+        head_state: HeadState,
+        current_entries: Callable[[], tuple[EnumeratedPath, ...]],
+        current_head_state: Callable[[], HeadState],
+        max_files: int,
+        max_file_bytes: int,
+        max_total_bytes: int,
+        repository_descriptor: int | None = None,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> None:
+        self.repository = repository if repository.is_absolute() else repository.resolve()
+        if any(type(value) is not int or value <= 0 for value in (max_files, max_file_bytes)):
+            raise ValueError("source file limits must be positive integers")
+        if type(max_total_bytes) is not int or max_total_bytes < 0:
+            raise ValueError("source total-byte limit must be a non-negative integer")
+        by_path: dict[str, EnumeratedPath] = {}
+        for entry in entries:
+            path = entry.normalized.as_posix()
+            if path in by_path:
+                raise SourceReadFailure(path, SourceReadFailureKind.UNSAFE_PATH)
+            by_path[path] = entry
+        self._entries = tuple(
+            sorted(
+                entries,
+                key=lambda entry: (
+                    entry.normalized.as_posix().encode("utf-8"),
+                    entry.raw_text.encode("utf-8"),
+                ),
+            )
+        )
+        self._entry_by_path = {entry.normalized.as_posix(): entry for entry in self._entries}
+        self._head_state = head_state
+        self._current_entries = current_entries
+        self._current_head_state = current_head_state
+        self._max_files = max_files
+        self._max_file_bytes = max_file_bytes
+        self._max_total_bytes = max_total_bytes
+        self._repository_descriptor = repository_descriptor
+        self._cancelled = cancelled or (lambda: False)
+        self._read_attempts: set[str] = set()
+        self._files: dict[str, SourceFile] = {}
+        self._file_signatures: dict[str, tuple[int, int, int, int, int, int]] = {}
+        self._total_bytes = 0
+        self._sealing = False
+        self._sealed = False
+
+    def enumerate_paths(self) -> tuple[str, ...]:
+        self._ensure_open()
+        return tuple(entry.normalized.as_posix() for entry in self._entries)
+
+    def read_once(self, path: str) -> bytes:
+        self._ensure_open()
+        if not isinstance(path, str):
+            raise SourceReadFailure("", SourceReadFailureKind.UNSAFE_PATH)
+        entry = self._entry_by_path.get(path)
+        if entry is None:
+            raise SourceReadFailure(path, SourceReadFailureKind.UNSAFE_PATH)
+        if path in self._read_attempts:
+            raise RuntimeError("source path may be read only once")
+        if len(self._read_attempts) >= self._max_files:
+            raise SourceReadFailure(path, SourceReadFailureKind.TOO_MANY_FILES)
+        self._read_attempts.add(path)
+
+        physical_path = PurePosixPath(entry.raw_text)
+        parent_descriptor: int | None = None
+        file_descriptor: int | None = None
+        try:
+            self._checkpoint()
+            parent_descriptor = _open_parent_without_symlinks(
+                self.repository,
+                physical_path,
+                repository_descriptor=self._repository_descriptor,
+            )
+            name = physical_path.name
+            before = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+            if stat.S_ISLNK(before.st_mode):
+                raise SourceReadFailure(path, SourceReadFailureKind.SYMLINK)
+            if not stat.S_ISREG(before.st_mode):
+                raise SourceReadFailure(path, SourceReadFailureKind.NON_REGULAR)
+            remaining = self._max_total_bytes - self._total_bytes
+            limit = min(self._max_file_bytes, remaining)
+            if before.st_size > limit:
+                raise SourceReadFailure(path, SourceReadFailureKind.TOO_LARGE)
+
+            file_descriptor = os.open(name, _read_flags(), dir_fd=parent_descriptor)
+            opened_before = os.fstat(file_descriptor)
+            if _stat_signature(before) != _stat_signature(opened_before):
+                raise _ConcurrentMutationError
+            content = _read_fd_limited(file_descriptor, limit, path)
+            opened_after = os.fstat(file_descriptor)
+            after = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+            if (
+                _stat_signature(before) != _stat_signature(opened_before)
+                or _stat_signature(opened_before) != _stat_signature(opened_after)
+                or _stat_signature(opened_after) != _stat_signature(after)
+                or len(content) != opened_after.st_size
+            ):
+                raise _ConcurrentMutationError
+        except _ConcurrentMutationError as error:
+            raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
+        except SourceReadFailure:
+            raise
+        except _UnsafeSymlinkError as error:
+            raise SourceReadFailure(path, SourceReadFailureKind.UNSAFE_PATH) from error
+        except FileNotFoundError as error:
+            raise SourceReadFailure(path, SourceReadFailureKind.MISSING) from error
+        except OSError as error:
+            raise SourceReadFailure(path, SourceReadFailureKind.READ) from error
+        finally:
+            if file_descriptor is not None:
+                os.close(file_descriptor)
+            if parent_descriptor is not None:
+                os.close(parent_descriptor)
+
+        self._total_bytes += len(content)
+        self._files[path] = SourceFile(
+            path=entry.normalized,
+            kind=SourceFileKind.REGULAR,
+            resolved_target=None,
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+            content=content,
+        )
+        self._file_signatures[path] = _stat_signature(opened_after)
+        return content
+
+    def seal(self, *, source_graph_digest: str | None = None) -> SourceView:
+        self._ensure_open()
+        if source_graph_digest is not None and (
+            len(source_graph_digest) != 64
+            or any(character not in "0123456789abcdef" for character in source_graph_digest)
+        ):
+            raise ValueError("source graph digest must be a lowercase SHA-256 value")
+        self._sealing = True
+        try:
+            self._assert_current_repository_state()
+            for path, signature in self._file_signatures.items():
+                self._assert_current_file(path, signature)
+            self._assert_current_repository_state()
+            files = tuple(sorted(self._files.values(), key=lambda item: _path_key(item.path)))
+            value = {
+                "schema": _SCHEMA,
+                "kind": _KIND,
+                "head_commit": _head_commit(self._head_state),
+                "files": [item.descriptor_value() for item in files],
+                "failures": [],
+            }
+            if source_graph_digest is not None:
+                value["source_graph_digest"] = source_graph_digest
+            source_view = SourceView(
+                head_commit=_head_commit(self._head_state),
+                files=files,
+                failures=(),
+                fingerprint=hashlib.sha256(encode_canonical_json(value)).hexdigest(),
+                source_graph_digest=source_graph_digest,
+            )
+            self._sealed = True
+            return source_view
+        except BaseException:
+            self._sealed = True
+            raise
+        finally:
+            self._sealing = False
+
+    def _ensure_open(self) -> None:
+        if self._sealed or self._sealing:
+            raise RuntimeError("source read session is sealed")
+
+    def _checkpoint(self) -> None:
+        if self._cancelled():
+            raise SourceInterruptedError(diagnostic(DiagnosticCode.INTERRUPTED))
+
+    def _assert_current_repository_state(self) -> None:
+        self._checkpoint()
+        try:
+            current_entries = tuple(
+                sorted(
+                    self._current_entries(),
+                    key=lambda entry: (
+                        entry.normalized.as_posix().encode("utf-8"),
+                        entry.raw_text.encode("utf-8"),
+                    ),
+                )
+            )
+            current_head = self._current_head_state()
+        except Exception as error:
+            raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
+        if current_entries != self._entries or current_head != self._head_state:
+            raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT))
+
+    def _assert_current_file(
+        self, path: str, expected_signature: tuple[int, int, int, int, int, int]
+    ) -> None:
+        entry = self._entry_by_path[path]
+        physical_path = PurePosixPath(entry.raw_text)
+        parent_descriptor: int | None = None
+        try:
+            parent_descriptor = _open_parent_without_symlinks(
+                self.repository,
+                physical_path,
+                repository_descriptor=self._repository_descriptor,
+            )
+            current = os.stat(physical_path.name, dir_fd=parent_descriptor, follow_symlinks=False)
+            if not stat.S_ISREG(current.st_mode) or _stat_signature(current) != expected_signature:
+                raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT))
+        except SourceDriftError:
+            raise
+        except (OSError, _UnsafeSymlinkError, _ConcurrentMutationError) as error:
+            raise SourceDriftError(diagnostic(DiagnosticCode.SOURCE_DRIFT)) from error
+        finally:
+            if parent_descriptor is not None:
+                os.close(parent_descriptor)
 
 
 def _path_key(path: PurePosixPath) -> bytes:
@@ -264,8 +506,15 @@ def _is_candidate(path: PurePosixPath, config: PythonConfig) -> bool:
     )
 
 
-def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns)
+def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
 
 
 def _read_fd(fd: int) -> bytes:
@@ -274,6 +523,19 @@ def _read_fd(fd: int) -> bytes:
         chunk = os.read(fd, 1024 * 1024)
         if not chunk:
             return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def _read_fd_limited(fd: int, limit: int, path: str) -> bytes:
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = os.read(fd, min(1024 * 1024, limit - size + 1))
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > limit:
+            raise SourceReadFailure(path, SourceReadFailureKind.TOO_LARGE)
         chunks.append(chunk)
 
 
