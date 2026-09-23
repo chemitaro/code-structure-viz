@@ -10398,6 +10398,191 @@ def test_response_boundary_failures_are_pre_response_decisions(
 
 
 @pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_next_decision_context_rejects_proofless_target_failure(
+    selector: str | None,
+) -> None:
+    request = validate_adapter_request(
+        _request(
+            targets=["path:src/Button.tsx"],
+            run_context=_run_context(selector=selector),
+        )
+    )
+    valid_context = decision_context_for_request(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        known_counts=_decision_known_counts(request),
+        source_failure_ledger=(),
+    )
+    proofless_target_provenance = _decision_provenance(
+        kind="request_bound_failure",
+        stage="target_resolution",
+        failure_code="CSV-NEXT-TARGET-001",
+        request=True,
+        limits=True,
+        source_plan=True,
+        toolchain=True,
+        trusted_environment=True,
+    )
+    proofless_target_provenance["observed"]["response"] = _observation_row("response", False)
+
+    with pytest.raises(AssertionError, match=r"pre-response.*target"):
+        replace(
+            valid_context,
+            stage="target_resolution",
+            diagnostic_code="CSV-NEXT-TARGET-001",
+            failure_kind=decision_failure_kind("CSV-NEXT-TARGET-001"),
+            provenance_observation=proofless_target_provenance,
+            provenance="request_bound_failure",
+        )
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_pre_response_diagnostic_alias_cannot_mutate_publication(
+    selector: str | None,
+) -> None:
+    request = validate_adapter_request(
+        _request(
+            targets=["path:src/Button.tsx"],
+            run_context=_run_context(selector=selector),
+        )
+    )
+    base_decision = response_boundary_decision(b'{"schema":', request)
+    assert isinstance(base_decision, PreResponseFailureDecision)
+    assert base_decision.diagnostic_code == "CSV-NEXT-PROTOCOL-001"
+
+    caller_owned_diagnostic = base_decision.diagnostic
+    decision = replace(base_decision, diagnostic=caller_owned_diagnostic)
+    caller_owned_diagnostic.clear()
+    caller_owned_diagnostic.update(
+        _public_diagnostic(
+            "CSV-NEXT-TARGET-001",
+            path="src/Button.tsx",
+            reason="missing",
+        )
+    )
+
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+    domain, manifest, _, _, stderr = _validate_publication_chain(publication)
+    assert decision.diagnostic_code == "CSV-NEXT-PROTOCOL-001"
+    assert domain["diagnostics"][0]["code"] == "CSV-NEXT-PROTOCOL-001"
+    assert manifest["diagnostics"][0]["code"] == "CSV-NEXT-PROTOCOL-001"
+    for output in (canonical_json_bytes(domain), canonical_json_bytes(manifest), stderr):
+        assert b"CSV-NEXT-TARGET-001" not in output
+    assert decision.diagnostic["code"] == "CSV-NEXT-PROTOCOL-001"
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_pre_response_rejects_replaced_target_publication_provenance(
+    selector: str | None,
+) -> None:
+    request = validate_adapter_request(
+        _request(
+            targets=["path:src/Button.tsx"],
+            run_context=_run_context(selector=selector),
+        )
+    )
+    valid_context = decision_context_for_request(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        known_counts=_decision_known_counts(request),
+        source_failure_ledger=(),
+    )
+    decision = pre_response_failure_decision(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        decision_context=valid_context,
+    )
+
+    target_provenance = decision.publication_context.observation_provenance
+    target_provenance["stage"] = "target_resolution"
+    target_provenance["failure_code"] = "CSV-NEXT-TARGET-001"
+    target_provenance["observed"]["response"] = _observation_row("response", False)
+    target_publication_context = replace(
+        decision.publication_context,
+        observation_provenance=target_provenance,
+    )
+
+    with pytest.raises(AssertionError, match=r"pre-response publication provenance"):
+        replace(decision, publication_context=target_publication_context)
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_pre_response_rejects_response_observation_before_response_stage(
+    selector: str | None,
+) -> None:
+    request = validate_adapter_request(
+        _request(
+            targets=["path:src/Button.tsx"],
+            run_context=_run_context(selector=selector),
+        )
+    )
+    valid_context = decision_context_for_request(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        known_counts=_decision_known_counts(request),
+        source_failure_ledger=(),
+    )
+    decision = pre_response_failure_decision(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        decision_context=valid_context,
+    )
+    provenance = decision.publication_context.observation_provenance
+    assert provenance["observed"]["response"] == _observation_row("response", False)
+    provenance["observed"]["response"] = _observation_row(
+        "response", True, observed_value=b"unowned-response"
+    )
+    changed_context = replace(
+        decision.publication_context,
+        observation_provenance=provenance,
+    )
+
+    with pytest.raises(AssertionError, match=r"pre-response publication provenance"):
+        replace(decision, publication_context=changed_context)
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_pre_response_known_counts_are_owned_after_construction(
+    selector: str | None,
+) -> None:
+    request = validate_adapter_request(
+        _request(
+            targets=["path:src/Button.tsx"],
+            run_context=_run_context(selector=selector),
+        )
+    )
+    valid_context = decision_context_for_request(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        known_counts=_decision_known_counts(request),
+        source_failure_ledger=(),
+    )
+    base_decision = pre_response_failure_decision(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        decision_context=valid_context,
+    )
+    expected_counts = base_decision.known_counts
+    caller_owned_counts = copy.deepcopy(expected_counts)
+    decision = replace(base_decision, known_counts=caller_owned_counts)
+
+    caller_owned_counts["stdout_bytes"] = 17
+
+    assert decision.known_counts == expected_counts
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+    domain, manifest, _, _, _ = _validate_publication_chain(publication)
+    assert domain["diagnostics"][0]["code"] == "CSV-NEXT-NODE-001"
+    assert manifest["diagnostics"][0]["code"] == "CSV-NEXT-NODE-001"
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
 def test_request_bound_pre_response_context_rejects_target_resolution_diagnostic(
     selector: str | None,
 ) -> None:
@@ -10431,20 +10616,12 @@ def test_pre_response_failure_rejects_target_diagnostic_with_independent_context
         known_counts=_decision_known_counts(request),
         source_failure_ledger=(),
     )
-    independently_built_context = replace(
-        valid_context,
-        stage="target_resolution",
-        diagnostic_code="CSV-NEXT-TARGET-001",
-        failure_kind=decision_failure_kind("CSV-NEXT-TARGET-001"),
-    )
-
     with pytest.raises(AssertionError, match=r"pre-response.*target"):
-        pre_response_failure_decision(
-            request,
+        replace(
+            valid_context,
             stage="target_resolution",
             diagnostic_code="CSV-NEXT-TARGET-001",
-            decision_context=independently_built_context,
-            path="src/Button.tsx",
+            failure_kind=decision_failure_kind("CSV-NEXT-TARGET-001"),
         )
 
 
@@ -10469,13 +10646,6 @@ def test_pre_response_failure_decision_replace_rejects_reasoned_target_diagnosti
         diagnostic_code="CSV-NEXT-NODE-001",
         decision_context=valid_context,
     )
-    independently_built_context = replace(
-        valid_decision.decision_context,
-        stage="target_resolution",
-        diagnostic_code="CSV-NEXT-TARGET-001",
-        failure_kind=decision_failure_kind("CSV-NEXT-TARGET-001"),
-    )
-
     with pytest.raises(AssertionError, match=r"pre-response.*target"):
         replace(
             valid_decision,
@@ -10484,7 +10654,7 @@ def test_pre_response_failure_decision_replace_rejects_reasoned_target_diagnosti
             diagnostic=_public_diagnostic(
                 "CSV-NEXT-TARGET-001", path="src/Button.tsx", reason="missing"
             ),
-            decision_context=independently_built_context,
+            decision_context=valid_decision.decision_context,
         )
 
 

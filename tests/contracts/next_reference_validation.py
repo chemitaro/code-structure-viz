@@ -317,6 +317,7 @@ class NextDecisionContext:
             "request_independent_not_applicable",
             "request_independent_failure",
         }
+        _assert_pre_response_failure_diagnostic_eligible(self.diagnostic_code)
         observations = copy.deepcopy(self.provenance_observation)
         validate_stage_dependent_provenance(observations)
         normalized_provenance = {
@@ -1039,6 +1040,16 @@ DECISION_FAILURE_STAGES = frozenset(
         "public_stderr_capture",
     }
 )
+RESPONSE_OBSERVATION_STAGES = frozenset(
+    {
+        "response_raw_bytes",
+        "response_decode",
+        "response_protocol",
+        "response_schema",
+        "response_validation",
+        "model_validation",
+    }
+)
 DECISION_FAILURE_CODES = frozenset(
     {
         "CSV-NEXT-APPLICABILITY-001",
@@ -1425,6 +1436,8 @@ class PreResponseFailureDecision:
     def __post_init__(self) -> None:
         object.__setattr__(self, "request", copy.deepcopy(self.request))
         object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
+        object.__setattr__(self, "diagnostic", copy.deepcopy(self.diagnostic))
+        object.__setattr__(self, "known_counts", copy.deepcopy(self.known_counts))
         assert self.stage in DECISION_FAILURE_STAGES
         assert self.diagnostic_code in DECISION_FAILURE_CODES
         _assert_pre_response_failure_diagnostic_eligible(self.diagnostic_code)
@@ -1483,6 +1496,19 @@ class PreResponseFailureDecision:
         assert tuple(context.source_failure_ledger) == tuple(decision_context.source_failure_ledger)
         if self.request is None:
             assert context.observation_provenance == decision_context.provenance_observation
+        else:
+            provenance = context.observation_provenance
+            assert (
+                provenance["kind"],
+                provenance["stage"],
+                provenance["failure_code"],
+            ) == ("request_bound_failure", self.stage, self.diagnostic_code), (
+                "pre-response publication provenance must match the owning failure"
+            )
+            if self.stage not in RESPONSE_OBSERVATION_STAGES:
+                assert provenance["observed"]["response"] == _observation_row("response", False), (
+                    "pre-response publication provenance cannot observe a response before its stage"
+                )
         object.__setattr__(self, "publication_context", context)
 
     def __getattribute__(self, name: str) -> Any:
