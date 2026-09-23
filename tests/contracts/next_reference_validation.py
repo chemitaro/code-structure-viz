@@ -1512,6 +1512,11 @@ class PreResponseFailureDecision:
                 assert provenance["observed"]["response"] == _observation_row("response", False), (
                     "pre-response publication provenance cannot observe a response before its stage"
                 )
+            _assert_pre_response_publication_context_matches_request(
+                self.request,
+                self.run_context,
+                context,
+            )
         object.__setattr__(self, "publication_context", context)
 
     def __getattribute__(self, name: str) -> Any:
@@ -7343,6 +7348,84 @@ def _seal_publication_context(
     )
 
 
+def _request_publication_config(
+    request: ValidatedAdapterRequest,
+    run_context: NextRunContext,
+    source_seal: SourceAcquisitionSeal,
+) -> dict[str, Any]:
+    """Project request-owned public config only from its request and source seal."""
+
+    project_descriptors = [
+        {
+            key: copy.deepcopy(project[key])
+            for key in ("root", "source_roots", "config_path", "compiler_options")
+        }
+        for project in request["projects"]
+    ]
+    return {
+        "schema": "code-structure-viz.domain-config/next/v1",
+        "projects": project_descriptors,
+        "config_resolution": copy.deepcopy(source_seal.final_plan["config_resolution"]),
+        "targets": list(request["targets"]),
+        "upstream_depth": 1,
+        "downstream_depth": 1,
+        "formats": list(run_context["requested_formats"]),
+        "limits": copy.deepcopy(request["limits"]),
+        "source_plan": copy.deepcopy(source_seal.final_plan),
+        "source_plan_digest": source_seal.plan_digest,
+        "trusted_environment_digest": request["trusted_type_environment"]["sha256"],
+    }
+
+
+def _assert_pre_response_publication_context_matches_request(
+    request: ValidatedAdapterRequest,
+    run_context: NextRunContext,
+    context: NextPublicationContext,
+) -> None:
+    """Bind every request-derived publication field to the owning request."""
+
+    source_seal = context.source_acquisition_seal
+    assert isinstance(source_seal, SourceAcquisitionSeal)
+    _validate_request_matches_source_seal(
+        request,
+        source_seal,
+        context.source_failure_ledger_seal,
+    )
+
+    provenance = context.observation_provenance
+    provenance["observed"]["request"] = _observation_row(
+        "request", True, observed_value=request.snapshot()
+    )
+    semantic_files = [
+        {key: copy.deepcopy(value) for key, value in file_record.items() if key != "content_base64"}
+        for file_record in request["files"]
+    ]
+    ledger: SourceFailureLedger | tuple[dict[str, Any], ...] = (
+        context.source_failure_ledger_seal
+        if context.source_failure_ledger_seal is not None
+        else context.source_failure_ledger
+    )
+    expected_context = _seal_publication_context(
+        source_seal=source_seal,
+        run_context=run_context,
+        public_request=request,
+        public_config=_request_publication_config(request, run_context, source_seal),
+        compatibility_descriptor=context.compatibility_descriptor,
+        toolchain=context.toolchain,
+        trusted_environment=context.trusted_environment,
+        semantic_projects=copy.deepcopy(request["projects"]),
+        semantic_files=semantic_files,
+        fingerprint_projects=copy.deepcopy(request["projects"]),
+        source_failure_ledger=ledger,
+        process_launch_observation=context.process_launch_observation,
+        observation_provenance=provenance,
+        process_launch_policy=context.process_launch_policy,
+    )
+    assert context == expected_context, (
+        "pre-response publication context must match the owning request"
+    )
+
+
 def _publication_context_for_validated_request(
     request: ValidatedAdapterRequest,
     run_context: NextRunContext,
@@ -7371,26 +7454,8 @@ def _publication_context_for_validated_request(
         source_seal,
         source_failure_ledger if isinstance(source_failure_ledger, SourceFailureLedger) else None,
     )
-    project_descriptors = [
-        {
-            key: copy.deepcopy(project[key])
-            for key in ("root", "source_roots", "config_path", "compiler_options")
-        }
-        for project in request["projects"]
-    ]
-    config = {
-        "schema": "code-structure-viz.domain-config/next/v1",
-        "projects": project_descriptors,
-        "config_resolution": copy.deepcopy(source_seal.final_plan["config_resolution"]),
-        "targets": list(request["targets"]),
-        "upstream_depth": 1,
-        "downstream_depth": 1,
-        "formats": list(run_context["requested_formats"]),
-        "limits": copy.deepcopy(request["limits"]),
-        "source_plan": copy.deepcopy(source_seal.final_plan),
-        "source_plan_digest": source_seal.plan_digest,
-        "trusted_environment_digest": request["trusted_type_environment"]["sha256"],
-    }
+    config = _request_publication_config(request, run_context, source_seal)
+    project_descriptors = copy.deepcopy(config["projects"])
     return _seal_publication_context(
         source_seal=source_seal,
         run_context=run_context,
