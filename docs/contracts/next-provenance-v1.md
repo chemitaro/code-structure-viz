@@ -17,6 +17,8 @@
 
 stageの前に観測されたapplicability、limits、source plan、toolchain、trusted environment、compatibility、process launch、budgetは後続 failureでも保持し、それ以降のsuffixだけをunobservedにします。request-independent failureでは未観測requestを作らず、request-bound failureではcanonical request id/files/digestsを再検証済みの値だけを保持します。`NextDecisionContext`と`NextPublicationContext`はこの同じprovenance shapeを使い、domain/root manifest/stdout/stderr/exitのprojectionはdecisionだけを入力とします。
 
+`request_independent`はadapter requestの観測状態を示し、sourceやconfigの全観測がないことを意味しません。`source_read` failureが実際の`SourceAcquisitionSeal`を保持する場合は、provenanceのapplicability/config/source/limits/source-plan observed prefixをpublication context、run-decision context、public config、domainへ同じ値/digestで投影します。requestとtoolchain/trusted-environment/compatibility/process/response/budgetなどstage後の観測はunobservedのままで、request-independent run fingerprintにはprovenance digestを含めます。sealのない先行failureはこれまでどおりsource identity、limits、source planを公開しません。
+
 ### 実観測に結び付く早期分岐
 
 `request_independent_not_applicable_decision`の必須入力は、凍結package bytesから導出した
@@ -43,7 +45,12 @@ applicability/source_control failureの非公開原本は`EarlySourceReadPrefix`
 いずれのprovenanceもcaller入力ではなく原本から導出するread-only値とし、code/stage/pathを原本と照合する。
 別入力のdigestや未読pathへの交換、mutable aliasによる原本変更を許可しない。
 `source_acquisition_failure_decision`はapplicability/source_control/source_readの実結果を既存の
-`PreResponseFailureDecision`へ接続する。malformed packageはAPPLICABILITY-002、
+`PreResponseFailureDecision`へ接続する。sealed source_read failureではrequest-independent decisionでも
+`SourceAcquisitionSeal`をpublication contextへ保持する。public configにはsealから導出したproject descriptor、
+limits、source plan/digest/config-resolutionを載せる一方、validated request、runtime、trusted environment、
+compatibility、semantic model/project rowsは作らない。domain source/fingerprint/limitsとrun-decisionの
+source digestsはseal/provenanceと照合し、target-resolution proofがなければtarget rowは空のままにする。
+malformed packageはAPPLICABILITY-002、
 config読取不能はSOURCE-003/source_control、non-isolatableなsource readはSOURCE-003/source_readとし、
 catalogが許す後者のpathを落とさない。source本文やfailure proofは公開診断へ含めない。
 provenanceを持たない旧status-only fixtureはこの接続関数に渡せない。
@@ -52,8 +59,9 @@ safe subsetを公開するsource-isolation経路やusage/fatal/interruptの接�
 公開側はdecision contextのprovenanceをそのまま引き継ぎ、field名だけのmarkerを再生成しない。
 request-independent run fingerprintのpreimageには`observation_provenance_digest`を含める。
 異なる取得済み入力はfingerprintを変え、未読sourceのbytesだけの変更は早期結果を変えない。
-request、source plan、limits、toolchain、trusted environment、process、response、budgetの
-未観測suffixはnullのまま保持する。生のcontrol/source本文をpublic manifestへ追加しない。
+requestとfailure stageより後のtoolchain、trusted environment、compatibility、process、response、budgetの
+未観測suffixはnullのまま保持する。source_readより前に実観測済みのsource planとlimitsはnullへ落とさず、
+seal/provenance/public config/domainで同じ値に束縛する。生のcontrol/source本文をpublic manifestへ追加しない。
 
 受け入れ根拠は`test_actual_early_failure_preserves_observations_through_publication`、
 `test_early_failure_identity_binds_read_bytes_not_unread_suffix`、

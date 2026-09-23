@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-21"
+最終更新: "2026-09-23"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -47,6 +47,8 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 | 3 | `I05-PLAN-008` | clean/pushed fixed SHA、全品質gate、独立GPT-6 Max review | `P0=0 / P1=0 / review_status=pass`になるまで次へ進まない。 |
 | 4 | `I05-PLAN-002`〜`007` | production adapter、Node process、semantic/publication、stdout、hardening | 上記gate通過後だけ開始。現在は未実装・未認定。 |
 | 5 | G11（`I05-PLAN-006`へ接続） | 将来のwheel/sdist runtime build inventoryとpackage受入れ | schema/docsで境界のみ固定。現行commitでbuild・依存・lockfileを変更しない。 |
+
+I05-PLAN-008のpre-response projection gateでは、validated requestに明示targetがある一方でresponse decode/validationより前に失敗しvalidated target proofがない経路を、全selector（省略、manifest、semantic-json、PlantUML）で検証します。request/config/run identityのtargetは保持し、target-completeness行・target failure reason・`CSV-NEXT-TARGET-001`は生成せず、既存のpre-response diagnostic/statusとpayload-unavailable publicationを保つことを確認します。`test_response_boundary_failures_are_pre_response_decisions`と実publication-chain regressionをこの基準へ合わせます。request-independentな実`source_read` failureは、取得済み`SourceAcquisitionSeal`に基づくapplicability/config/source/limits/source-plan prefixをprovenanceからrun decision・config・domainまで保持し、request/runtime/semantic payloadは作りません。sealがないより前のfailureはnull suffixを維持します。source-read observed-prefix projectionは独立した同じpre-response publication unitで検証し、どちらもI05-PLAN-008のfresh exact-SHA reviewsを通過するまでproduction workへ進みません。
 
 ### G11: reference inventoryとbuild inventoryの分離
 

@@ -2737,11 +2737,19 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
         "request_independent_failure",
     }
     if independent:
-        assert publication_context.source_acquisition_seal is None
-        assert config["limits"] is None
-        assert config["source_plan"] is None
-        assert config["source_plan_digest"] is None
+        assert publication_context.public_next_request is None
         assert config["trusted_environment_digest"] is None
+        if publication_context.source_acquisition_seal is None:
+            assert config["limits"] is None
+            assert config["source_plan"] is None
+            assert config["source_plan_digest"] is None
+            assert publication_context.source_view_descriptor is None
+        else:
+            assert publication_context.observation_provenance["stage"] == "source_read"
+            assert publication_context.final_source_acquisition_plan is not None
+            assert publication_context.source_plan_digest is not None
+            config["source_plan"] = copy.deepcopy(publication_context.final_source_acquisition_plan)
+            config["source_plan_digest"] = publication_context.source_plan_digest
     else:
         assert publication_context.final_source_acquisition_plan is not None
         assert publication_context.source_plan_digest is not None
@@ -2759,8 +2767,7 @@ def _domain_from_run_decision(decision: NextRunDecision) -> _DomainProjection:
     # of inventing project/config input that was never available.
     request = copy.deepcopy(publication_context.public_next_request)
     source_view = publication_context.source_view_descriptor
-    if independent:
-        assert source_view is None
+    if source_view is None:
         source = {
             "schema": "code-structure-viz.source-view/v1",
             "kind": "unavailable",
@@ -10335,14 +10342,19 @@ def test_pre_response_decision_is_the_only_authority_for_manifest_stdout_and_exi
 
 
 @pytest.mark.parametrize("mutation", ["malformed_json", "duplicate_key", "schema", "reference"])
-def test_response_boundary_failures_are_pre_response_decisions(mutation: str) -> None:
-    request = _request()
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_response_boundary_failures_are_pre_response_decisions(
+    mutation: str, selector: str | None
+) -> None:
+    target = "path:src/Button.tsx"
+    run_context = _run_context(selector=selector)
+    request = _request(targets=[target], run_context=run_context)
     if mutation == "malformed_json":
         response_bytes = b'{"schema":'
     elif mutation == "duplicate_key":
         response_bytes = b'{"schema":"first","schema":"second"}'
     else:
-        response = _response(_model(), request=request, run_context=_run_context())
+        response = _response(_model(), request=request, run_context=run_context)
         if mutation == "schema":
             response["unexpected"] = True
         else:
@@ -10362,18 +10374,27 @@ def test_response_boundary_failures_are_pre_response_decisions(mutation: str) ->
     assert decision.diagnostic_code == "CSV-NEXT-PROTOCOL-001"
     assert decision.payload_available is False
     assert decision.artifact_paths == ()
-    domain = _domain(decision=decision)
-    manifest = _run_manifest(domain)
-    stream = _stdout_result_for_domain(domain, manifest)
-    validate_run_status_vector(
-        manifest,
-        _run_summary_value("incomplete", domain),
-        stream,
-        {},
-        canonical_json_bytes(stream) + b"\n",
-        manifest["diagnostics"],
-        stderr_bytes=_diagnostic_jsonl(manifest["diagnostics"]),
-    )
+    assert decision.request is not None
+    assert decision.request["targets"] == [target]
+
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+    domain, manifest, stream, artifacts, stderr = _validate_publication_chain(publication)
+    assert domain["request"]["targets"] == [target]
+    assert domain["config"]["targets"] == [target]
+    assert domain["targets"] == [target]
+    assert domain["coverage"]["target_completeness"] == []
+    assert domain["status"] == "incomplete"
+    assert domain["incomplete_kind"] == "payload_unavailable"
+    assert domain["payload_available"] is False
+    assert artifacts == {}
+    assert manifest["request"]["targets"] == [target]
+    assert manifest["next_request"]["targets"] == [target]
+    assert [item["code"] for item in domain["diagnostics"]] == ["CSV-NEXT-PROTOCOL-001"]
+    assert [item["code"] for item in manifest["diagnostics"]] == ["CSV-NEXT-PROTOCOL-001"]
+    assert "target_failures" not in stream
+    assert all("reason" not in row for row in domain["coverage"]["target_completeness"])
+    for output in (canonical_json_bytes(domain), canonical_json_bytes(manifest), stderr):
+        assert b"CSV-NEXT-TARGET-001" not in output
 
 
 def test_stdout_target_failures_are_bijective_sorted_and_target_only() -> None:
@@ -13217,6 +13238,8 @@ def test_actual_nonisolatable_source_read_failure_reaches_publication(
     assert result.stage == "source_read" and result.observation_provenance is not None
     assert result.path == "src/dep.ts"
     observed = result.observation_provenance
+    seal = result.seal
+    assert seal is not None
     reads_at_failure = dict(reader.read_counts)
     assert reads_at_failure["src/dep.ts"] == 1
 
@@ -13228,9 +13251,59 @@ def test_actual_nonisolatable_source_read_failure_reaches_publication(
     assert decision.decision_context.targets == ("path:src/entry.ts",)
     assert decision.decision_context.provenance_observation == observed
     assert decision.publication_context.observation_provenance == observed
+    publication_context = decision.publication_context
+    assert publication_context.source_acquisition_seal == seal
+    assert publication_context.source_view_descriptor == seal.source_view
+    assert publication_context.source_view_fingerprint == seal.source_view_fingerprint
+    assert publication_context.final_source_acquisition_plan == seal.final_plan
+    assert publication_context.source_plan_digest == seal.plan_digest
+    observed_values = observed["observed"]
+    assert observed_values["applicability"]["value"]["sha256"] == digest(
+        seal.package_applicability.as_dict()
+    )
+    assert observed_values["config"]["value"]["sha256"] == digest(
+        publication_context.public_next_config["projects"]
+    )
+    assert observed_values["source"]["value"]["sha256"] == seal.source_view_fingerprint
+    assert observed_values["limits"]["value"]["sha256"] == digest(seal.final_plan["limits"])
+    assert observed_values["source_plan"]["value"]["sha256"] == seal.plan_digest
+    assert publication_context.public_next_config["projects"] == [
+        {key: project[key] for key in ("root", "source_roots", "config_path", "compiler_options")}
+        for project in seal.final_plan["projects"]
+    ]
+    assert publication_context.public_next_config["limits"] == seal.final_plan["limits"]
+    assert publication_context.public_next_config["source_plan"] == seal.final_plan
+    assert publication_context.public_next_config["source_plan_digest"] == seal.plan_digest
+    assert publication_context.public_next_config["trusted_environment_digest"] is None
+    assert publication_context.public_next_request is None
+    assert publication_context.compatibility_descriptor is None
+    assert publication_context.toolchain is None
+    assert publication_context.trusted_environment is None
     run_wire = next_run_decision_projection(decision)
     _validator("next-run-decision-v1.schema.json").validate(run_wire)
     assert run_wire["provenance"] == observed
+    assert run_wire["request_independent"] is True
+    assert run_wire["request"] is None and run_wire["response"] is None
+    assert run_wire["context"]["request_id"] is None
+    assert run_wire["context"]["source_plan_digest"] == seal.plan_digest
+    assert run_wire["context"]["source_view_fingerprint"] == seal.source_view_fingerprint
+    assert run_wire["context"]["compatibility_id"] is None
+    assert run_wire["context"]["process_observation_digest"] is None
+    for name, expected_digest in (
+        ("applicability", observed["observed"]["applicability"]["value"]["sha256"]),
+        ("config", observed["observed"]["config"]["value"]["sha256"]),
+        ("source", seal.source_view_fingerprint),
+        ("limits", observed["observed"]["limits"]["value"]["sha256"]),
+    ):
+        assert run_wire["context"]["observed_prefix"][name] == {
+            "state": "observed",
+            "value": expected_digest,
+        }
+    for name in ("toolchain", "trusted_environment", "process", "response", "budget"):
+        assert run_wire["context"]["observed_prefix"][name] == {
+            "state": "unobserved",
+            "value": None,
+        }
 
     publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
     publication_wire = next_publication_decision_projection(publication)
@@ -13240,6 +13313,11 @@ def test_actual_nonisolatable_source_read_failure_reaches_publication(
     domain, manifest, stdout, artifacts, stderr = _validate_publication_chain(publication)
     assert domain["targets"] == ["path:src/entry.ts"]
     assert domain["config"]["targets"] == ["path:src/entry.ts"]
+    assert domain["source"]["fingerprint"] == seal.source_view_fingerprint
+    assert domain["source"]["file_count"] == seal.source_view["file_count"]
+    assert domain["config"]["source_plan"] == seal.final_plan
+    assert domain["config"]["source_plan_digest"] == seal.plan_digest
+    assert domain["config"]["limits"] == seal.final_plan["limits"]
     assert domain["coverage"]["target_completeness"] == []
     assert domain["payload_available"] is False and artifacts == {}
     assert [(diagnostic["code"], diagnostic["path"]) for diagnostic in domain["diagnostics"]] == [

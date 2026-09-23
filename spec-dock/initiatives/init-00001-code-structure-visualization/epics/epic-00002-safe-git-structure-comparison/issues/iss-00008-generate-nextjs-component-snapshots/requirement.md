@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-21"
+最終更新: "2026-09-23"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -30,6 +30,8 @@ package_sequence_key: "ISSUE-05"
 7. Unicode 15.0.0 NFC profile、string export disposition、namespace import memberをversioned closed contractとして固定し、将来のUnicode/table・wheel/sdist変更は別compatibility migrationとします。
 8. run/publication provenanceは `code-structure-viz.run-manifest/v1` と Next domain manifestだけが所有します。checked-in reference fixtureは `code-structure-viz.next-reference-runtime-inventory/v1`、将来の出荷物は `code-structure-viz.next-runtime-build-inventory/v1` とし、旧 `code-structure-viz.next-runtime-manifest/v1` はsupersededで、第二のrun/package authorityとして使用しません。これは `pyproject.toml`、依存、lockfile、wheel、sdistを変更する決定ではありません。
 9. run-level terminal branchは、project-root overlapをusage（`CSV-NEXT-PROJECT-001`、exit 2、stdout空、Artifactなし、source reader未実行）、source-integrity driftをfatal（`CSV-NEXT-SOURCE-INTEGRITY-001`、exit 1、manifest/Artifactなし）、handled interruptをinterrupted（`CSV-INTERRUPT-001`、exit 130、cleanup後）として一度だけ投影します。全selectorでterminal branchはdecoder/finalizer/artifact readを呼ばず、外部から付与されたinterrupt診断のmessage/path/domainを公開せず、closed core診断を再構築します。
+10. validated request後、validated semantic responseおよびtarget-resolution proofより前に失敗した場合は、request/config/run identityの明示targetを保持し、`coverage.target_completeness`に行を生成しません。空配列はtargetが指定されなかったこと、またはtarget resolutionがcomplete/failedだったことを意味しません。target failure reasonや`CSV-NEXT-TARGET-001`を合成せず、当該pre-response failureの診断だけを公開します。validated responseのproofがある場合のtarget-completeness行は従来どおりproofから導出します。
+11. `request_independent`は「validated adapter requestがない」ことを意味し、先行観測が一切ないことを意味しません。actual `source_read` failureが`SourceAcquisitionSeal`を保持する場合、applicability/config/source/limits/source-planの観測済みprefixをprovenance、publication context、run-decision、config、domainで同一digest/valueに結びます。request、runtime/toolchain/trusted-environment/compatibility/process観測、semantic payloadとtarget-resolution rowsは作りません。sealのない先行failureは引き続き未観測値をnullにします。
 
 現在の作業は実装前契約の整備であり、production adapter/Node実行は含みません。2026-09-08の明示指示により、利用不能な外部ChatGPT系スキルを停止し、主担当GPT-6の分析と独立GPT-6・推論Maxレビューへ切り替えます。cleanかつpush済みの固定SHAを対象に必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、実装開始可能性は未確定です。内部レビューを外部ChatGPT Strict passと表記しません。過去のStrict結果は当時の証拠として保持します。
 
@@ -115,7 +117,7 @@ Python coreは明示project rootの`package.json`にあるdirect `next` dependen
 Component identityはrepository-relative physical declaration moduleとdeclaration key。named bindingまたはmodule-local `@anonymous-default` slotを使う。export/re-export/alias/defaultは`ExportBindingMember`、route pathとrouter contextはattributeとし、identityに含めない。
 ### I05-REQ-004
 
-Node adapterは`code-structure-viz.next-adapter/v1`のexact one response JSONをstdoutへ返す。Python coreはresponseをuntrusted inputとしてschema/path/ref/redaction/order/ID/count/digest/target completenessを検証し、public semantic JSONとPlantUMLを自身で生成する。
+Node adapterは`code-structure-viz.next-adapter/v1`のexact one response JSONをstdoutへ返す。Python coreはresponseをuntrusted inputとしてschema/path/ref/redaction/order/ID/count/digest/target completenessを検証し、public semantic JSONとPlantUMLを自身で生成する。target-completeness行はvalidated responseのtarget-resolution proofからのみ生成する。validated request後、responseのdecode/validationを含むpre-response failureによりproofが存在しない場合、明示targetをrequest/config/run identityに保持したまま`coverage.target_completeness`は空配列とし、targetのcomplete/failedを主張する行・reason・`CSV-NEXT-TARGET-001`を出さない。空配列の意味は「target-resolution proofに基づく行がない」であり、target未指定または成功解決の主張ではない。
 ### I05-REQ-005
 
 non-literal dynamic behaviorはrelationを捏造せずunknown diagnosticとcoverage limitationにする。Node/protocol/static analysis failureはincomplete、entity budget超過はdomain incomplete exit 3でaffected semantic JSON/PlantUMLを公開しない。implicit changed-path gateはdiff専用でありsnapshotでは実行せず、snapshotへの`--from`/`--to`/`--pr-target`/`--max-changed-paths`指定はusage error、exit 2とする。

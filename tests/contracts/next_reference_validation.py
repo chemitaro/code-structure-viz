@@ -522,9 +522,9 @@ class NextPublicationContext:
             )
             assert provenance["observed"]["budget"] == expected_budget
         if seal is None:
-            # The run stopped before a source/config/request observation was
-            # available.  Null is the fact; an empty plan, trusted profile,
-            # toolchain, or limit record would falsely claim observation.
+            # No SourceAcquisitionSeal crossed this publication boundary.
+            # Keep source identity, resolved limits, and runtime context null;
+            # earlier control observations remain represented by provenance.
             assert provenance["kind"] in {
                 "request_independent_not_applicable",
                 "request_independent_failure",
@@ -563,19 +563,9 @@ class NextPublicationContext:
         assert self.final_source_acquisition_plan is not None
         assert self.source_plan_digest is not None
         assert self.seal_id is not None
-        assert self.compatibility_descriptor is not None
-        assert self.toolchain is not None
-        assert self.trusted_environment is not None
-        assert process_observation["node_status"] == self.toolchain["node"]["status"]
         assert seal.plan_digest == self.source_plan_digest
         assert seal.source_view_fingerprint == self.source_view_fingerprint
         assert seal.seal_id == self.seal_id
-        validate_compatibility_descriptor(self.compatibility_descriptor)
-        assert self.compatibility_descriptor == _compatibility_descriptor_snapshot(
-            toolchain=self.toolchain,
-            trusted_environment=self.trusted_environment,
-            process_observation=process_observation,
-        )
         assert re.fullmatch(r"[0-9a-f]{64}", self.source_view_fingerprint)
         assert re.fullmatch(r"[0-9a-f]{64}", self.source_plan_digest)
         assert re.fullmatch(r"[0-9a-f]{64}", self.seal_id)
@@ -592,6 +582,9 @@ class NextPublicationContext:
                 "source_graph_digest": seal.source_graph["graph_digest"],
             }
         )
+        assert self.public_next_config["source_plan"] == self.final_source_acquisition_plan
+        assert self.public_next_config["source_plan_digest"] == self.source_plan_digest
+        assert self.public_next_config["limits"] == self.final_source_acquisition_plan["limits"]
         ledger = tuple(self.source_failure_ledger)
         assert ledger == tuple(sorted(ledger, key=canonical_json_bytes))
         for failure in ledger:
@@ -608,13 +601,68 @@ class NextPublicationContext:
         assert preimage["formats"] == self.run_context["requested_formats"]
         assert preimage["stdout_selector"] == self.run_context["stdout_selector"]
         assert preimage["limits"] == self.public_next_config["limits"]
+        assert preimage["process_launch_observation_digest"] == digest(process_observation)
+        assert preimage["source_failure_ledger"] == list(ledger)
+        assert preimage.get("source_failure_ledger_digest") == ledger_digest
+        if self.public_next_request is None:
+            # A source-read failure is request-independent but is not
+            # observation-independent: preserve the sealed source/config
+            # prefix while leaving every runtime and semantic result absent.
+            assert provenance["kind"] == "request_independent_failure"
+            assert provenance["stage"] == "source_read"
+            assert provenance["failure_code"] == "CSV-NEXT-SOURCE-003"
+            assert self.public_next_config["request_independent"] is True
+            assert preimage["projects"] == self.semantic_projects
+            assert self.public_next_config["projects"] == [
+                {
+                    key: copy.deepcopy(project[key])
+                    for key in ("root", "source_roots", "config_path", "compiler_options")
+                }
+                for project in self.final_source_acquisition_plan["projects"]
+            ]
+            assert self.public_next_config["trusted_environment_digest"] is None
+            assert self.compatibility_descriptor is None
+            assert self.toolchain is None
+            assert self.trusted_environment is None
+            assert process_observation["node_status"] == "unavailable"
+            assert preimage["trusted_environment_digest"] is None
+            assert preimage["node_version"] is None
+            assert preimage["typescript_version"] is None
+            assert preimage["adapter_version"] is None
+            assert preimage["protocol"] is None
+            assert preimage["process_launch_descriptor_digest"] is None
+            assert preimage["observation_provenance_digest"] == digest(provenance)
+            assert provenance["observed"]["applicability"]["value"]["sha256"] == digest(
+                seal.package_applicability.as_dict()
+            )
+            assert provenance["observed"]["config"]["value"]["sha256"] == digest(
+                self.public_next_config["projects"]
+            )
+            assert provenance["observed"]["source"]["value"]["sha256"] == digest(
+                self.source_view_descriptor
+            )
+            assert provenance["observed"]["limits"]["value"]["sha256"] == digest(
+                self.public_next_config["limits"]
+            )
+            assert provenance["observed"]["source_plan"]["value"]["sha256"] == digest(
+                self.final_source_acquisition_plan
+            )
+            return
+        assert self.compatibility_descriptor is not None
+        assert self.toolchain is not None
+        assert self.trusted_environment is not None
+        assert process_observation["node_status"] == self.toolchain["node"]["status"]
+        validate_compatibility_descriptor(self.compatibility_descriptor)
+        assert self.compatibility_descriptor == _compatibility_descriptor_snapshot(
+            toolchain=self.toolchain,
+            trusted_environment=self.trusted_environment,
+            process_observation=process_observation,
+        )
         assert preimage["trusted_environment_digest"] == self.trusted_environment["sha256"]
         assert preimage["node_version"] == self.toolchain["node_version"]
         assert preimage["typescript_version"] == self.toolchain["typescript_version"]
         assert preimage["adapter_version"] == self.toolchain["adapter_version"]
         assert preimage["protocol"] == self.toolchain["protocol"]
-        assert preimage["source_failure_ledger"] == list(ledger)
-        assert preimage.get("source_failure_ledger_digest") == ledger_digest
         validate_process_launch_descriptor(self.process_launch_descriptor)
         assert self.process_launch_descriptor["node_status"] == self.toolchain["node"]["status"]
         assert self.process_launch_descriptor["node_version"] == self.toolchain["node_version"]
@@ -7153,8 +7201,8 @@ def _seal_publication_context(
         else None
     )
     config = copy.deepcopy(public_config)
-    config.setdefault("request_independent", source_seal is None)
-    assert config["request_independent"] is (source_seal is None)
+    config.setdefault("request_independent", public_request is None)
+    assert config["request_independent"] is (public_request is None)
     if source_seal is not None:
         config["source_plan"] = copy.deepcopy(source_seal.final_plan)
         config["source_plan_digest"] = source_seal.plan_digest
@@ -7203,11 +7251,13 @@ def _seal_publication_context(
         # fingerprint and in every downstream context.
         # A request-independent failure has no observed executable and must
         # not turn its derived unavailable compatibility view into a fake
-        # process observation.  Only a source-bound context carries the
+        # process observation. Only a request-bound context carries the
         # legacy descriptor digest; the normative observation digest remains
         # present for both branches.
         "process_launch_descriptor_digest": (
-            digest(launch) if source_seal is not None and launch is not None else None
+            digest(launch)
+            if public_request is not None and source_seal is not None and launch is not None
+            else None
         ),
         "process_launch_observation_digest": digest(launch_observation),
         "source_failure_ledger": copy.deepcopy(list(ledger_rows)),
@@ -7216,7 +7266,7 @@ def _seal_publication_context(
     }
     if ledger_digest is not None:
         preimage["source_failure_ledger_digest"] = ledger_digest
-    if source_seal is None:
+    if public_request is None:
         preimage["observation_provenance_digest"] = digest(observation_provenance)
     if public_request is not None:
         request_snapshot = _public_request_snapshot(
@@ -7362,32 +7412,52 @@ def _publication_context_for_request_independent_failure(
     stage: str,
     diagnostic_code: str,
     source_failure_ledger: SourceFailureLedger | tuple[dict[str, Any], ...],
+    source_seal: SourceAcquisitionSeal | None = None,
 ) -> NextPublicationContext:
-    """Seal only facts observed before a request-independent failure.
+    """Seal exactly the observation prefix available before the failure.
 
-    The absence of an adapter request also means that limits, trusted
-    environment, toolchain, and source plan are not observed by this branch.
-    They remain explicit ``null`` values instead of being reconstructed from
-    defaults or an unavailable fixture.
+    Request independence does not imply that every pre-request observation is
+    absent. A source-read failure carries its actual source seal and config
+    prefix, while adapter request and runtime observations remain unavailable.
     """
 
+    projects = []
+    limits = None
+    source_plan = None
+    source_plan_digest = None
+    config_resolution = []
+    if source_seal is not None:
+        assert stage == "source_read" and diagnostic_code == "CSV-NEXT-SOURCE-003"
+        assert source_seal.source_view["read_failures"]
+        projects = [
+            {
+                key: copy.deepcopy(project[key])
+                for key in ("root", "source_roots", "config_path", "compiler_options")
+            }
+            for project in source_seal.final_plan["projects"]
+        ]
+        limits = copy.deepcopy(source_seal.final_plan["limits"])
+        source_plan = copy.deepcopy(source_seal.final_plan)
+        source_plan_digest = source_seal.plan_digest
+        config_resolution = copy.deepcopy(source_seal.final_plan["config_resolution"])
     config = {
         "schema": "code-structure-viz.domain-config/next/v1",
         "request_independent": True,
-        "projects": [],
+        "projects": projects,
         "targets": list(decision_context.targets),
         "upstream_depth": None,
         "downstream_depth": None,
         "formats": list(run_context["requested_formats"]),
-        "limits": None,
-        "source_plan": None,
-        "source_plan_digest": None,
+        "limits": limits,
+        "source_plan": source_plan,
+        "source_plan_digest": source_plan_digest,
         "trusted_environment_digest": None,
         "failure_stage": stage,
         "failure_code": diagnostic_code,
+        "config_resolution": config_resolution,
     }
     return _seal_publication_context(
-        source_seal=None,
+        source_seal=source_seal,
         run_context=run_context,
         public_request=None,
         public_config=config,
@@ -9277,6 +9347,7 @@ def source_acquisition_failure_decision(
         diagnostic_code=result.diagnostic_code,
         decision_context=decision_context,
         path=result.path,
+        source_seal=result.seal,
     )
 
 
@@ -9723,9 +9794,9 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
     if not independent:
         assert run_context["budget_source"] == value["budget"]["source"]
     if independent:
-        # This branch is intentionally explicit about absence.  No default
-        # limits, trusted profile, toolchain, compatibility, or source plan
-        # may be smuggled into a failure that predates their observation.
+        # Request-independence is not observation-independence: source_read
+        # carries an actual acquisition seal, while failures before source
+        # acquisition retain the all-null form.
         is_not_applicable = value["status"] == "not_applicable"
         if is_not_applicable:
             assert "incomplete_kind" not in value
@@ -9740,24 +9811,15 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
         assert value["semantic_compatibility_id"] is None
         assert value["compatibility_descriptor"] is None
         assert value["identity_versions"] is None
-        assert value["source_plan_digest"] is None
-        assert value["source"]["kind"] == "unavailable"
-        assert value["source"]["fingerprint"] is None
-        assert value["source"]["file_count"] == 0
         assert value["toolchain"] is None
         assert value["trusted_environment"] is None
-        assert value["limits"] is None
         assert value["budget"]["resolved"] is None
         assert value["budget"]["source"] == "unobserved"
         assert value["budget"]["outcome"] == (
             "not_applicable" if is_not_applicable else "payload_unavailable"
         )
         assert value["config"]["request_independent"] is True
-        assert value["config"]["projects"] == []
-        assert value["config"]["limits"] is None
         assert value["config"]["trusted_environment_digest"] is None
-        assert value["config"]["source_plan"] is None
-        assert value["config"]["source_plan_digest"] is None
         assert value["config"]["domain_config_digest"] == resolved_config_digest(value["config"])
         _validate_public_diagnostics(value["diagnostics"])
         expected_diagnostic_outcome = (
@@ -9781,7 +9843,58 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
         assert value["coverage"]["counts"]["internal_entities"] == 0
         assert value["coverage"]["counts"]["published"] == 0
         assert value["coverage"]["counts"]["discovered"] == 0
+        assert value["coverage"]["target_completeness"] == []
         assert value.get("decision") == next_run_decision_projection(decision)
+        seal = context.source_acquisition_seal
+        if seal is None:
+            assert value["source_plan_digest"] is None
+            assert value["source"]["kind"] == "unavailable"
+            assert value["source"]["fingerprint"] is None
+            assert value["source"]["file_count"] == 0
+            assert value["limits"] is None
+            assert value["config"]["projects"] == []
+            assert value["config"]["limits"] is None
+            assert value["config"]["source_plan"] is None
+            assert value["config"]["source_plan_digest"] is None
+        else:
+            assert isinstance(decision, PreResponseFailureDecision)
+            assert decision.stage == "source_read"
+            assert decision.diagnostic_code == "CSV-NEXT-SOURCE-003"
+            assert context.public_next_request is None
+            plan = seal.final_plan
+            source_view = seal.source_view
+            expected_projects = [
+                {
+                    key: copy.deepcopy(project[key])
+                    for key in ("root", "source_roots", "config_path", "compiler_options")
+                }
+                for project in plan["projects"]
+            ]
+            assert value["source"] == {
+                "schema": "code-structure-viz.source-view/v1",
+                "kind": source_view["kind"],
+                "head_commit": source_view["head_commit"],
+                "fingerprint": seal.source_view_fingerprint,
+                "file_count": source_view["file_count"],
+            }
+            assert value["source_plan_digest"] == seal.plan_digest
+            assert value["config"]["projects"] == expected_projects
+            assert value["config"]["config_resolution"] == plan["config_resolution"]
+            assert value["config"]["limits"] == plan["limits"] == value["limits"]
+            assert value["config"]["source_plan"] == plan
+            assert value["config"]["source_plan_digest"] == seal.plan_digest
+            assert value["config"]["failure_stage"] == "source_read"
+            assert value["config"]["failure_code"] == "CSV-NEXT-SOURCE-003"
+            assert value["config"]["domain_config_digest"] == value["domain_config_digest"]
+            validate_limits(value["limits"])
+            provenance = context.observation_provenance["observed"]
+            assert provenance["applicability"]["value"]["sha256"] == digest(
+                seal.package_applicability.as_dict()
+            )
+            assert provenance["config"]["value"]["sha256"] == digest(expected_projects)
+            assert provenance["source"]["value"]["sha256"] == digest(source_view)
+            assert provenance["limits"]["value"]["sha256"] == digest(plan["limits"])
+            assert provenance["source_plan"]["value"]["sha256"] == digest(plan)
         return
     validate_compatibility_descriptor(value["compatibility_descriptor"])
     assert (
@@ -9896,7 +10009,13 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
     target_completeness = value["coverage"]["target_completeness"]
     _assert_canonical(target_completeness)
     target_rows = {item["target_key"]: item for item in target_completeness}
-    assert set(target_rows) == set(value["targets"])
+    if isinstance(decision, PreResponseFailureDecision):
+        # A request-bound failure before response validation has no semantic
+        # target-resolution proof. Preserve the request identity, but do not
+        # turn those requested keys into fabricated complete/failed rows.
+        assert target_completeness == []
+    else:
+        assert set(target_rows) == set(value["targets"])
     assert all(item["record_ids"] == sorted(item["record_ids"]) for item in target_completeness)
     for item in target_completeness:
         if item["status"] == "failed":
@@ -11528,10 +11647,8 @@ def next_run_decision_projection(decision: NextRunDecision) -> dict[str, Any]:
         "request_id": request_value.get("request_id") if request_value else None,
         "run_fingerprint": digest(publication_context.run_fingerprint_preimage),
         "run_context": copy.deepcopy(publication_context.run_context),
-        "source_plan_digest": publication_context.source_plan_digest if not independent else None,
-        "source_view_fingerprint": (
-            publication_context.source_view_fingerprint if not independent else None
-        ),
+        "source_plan_digest": publication_context.source_plan_digest,
+        "source_view_fingerprint": publication_context.source_view_fingerprint,
         "compatibility_id": (
             publication_context.compatibility_descriptor["compatibility_id"]
             if publication_context.compatibility_descriptor is not None and not independent
@@ -12928,6 +13045,11 @@ def pre_response_failure_decision(
             source_failure_ledger.failures
         )
     if validated_request is None:
+        if source_seal is not None:
+            assert stage == "source_read"
+            assert diagnostic_code == "CSV-NEXT-SOURCE-003"
+            assert source_seal.source_view["read_failures"]
+            assert path == _source_read_failure_path(source_seal)
         publication_context = _publication_context_for_request_independent_failure(
             run_context=context,
             decision_context=effective_decision_context,
@@ -12936,6 +13058,7 @@ def pre_response_failure_decision(
             source_failure_ledger=(
                 source_failure_ledger or effective_decision_context.source_failure_ledger
             ),
+            source_seal=source_seal,
         )
     else:
         trusted_source_seal = _trusted_fixture_source_seal(validated_request, source_seal)

@@ -69,7 +69,20 @@
         "context": {"$ref": "#/$defs/independent_context"},
         "request": {"type": "null"},
         "response": {"type": "null"},
-        "provenance": {"properties": {"kind": {"const": "request_independent_failure"}}}
+        "provenance": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"not": {"const": "source_read"}}}}
+      }
+    },
+    {
+      "properties": {
+        "kind": {"const": "request_independent_failure"},
+        "request_independent": {"const": true},
+        "outcome": {"const": "payload_unavailable"},
+        "payload_available": {"const": false},
+        "exit_code": {"const": 3},
+        "context": {"$ref": "#/$defs/independent_source_context"},
+        "request": {"type": "null"},
+        "response": {"type": "null"},
+        "provenance": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"const": "source_read"}, "failure_code": {"const": "CSV-NEXT-SOURCE-003"}}}
       }
     }
   ],
@@ -128,6 +141,33 @@
       "allOf": [
         {"$ref": "#/$defs/context"},
         {"properties": {"request_id": {"const": null}, "source_plan_digest": {"const": null}, "source_view_fingerprint": {"const": null}, "compatibility_id": {"const": null}, "process_observation_digest": {"const": null}}}
+      ]
+    },
+    "independent_source_context": {
+      "allOf": [
+        {"$ref": "#/$defs/context"},
+        {
+          "properties": {
+            "request_id": {"const": null},
+            "source_plan_digest": {"$ref": "#/$defs/digest"},
+            "source_view_fingerprint": {"$ref": "#/$defs/digest"},
+            "compatibility_id": {"const": null},
+            "process_observation_digest": {"const": null},
+            "observed_prefix": {
+              "properties": {
+                "applicability": {"properties": {"state": {"const": "observed"}}},
+                "config": {"properties": {"state": {"const": "observed"}}},
+                "source": {"properties": {"state": {"const": "observed"}}},
+                "limits": {"properties": {"state": {"const": "observed"}}},
+                "toolchain": {"properties": {"state": {"const": "unobserved"}}},
+                "trusted_environment": {"properties": {"state": {"const": "unobserved"}}},
+                "process": {"properties": {"state": {"const": "unobserved"}}},
+                "response": {"properties": {"state": {"const": "unobserved"}}},
+                "budget": {"properties": {"state": {"const": "unobserved"}}}
+              }
+            }
+          }
+        }
       ]
     },
     "request_descriptor": {

@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-21"
+最終更新: "2026-09-23"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -42,6 +42,10 @@ note bottom of O : No external reconstruction or fallback
 Membershipの`files`/`include`/`exclude`値は、各値を宣言したconfig fileのdirectory（extendsされたconfigを含む）から解決します。解決した値はrepository-relative POSIX pathへ正規化し、selected project root内に限ります。`..`を含むunsafe pathはclosed path grammarにより拒否します。解決基準とcanonicalな出力形式を混同しません。
 
 `NextDecisionContext`/`NextPublicationContext`は全variantで同じsealed valuesを運びます。provenanceは四つのdiscriminator（request-independent not-applicable/failure、request-bound failure/success）とstage/code matrixを共有し、observed prefixの各値にfield schema/versionと実値digestを要求します。processは`ProcessLaunchPolicy`と`ProcessLaunchObservation`を分離し、legacy descriptorはobservationからの一方向compatibility viewに限ります。run/publication provenanceは`code-structure-viz.run-manifest/v1`とNext domain manifestだけが所有し、checked-in reference inventoryと将来のbuild inventoryを別schema identityへ分離します。
+
+target-completeness rowsはvalidated responseのtarget-resolution proofだけを表します。validated requestの後、response decode/validationなどvalidated semantic responseより前の段階で失敗しproofがない場合、要求targetはrequest/config/run identityに保持しますが、domainの`coverage.target_completeness`は空配列にします。この空配列は「target未指定」や「全targetがcomplete」を意味せず、resolution proofの行がないことを示します。response failureの既存diagnostic/statusを使い、個々のtargetがfailedであるかのようなrow/reasonや`CSV-NEXT-TARGET-001`を生成しません。validated response proofがある通常経路の一行一target・closed failure reasonは変更しません。
+
+`request_independent`はvalidated adapter requestの有無を示すdiscriminatorで、観測prefixの有無を代用しません。`source_read` failureに実際の`SourceAcquisitionSeal`がある場合は、そのsealのapplicability/config/source/limits/source-plan prefixを保持し、provenanceの値digest、`NextPublicationContext`、run-decision context、public config、domain source/limitsへ同じ値として投影します。requestとNode/toolchain/trusted-environment/compatibility/process観測、semantic project/entity payload、target-resolution rowsはnullまたは空のままです。sealを持たないapplicability/config/source-controlなどの先行failureは既存のall-null suffixを維持します。
 
 semantic rendererはdecisionだけを受け、publication finalizerは実際のcandidate bytesとmeasurementを一度sealします。summary/root-manifest/artifact/typed-unavailableはそのsealed bytesを返すだけで再render/retryしません。selected copy overrunはsemantic statusを変えず、persisted descriptorを保持したpublication-incomplete/exit 3です。canonical JSONはsort_keys/NFC/UTF-8/LF、path-only rowsはNFC UTF-8 bytes、object rowsはcanonical JSON bytesです。
 

@@ -49,6 +49,23 @@
         "source_plan": {"const": null},
         "source_plan_digest": {"const": null},
         "config_resolution": {"const": []}
+      },
+      "not": {"properties": {"failure_stage": {"const": "source_read"}}}
+    },
+    {
+      "required": ["request_independent", "failure_stage", "failure_code"],
+      "properties": {
+        "request_independent": {"const": true},
+        "projects": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/project"}},
+        "upstream_depth": {"const": null},
+        "downstream_depth": {"const": null},
+        "limits": {"$ref": "#/$defs/limits"},
+        "trusted_environment_digest": {"const": null},
+        "source_plan": {"$ref": "urn:code-structure-viz:schema:next-source-plan-v1"},
+        "source_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "config_resolution": {"minItems": 1},
+        "failure_stage": {"const": "source_read"},
+        "failure_code": {"const": "CSV-NEXT-SOURCE-003"}
       }
     }
   ],
