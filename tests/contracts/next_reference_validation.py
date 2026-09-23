@@ -10118,14 +10118,14 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
     applicable_roots = None
     if is_next_run_decision(decision):
         publication_context = decision.publication_context
-        source_view = publication_context.source_view_descriptor
-        if source_view is not None:
+        sealed_source_view = publication_context.source_view_descriptor
+        if sealed_source_view is not None:
             assert value["source"] == {
-                "schema": source_view["schema"],
-                "kind": source_view["kind"],
-                "head_commit": source_view["head_commit"],
+                "schema": sealed_source_view["schema"],
+                "kind": sealed_source_view["kind"],
+                "head_commit": sealed_source_view["head_commit"],
                 "fingerprint": publication_context.source_view_fingerprint,
-                "file_count": source_view["file_count"],
+                "file_count": sealed_source_view["file_count"],
             }
         full_plan = publication_context.final_source_acquisition_plan
         if full_plan is not None:
