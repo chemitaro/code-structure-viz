@@ -29,6 +29,13 @@ reflected_to: []
 - Analysis transcript SHA-256: `320a3be81f7094c36f0ff58c7445c8b0d77e4eeba4f0f4692aa13aeeade133e2`
 - Analysis output-log SHA-256: `6f438fc728747a1ad9da04c1881729e3d0d2ee7fbce1f23cc7988c0a276a38e1`
 - Analysis model/effort evidence: GPT-5.6 Sol / Pro, both verified by the model and thinking pickers. Strict GitHub verification bound the analysis to the exact repository, branch, and SHA above.
+- Remediation commit / reviewed candidate SHA: `79e77ae3af536c5f72ca6eb360c55c46bf32d156`
+- Fresh post-remediation Strict code review session: `required-strict-github-connector-verificati-1082`
+- Reviewed range: `777e554a599c2f14b71e93f4a8c32f0edaa8fc96..79e77ae3af536c5f72ca6eb360c55c46bf32d156`
+- Code review result: valid JSON, `review_status=pass`, `findings=[]`, `overall_correctness=patch is correct`, confidence `0.96`. GPT-5.6 Sol model and Pro reasoning were verified in the browser picker. The GitHub connector re-read the exact repository/branch tip and confirmed the full candidate SHA.
+- Code review transcript SHA-256: `9aa97b092f633e9fef59a6c265cd3b5cb3cf1e96e5eb92cd5b115676d9042b70`
+- Code review output-log SHA-256: `9946e9648dbb79384876fde23b9885bf0fe5d79e105ad7dfc60351f1dabff4ee`
+- Reviewer verification boundary: the reviewer independently inspected the fixed GitHub range but did not rerun tests; local test evidence below is from the recorded local commands.
 - Primary evidence packet: `.workbench/reports/issue8-package-review-1080.md` (ignored, non-canonical; its facts were checked against tracked code and tests).
 - Related earlier root-cause evidence: `20260923t163655z-disc-issue8-verified-fd-dependency-analysis.md`.
 
@@ -91,7 +98,9 @@ Completed focused results:
 | `git diff --check` | passed |
 | Pinned PlantUML HTML validator | static 8/8; browser 8/8 inline SVG; click, keyboard, bounds, focus trap, dismissal, focus restoration passed |
 
-The first sandboxed Chrome startup timed out after the static 8/8 check; the exact same read-only validator command was run once with the execution permission needed to launch Chrome and passed the browser and zoom gates. The HTML was not changed. A clean/pushed exact-SHA fresh Strict re-review remains required before this candidate can be considered review-ready.
+The first sandboxed Chrome startup timed out after the static 8/8 check; the exact same read-only validator command was run once with the execution permission needed to launch Chrome and passed the browser and zoom gates. The HTML was not changed.
+
+The fresh exact-SHA Strict code re-review completed successfully on `79e77ae3af536c5f72ca6eb360c55c46bf32d156`: `review_status=pass`, no findings, confidence `0.96`. This closes the bounded package-projection P1 review loop. It is not the overall I05-PLAN-008/production gate or Issue #8 completion.
 
 ## Options and trade-offs
 
@@ -107,7 +116,7 @@ The first sandboxed Chrome startup timed out after the static 8/8 check; the exa
 - This remediation does not certify Node launch, verified executable-FD behavior, process observations, macOS/Linux support, `available`, wheel/sdist runtime contents, or Issue #8 completion.
 - The verified-FD investigation remains separate: current macOS behavior did not establish a safe spawn mechanism, so no path-based fallback is introduced here.
 - P2 `RG-02` remains unresolved and requires a Requirement/Design decision before changing its code/stage behavior.
-- A new clean/pushed exact SHA and fresh Strict code review must close the current P1; a package projection review is not the overall I05-PLAN-008 or Issue #8 completion gate.
+- The package-projection P1 is closed for the exact reviewed SHA above. Any follow-on change requires its own current-SHA review; this package projection review is not the overall I05-PLAN-008 or Issue #8 completion gate.
 
 ## Reflection
 
