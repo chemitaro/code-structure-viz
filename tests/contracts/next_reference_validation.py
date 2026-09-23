@@ -1505,6 +1505,9 @@ class PreResponseFailureDecision:
             ) == ("request_bound_failure", self.stage, self.diagnostic_code), (
                 "pre-response publication provenance must match the owning failure"
             )
+            assert provenance["observed"]["request"] == _observation_row(
+                "request", True, observed_value=self.request.snapshot()
+            ), "pre-response publication context must match the owning request"
             if self.stage not in RESPONSE_OBSERVATION_STAGES:
                 assert provenance["observed"]["response"] == _observation_row("response", False), (
                     "pre-response publication provenance cannot observe a response before its stage"

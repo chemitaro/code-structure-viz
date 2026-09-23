@@ -10583,6 +10583,117 @@ def test_pre_response_known_counts_are_owned_after_construction(
 
 
 @pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize("construction", ["direct", "replace"])
+def test_pre_response_rejects_foreign_request_publication_context(
+    selector: str | None,
+    construction: str,
+) -> None:
+    run_context = _run_context(selector=selector)
+    request_a = validate_adapter_request(
+        _request(targets=["path:src/Button.tsx"], run_context=run_context)
+    )
+    request_b = validate_adapter_request(
+        _request(targets=["path:app/page.tsx"], run_context=run_context)
+    )
+    assert request_a["request_id"] != request_b["request_id"]
+    assert request_a["targets"] != request_b["targets"]
+
+    decision_context_a = decision_context_for_request(
+        request_a,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        known_counts=_decision_known_counts(request_a),
+        source_failure_ledger=(),
+    )
+    decision_context_b = decision_context_for_request(
+        request_b,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        known_counts=_decision_known_counts(request_b),
+        source_failure_ledger=(),
+    )
+    decision_a = pre_response_failure_decision(
+        request_a,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        decision_context=decision_context_a,
+    )
+    decision_b = pre_response_failure_decision(
+        request_b,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        decision_context=decision_context_b,
+    )
+
+    assert decision_a.stage == decision_b.stage
+    assert decision_a.diagnostic_code == decision_b.diagnostic_code
+    assert decision_a.publication_context.run_context == decision_b.publication_context.run_context
+    assert (
+        decision_a.publication_context.public_next_config["targets"]
+        != (decision_b.publication_context.public_next_config["targets"])
+    )
+
+    with pytest.raises(AssertionError, match=r"publication context.*request"):
+        if construction == "direct":
+            PreResponseFailureDecision(
+                request=request_a,
+                run_context=request_a["run_context"],
+                stage=decision_a.stage,
+                diagnostic_code=decision_a.diagnostic_code,
+                diagnostic=decision_a.diagnostic,
+                known_counts=decision_a.known_counts,
+                decision_context=decision_a.decision_context,
+                publication_context=decision_b.publication_context,
+            )
+        else:
+            replace(decision_a, publication_context=decision_b.publication_context)
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize("construction", ["direct", "replace"])
+def test_pre_response_accepts_equivalent_own_request_publication_context(
+    selector: str | None,
+    construction: str,
+) -> None:
+    run_context = _run_context(selector=selector)
+    request = validate_adapter_request(
+        _request(targets=["path:src/Button.tsx"], run_context=run_context)
+    )
+    decision_context = decision_context_for_request(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        known_counts=_decision_known_counts(request),
+        source_failure_ledger=(),
+    )
+    decision = pre_response_failure_decision(
+        request,
+        stage="node_discovery",
+        diagnostic_code="CSV-NEXT-NODE-001",
+        decision_context=decision_context,
+    )
+    equivalent_context = copy.deepcopy(decision.publication_context)
+
+    if construction == "direct":
+        accepted = PreResponseFailureDecision(
+            request=request,
+            run_context=request["run_context"],
+            stage=decision.stage,
+            diagnostic_code=decision.diagnostic_code,
+            diagnostic=decision.diagnostic,
+            known_counts=decision.known_counts,
+            decision_context=copy.deepcopy(decision.decision_context),
+            publication_context=equivalent_context,
+        )
+    else:
+        accepted = replace(decision, publication_context=equivalent_context)
+
+    assert accepted.request is not None
+    assert accepted.request["request_id"] == request["request_id"]
+    assert accepted.publication_context == decision.publication_context
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
 def test_request_bound_pre_response_context_rejects_target_resolution_diagnostic(
     selector: str | None,
 ) -> None:
