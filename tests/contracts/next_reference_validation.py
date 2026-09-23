@@ -1210,6 +1210,14 @@ def decision_failure_spec(diagnostic_code: str, stage: str) -> dict[str, Any]:
     }
 
 
+def _assert_pre_response_failure_diagnostic_eligible(diagnostic_code: str) -> None:
+    """Reject target-failure diagnostics that require validated proof."""
+
+    assert diagnostic_code != "CSV-NEXT-TARGET-001", (
+        "pre-response failure cannot carry CSV-NEXT-TARGET-001 without target-resolution proof"
+    )
+
+
 PROVENANCE_FIELDS = (
     "applicability",
     "config",
@@ -1419,6 +1427,7 @@ class PreResponseFailureDecision:
         object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
         assert self.stage in DECISION_FAILURE_STAGES
         assert self.diagnostic_code in DECISION_FAILURE_CODES
+        _assert_pre_response_failure_diagnostic_eligible(self.diagnostic_code)
         failure_spec = decision_failure_spec(self.diagnostic_code, self.stage)
         assert failure_spec["outcome"] == "payload_unavailable"
         assert set(self.known_counts) == set(KNOWN_COUNT_KEYS)
@@ -12935,6 +12944,7 @@ def decision_context_for_request(
     counters and source ledger that belong to the same validated request.
     """
 
+    _assert_pre_response_failure_diagnostic_eligible(diagnostic_code)
     assert isinstance(request, ValidatedAdapterRequest)
     return NextDecisionContext(
         run_context=request["run_context"],
@@ -12980,6 +12990,7 @@ def pre_response_failure_decision(
 ) -> PreResponseFailureDecision:
     """Create the closed authority for a failure before response validation."""
 
+    _assert_pre_response_failure_diagnostic_eligible(diagnostic_code)
     validated_request = validate_adapter_request(request) if request is not None else None
     # A request-independent failure (for example config/project discovery)
     # cannot fabricate a request.  The caller must supply its resolved run
