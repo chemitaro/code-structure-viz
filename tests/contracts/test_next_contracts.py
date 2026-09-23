@@ -12747,6 +12747,37 @@ def test_actual_publication_selector_matrix_and_measured_candidate_identity(
 
 
 @pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_actual_publication_selector_matrix_explicit_target_not_applicable(
+    selector: str | None,
+) -> None:
+    target = "path:src/Button.tsx"
+    context = _run_context(selector=selector, independent=True)
+    decision = request_independent_not_applicable_decision(
+        context,
+        package_applicability=derive_package_applicability_matrix({}, (".",)),
+        targets=(target,),
+    )
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=(b"",))
+
+    domain, manifest, _metadata, artifacts, stderr = _validate_publication_chain(publication)
+
+    assert decision.decision_context.targets == (target,)
+    assert domain["status"] == "not_applicable"
+    assert domain["targets"] == [target]
+    assert domain["config"]["targets"] == [target]
+    assert manifest["request"] is None
+    assert manifest["next_config"]["targets"] == [target]
+    assert manifest["config"]["resolved"]["next"]["targets"] == [target]
+    assert domain["coverage"]["target_completeness"] == [
+        {"target_key": target, "status": "complete", "record_ids": []}
+    ]
+    assert domain["artifact_paths"] == []
+    assert artifacts == {}
+    assert [item["code"] for item in domain["diagnostics"]] == ["CSV-NEXT-APPLICABILITY-001"]
+    assert b"CSV-NEXT-TARGET-001" not in stderr
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
 @pytest.mark.parametrize("failed_gate", ["adapter_stdout", "adapter_stderr", "public_stderr"])
 @pytest.mark.parametrize("selected_limit", [None, 1])
 def test_actual_publication_capture_failure_matrix(

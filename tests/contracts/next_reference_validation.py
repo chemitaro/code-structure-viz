@@ -9843,8 +9843,18 @@ def validate_domain_manifest(value: dict[str, Any]) -> None:
         assert value["coverage"]["counts"]["internal_entities"] == 0
         assert value["coverage"]["counts"]["published"] == 0
         assert value["coverage"]["counts"]["discovered"] == 0
-        assert value["coverage"]["target_completeness"] == []
         assert value.get("decision") == next_run_decision_projection(decision)
+        if isinstance(decision, NotApplicableDecision):
+            expected_targets = list(decision.decision_context.targets)
+            assert value["targets"] == expected_targets
+            assert value["config"]["targets"] == expected_targets
+            assert value["coverage"]["target_completeness"] == [
+                {"target_key": target, "status": "complete", "record_ids": []}
+                for target in expected_targets
+            ]
+        else:
+            assert isinstance(decision, PreResponseFailureDecision)
+            assert value["coverage"]["target_completeness"] == []
         seal = context.source_acquisition_seal
         if seal is None:
             assert value["source_plan_digest"] is None
