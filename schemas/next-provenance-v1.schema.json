@@ -49,7 +49,7 @@
   "allOf": [
     {
       "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"const": "source_selection"}}},
-      "then": {"properties": {"failure_code": {"const": "CSV-NEXT-SOURCE-003"}}}
+      "then": {"properties": {"failure_code": {"enum": ["CSV-NEXT-LIMIT-002", "CSV-NEXT-SOURCE-003"]}}}
     },
     {
       "if": {"properties": {"kind": {"enum": ["request_independent_not_applicable", "request_independent_failure"]}, "stage": {"enum": ["applicability", "config_validation", "project_validation"]}}},

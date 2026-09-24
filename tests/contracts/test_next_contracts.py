@@ -40,6 +40,7 @@ from tests.contracts.next_reference_validation import (
     R23_UNICODE_PROFILE_DIGEST,
     ROLE_ORDER,
     ROLE_PRECEDENCE,
+    ROUND22_TYPED_FAILURE_KINDS,
     RUNTIME_PHYSICAL_TO_VIRTUAL,
     RUNTIME_REQUIRED_PATHS,
     TARGET_FAILURE_REASONS,
@@ -90,6 +91,7 @@ from tests.contracts.next_reference_validation import (
     _path_sort_key,
     _process_launch_for_toolchain,
     _publication_context_for_validated_request,
+    _publication_provenance,
     _r23_registry_coverage_entries,
     _scan_export_file,
     _scan_module_specifiers,
@@ -12701,6 +12703,9 @@ def test_round22_runtime_registry_executes_vectors_and_named_validators() -> Non
         "test_package_read_failure_preserves_its_distinct_reference_outcome",
         "test_nonordinary_read_failure_preserves_classification_and_actual_phase_prefix",
         "test_actual_integrity_drift_is_fatal_before_publication_for_every_phase",
+        "test_source_read_failure_matrix_excludes_selection_and_integrity_triggers",
+        "test_source_reader_rejects_selection_and_integrity_failure_injection",
+        "test_selection_and_symlink_boundaries_keep_classification_through_publication",
     } <= set(fixture["criterion_test_map"]["round22.rg-01"])
     known_vector_ids = set(fixture["positive"]) | set(fixture["negative"])
     validate_runtime_vector_registry(
@@ -14118,6 +14123,153 @@ def test_actual_acquisition_failure_preserves_its_catalog_stage_and_code(
 
 
 @pytest.mark.parametrize(
+    "failure_kind",
+    [
+        ReferenceSourceFailureKind.TOO_MANY_FILES,
+        ReferenceSourceFailureKind.SYMLINK,
+    ],
+    ids=["too-many-files", "symlink"],
+)
+def test_source_read_failure_matrix_excludes_selection_and_integrity_triggers(
+    failure_kind: ReferenceSourceFailureKind,
+) -> None:
+    assert failure_kind not in ROUND22_TYPED_FAILURE_KINDS
+
+
+@pytest.mark.parametrize(
+    "failure_kind",
+    [
+        ReferenceSourceFailureKind.TOO_MANY_FILES,
+        ReferenceSourceFailureKind.SYMLINK,
+    ],
+    ids=["too-many-files", "symlink"],
+)
+def test_source_reader_rejects_selection_and_integrity_failure_injection(
+    failure_kind: ReferenceSourceFailureKind,
+) -> None:
+    with pytest.raises(AssertionError, match="not a source-read failure"):
+        InstrumentedSourceReader(
+            {"src/page.tsx": b"export default function Page() { return null; }"},
+            read_failures={"src/page.tsx": failure_kind},
+        )
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize(
+    ("failure_kind", "diagnostic_code", "stage", "path", "selected_paths", "max_files"),
+    [
+        (
+            ReferenceSourceFailureKind.TOO_MANY_FILES,
+            "CSV-NEXT-LIMIT-002",
+            "source_selection",
+            None,
+            ("package.json", "src/page.tsx"),
+            1,
+        ),
+        (
+            ReferenceSourceFailureKind.SYMLINK,
+            "CSV-NEXT-SOURCE-002",
+            "source_integrity",
+            "src/page.tsx",
+            ("src/page.tsx",),
+            20_000,
+        ),
+    ],
+    ids=["file-count-selection", "symlink-integrity"],
+)
+def test_selection_and_symlink_boundaries_keep_classification_through_publication(
+    selector: str | None,
+    failure_kind: ReferenceSourceFailureKind,
+    diagnostic_code: str,
+    stage: str,
+    path: str | None,
+    selected_paths: tuple[str, ...],
+    max_files: int,
+) -> None:
+    observed_source: dict[str, Any]
+    if failure_kind is ReferenceSourceFailureKind.TOO_MANY_FILES:
+        assert len(selected_paths) > max_files
+        observed_source = {"selected_paths": list(selected_paths)}
+    else:
+        assert failure_kind is ReferenceSourceFailureKind.SYMLINK
+        assert path in selected_paths
+        observed_source = {"selected_path_kind": "symlink", "selected_path": path}
+
+    reader = InstrumentedSourceReader(
+        {selected_path: b"private-unread" for selected_path in selected_paths}
+    )
+    assert set(reader.enumerate_paths((".",), ())) == set(selected_paths)
+    assert reader.read_counts == {}
+
+    run_context = _run_context(selector=selector, independent=True)
+    provenance = _publication_provenance(
+        kind="request_independent_failure",
+        failure_stage=stage,
+        failure_code=diagnostic_code,
+        budget_observed=False,
+        observed_values={
+            "applicability": {"applicable_projects": ["."]},
+            "config": [],
+            "source": observed_source,
+            "limits": {"max_files": max_files},
+            "source_plan": {"selected_paths": list(selected_paths)},
+        },
+    )
+    decision_context = NextDecisionContext(
+        run_context=run_context,
+        request_id=None,
+        targets=(),
+        limits=None,
+        stage=stage,
+        diagnostic_code=diagnostic_code,
+        failure_kind=decision_failure_kind(diagnostic_code),
+        known_counts=_decision_known_counts(None),
+        source_failure_ledger=(),
+        outcome="payload_unavailable",
+        payload_unavailable=True,
+        exit_code=3,
+        provenance_observation=provenance,
+        provenance="request_independent_failure",
+    )
+    decision = pre_response_failure_decision(
+        None,
+        stage=stage,
+        diagnostic_code=diagnostic_code,
+        decision_context=decision_context,
+        path=path,
+    )
+
+    assert decision.diagnostic["path"] == path
+    run_wire = next_run_decision_projection(decision)
+    validate_next_run_decision_projection(run_wire, decision)
+    _validator("next-run-decision-v1.schema.json").validate(run_wire)
+    assert (run_wire["outcome"], run_wire["exit_code"]) == ("payload_unavailable", 3)
+    assert run_wire["provenance"]["stage"] == stage
+    assert run_wire["provenance"]["failure_code"] == diagnostic_code
+    assert run_wire["request"] is None and run_wire["response"] is None
+
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+    publication_wire = next_publication_decision_projection(publication)
+    validate_next_publication_decision_projection(publication_wire, publication)
+    _validator("next-publication-decision-v1.schema.json").validate(publication_wire)
+    domain, manifest, stdout, artifacts, stderr = _validate_publication_chain(publication)
+    assert publication_wire["semantic_decision"] == run_wire
+    assert publication_wire["response"] is None and publication_wire["artifacts"] == []
+    assert domain["payload_available"] is False and artifacts == {}
+    assert (domain["config"]["failure_stage"], domain["config"]["failure_code"]) == (
+        stage,
+        diagnostic_code,
+    )
+    assert [(item["code"], item["path"]) for item in domain["diagnostics"]] == [
+        (diagnostic_code, path)
+    ]
+    assert manifest["run"]["exit_code"] == publication.exit_code == 3
+    assert stdout["selector"] == selector
+    assert json.loads(stderr)["code"] == diagnostic_code
+    assert reader.read_counts == {} and reader.seal_calls == 0
+
+
+@pytest.mark.parametrize(
     ("failure_kind", "result_type", "code", "stage", "path", "exit_code"),
     [
         (
@@ -14137,23 +14289,7 @@ def test_actual_acquisition_failure_preserves_its_catalog_stage_and_code(
             3,
         ),
         (
-            ReferenceSourceFailureKind.TOO_MANY_FILES,
-            SourceAcquisitionUnavailable,
-            "CSV-NEXT-LIMIT-001",
-            "source_read",
-            None,
-            3,
-        ),
-        (
             ReferenceSourceFailureKind.UNSAFE_PATH,
-            SourceAcquisitionUnavailable,
-            "CSV-NEXT-SOURCE-003",
-            "source_read",
-            "apps/web/package.json",
-            3,
-        ),
-        (
-            ReferenceSourceFailureKind.SYMLINK,
             SourceAcquisitionUnavailable,
             "CSV-NEXT-SOURCE-003",
             "source_read",
@@ -14279,9 +14415,7 @@ def test_package_read_failure_preserves_its_distinct_reference_outcome(
     "failure_kind",
     [
         ReferenceSourceFailureKind.TOO_LARGE,
-        ReferenceSourceFailureKind.TOO_MANY_FILES,
         ReferenceSourceFailureKind.UNSAFE_PATH,
-        ReferenceSourceFailureKind.SYMLINK,
         ReferenceSourceFailureKind.NON_REGULAR,
         ReferenceSourceFailureKind.RACED_MISSING,
     ],
@@ -14311,14 +14445,10 @@ def test_nonordinary_read_failure_preserves_classification_and_actual_phase_pref
 
     code = (
         "CSV-NEXT-LIMIT-001"
-        if failure_kind
-        in {ReferenceSourceFailureKind.TOO_LARGE, ReferenceSourceFailureKind.TOO_MANY_FILES}
+        if failure_kind is ReferenceSourceFailureKind.TOO_LARGE
         else "CSV-NEXT-SOURCE-003"
     )
-    include_path = failure_kind not in {
-        ReferenceSourceFailureKind.TOO_LARGE,
-        ReferenceSourceFailureKind.TOO_MANY_FILES,
-    }
+    include_path = failure_kind is not ReferenceSourceFailureKind.TOO_LARGE
     assert isinstance(result, SourceAcquisitionUnavailable)
     assert (result.diagnostic_code, result.stage, result.path) == (
         code,
@@ -14371,7 +14501,7 @@ def test_nonordinary_read_failure_preserves_classification_and_actual_phase_pref
 )
 @pytest.mark.parametrize(
     "failure_kind",
-    [ReferenceSourceFailureKind.TOO_LARGE, ReferenceSourceFailureKind.TOO_MANY_FILES],
+    [ReferenceSourceFailureKind.TOO_LARGE],
 )
 def test_pathless_limit_failure_rejects_phase_not_bound_to_private_read_evidence(
     phase: str, failure_kind: ReferenceSourceFailureKind
@@ -14526,13 +14656,11 @@ def test_actual_integrity_drift_is_fatal_before_publication_for_every_phase(
     ("failure_kind", "code", "path"),
     [
         (ReferenceSourceFailureKind.TOO_LARGE, "CSV-NEXT-LIMIT-001", None),
-        (ReferenceSourceFailureKind.TOO_MANY_FILES, "CSV-NEXT-LIMIT-001", None),
         (ReferenceSourceFailureKind.UNSAFE_PATH, "CSV-NEXT-SOURCE-003", "package.json"),
-        (ReferenceSourceFailureKind.SYMLINK, "CSV-NEXT-SOURCE-003", "package.json"),
         (ReferenceSourceFailureKind.NON_REGULAR, "CSV-NEXT-SOURCE-003", "package.json"),
         (ReferenceSourceFailureKind.RACED_MISSING, "CSV-NEXT-SOURCE-003", "package.json"),
     ],
-    ids=["too-large", "too-many-files", "unsafe-path", "symlink", "non-regular", "raced-missing"],
+    ids=["too-large", "unsafe-path", "non-regular", "raced-missing"],
 )
 def test_preseal_package_source_read_failure_reaches_publication(
     selector: str | None,
@@ -14562,8 +14690,7 @@ def test_preseal_package_source_read_failure_reaches_publication(
     assert reader.seal_calls == 0
     assert dict(result.early_read_prefix.failed_reads) == {
         package_path: "CSV-NEXT-LIMIT-001"
-        if failure_kind
-        in {ReferenceSourceFailureKind.TOO_LARGE, ReferenceSourceFailureKind.TOO_MANY_FILES}
+        if failure_kind is ReferenceSourceFailureKind.TOO_LARGE
         else "CSV-NEXT-SOURCE-003"
     }
     provenance = result.observation_provenance

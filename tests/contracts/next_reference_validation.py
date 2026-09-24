@@ -2338,7 +2338,7 @@ class EarlySourceReadPrefix:
         )
         if self.stage == "source_read":
             assert self.failure_kind is not None
-            failure_projection = _REFERENCE_SOURCE_FAILURES[self.failure_kind]
+            failure_projection = _REFERENCE_READ_FAILURES[self.failure_kind]
             assert failure_projection.diagnostic_code == self.diagnostic_code
             assert failure_projection.stage == self.stage
             assert _diagnostic_catalog()[self.diagnostic_code]["ref_permission"] == (
@@ -2435,7 +2435,7 @@ class _ReferenceSourceFailureProjection:
     include_path: bool
 
 
-_REFERENCE_SOURCE_FAILURES: dict[ReferenceSourceFailureKind, _ReferenceSourceFailureProjection] = {
+_REFERENCE_READ_FAILURES: dict[ReferenceSourceFailureKind, _ReferenceSourceFailureProjection] = {
     ReferenceSourceFailureKind.ORDINARY_READ: _ReferenceSourceFailureProjection(
         "CSV-NEXT-SOURCE-001", "source_read", True
     ),
@@ -2445,13 +2445,7 @@ _REFERENCE_SOURCE_FAILURES: dict[ReferenceSourceFailureKind, _ReferenceSourceFai
     ReferenceSourceFailureKind.TOO_LARGE: _ReferenceSourceFailureProjection(
         "CSV-NEXT-LIMIT-001", "source_read", False
     ),
-    ReferenceSourceFailureKind.TOO_MANY_FILES: _ReferenceSourceFailureProjection(
-        "CSV-NEXT-LIMIT-001", "source_read", False
-    ),
     ReferenceSourceFailureKind.UNSAFE_PATH: _ReferenceSourceFailureProjection(
-        "CSV-NEXT-SOURCE-003", "source_read", True
-    ),
-    ReferenceSourceFailureKind.SYMLINK: _ReferenceSourceFailureProjection(
         "CSV-NEXT-SOURCE-003", "source_read", True
     ),
     ReferenceSourceFailureKind.NON_REGULAR: _ReferenceSourceFailureProjection(
@@ -2459,9 +2453,6 @@ _REFERENCE_SOURCE_FAILURES: dict[ReferenceSourceFailureKind, _ReferenceSourceFai
     ),
     ReferenceSourceFailureKind.RACED_MISSING: _ReferenceSourceFailureProjection(
         "CSV-NEXT-SOURCE-003", "source_read", True
-    ),
-    ReferenceSourceFailureKind.INTEGRITY_DRIFT: _ReferenceSourceFailureProjection(
-        "CSV-NEXT-SOURCE-INTEGRITY-001", "source_integrity", False
     ),
 }
 
@@ -2485,6 +2476,12 @@ class InstrumentedSourceReader:
         self.revision_after = revision if revision_after is None else revision_after
         self._source_graph = copy.deepcopy(source_graph)
         self._read_failures = dict(read_failures or {})
+        for failure in self._read_failures.values():
+            if isinstance(failure, ReferenceSourceFailureKind):
+                assert (
+                    failure in _REFERENCE_READ_FAILURES
+                    or failure is ReferenceSourceFailureKind.INTEGRITY_DRIFT
+                ), f"{failure.value} is not a source-read failure"
         self._observed_files: dict[str, bytes] = {}
         self._observed_read_failures: dict[str, str] = {}
         self._observed_read_phases: dict[str, str] = {}
@@ -2528,11 +2525,16 @@ class InstrumentedSourceReader:
         if path in self._read_failures:
             configured_failure = self._read_failures[path]
             if isinstance(configured_failure, ReferenceSourceFailureKind):
-                projection = _REFERENCE_SOURCE_FAILURES[configured_failure]
                 failure_kind = configured_failure
-                code = projection.diagnostic_code
-                stage = projection.stage
-                diagnostic_path = path if projection.include_path else None
+                if failure_kind is ReferenceSourceFailureKind.INTEGRITY_DRIFT:
+                    code = "CSV-NEXT-SOURCE-INTEGRITY-001"
+                    stage = "source_integrity"
+                    diagnostic_path = None
+                else:
+                    projection = _REFERENCE_READ_FAILURES[failure_kind]
+                    code = projection.diagnostic_code
+                    stage = projection.stage
+                    diagnostic_path = path if projection.include_path else None
             else:
                 code = configured_failure
                 stage = "source_read"
@@ -3025,9 +3027,7 @@ def validate_preseal_package_failure_matrix(value: list[dict[str, Any]]) -> None
 
     expected = (
         ("too_large", "CSV-NEXT-LIMIT-001", None),
-        ("too_many_files", "CSV-NEXT-LIMIT-001", None),
         ("unsafe_path", "CSV-NEXT-SOURCE-003", "package.json"),
-        ("symlink", "CSV-NEXT-SOURCE-003", "package.json"),
         ("non_regular", "CSV-NEXT-SOURCE-003", "package.json"),
         ("raced_missing", "CSV-NEXT-SOURCE-003", "package.json"),
     )
@@ -17080,9 +17080,7 @@ def runtime_vector_round22_unequal_dual_applicability_mutation() -> dict[str, An
 
 ROUND22_TYPED_FAILURE_KINDS = (
     ReferenceSourceFailureKind.TOO_LARGE,
-    ReferenceSourceFailureKind.TOO_MANY_FILES,
     ReferenceSourceFailureKind.UNSAFE_PATH,
-    ReferenceSourceFailureKind.SYMLINK,
     ReferenceSourceFailureKind.NON_REGULAR,
     ReferenceSourceFailureKind.RACED_MISSING,
     ReferenceSourceFailureKind.INTEGRITY_DRIFT,
@@ -17265,9 +17263,7 @@ def runtime_vector_round22_phase_failure_matrix_mutation() -> list[dict[str, Any
 def runtime_vector_round22_preseal_package_failure_matrix() -> list[dict[str, Any]]:
     cases = (
         ReferenceSourceFailureKind.TOO_LARGE,
-        ReferenceSourceFailureKind.TOO_MANY_FILES,
         ReferenceSourceFailureKind.UNSAFE_PATH,
-        ReferenceSourceFailureKind.SYMLINK,
         ReferenceSourceFailureKind.NON_REGULAR,
         ReferenceSourceFailureKind.RACED_MISSING,
     )
@@ -17667,7 +17663,7 @@ def validate_round22_phase_failure_matrix(value: list[dict[str, Any]]) -> None:
                 assert row["has_early_prefix"] is False and row["has_seal"] is False
                 assert row["observed_prefix"] == []
             else:
-                failure = _REFERENCE_SOURCE_FAILURES[failure_kind]
+                failure = _REFERENCE_READ_FAILURES[failure_kind]
                 expected_path = failed_path if failure.include_path else None
                 expected = {
                     "result_kind": "payload_unavailable",

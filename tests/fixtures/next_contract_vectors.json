@@ -555,7 +555,10 @@
       "test_preseal_package_source_read_failure_reaches_publication",
       "test_package_read_failure_preserves_its_distinct_reference_outcome",
       "test_nonordinary_read_failure_preserves_classification_and_actual_phase_prefix",
-      "test_actual_integrity_drift_is_fatal_before_publication_for_every_phase"
+      "test_actual_integrity_drift_is_fatal_before_publication_for_every_phase",
+      "test_source_read_failure_matrix_excludes_selection_and_integrity_triggers",
+      "test_source_reader_rejects_selection_and_integrity_failure_injection",
+      "test_selection_and_symlink_boundaries_keep_classification_through_publication"
     ],
     "round22.rg-02": [
       "test_round22_config_codes_and_jsonc_composition_are_closed"
