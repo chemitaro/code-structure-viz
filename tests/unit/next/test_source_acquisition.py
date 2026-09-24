@@ -121,13 +121,7 @@ def test_malformed_package_applicability_fails_before_control_reads() -> None:
             "applicability",
             None,
         ),
-        (SourceReadFailureKind.TOO_LARGE, "CSV-NEXT-LIMIT-001", "limits", "package.json"),
-        (
-            SourceReadFailureKind.TOO_MANY_FILES,
-            "CSV-NEXT-LIMIT-001",
-            "limits",
-            "package.json",
-        ),
+        (SourceReadFailureKind.TOO_LARGE, "CSV-NEXT-LIMIT-001", "source_read", None),
         (SourceReadFailureKind.MISSING, "CSV-NEXT-SOURCE-003", "source_read", "package.json"),
         (
             SourceReadFailureKind.UNSAFE_PATH,
@@ -135,7 +129,6 @@ def test_malformed_package_applicability_fails_before_control_reads() -> None:
             "source_read",
             "package.json",
         ),
-        (SourceReadFailureKind.SYMLINK, "CSV-NEXT-SOURCE-003", "source_read", "package.json"),
         (
             SourceReadFailureKind.NON_REGULAR,
             "CSV-NEXT-SOURCE-003",
@@ -742,9 +735,184 @@ def test_source_read_failure_is_a_typed_unavailable_acquisition(tmp_path: Path) 
             trusted_environment_digest="4" * 64,
         )
 
-    assert caught.value.code == "CSV-NEXT-SOURCE-003"
-    assert caught.value.stage == "source_read"
+    assert caught.value.code == "CSV-NEXT-SOURCE-002"
+    assert caught.value.stage == "source_integrity"
     assert caught.value.path == "src/Page.tsx"
+
+
+def test_descriptor_reader_size_limit_maps_to_pathless_source_read_limit(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    package_path = repository / "package.json"
+    package_path.write_bytes(b'{"dependencies":{"next":"15"}}')
+    entries = (EnumeratedPath("package.json", PurePosixPath("package.json")),)
+    head = Commit("6" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=20_000,
+        max_file_bytes=8,
+        max_total_bytes=64,
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent((".",)),
+            reader,
+            trusted_environment_digest="6" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        "CSV-NEXT-LIMIT-001",
+        "source_read",
+        None,
+    )
+
+
+def test_descriptor_reader_file_count_limit_maps_to_pathless_selection_limit(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    files = {
+        "package.json": b'{"dependencies":{"next":"15"}}',
+        "tsconfig.json": b"{}",
+        "src/Page.tsx": b"export default function Page() { return null; }",
+    }
+    for relative_path, content in files.items():
+        target = repository / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    entries = tuple(
+        EnumeratedPath(path, PurePosixPath(path))
+        for path in sorted(files, key=lambda value: value.encode("utf-8"))
+    )
+    head = Commit("7" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=1,
+        max_file_bytes=4 * 1024 * 1024,
+        max_total_bytes=64 * 1024 * 1024,
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent((".",), control_candidates=("tsconfig.json",)),
+            reader,
+            trusted_environment_digest="7" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        "CSV-NEXT-LIMIT-002",
+        "source_selection",
+        None,
+    )
+
+
+def test_source_plan_file_count_limit_uses_selection_failure_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = MemorySourceReader(
+        {
+            "package.json": b'{"dependencies":{"next":"15"}}',
+            "tsconfig.json": b'{"include":["src/**/*"]}',
+            "src/Page.tsx": b"export default function Page() { return null; }",
+        }
+    )
+    monkeypatch.setattr(
+        source_acquisition,
+        "DEFAULT_NEXT_LIMITS",
+        {**source_acquisition.DEFAULT_NEXT_LIMITS, "max_files": 2},
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent((".",), control_candidates=("tsconfig.json",)),
+            reader,
+            trusted_environment_digest="8" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        "CSV-NEXT-LIMIT-002",
+        "source_selection",
+        None,
+    )
+    assert reader.reads == ["package.json", "tsconfig.json"]
+    assert reader.seal_calls == 0
+
+
+def test_source_plan_per_file_size_limit_does_not_publish_a_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_bytes = b'{"dependencies":{"next":"15"}}' + b" " * 16
+    reader = MemorySourceReader(
+        {
+            "package.json": package_bytes,
+            "tsconfig.json": b"{}",
+        }
+    )
+    monkeypatch.setattr(
+        source_acquisition,
+        "DEFAULT_NEXT_LIMITS",
+        {**source_acquisition.DEFAULT_NEXT_LIMITS, "max_file_bytes": 8},
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent((".",), control_candidates=("tsconfig.json",)),
+            reader,
+            trusted_environment_digest="9" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        "CSV-NEXT-LIMIT-001",
+        "source_read",
+        None,
+    )
+
+
+def test_source_plan_total_size_limit_does_not_publish_a_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_bytes = b'{"dependencies":{"next":"15"}}'
+    config_bytes = b"{}"
+    reader = MemorySourceReader(
+        {
+            "package.json": package_bytes,
+            "tsconfig.json": config_bytes,
+            "src/Page.tsx": b"x",
+        }
+    )
+    monkeypatch.setattr(
+        source_acquisition,
+        "DEFAULT_NEXT_LIMITS",
+        {
+            **source_acquisition.DEFAULT_NEXT_LIMITS,
+            "max_file_bytes": 1024,
+            "max_decoded_bytes": len(package_bytes) + len(config_bytes),
+        },
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent((".",), control_candidates=("tsconfig.json",)),
+            reader,
+            trusted_environment_digest="a" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        "CSV-NEXT-LIMIT-001",
+        "source_read",
+        None,
+    )
+    assert reader.reads == ["package.json", "tsconfig.json", "src/Page.tsx"]
 
 
 def test_source_inventory_drift_is_fatal_integrity_failure(tmp_path: Path) -> None:

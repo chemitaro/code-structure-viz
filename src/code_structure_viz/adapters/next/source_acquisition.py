@@ -262,12 +262,15 @@ class _GuardedSourceReader:
         except SourceDriftError as error:
             raise NextSourceIntegrityError(path=path) from error
         except SourceReadFailure as error:
-            if error.kind in {
-                SourceReadFailureKind.TOO_LARGE,
-                SourceReadFailureKind.TOO_MANY_FILES,
-            }:
+            if error.kind is SourceReadFailureKind.TOO_LARGE:
+                raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_read") from error
+            if error.kind is SourceReadFailureKind.TOO_MANY_FILES:
                 raise NextSourceAcquisitionError(
-                    "CSV-NEXT-LIMIT-001", "limits", path=path
+                    "CSV-NEXT-LIMIT-002", "source_selection"
+                ) from error
+            if error.kind is SourceReadFailureKind.SYMLINK:
+                raise NextSourceAcquisitionError(
+                    "CSV-NEXT-SOURCE-002", "source_integrity", path=path
                 ) from error
             if error.kind is SourceReadFailureKind.READ and path in self._applicability_paths:
                 raise NextSourceAcquisitionError(
@@ -547,13 +550,13 @@ def seal_source_acquisition(
     limits = dict(DEFAULT_NEXT_LIMITS)
     limits["max_entities"] = max_entities
     if len(final_paths) > limits["max_files"]:
-        raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_selection")
+        raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-002", "source_selection")
 
     contents = dict(acquirer._observed)
     total_bytes = sum(len(payload) for payload in contents.values())
-    for path, payload in contents.items():
+    for _path, payload in contents.items():
         if len(payload) > limits["max_file_bytes"]:
-            raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_read", path=path)
+            raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_read")
     if total_bytes > limits["max_decoded_bytes"]:
         raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_read")
 
@@ -562,10 +565,10 @@ def seal_source_acquisition(
             continue
         payload = acquirer._read_once(path)
         if len(payload) > limits["max_file_bytes"]:
-            raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_read", path=path)
+            raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_read")
         total_bytes += len(payload)
         if total_bytes > limits["max_decoded_bytes"]:
-            raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_read", path=path)
+            raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_read")
         contents[path] = payload
 
     graph, local_extends = derive_source_graph(
