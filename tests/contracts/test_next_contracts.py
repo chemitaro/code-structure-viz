@@ -14286,12 +14286,14 @@ def test_package_read_failure_preserves_its_distinct_reference_outcome(
         ReferenceSourceFailureKind.RACED_MISSING,
     ],
 )
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
 def test_nonordinary_read_failure_preserves_classification_and_actual_phase_prefix(
     phase: str,
     files: dict[str, bytes],
     control_candidates: tuple[str, ...],
     failed_path: str,
     failure_kind: ReferenceSourceFailureKind,
+    selector: str | None,
 ) -> None:
     reader = InstrumentedSourceReader(
         files,
@@ -14340,6 +14342,100 @@ def test_nonordinary_read_failure_preserves_classification_and_actual_phase_pref
         assert (observed["observed"][field]["state"] == "observed") is (field in expected_fields)
     assert reader.read_counts[failed_path] == 1
     assert reader.seal_calls == 0
+
+    decision = source_acquisition_failure_decision(
+        result, _run_context(selector=selector, independent=True)
+    )
+    run_wire = next_run_decision_projection(decision)
+    validate_next_run_decision_projection(run_wire, decision)
+    _validator("next-run-decision-v1.schema.json").validate(run_wire)
+    assert run_wire["request"] is None and run_wire["response"] is None
+    assert run_wire["outcome"] == "payload_unavailable"
+    assert run_wire["payload_available"] is False and run_wire["exit_code"] == 3
+
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+    publication_wire = next_publication_decision_projection(publication)
+    validate_next_publication_decision_projection(publication_wire, publication)
+    _validator("next-publication-decision-v1.schema.json").validate(publication_wire)
+    domain, manifest, stdout, artifacts, _stderr = _validate_publication_chain(publication)
+    assert publication_wire["semantic_decision"] == run_wire
+    assert publication_wire["response"] is None and publication_wire["artifacts"] == []
+    assert publication_wire["stdout"]["selector"] == selector
+    assert domain["payload_available"] is False and artifacts == {}
+    assert manifest["run"]["exit_code"] == 3
+    assert stdout["selector"] == selector
+
+
+@pytest.mark.parametrize(
+    "phase", ["applicability", "root_config", "local_extends", "program", "context"]
+)
+@pytest.mark.parametrize(
+    "failure_kind",
+    [ReferenceSourceFailureKind.TOO_LARGE, ReferenceSourceFailureKind.TOO_MANY_FILES],
+)
+def test_pathless_limit_failure_rejects_phase_not_bound_to_private_read_evidence(
+    phase: str, failure_kind: ReferenceSourceFailureKind
+) -> None:
+    phase_inputs = {
+        "applicability": (
+            {"package.json": b'{"dependencies":{"next":"15"}}'},
+            (),
+            "package.json",
+        ),
+        "root_config": (
+            {"package.json": b'{"dependencies":{"next":"15"}}', "tsconfig.json": b"{}"},
+            ("tsconfig.json",),
+            "tsconfig.json",
+        ),
+        "local_extends": (
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"extends":"./tsconfig.base.json"}',
+                "tsconfig.base.json": b"{}",
+            },
+            ("tsconfig.json",),
+            "tsconfig.base.json",
+        ),
+        "program": (
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"include":["src/**"]}',
+                "src/page.tsx": b"export default function Page() { return null; }",
+            },
+            ("tsconfig.json",),
+            "src/page.tsx",
+        ),
+        "context": (
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"include":["src/**"]}',
+                "src/global.d.ts": b"declare const marker: string;",
+            },
+            ("tsconfig.json",),
+            "src/global.d.ts",
+        ),
+    }
+    files, control_candidates, failed_path = phase_inputs[phase]
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=control_candidates),
+        InstrumentedSourceReader(files, read_failures={failed_path: failure_kind}),
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert result.diagnostic_code == "CSV-NEXT-LIMIT-001"
+    assert result.path is None
+    prefix = result.early_read_prefix
+    assert prefix is not None and prefix.phase == phase
+
+    for forged_phase in {"applicability", "root_config", "local_extends", "program", "context"} - {
+        phase
+    }:
+        with pytest.raises(AssertionError):
+            replace(prefix, phase=forged_phase)
 
 
 @pytest.mark.parametrize("phase", ["root_config", "local_extends", "program", "context"])

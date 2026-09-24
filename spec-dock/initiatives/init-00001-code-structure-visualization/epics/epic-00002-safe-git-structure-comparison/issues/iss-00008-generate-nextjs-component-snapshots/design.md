@@ -72,7 +72,7 @@ run-level terminal branchはpublication finalizerの前に一度だけ分岐し�
 
 ### currentとhistoricalの機械的な境界
 
-現行registryは `runtime_vector_registry` の20件、履歴registryは `historical_runtime_vector_registry` の36件です。validator/executorは `current` または `historical_r23` の閉じたselectorだけを受け、任意iterableや旧surrogateをauthorityとして注入できません。したがって、設計文書のRound 23例は履歴検証の再現には使えても、現行v1のproducer・validator・coverageの証明にはなりません。
+現行registryは `runtime_vector_registry` の26件、履歴registryは `historical_runtime_vector_registry` の36件です。validator/executorは `current` または `historical_r23` の閉じたselectorだけを受け、任意iterableや旧surrogateをauthorityとして注入できません。したがって、設計文書のRound 23例は履歴検証の再現には使えても、現行v1のproducer・validator・coverageの証明にはなりません。
 
 ### resource identityの二層化
 

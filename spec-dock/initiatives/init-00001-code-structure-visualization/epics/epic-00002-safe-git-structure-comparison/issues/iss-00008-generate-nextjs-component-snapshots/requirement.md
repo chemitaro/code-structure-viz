@@ -64,7 +64,7 @@ package_sequence_key: "ISSUE-05"
 
 ### registryと履歴の境界
 
-現行coverageの唯一のregistryは `tests/fixtures/next_contract_vectors.json` の `runtime_vector_registry`（Round 22由来、20件）です。旧Round 23由来の36件は同fixtureの `historical_runtime_vector_registry` として明示的に隔離し、履歴test以外から解決できません。したがって「登録されている」だけでは現行要件の実装証拠にならず、現行registryのcriterion、positive/negative、producer、validator、substantive testの対応を同時に検査します。
+現行coverageの唯一のregistryは `tests/fixtures/next_contract_vectors.json` の `runtime_vector_registry`（Round 22由来、26件）です。旧Round 23由来の36件は同fixtureの `historical_runtime_vector_registry` として明示的に隔離し、履歴test以外から解決できません。したがって「登録されている」だけでは現行要件の実装証拠にならず、現行registryのcriterion、positive/negative、producer、validator、substantive testの対応を同時に検査します。
 
 ### versioned inventoryの境界
 

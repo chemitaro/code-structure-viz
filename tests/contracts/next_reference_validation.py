@@ -2336,6 +2336,22 @@ class EarlySourceReadPrefix:
             phase in {"applicability", "root_config", "local_extends", "program", "context"}
             for _, phase in self.read_phases
         )
+        if self.stage == "source_read":
+            assert self.failure_kind is not None
+            failure_projection = _REFERENCE_SOURCE_FAILURES[self.failure_kind]
+            assert failure_projection.diagnostic_code == self.diagnostic_code
+            assert failure_projection.stage == self.stage
+            assert _diagnostic_catalog()[self.diagnostic_code]["ref_permission"] == (
+                "path" if failure_projection.include_path else "none"
+            )
+            trigger_paths = tuple(
+                path for path, code in self.failed_reads if code == self.diagnostic_code
+            )
+            assert len(trigger_paths) == 1
+            trigger_path = trigger_paths[0]
+            assert dict(self.read_phases)[trigger_path] == self.phase
+            if failure_projection.include_path:
+                assert self.path == trigger_path
         if self.path is not None:
             assert dict(self.read_phases).get(self.path) == self.phase
         if _diagnostic_catalog()[self.diagnostic_code]["ref_permission"] == "path":

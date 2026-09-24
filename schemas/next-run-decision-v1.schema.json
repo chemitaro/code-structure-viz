@@ -87,7 +87,13 @@
             "kind": {"const": "request_independent_failure"},
             "stage": {"const": "source_read"},
             "failure_code": {"enum": ["CSV-NEXT-LIMIT-001", "CSV-NEXT-SOURCE-003"]},
-            "observed": {"$ref": "urn:code-structure-viz:schema:next-provenance-v1#/$defs/early_observed"}
+            "observed": {
+              "oneOf": [
+                {"$ref": "urn:code-structure-viz:schema:next-provenance-v1#/$defs/early_observed"},
+                {"$ref": "urn:code-structure-viz:schema:next-provenance-v1#/$defs/config_observed"},
+                {"$ref": "urn:code-structure-viz:schema:next-provenance-v1#/$defs/preseal_source_observed"}
+              ]
+            }
           }
         }
       }
