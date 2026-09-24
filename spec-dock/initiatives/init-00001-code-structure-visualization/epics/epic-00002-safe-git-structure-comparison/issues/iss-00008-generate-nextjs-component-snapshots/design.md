@@ -45,7 +45,7 @@ Membershipの`files`/`include`/`exclude`値は、各値を宣言したconfig fil
 
 target-completeness rowsはvalidated responseのtarget-resolution proofだけを表します。validated requestの後、response decode/validationなどvalidated semantic responseより前の段階で失敗しproofがない場合、要求targetはrequest/config/run identityに保持しますが、domainの`coverage.target_completeness`は空配列にします。この空配列は「target未指定」や「全targetがcomplete」を意味せず、resolution proofの行がないことを示します。response failureの既存diagnostic/statusを使い、個々のtargetがfailedであるかのようなrow/reasonや`CSV-NEXT-TARGET-001`を生成しません。validated response proofがある通常経路の一行一target・closed failure reasonは変更しません。
 
-`request_independent`はvalidated adapter requestの有無を示すdiscriminatorで、観測prefixの有無を代用しません。`source_read` failureに実際の`SourceAcquisitionSeal`がある場合は、そのsealのapplicability/config/source/limits/source-plan prefixを保持し、provenanceの値digest、`NextPublicationContext`、run-decision context、public config、domain source/limitsへ同じ値として投影します。requestとNode/toolchain/trusted-environment/compatibility/process観測、semantic project/entity payload、target-resolution rowsはnullまたは空のままです。sealを持たないapplicability/config/source-controlなどの先行failureは既存のall-null suffixを維持します。
+`request_independent`はvalidated adapter requestの有無を示すdiscriminatorで、観測prefixの有無を代用しません。prefixはreader-owned acquisition phase/read evidenceから導出します。package preflightはapplicability、root config/local `extends`はapplicability+config、seal前のprogram/context failureはapplicability+config+実source-read identityを保持し、failure後のsuffixをunobserved/nullとします。`source_read` failureに実際の`SourceAcquisitionSeal`がある場合は、そのsealのapplicability/config/source/limits/source-plan prefixを保持し、provenanceの値digest、`NextPublicationContext`、run-decision context、public config、domain source/limitsへ同じ値として投影します。requestとNode/toolchain/trusted-environment/compatibility/process観測、semantic project/entity payload、target-resolution rowsはnullまたは空のままです。source-integrity failureはこのprovenance/publication経路へ入れずterminal fatal branchへ進みます。
 
 semantic rendererはdecisionだけを受け、publication finalizerは実際のcandidate bytesとmeasurementを一度sealします。summary/root-manifest/artifact/typed-unavailableはそのsealed bytesを返すだけで再render/retryしません。selected copy overrunはsemantic statusを変えず、persisted descriptorを保持したpublication-incomplete/exit 3です。canonical JSONはsort_keys/NFC/UTF-8/LF、path-only rowsはNFC UTF-8 bytes、object rowsはcanonical JSON bytesです。
 
@@ -149,8 +149,12 @@ acceptanceと誤認せず、後続production planへ引き継ぐ。
 #### stage-dependent provenanceと順序
 
 `schemas/next-provenance-v1.schema.json`の`request_independent` branchは、failure stage/codeと同時に各値の
-observation state/valueを持つ。stageより後のrequest、limits、source plan、toolchain、trusted environment、
-compatibility、process launch、budgetを`unobserved`/`null`で表し、先に観測したprefixを削除できない。
+observation state/valueを持つ。prefixはpublic stageだけでなくreader-owned acquisition phaseと実read evidence
+から導出する。package preflightはapplicability、root config/local `extends`はapplicability+config、seal前の
+program/context failureはapplicability+config+実source-read identityを保持する。failure後のlimits、source plan、
+request、toolchain、trusted environment、compatibility、process launch、budgetは`unobserved`/`null`で表し、
+先に観測したprefixを削除できない。sealを持つsource-read failureだけがlimits/source-planまでを含むsealed prefixを持ち、
+integrity driftはprovenance publicationへ進まずterminal fatalになる。
 `next-config`は`request_independent`を必須booleanとし、normal/independent branchを`oneOf`で排他的にする。
 `NextRunContext`はselectorとrequested formats、budget sourceとrequested/resolvedの相関を検証する。
 

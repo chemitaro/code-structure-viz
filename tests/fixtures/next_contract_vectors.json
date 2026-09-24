@@ -142,6 +142,9 @@
     "round22-runtime-applicability",
     "round22-runtime-unequal-dual-applicability",
     "round22-runtime-preseal-package-failure-matrix",
+    "round22-runtime-actual-package-ordinary-read",
+    "round22-runtime-actual-package-integrity",
+    "round22-runtime-phase-failure-matrix",
     "round22-runtime-config-provenance",
     "round22-runtime-source-graph",
     "round22-runtime-process-observation",
@@ -312,6 +315,9 @@
     "round22-runtime-applicability-mutation",
     "round22-runtime-unequal-dual-applicability-mutation",
     "round22-runtime-preseal-package-failure-matrix-mutation",
+    "round22-runtime-actual-package-ordinary-read-mutation",
+    "round22-runtime-actual-package-integrity-mutation",
+    "round22-runtime-phase-failure-matrix-mutation",
     "round22-runtime-config-provenance-mutation",
     "round22-runtime-source-graph-mutation",
     "round22-runtime-process-observation-mutation",
@@ -546,7 +552,10 @@
     "round22.rg-01": [
       "test_round22_applicability_dual_declarations_and_malformed_projection",
       "test_round22_applicability_unequal_dual_declarations_are_applicable",
-      "test_preseal_package_source_read_failure_reaches_publication"
+      "test_preseal_package_source_read_failure_reaches_publication",
+      "test_package_read_failure_preserves_its_distinct_reference_outcome",
+      "test_nonordinary_read_failure_preserves_classification_and_actual_phase_prefix",
+      "test_actual_integrity_drift_is_fatal_before_publication_for_every_phase"
     ],
     "round22.rg-02": [
       "test_round22_config_codes_and_jsonc_composition_are_closed"
@@ -561,7 +570,8 @@
       "test_round22_provenance_observed_rows_have_typed_identity"
     ],
     "round22.rg-06": [
-      "test_round22_source_integrity_has_distinct_fatal_diagnostic"
+      "test_round22_source_integrity_has_distinct_fatal_diagnostic",
+      "test_actual_integrity_drift_is_fatal_before_publication_for_every_phase"
     ],
     "round22.rg-07": [
       "test_round22_project_root_overlap_is_usage_before_source_acquisition"
@@ -1092,6 +1102,54 @@
       "polarity": "negative",
       "callable": "runtime_vector_round22_preseal_package_failure_matrix_mutation",
       "validator": "validate_preseal_package_failure_matrix",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-actual-package-ordinary-read",
+      "criterion": "round22.rg-01",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_actual_package_ordinary_read",
+      "validator": "validate_round22_actual_package_ordinary_read",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-actual-package-ordinary-read-mutation",
+      "criterion": "round22.rg-01",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_actual_package_ordinary_read_mutation",
+      "validator": "validate_round22_actual_package_ordinary_read",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-actual-package-integrity",
+      "criterion": "round22.rg-01",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_actual_package_integrity",
+      "validator": "validate_round22_actual_package_integrity",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-actual-package-integrity-mutation",
+      "criterion": "round22.rg-01",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_actual_package_integrity_mutation",
+      "validator": "validate_round22_actual_package_integrity",
+      "expected_valid": false
+    },
+    {
+      "vector_id": "round22-runtime-phase-failure-matrix",
+      "criterion": "round22.rg-01",
+      "polarity": "positive",
+      "callable": "runtime_vector_round22_phase_failure_matrix",
+      "validator": "validate_round22_phase_failure_matrix",
+      "expected_valid": true
+    },
+    {
+      "vector_id": "round22-runtime-phase-failure-matrix-mutation",
+      "criterion": "round22.rg-01",
+      "polarity": "negative",
+      "callable": "runtime_vector_round22_phase_failure_matrix_mutation",
+      "validator": "validate_round22_phase_failure_matrix",
       "expected_valid": false
     },
     {

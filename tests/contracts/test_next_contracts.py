@@ -12687,11 +12687,20 @@ def test_round22_runtime_registry_executes_vectors_and_named_validators() -> Non
         "round22-runtime-unequal-dual-applicability-mutation",
         "round22-runtime-preseal-package-failure-matrix",
         "round22-runtime-preseal-package-failure-matrix-mutation",
+        "round22-runtime-actual-package-ordinary-read",
+        "round22-runtime-actual-package-ordinary-read-mutation",
+        "round22-runtime-actual-package-integrity",
+        "round22-runtime-actual-package-integrity-mutation",
+        "round22-runtime-phase-failure-matrix",
+        "round22-runtime-phase-failure-matrix-mutation",
     }
     assert {
         "test_round22_applicability_dual_declarations_and_malformed_projection",
         "test_round22_applicability_unequal_dual_declarations_are_applicable",
         "test_preseal_package_source_read_failure_reaches_publication",
+        "test_package_read_failure_preserves_its_distinct_reference_outcome",
+        "test_nonordinary_read_failure_preserves_classification_and_actual_phase_prefix",
+        "test_actual_integrity_drift_is_fatal_before_publication_for_every_phase",
     } <= set(fixture["criterion_test_map"]["round22.rg-01"])
     known_vector_ids = set(fixture["positive"]) | set(fixture["negative"])
     validate_runtime_vector_registry(
@@ -14214,6 +14223,206 @@ def test_package_read_failure_preserves_its_distinct_reference_outcome(
     )
     assert reader.read_counts == {package_path: 1}
     assert reader.seal_calls == 0
+    if failure_kind is ReferenceSourceFailureKind.ORDINARY_READ:
+        assert isinstance(result, SourceAcquisitionUnavailable)
+        assert result.early_read_prefix is not None
+        assert result.early_read_prefix.phase == "applicability"
+        assert result.early_read_prefix.failure_kind is ReferenceSourceFailureKind.ORDINARY_READ
+
+
+@pytest.mark.parametrize(
+    ("phase", "files", "control_candidates", "failed_path"),
+    [
+        (
+            "root_config",
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b"{}",
+            },
+            ("tsconfig.json",),
+            "tsconfig.json",
+        ),
+        (
+            "local_extends",
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"extends":"./tsconfig.base.json"}',
+                "tsconfig.base.json": b"{}",
+            },
+            ("tsconfig.json",),
+            "tsconfig.base.json",
+        ),
+        (
+            "program",
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"include":["src/**"]}',
+                "src/page.tsx": b"export default function Page() { return null; }",
+            },
+            ("tsconfig.json",),
+            "src/page.tsx",
+        ),
+        (
+            "context",
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"include":["src/**"]}',
+                "src/global.d.ts": b"declare const marker: string;",
+            },
+            ("tsconfig.json",),
+            "src/global.d.ts",
+        ),
+    ],
+    ids=["root-config", "local-extends", "program", "context"],
+)
+@pytest.mark.parametrize(
+    "failure_kind",
+    [
+        ReferenceSourceFailureKind.TOO_LARGE,
+        ReferenceSourceFailureKind.TOO_MANY_FILES,
+        ReferenceSourceFailureKind.UNSAFE_PATH,
+        ReferenceSourceFailureKind.SYMLINK,
+        ReferenceSourceFailureKind.NON_REGULAR,
+        ReferenceSourceFailureKind.RACED_MISSING,
+    ],
+)
+def test_nonordinary_read_failure_preserves_classification_and_actual_phase_prefix(
+    phase: str,
+    files: dict[str, bytes],
+    control_candidates: tuple[str, ...],
+    failed_path: str,
+    failure_kind: ReferenceSourceFailureKind,
+) -> None:
+    reader = InstrumentedSourceReader(
+        files,
+        read_failures={failed_path: failure_kind},
+    )
+
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=control_candidates),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+
+    code = (
+        "CSV-NEXT-LIMIT-001"
+        if failure_kind
+        in {ReferenceSourceFailureKind.TOO_LARGE, ReferenceSourceFailureKind.TOO_MANY_FILES}
+        else "CSV-NEXT-SOURCE-003"
+    )
+    include_path = failure_kind not in {
+        ReferenceSourceFailureKind.TOO_LARGE,
+        ReferenceSourceFailureKind.TOO_MANY_FILES,
+    }
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert (result.diagnostic_code, result.stage, result.path) == (
+        code,
+        "source_read",
+        failed_path if include_path else None,
+    )
+    assert result.seal is None
+    assert result.early_read_prefix is not None
+    assert result.early_read_prefix.phase == phase
+    assert result.early_read_prefix.failure_kind is failure_kind
+    observed = result.observation_provenance
+    assert observed is not None
+    validate_stage_dependent_provenance(observed)
+    _validator("next-provenance-v1.schema.json").validate(observed)
+    expected_fields = {"applicability"}
+    if phase in {"root_config", "local_extends", "program", "context"}:
+        expected_fields.add("config")
+    if phase in {"program", "context"}:
+        expected_fields.add("source")
+    for field in ("applicability", "config", "source", "limits", "source_plan"):
+        assert (observed["observed"][field]["state"] == "observed") is (field in expected_fields)
+    assert reader.read_counts[failed_path] == 1
+    assert reader.seal_calls == 0
+
+
+@pytest.mark.parametrize("phase", ["root_config", "local_extends", "program", "context"])
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_actual_integrity_drift_is_fatal_before_publication_for_every_phase(
+    phase: str, selector: str | None
+) -> None:
+    phase_files = {
+        "root_config": (
+            {"package.json": b'{"dependencies":{"next":"15"}}', "tsconfig.json": b"{}"},
+            ("tsconfig.json",),
+            "tsconfig.json",
+        ),
+        "local_extends": (
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"extends":"./tsconfig.base.json"}',
+                "tsconfig.base.json": b"{}",
+            },
+            ("tsconfig.json",),
+            "tsconfig.base.json",
+        ),
+        "program": (
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"include":["src/**"]}',
+                "src/page.tsx": b"export default function Page() { return null; }",
+            },
+            ("tsconfig.json",),
+            "src/page.tsx",
+        ),
+        "context": (
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"include":["src/**"]}',
+                "src/global.d.ts": b"declare const marker: string;",
+            },
+            ("tsconfig.json",),
+            "src/global.d.ts",
+        ),
+    }
+    files, control_candidates, failed_path = phase_files[phase]
+    reader = InstrumentedSourceReader(
+        files,
+        read_failures={failed_path: ReferenceSourceFailureKind.INTEGRITY_DRIFT},
+    )
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=control_candidates),
+        reader,
+        {
+            "observed_limits": _next_limits(),
+            "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+        },
+    )
+
+    assert isinstance(result, SourceIntegrityFatal)
+    assert (result.diagnostic_code, result.stage) == (
+        "CSV-NEXT-SOURCE-INTEGRITY-001",
+        "source_integrity",
+    )
+    projection = source_acquisition_result_decision(result)
+    assert (projection.result_kind, projection.outcome, projection.exit_code) == (
+        "source_integrity_fatal",
+        "fatal",
+        1,
+    )
+    selected = (
+        None
+        if selector is None
+        else ManifestSelector()
+        if selector == "manifest"
+        else DomainFormatSelector(domain="next", format=selector.removeprefix("next:"))  # type: ignore[arg-type]
+    )
+    outcome, stdout_bytes, stderr_bytes = next_terminal_run_publication(result, selected)
+    assert outcome.status.value == "fatal" and outcome.exit_code == 1
+    assert json.loads(stderr_bytes)["code"] == "CSV-NEXT-SOURCE-INTEGRITY-001"
+    assert reader.read_counts[failed_path] == 1
+    assert reader.seal_calls == 0
+    if selector is None:
+        assert stdout_bytes == encode_canonical_json(_run_summary_value("fatal"))
+    else:
+        assert json.loads(stdout_bytes)["run_status"] == "fatal"
+        assert json.loads(stdout_bytes)["artifact"] is None
 
 
 @pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
