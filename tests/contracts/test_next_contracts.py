@@ -12292,6 +12292,25 @@ def test_round22_applicability_dual_declarations_and_malformed_projection() -> N
     _validator("next-provenance-v1.schema.json").validate(malformed_provenance)
 
 
+def test_round22_applicability_unequal_dual_declarations_are_applicable() -> None:
+    matrix = derive_package_applicability_matrix(
+        {
+            "package.json": (
+                b'{"dependencies":{"next":"15.0.0"},"devDependencies":{"next":"16.0.0"}}'
+            )
+        },
+        (".",),
+    )
+    projection = package_applicability_projection(matrix)
+
+    assert matrix.aggregate_state == "applicable"
+    assert matrix.entries[0].evidence == "direct_next_dependency"
+    assert projection["matrix"]["applicable_projects"] == ["."]
+    assert projection["node_probe"] == {"permission": "permitted", "performed": False}
+    validate_package_applicability_projection(projection)
+    _validator("next-applicability-decision-v1.schema.json").validate(projection)
+
+
 def test_round22_all_non_applicable_short_circuits_config_and_source_reads() -> None:
     """The matrix must decide Node/config eligibility before other reads."""
 
@@ -12658,6 +12677,22 @@ def test_round22_runtime_registry_executes_vectors_and_named_validators() -> Non
     records = fixture["runtime_vector_registry"]
     assert records == runtime_vector_registry()
     assert all(record["criterion"].startswith("round22.") for record in records)
+    applicability_records = {
+        record["vector_id"] for record in records if record["criterion"] == "round22.rg-01"
+    }
+    assert applicability_records == {
+        "round22-runtime-applicability",
+        "round22-runtime-applicability-mutation",
+        "round22-runtime-unequal-dual-applicability",
+        "round22-runtime-unequal-dual-applicability-mutation",
+        "round22-runtime-preseal-package-failure-matrix",
+        "round22-runtime-preseal-package-failure-matrix-mutation",
+    }
+    assert {
+        "test_round22_applicability_dual_declarations_and_malformed_projection",
+        "test_round22_applicability_unequal_dual_declarations_are_applicable",
+        "test_preseal_package_source_read_failure_reaches_publication",
+    } <= set(fixture["criterion_test_map"]["round22.rg-01"])
     known_vector_ids = set(fixture["positive"]) | set(fixture["negative"])
     validate_runtime_vector_registry(
         records,
@@ -14183,6 +14218,93 @@ def test_package_read_failure_preserves_its_distinct_reference_outcome(
 
 @pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
 @pytest.mark.parametrize(
+    ("failure_kind", "code", "path"),
+    [
+        (ReferenceSourceFailureKind.TOO_LARGE, "CSV-NEXT-LIMIT-001", None),
+        (ReferenceSourceFailureKind.TOO_MANY_FILES, "CSV-NEXT-LIMIT-001", None),
+        (ReferenceSourceFailureKind.UNSAFE_PATH, "CSV-NEXT-SOURCE-003", "package.json"),
+        (ReferenceSourceFailureKind.SYMLINK, "CSV-NEXT-SOURCE-003", "package.json"),
+        (ReferenceSourceFailureKind.NON_REGULAR, "CSV-NEXT-SOURCE-003", "package.json"),
+        (ReferenceSourceFailureKind.RACED_MISSING, "CSV-NEXT-SOURCE-003", "package.json"),
+    ],
+    ids=["too-large", "too-many-files", "unsafe-path", "symlink", "non-regular", "raced-missing"],
+)
+def test_preseal_package_source_read_failure_reaches_publication(
+    selector: str | None,
+    failure_kind: ReferenceSourceFailureKind,
+    code: str,
+    path: str | None,
+) -> None:
+    package_path = "package.json"
+    reader = InstrumentedSourceReader(
+        {
+            package_path: b'{"dependencies":{"next":"15"}}',
+            "src/never-read.tsx": b"private-source-marker",
+        },
+        read_failures={package_path: failure_kind},
+    )
+
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=()), reader
+    )
+
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert (result.diagnostic_code, result.stage, result.path) == (code, "source_read", path)
+    assert result.seal is None
+    assert result.early_read_prefix is not None
+    assert result.observation_provenance is not None
+    assert reader.read_counts == {package_path: 1}
+    assert reader.seal_calls == 0
+    assert dict(result.early_read_prefix.failed_reads) == {
+        package_path: "CSV-NEXT-LIMIT-001"
+        if failure_kind
+        in {ReferenceSourceFailureKind.TOO_LARGE, ReferenceSourceFailureKind.TOO_MANY_FILES}
+        else "CSV-NEXT-SOURCE-003"
+    }
+    provenance = result.observation_provenance
+    validate_stage_dependent_provenance(provenance)
+    _validator("next-provenance-v1.schema.json").validate(provenance)
+    assert provenance["observed"]["applicability"]["state"] == "observed"
+    for field in (
+        "config",
+        "source",
+        "limits",
+        "source_plan",
+        "request",
+        "toolchain",
+        "trusted_environment",
+        "compatibility",
+        "process_launch",
+        "response",
+    ):
+        assert provenance["observed"][field] == {"state": "unobserved", "value": None}
+
+    decision = source_acquisition_failure_decision(
+        result, _run_context(selector=selector, independent=True)
+    )
+    assert decision.publication_context.source_acquisition_seal is None
+    run_wire = next_run_decision_projection(decision)
+    _validator("next-run-decision-v1.schema.json").validate(run_wire)
+    assert run_wire["provenance"] == provenance
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+    publication_wire = next_publication_decision_projection(publication)
+    _validator("next-publication-decision-v1.schema.json").validate(publication_wire)
+    domain, manifest, _metadata, artifacts, _stderr = _validate_publication_chain(publication)
+    _validator("next-config-v1.schema.json").validate(domain["config"])
+    assert domain["request"] is None and not domain["payload_available"]
+    assert domain["config"]["failure_stage"] == "source_read"
+    assert domain["config"]["failure_code"] == code
+    assert domain["config"]["source_plan"] is None
+    assert manifest["run"]["exit_code"] == 3
+    assert artifacts == {}
+    assert reader.read_counts == {package_path: 1}
+    public_bytes = canonical_json_bytes(domain) + canonical_json_bytes(manifest)
+    assert b"private-source-marker" not in public_bytes
+    assert b'{"dependencies":{"next":"15"}}' not in public_bytes
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize(
     "failure", ["malformed_package", "package_read", "malformed_config", "config_read"]
 )
 def test_actual_early_failure_preserves_observations_through_publication(
@@ -14310,6 +14432,53 @@ def test_early_failure_rejects_foreign_provenance_and_unread_diagnostic_path() -
     object.__setattr__(failed, "path", "src/never-read.tsx")
     with pytest.raises(AssertionError):
         source_acquisition_failure_decision(failed, _run_context(independent=True))
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize("failure_kind", ["source_control", "sealed_source_read"])
+def test_failure_decision_rejects_diagnostic_path_not_bound_to_read_evidence(
+    selector: str | None, failure_kind: str
+) -> None:
+    if failure_kind == "source_control":
+        reader = InstrumentedSourceReader(
+            {"package.json": b'{"dependencies":{"next":"15"}}', "tsconfig.json": b"{}"},
+            read_failures={"tsconfig.json": "CSV-NEXT-SOURCE-001"},
+        )
+        result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+            reader,
+        )
+        assert isinstance(result, SourceAcquisitionUnavailable)
+        assert result.stage == "source_control" and result.path == "tsconfig.json"
+    else:
+        reader = InstrumentedSourceReader(
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "src/dep.ts": b"export const dep=1;",
+            },
+            read_failures={"src/dep.ts": "read-failed"},
+        )
+        result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=()),
+            reader,
+            {
+                "observed_limits": _next_limits(),
+                "observed_trusted_environment_digest": _trusted_environment()["sha256"],
+            },
+        )
+        assert isinstance(result, SourceAcquisitionUnavailable)
+        assert result.stage == "source_read" and result.path == "src/dep.ts"
+    decision = source_acquisition_failure_decision(
+        result, _run_context(selector=selector, independent=True)
+    )
+    forged_diagnostic = decision.diagnostic
+    forged_diagnostic["path"] = "src/never-read.tsx"
+    with pytest.raises(AssertionError):
+        replace(decision, diagnostic=forged_diagnostic)
+
+    object.__setattr__(decision, "diagnostic", forged_diagnostic)
+    with pytest.raises(AssertionError):
+        finalize_publication_decision(decision, adapter_stdout_chunks=())
 
 
 def test_early_failure_identity_binds_read_bytes_not_unread_suffix() -> None:

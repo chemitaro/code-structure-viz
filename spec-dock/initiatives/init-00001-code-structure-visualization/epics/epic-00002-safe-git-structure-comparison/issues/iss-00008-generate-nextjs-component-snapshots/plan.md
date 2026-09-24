@@ -43,14 +43,16 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 | 順序 | Plan ID / owner | 現在の成果物またはgate | 状態と停止条件 |
 | --- | --- | --- | --- |
 | 1 | `I05-PLAN-000` | Requirement/Design/Plan、HTML、既存schemaの現行v1採択 | G10で正本境界を明示。production codeは変更しない。 |
-| 2 | `I05-PLAN-001` | fixture、positive/negative vector、reference validator/test、schema cross-check | G09までの現行registryは16件。旧R23 36件はhistorical selectorだけで実行する。 |
+| 2 | `I05-PLAN-001` | fixture、positive/negative vector、reference validator/test、schema cross-check | G09までの現行registryは20件。旧R23 36件はhistorical selectorだけで実行する。 |
 | 3 | `I05-PLAN-008` | clean/pushed fixed SHA、全品質gate、独立GPT-6 Max review | `P0=0 / P1=0 / review_status=pass`になるまで次へ進まない。 |
 | 4 | `I05-PLAN-002`〜`007` | production adapter、Node process、semantic/publication、stdout、hardening | 上記gate通過後だけ開始。source-sealed request builderの先行スライス以外は未実装・未認定。 |
 | 5 | G11（`I05-PLAN-006`へ接続） | 将来のwheel/sdist runtime build inventoryとpackage受入れ | schema/docsで境界のみ固定。現行commitでbuild・依存・lockfileを変更しない。 |
 
 2026-09-24のユーザー指示による実装再開では、OS process boundaryより前のhost-independentなsource-sealed request builderだけを先行実装した。これは`I05-PLAN-008`のfixed-SHA Strict gate、`I05-PLAN-002`の完了、Node起動、macOS support、production `available`を証明しない。続く`chatgpt-code-review-strict`試行は応答JSON不正でwrapper exit 20となったため、valid review pass/failとして扱わない。差分のローカルadjudicationとテスト証拠はtracked artifact `20260923t163655z-disc-issue8-verified-fd-dependency-analysis.md`に記録する。
 
-I05-PLAN-008のpre-response projection gateでは、validated requestに明示targetがある一方でresponse decode/validationより前に失敗しvalidated target proofがない経路を、全selector（省略、manifest、semantic-json、PlantUML）で検証します。request/config/run identityのtargetは保持し、target-completeness行・target failure reason・`CSV-NEXT-TARGET-001`は生成せず、既存のpre-response diagnostic/statusとpayload-unavailable publicationを保つことを確認します。`test_response_boundary_failures_are_pre_response_decisions`と実publication-chain regressionをこの基準へ合わせます。request-independentな実`source_read` failureは、取得済み`SourceAcquisitionSeal`に基づくapplicability/config/source/limits/source-plan prefixをprovenanceからrun decision・config・domainまで保持し、request/runtime/semantic payloadは作りません。sealがないより前のfailureはnull suffixを維持します。source-read observed-prefix projectionは独立した同じpre-response publication unitで検証し、どちらもI05-PLAN-008のfresh exact-SHA reviewsを通過するまでproduction workへ進みません。
+I05-PLAN-008のpre-response projection gateでは、validated requestに明示targetがある一方でresponse decode/validationより前に失敗しvalidated target proofがない経路を、全selector（省略、manifest、semantic-json、PlantUML）で検証します。request/config/run identityのtargetは保持し、target-completeness行・target failure reason・`CSV-NEXT-TARGET-001`は生成せず、既存のpre-response diagnostic/statusとpayload-unavailable publicationを保つことを確認します。`test_response_boundary_failures_are_pre_response_decisions`と実publication-chain regressionをこの基準へ合わせます。
+
+request-independentな`source_read` failureには2つの実証拠形状があります。root `package.json` readのpre-seal failureでは、実際のapplicability read-attempt prefixだけを保持し、matrixは作らず、config/source/limits/source-planと後続観測は`unobserved/null`のままにします。`SourceAcquisitionSeal`を保持するsource-read failureではapplicability/config/source/limits/source-plan prefixをprovenanceからrun decision・config・domainまで同じdigest/valueで保持します。両方ともrequest/runtime/semantic payloadを作りません。pathを許可された診断も、pre-sealならimmutable early-read evidence、sealedならsource sealに結び付け、decision構築とpublication投影の両方で再検証します。`test_preseal_package_source_read_failure_reaches_publication`、`test_failure_decision_rejects_diagnostic_path_not_bound_to_read_evidence`、対応するcurrent RG-01 runtime vectorsを全selectorで実行し、どちらもI05-PLAN-008のfresh exact-SHA reviewsを通過するまでproduction workへ進みません。
 
 ### G11: reference inventoryとbuild inventoryの分離
 

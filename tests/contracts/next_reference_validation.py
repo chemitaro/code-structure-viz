@@ -831,11 +831,26 @@ def _publication_provenance(
     else:
         assert isinstance(failure_stage, str) and failure_stage
         assert isinstance(failure_code, str) and failure_code
+        early_source_read = (
+            normalized_kind == "request_independent_failure"
+            and failure_stage == "source_read"
+            and "source" not in values
+        )
+        if early_source_read:
+            assert set(values) == {"applicability"}
+        if normalized_kind == "request_independent_failure" and failure_stage == "source_read":
+            assert failure_code in {"CSV-NEXT-LIMIT-001", "CSV-NEXT-SOURCE-003"}
+            if not early_source_read:
+                assert failure_code == "CSV-NEXT-SOURCE-003"
+        expected_observed = (
+            frozenset({"applicability"})
+            if early_source_read
+            else _expected_provenance_observed(failure_stage)
+        )
         observed = {
             name: _observation_row(
                 name,
-                name in _expected_provenance_observed(failure_stage)
-                or (name == "budget" and budget_observed),
+                name in expected_observed or (name == "budget" and budget_observed),
                 observed_value=values.get(name),
             )
             for name in PROVENANCE_FIELDS
@@ -1406,7 +1421,18 @@ def validate_stage_dependent_provenance(value: dict[str, Any]) -> None:
         assert stage == "applicability" and code == "CSV-NEXT-APPLICABILITY-001"
     else:
         decision_failure_spec(code, stage)
-    expected_observed = _expected_provenance_observed(stage)
+    early_source_read = (
+        value["kind"] == "request_independent_failure"
+        and stage == "source_read"
+        and observed["source"]["state"] == "unobserved"
+    )
+    if value["kind"] == "request_independent_failure" and stage == "source_read":
+        assert code in {"CSV-NEXT-LIMIT-001", "CSV-NEXT-SOURCE-003"}
+        if not early_source_read:
+            assert code == "CSV-NEXT-SOURCE-003"
+    expected_observed = (
+        frozenset({"applicability"}) if early_source_read else _expected_provenance_observed(stage)
+    )
     assert observed["request"] == _observation_row("request", False)
     for field_name in PROVENANCE_FIELDS:
         if field_name == "budget":
@@ -1433,12 +1459,14 @@ class PreResponseFailureDecision:
     exit_code: int = 3
     decision_context: NextDecisionContext
     publication_context: NextPublicationContext
+    early_read_prefix: EarlySourceReadPrefix | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "request", copy.deepcopy(self.request))
         object.__setattr__(self, "run_context", canonical_run_context(**self.run_context))
         object.__setattr__(self, "diagnostic", copy.deepcopy(self.diagnostic))
         object.__setattr__(self, "known_counts", copy.deepcopy(self.known_counts))
+        object.__setattr__(self, "early_read_prefix", copy.deepcopy(self.early_read_prefix))
         assert self.stage in DECISION_FAILURE_STAGES
         assert self.diagnostic_code in DECISION_FAILURE_CODES
         _assert_pre_response_failure_diagnostic_eligible(self.diagnostic_code)
@@ -1518,6 +1546,25 @@ class PreResponseFailureDecision:
                 self.run_context,
                 context,
             )
+        if self.request is None and self.stage in {"source_control", "source_read"}:
+            source_seal = context.source_acquisition_seal
+            if self.early_read_prefix is not None:
+                prefix = self.early_read_prefix
+                assert source_seal is None
+                assert (prefix.diagnostic_code, prefix.stage) == (
+                    self.diagnostic_code,
+                    self.stage,
+                )
+                assert prefix.provenance() == context.observation_provenance
+                expected_path = prefix.path
+            else:
+                assert self.stage == "source_read" and source_seal is not None
+                assert self.diagnostic_code == "CSV-NEXT-SOURCE-003"
+                expected_path = _source_read_failure_path(source_seal)
+            if permission == "path":
+                assert self.diagnostic["path"] == expected_path
+            else:
+                assert permission == "none" and self.diagnostic["path"] is None
         object.__setattr__(self, "publication_context", context)
 
     def __getattribute__(self, name: str) -> Any:
@@ -1530,6 +1577,7 @@ class PreResponseFailureDecision:
             "artifact_paths",
             "decision_context",
             "publication_context",
+            "early_read_prefix",
         }:
             return copy.deepcopy(value)
         return value
@@ -1657,6 +1705,10 @@ def decision_public_diagnostics(decision: NextRunDecision) -> list[dict[str, Any
 
     assert is_next_run_decision(decision)
     if isinstance(decision, (PreResponseFailureDecision, NotApplicableDecision)):
+        if isinstance(decision, PreResponseFailureDecision):
+            # Revalidate at the publication boundary as frozen dataclasses can
+            # still be altered through low-level mutation or foreign callers.
+            decision.__post_init__()
         return [copy.deepcopy(decision.diagnostic)]
     if decision.target_failures:
         entry = _diagnostic_catalog()["CSV-NEXT-TARGET-001"]
@@ -2238,7 +2290,9 @@ class EarlySourceReadPrefix:
     path: str | None
 
     def __post_init__(self) -> None:
-        assert self.stage in {"applicability", "source_control"}
+        assert self.stage in {"applicability", "source_control", "source_read"}
+        if self.stage == "source_read":
+            assert self.diagnostic_code in {"CSV-NEXT-LIMIT-001", "CSV-NEXT-SOURCE-003"}
         decision_failure_spec(self.diagnostic_code, self.stage)
         assert self.project_roots
         for paths in (self.project_roots, self.enumerated_paths):
@@ -2875,6 +2929,85 @@ def validate_package_applicability_projection(value: dict[str, Any]) -> None:
     )
     assert raw_matrix == matrix.as_dict()
     assert value == package_applicability_projection(matrix)
+
+
+def validate_unequal_dual_package_applicability_projection(value: dict[str, Any]) -> None:
+    """Require both valid direct declarations to grant applicability."""
+
+    validate_package_applicability_projection(value)
+    assert value["matrix"]["projects"] == [
+        {
+            "project_root": ".",
+            "package_path": "package.json",
+            "state": "applicable",
+            "evidence": "direct_next_dependency",
+        }
+    ]
+    assert value["matrix"]["aggregate_state"] == "applicable"
+    assert value["matrix"]["applicable_projects"] == ["."]
+    assert value["project_filter"] == ["."]
+    assert value["node_probe"] == {"permission": "permitted", "performed": False}
+
+
+def validate_preseal_package_failure_matrix(value: list[dict[str, Any]]) -> None:
+    """Require every pre-seal package failure to preserve its public outcome."""
+
+    expected = (
+        ("too_large", "CSV-NEXT-LIMIT-001", None),
+        ("too_many_files", "CSV-NEXT-LIMIT-001", None),
+        ("unsafe_path", "CSV-NEXT-SOURCE-003", "package.json"),
+        ("symlink", "CSV-NEXT-SOURCE-003", "package.json"),
+        ("non_regular", "CSV-NEXT-SOURCE-003", "package.json"),
+        ("raced_missing", "CSV-NEXT-SOURCE-003", "package.json"),
+    )
+    assert isinstance(value, list) and len(value) == len(expected)
+    for row, (failure_kind, code, path) in zip(value, expected, strict=True):
+        assert set(row) == {
+            "failure_kind",
+            "projection",
+            "diagnostic_code",
+            "path",
+            "has_early_prefix",
+            "has_seal",
+            "provenance",
+        }
+        assert row["failure_kind"] == failure_kind
+        assert row["diagnostic_code"] == code and row["path"] == path
+        assert row["has_early_prefix"] is True and row["has_seal"] is False
+        assert row["projection"] == {
+            "result_kind": "payload_unavailable",
+            "outcome": "payload_unavailable",
+            "payload_available": False,
+            "diagnostic_code": code,
+            "stage": "source_read",
+            "exit_code": 3,
+            "manifest_available": True,
+            "stdout_reason": "domain_payload_unavailable",
+        }
+        provenance = row["provenance"]
+        validate_stage_dependent_provenance(provenance)
+        assert (provenance["kind"], provenance["stage"], provenance["failure_code"]) == (
+            "request_independent_failure",
+            "source_read",
+            code,
+        )
+        assert provenance["observed"]["applicability"]["state"] == "observed"
+        assert all(
+            provenance["observed"][field] == {"state": "unobserved", "value": None}
+            for field in (
+                "config",
+                "source",
+                "request",
+                "limits",
+                "source_plan",
+                "toolchain",
+                "trusted_environment",
+                "compatibility",
+                "process_launch",
+                "response",
+                "budget",
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -9479,7 +9612,7 @@ def seal_source_acquisition_result(
             diagnostic_code=code,
             stage=failure.stage,
             early_read_prefix=reader.early_read_prefix(code, failure.stage, path)
-            if failure.stage in {"applicability", "source_control"}
+            if failure.stage in {"applicability", "source_control", "source_read"}
             else None,
             path=path,
         )
@@ -9524,12 +9657,12 @@ def source_acquisition_failure_decision(
     """Connect an actual sealed acquisition failure to the publication union.
 
     Status-only historical fixtures deliberately cannot cross this seam.
-    A source-read failure crosses only with its actual seal-derived provenance;
-    this constructor does not manufacture a source plan or runtime.
+    A source-read failure carries either its actual early prefix or its actual
+    source seal; this constructor never manufactures an observed suffix.
     """
 
     assert isinstance(result, SourceAcquisitionUnavailable)
-    if result.stage in {"applicability", "source_control"}:
+    if result.early_read_prefix is not None:
         assert result.early_read_prefix is not None
         assert result.seal is None
         assert result.observation_provenance == result.early_read_prefix.provenance()
@@ -9574,6 +9707,7 @@ def source_acquisition_failure_decision(
         decision_context=decision_context,
         path=result.path,
         source_seal=result.seal,
+        early_read_prefix=result.early_read_prefix,
     )
 
 
@@ -13223,6 +13357,7 @@ def pre_response_failure_decision(
     decision_context: NextDecisionContext,
     path: str | None = None,
     symbol: str | None = None,
+    early_read_prefix: EarlySourceReadPrefix | None = None,
     source_failure_ledger: SourceFailureLedger | None = None,
     source_seal: SourceAcquisitionSeal | None = None,
     response_bytes: bytes | None = None,
@@ -13356,6 +13491,7 @@ def pre_response_failure_decision(
         known_counts=resolved_counts,
         decision_context=effective_decision_context,
         publication_context=publication_context,
+        early_read_prefix=early_read_prefix,
     )
 
 
@@ -16594,6 +16730,38 @@ RUNTIME_VECTOR_REGISTRY: tuple[dict[str, Any], ...] = (
         "expected_valid": False,
     },
     {
+        "vector_id": "round22-runtime-unequal-dual-applicability",
+        "criterion": "round22.rg-01",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_unequal_dual_applicability",
+        "validator": "validate_unequal_dual_package_applicability_projection",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-unequal-dual-applicability-mutation",
+        "criterion": "round22.rg-01",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_unequal_dual_applicability_mutation",
+        "validator": "validate_unequal_dual_package_applicability_projection",
+        "expected_valid": False,
+    },
+    {
+        "vector_id": "round22-runtime-preseal-package-failure-matrix",
+        "criterion": "round22.rg-01",
+        "polarity": "positive",
+        "callable": "runtime_vector_round22_preseal_package_failure_matrix",
+        "validator": "validate_preseal_package_failure_matrix",
+        "expected_valid": True,
+    },
+    {
+        "vector_id": "round22-runtime-preseal-package-failure-matrix-mutation",
+        "criterion": "round22.rg-01",
+        "polarity": "negative",
+        "callable": "runtime_vector_round22_preseal_package_failure_matrix_mutation",
+        "validator": "validate_preseal_package_failure_matrix",
+        "expected_valid": False,
+    },
+    {
         "vector_id": "round22-runtime-config-provenance",
         "criterion": "round22.rg-02",
         "polarity": "positive",
@@ -16744,6 +16912,64 @@ def runtime_vector_round22_applicability() -> dict[str, Any]:
 def runtime_vector_round22_applicability_mutation() -> dict[str, Any]:
     value = runtime_vector_round22_applicability()
     value["matrix_digest"] = "0" * 64
+    return value
+
+
+def runtime_vector_round22_unequal_dual_applicability() -> dict[str, Any]:
+    matrix = derive_package_applicability_matrix(
+        {
+            "package.json": (
+                b'{"dependencies":{"next":"15.0.0"},"devDependencies":{"next":"16.0.0"}}'
+            )
+        },
+        (".",),
+    )
+    return package_applicability_projection(matrix)
+
+
+def runtime_vector_round22_unequal_dual_applicability_mutation() -> dict[str, Any]:
+    matrix = derive_package_applicability_matrix({"package.json": b'{"name":"plain"}'}, (".",))
+    return package_applicability_projection(matrix)
+
+
+def runtime_vector_round22_preseal_package_failure_matrix() -> list[dict[str, Any]]:
+    cases = (
+        ReferenceSourceFailureKind.TOO_LARGE,
+        ReferenceSourceFailureKind.TOO_MANY_FILES,
+        ReferenceSourceFailureKind.UNSAFE_PATH,
+        ReferenceSourceFailureKind.SYMLINK,
+        ReferenceSourceFailureKind.NON_REGULAR,
+        ReferenceSourceFailureKind.RACED_MISSING,
+    )
+    rows: list[dict[str, Any]] = []
+    for failure_kind in cases:
+        reader = InstrumentedSourceReader(
+            {"package.json": b'{"dependencies":{"next":"15"}}'},
+            read_failures={"package.json": failure_kind},
+        )
+        result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(project_roots=(".",), control_candidates=()), reader
+        )
+        assert isinstance(result, SourceAcquisitionUnavailable)
+        assert result.observation_provenance is not None
+        rows.append(
+            {
+                "failure_kind": failure_kind.value,
+                "projection": source_acquisition_result_decision(result).as_dict(),
+                "diagnostic_code": result.diagnostic_code,
+                "path": result.path,
+                "has_early_prefix": result.early_read_prefix is not None,
+                "has_seal": result.seal is not None,
+                "provenance": result.observation_provenance,
+            }
+        )
+    return rows
+
+
+def runtime_vector_round22_preseal_package_failure_matrix_mutation() -> list[dict[str, Any]]:
+    value = runtime_vector_round22_preseal_package_failure_matrix()
+    value[0]["projection"]["stage"] = "applicability"
+    value[0]["diagnostic_code"] = "CSV-NEXT-APPLICABILITY-002"
     return value
 
 

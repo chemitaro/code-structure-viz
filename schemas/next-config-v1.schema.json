@@ -56,6 +56,22 @@
       "required": ["request_independent", "failure_stage", "failure_code"],
       "properties": {
         "request_independent": {"const": true},
+        "projects": {"const": []},
+        "upstream_depth": {"const": null},
+        "downstream_depth": {"const": null},
+        "limits": {"const": null},
+        "trusted_environment_digest": {"const": null},
+        "source_plan": {"const": null},
+        "source_plan_digest": {"const": null},
+        "config_resolution": {"const": []},
+        "failure_stage": {"const": "source_read"},
+        "failure_code": {"enum": ["CSV-NEXT-LIMIT-001", "CSV-NEXT-SOURCE-003"]}
+      }
+    },
+    {
+      "required": ["request_independent", "failure_stage", "failure_code"],
+      "properties": {
+        "request_independent": {"const": true},
         "projects": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/project"}},
         "upstream_depth": {"const": null},
         "downstream_depth": {"const": null},

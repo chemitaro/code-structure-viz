@@ -60,8 +60,21 @@
       "then": {"properties": {"observed": {"$ref": "#/$defs/config_observed"}}}
     },
     {
-      "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"enum": ["source_selection", "source_read", "source_integrity"]}}},
+      "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"enum": ["source_selection", "source_integrity"]}}},
       "then": {"properties": {"observed": {"$ref": "#/$defs/source_observed"}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"const": "source_read"}}},
+      "then": {"properties": {"observed": {"oneOf": [{"$ref": "#/$defs/source_observed"}, {"$ref": "#/$defs/early_observed"}]}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"const": "source_read"}}},
+      "then": {
+        "oneOf": [
+          {"properties": {"failure_code": {"const": "CSV-NEXT-SOURCE-003"}}},
+          {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-001"}, "observed": {"$ref": "#/$defs/early_observed"}}}
+        ]
+      }
     },
     {
       "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"const": "trust_validation"}}},
