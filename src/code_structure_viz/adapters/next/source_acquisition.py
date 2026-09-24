@@ -502,12 +502,9 @@ def seal_source_acquisition(
         raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "limits")
 
     applicability_paths = frozenset(
-        "package.json" if root == "." else f"{root}/package.json"
-        for root in intent.project_roots
+        "package.json" if root == "." else f"{root}/package.json" for root in intent.project_roots
     )
-    guarded_reader = _GuardedSourceReader(
-        reader, applicability_paths=applicability_paths
-    )
+    guarded_reader = _GuardedSourceReader(reader, applicability_paths=applicability_paths)
     acquirer = NextSourceAcquirer(guarded_reader)
     preflight = acquirer.preflight(intent)
     applicability = preflight.matrix
