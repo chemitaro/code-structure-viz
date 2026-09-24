@@ -14,6 +14,7 @@ import json
 import re
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import cache, lru_cache
 from itertools import combinations
 from pathlib import Path
@@ -2312,8 +2313,59 @@ class EarlySourceReadPrefix:
         )
 
 
+class ReferenceSourceFailureKind(Enum):
+    """Closed failure model owned by the independent contract reference."""
+
+    ORDINARY_READ = "ordinary_read"
+    TOO_LARGE = "too_large"
+    TOO_MANY_FILES = "too_many_files"
+    UNSAFE_PATH = "unsafe_path"
+    SYMLINK = "symlink"
+    NON_REGULAR = "non_regular"
+    RACED_MISSING = "raced_missing"
+    INTEGRITY_DRIFT = "integrity_drift"
+
+
+@dataclass(frozen=True, slots=True)
+class _ReferenceSourceFailureProjection:
+    diagnostic_code: str
+    stage: str
+    include_path: bool
+
+
+_REFERENCE_SOURCE_FAILURES: dict[ReferenceSourceFailureKind, _ReferenceSourceFailureProjection] = {
+    ReferenceSourceFailureKind.ORDINARY_READ: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-SOURCE-001", "source_read", True
+    ),
+    # These are public contract projections, not the production reader's
+    # internal stage labels. LIMIT-001 permits source_read in the decision
+    # matrix and its catalog deliberately forbids a public path reference.
+    ReferenceSourceFailureKind.TOO_LARGE: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-LIMIT-001", "source_read", False
+    ),
+    ReferenceSourceFailureKind.TOO_MANY_FILES: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-LIMIT-001", "source_read", False
+    ),
+    ReferenceSourceFailureKind.UNSAFE_PATH: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-SOURCE-003", "source_read", True
+    ),
+    ReferenceSourceFailureKind.SYMLINK: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-SOURCE-003", "source_read", True
+    ),
+    ReferenceSourceFailureKind.NON_REGULAR: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-SOURCE-003", "source_read", True
+    ),
+    ReferenceSourceFailureKind.RACED_MISSING: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-SOURCE-003", "source_read", True
+    ),
+    ReferenceSourceFailureKind.INTEGRITY_DRIFT: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-SOURCE-INTEGRITY-001", "source_integrity", False
+    ),
+}
+
+
 class InstrumentedSourceReader:
-    """Trusted snapshot reader used to model one bounded source acquisition."""
+    """Independent test reader; string injections mean ordinary READ failures."""
 
     def __init__(
         self,
@@ -2323,7 +2375,7 @@ class InstrumentedSourceReader:
         revision: str = "revision-v1",
         revision_after: str | None = None,
         source_graph: dict[str, Any] | None = None,
-        read_failures: Mapping[str, str] | None = None,
+        read_failures: Mapping[str, str | ReferenceSourceFailureKind] | None = None,
     ) -> None:
         self._files = dict(files)
         self.snapshot_id = snapshot_id
@@ -2367,12 +2419,25 @@ class InstrumentedSourceReader:
         self.read_counts[path] = self.read_counts.get(path, 0) + 1
         assert self.read_counts[path] == 1, path
         if path in self._read_failures:
-            self._observed_read_failures[path] = self._read_failures[path]
+            configured_failure = self._read_failures[path]
+            if isinstance(configured_failure, ReferenceSourceFailureKind):
+                projection = _REFERENCE_SOURCE_FAILURES[configured_failure]
+                failure_kind = configured_failure
+                code = projection.diagnostic_code
+                stage = projection.stage
+                diagnostic_path = path if projection.include_path else None
+            else:
+                code = configured_failure
+                stage = "source_read"
+                diagnostic_path = path
+                failure_kind = ReferenceSourceFailureKind.ORDINARY_READ
+            self._observed_read_failures[path] = code
             raise SourceAcquisitionError(
-                self._read_failures[path],
-                "source_read",
+                code,
+                stage,
                 f"trusted snapshot read failed: {path}",
-                path=path,
+                path=diagnostic_path,
+                reference_failure_kind=failure_kind,
             )
         payload = self._files[path]
         self._observed_files[path] = payload
@@ -2409,8 +2474,8 @@ class InstrumentedSourceReader:
         return copy.deepcopy(self._source_graph)
 
     @property
-    def read_failures(self) -> dict[str, str]:
-        """Return the typed failures observed by this reader."""
+    def read_failures(self) -> dict[str, str | ReferenceSourceFailureKind]:
+        """Return configured failure injections for this test reader."""
 
         return copy.deepcopy(self._read_failures)
 
@@ -2418,10 +2483,19 @@ class InstrumentedSourceReader:
 class SourceAcquisitionError(AssertionError):
     """Typed fail-closed result for malformed or drifting source snapshots."""
 
-    def __init__(self, code: str, stage: str, message: str, *, path: str | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        stage: str,
+        message: str,
+        *,
+        path: str | None = None,
+        reference_failure_kind: ReferenceSourceFailureKind | None = None,
+    ) -> None:
         self.code = code
         self.stage = stage
         self.path = path
+        self.reference_failure_kind = reference_failure_kind
         super().__init__(message)
 
 
@@ -4617,6 +4691,11 @@ def seal_source_acquisition(
         try:
             contents[path] = reader.read(path)
         except SourceAcquisitionError as exc:
+            # A normal I/O READ failure means applicability could not be
+            # established. Limits, integrity, path-safety, and raced-missing
+            # failures retain their own public contract outcome.
+            if exc.reference_failure_kind is not ReferenceSourceFailureKind.ORDINARY_READ:
+                raise
             raise SourceAcquisitionError(
                 "CSV-NEXT-APPLICABILITY-002",
                 "applicability",

@@ -67,6 +67,7 @@ from tests.contracts.next_reference_validation import (
     PublicationBoundaryDecision,
     R23Decision,
     R23PublicationBoundary,
+    ReferenceSourceFailureKind,
     SourceAcquisitionError,
     SourceAcquisitionUnavailable,
     SourceDiscoveryIntent,
@@ -14070,6 +14071,114 @@ def test_actual_acquisition_failure_preserves_its_catalog_stage_and_code(
     assert (result.diagnostic_code, result.stage) == (code, stage)
     projection = source_acquisition_result_decision(result)
     assert (projection.diagnostic_code, projection.stage, projection.exit_code) == (code, stage, 3)
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "result_type", "code", "stage", "path", "exit_code"),
+    [
+        (
+            ReferenceSourceFailureKind.ORDINARY_READ,
+            SourceAcquisitionUnavailable,
+            "CSV-NEXT-APPLICABILITY-002",
+            "applicability",
+            None,
+            3,
+        ),
+        (
+            ReferenceSourceFailureKind.TOO_LARGE,
+            SourceAcquisitionUnavailable,
+            "CSV-NEXT-LIMIT-001",
+            "source_read",
+            None,
+            3,
+        ),
+        (
+            ReferenceSourceFailureKind.TOO_MANY_FILES,
+            SourceAcquisitionUnavailable,
+            "CSV-NEXT-LIMIT-001",
+            "source_read",
+            None,
+            3,
+        ),
+        (
+            ReferenceSourceFailureKind.UNSAFE_PATH,
+            SourceAcquisitionUnavailable,
+            "CSV-NEXT-SOURCE-003",
+            "source_read",
+            "apps/web/package.json",
+            3,
+        ),
+        (
+            ReferenceSourceFailureKind.SYMLINK,
+            SourceAcquisitionUnavailable,
+            "CSV-NEXT-SOURCE-003",
+            "source_read",
+            "apps/web/package.json",
+            3,
+        ),
+        (
+            ReferenceSourceFailureKind.NON_REGULAR,
+            SourceAcquisitionUnavailable,
+            "CSV-NEXT-SOURCE-003",
+            "source_read",
+            "apps/web/package.json",
+            3,
+        ),
+        (
+            ReferenceSourceFailureKind.RACED_MISSING,
+            SourceAcquisitionUnavailable,
+            "CSV-NEXT-SOURCE-003",
+            "source_read",
+            "apps/web/package.json",
+            3,
+        ),
+        (
+            ReferenceSourceFailureKind.INTEGRITY_DRIFT,
+            SourceIntegrityFatal,
+            "CSV-NEXT-SOURCE-INTEGRITY-001",
+            "source_integrity",
+            None,
+            1,
+        ),
+    ],
+)
+def test_package_read_failure_preserves_its_distinct_reference_outcome(
+    failure_kind: ReferenceSourceFailureKind,
+    result_type: type[SourceAcquisitionUnavailable] | type[SourceIntegrityFatal],
+    code: str,
+    stage: str,
+    path: str | None,
+    exit_code: int,
+) -> None:
+    package_path = "apps/web/package.json"
+    reader = InstrumentedSourceReader(
+        {
+            package_path: b'{"dependencies":{"next":"15"}}',
+            "apps/web/tsconfig.json": b"{}",
+            "apps/web/src/page.tsx": b"must remain unread",
+        },
+        read_failures={package_path: failure_kind},
+    )
+
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=("apps/web",), control_candidates=()),
+        reader,
+    )
+
+    assert isinstance(result, result_type)
+    assert (result.diagnostic_code, result.stage, getattr(result, "path", None)) == (
+        code,
+        stage,
+        path,
+    )
+    projection = source_acquisition_result_decision(result)
+    assert (projection.diagnostic_code, projection.stage, projection.exit_code) == (
+        code,
+        stage,
+        exit_code,
+    )
+    assert reader.read_counts == {package_path: 1}
+    assert reader.seal_calls == 0
 
 
 @pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
