@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-23"
+最終更新: "2026-09-24"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -51,7 +51,7 @@ semantic rendererはdecisionだけを受け、publication finalizerは実際のc
 
 run-level terminal branchはpublication finalizerの前に一度だけ分岐します。project-rootのancestor/descendant overlapは`SourceProjectUsage`としてusage/exit 2、stdout空、Artifactなし、reader・decoder・finalizer・artifact readなしで終了します。source revision driftなどのintegrity violationは`SourceIntegrityFatal`としてfatal/exit 1、manifest/Artifactなし、Next catalog診断をstderrへ出します。捕捉済み`PublicationInterrupted`/`KeyboardInterrupt`はcore `CSV-INTERRUPT-001`を再構築してinterrupted/exit 130とし、付属diagnosticのmessage/path/domainを信頼しません。selectorは全4形（省略、manifest、semantic-json、PlantUML）で同じ分岐表を使い、terminal stdoutは空またはtyped unavailable/summaryのsealed bytesだけを返します。
 
-現在の整備対象はdata-only reference contractです。production adapter、OS process-level証明、Node runtimeの実測は未実施です。2026-09-08のユーザー指示により、外部ChatGPT系スキルは停止し、独立GPT-6・推論Maxの固定SHAレビューへ切り替えます。必要な検証と重要指摘ゼロを確認するまでimplementation readinessを確定しません。内部レビューと過去の外部Strict結果を混同しません。
+現在の整備対象はdata-only reference contractです。production adapter、OS process-level証明、Node runtimeの実測は未実施です。2026-09-24のユーザー指示は、依存/toolchain/processなど実装を阻む課題に対してcleanかつpush済みの固定SHAをChatGPT-Use Strict（GPT-5.6 Pro）で分析し、Artifact化してlocal authorityへ照合することを求めます。Strict分析はadvisoryであり、独立レビューと`I05-PLAN-008` gateを置き換えません。必要な検証と重要指摘ゼロを確認するまでimplementation readinessを確定しません。内部レビューと外部Strict分析・レビューの役割を混同しません。
 
 ## Canonical design index and historical evidence boundary (G10)
 
@@ -505,7 +505,8 @@ serializer と manifest builder は `incomplete_kind` と `payload_available` �
 
 ### Project applicability and source plan
 
-- selected project root直下`package.json`のdirect `dependencies.next`または`devDependencies.next`がnon-empty stringの場合だけapplicableとする。
+- selected project root直下`package.json`のdirect `dependencies.next`または`devDependencies.next`にvalid non-empty stringがあればapplicableとする。両方がvalidでもversionを比較しない。
+- inventoryにroot `package.json`がない場合はnon-applicable。inventoryで存在を確認したpackageの通常`READ` I/O failureは`CSV-NEXT-APPLICABILITY-002`/`applicability`/`payload_unavailable`とし、raw error/pathを出さずconfig/source/Nodeへ進まない。malformed package contentsもAPP-002。limit、source-integrity、unsafe-path/symlink/non-regular/raced-missingは専用の既存failureに留める。
 - `next.config.*`、directory名、source import、lockfile indirect entryはapplicability evidenceにしない。
 - applicable project 0かつexplicit targetなしはNode probeなし`not_applicable`。applicableでComponent 0は`complete empty`。malformed manifest/configはabsenceを証明できないため`payload_unavailable`。
 - immutable `SourceAcquisitionPlan`はproject roots、program/context/control files、include roots、hard exclusions、finite limits、plan versionを持つ。
@@ -678,11 +679,13 @@ overlapping rootsを禁止するため、各source moduleのowning projectは一
 
 | package observation | project state | aggregate effect |
 | --- | --- | --- |
-| fileなし | non_applicable | 他にapplicableがなければdomain not_applicable |
+| package pathがinventoryにない | non_applicable | `CSV-NEXT-APPLICABILITY-001`; 他にapplicableがなければdomain not_applicable |
 | valid object、dependency tablesなし/`next`なし | non_applicable | 同上 |
-| `dependencies.next`または`devDependencies.next`がnon-empty string | applicable |解析対象 |
+| `dependencies.next`または`devDependencies.next`のいずれか/両方にvalid non-empty string | applicable |解析対象。両方でもversion equalityを比較しない |
 | `next` presentだがempty/non-string、dependency table non-object | malformed |domain payload unavailable |
-| invalid UTF-8/BOM、invalid JSON、duplicate key、root non-object、read failure | malformed |domain payload unavailable |
+| invalid UTF-8/BOM、invalid JSON、duplicate object key、root non-object | malformed |`CSV-NEXT-APPLICABILITY-002` / applicability / payload unavailable |
+| inventory上で存在するpackageの通常`READ` I/O failure | matrixを作らない |`CSV-NEXT-APPLICABILITY-002`; refなし、raw error/pathなし、config/source/Node未観測 |
+| package readのlimit、integrity、unsafe path、symlink、non-regularまたはraced-missing | matrixを作らない |各専用の既存limit/integrity/source failureを維持 |
 
 - 両dependency tableにvalid non-empty `next`があればapplicable。version semanticsは解釈せずredacted existenceだけを使う。
 - 一方でも`next` keyがinvalidなら、他方がvalidでもconflicting evidenceとしてmalformed。

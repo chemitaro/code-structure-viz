@@ -502,7 +502,7 @@
         {
           "properties": {
             "code": {"const": "CSV-NEXT-APPLICABILITY-002"},
-            "message": {"const": "The selected project's package applicability evidence is malformed."}
+            "message": {"const": "The selected project's package applicability evidence could not be read or validated."}
           }
         },
         {

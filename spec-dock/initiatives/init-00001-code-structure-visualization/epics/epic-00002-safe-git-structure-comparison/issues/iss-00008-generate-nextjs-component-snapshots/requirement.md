@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-23"
+最終更新: "2026-09-24"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -21,7 +21,7 @@ package_sequence_key: "ISSUE-05"
 
 現行v1で固定する判断は次のとおりです。
 
-1. applicabilityは`package.json`の`dependencies`/`devDependencies`にある直接`next`だけを観測し、全non-applicableはNode/config/sourceを読まずrequest-independent `not_applicable`、mixedはapplicable rootだけを通します。malformed packageは専用`CSV-NEXT-APPLICABILITY-002`でfail-closedです。
+1. applicabilityは`package.json`の`dependencies`/`devDependencies`にある直接`next`だけを観測し、全non-applicableはNode/config/sourceを読まずrequest-independent `not_applicable`、mixedはapplicable rootだけを通します。有効な非空direct `next`が両tableにある場合も、値の一致・不一致を比較せずapplicableです。malformed package、または存在を確認したroot `package.json`の通常read I/O failureは専用`CSV-NEXT-APPLICABILITY-002`でfail-closedにします。missing packageは`CSV-NEXT-APPLICABILITY-001`、limit・integrity・path-safety failureとpackage判定後のsource read failureはそれぞれの既存stage/codeを維持します。
 2. configはBOM/comment/trailing commaを合成する閉じたJSONCとし、local `./...` extends、declaring config path、`files`/`include`の排他的membership、宣言場所相対の`baseUrl`/`paths`、exact-before-wildcardを同じresolverで決定します。`files`/`include`/`exclude`各値は、その値を宣言したconfig（extends先を含む）のディレクトリを解決基準とします。解決後にrepository-relative POSIX pathへ正規化し、selected project root内への包含を検証します。raw解決基準とcanonical表示形式は別の意味として扱います。
 3. source graphはfrozen bytesからprovableなresolved/open unionを導出します。type/value role、dynamic import、export-from、requireを保持し、不確実なedgeは安全なfrontierまたはbyte-span由来のopaque identityだけを公開します。
 4. processはpolicyとobserved launchを分離し、observationを唯一の測定authorityとします。macOS/Linuxの実装はNode実体、adapter、argv、cwd、env、stdio/FD、group、TOCTOUを相互拘束し、証明できなければunavailableです。
@@ -33,7 +33,7 @@ package_sequence_key: "ISSUE-05"
 10. validated request後、validated semantic responseおよびtarget-resolution proofより前に失敗した場合は、request/config/run identityの明示targetを保持し、`coverage.target_completeness`に行を生成しません。空配列はtargetが指定されなかったこと、またはtarget resolutionがcomplete/failedだったことを意味しません。target failure reasonや`CSV-NEXT-TARGET-001`を合成せず、当該pre-response failureの診断だけを公開します。validated responseのproofがある場合のtarget-completeness行は従来どおりproofから導出します。
 11. `request_independent`は「validated adapter requestがない」ことを意味し、先行観測が一切ないことを意味しません。actual `source_read` failureが`SourceAcquisitionSeal`を保持する場合、applicability/config/source/limits/source-planの観測済みprefixをprovenance、publication context、run-decision、config、domainで同一digest/valueに結びます。request、runtime/toolchain/trusted-environment/compatibility/process観測、semantic payloadとtarget-resolution rowsは作りません。sealのない先行failureは引き続き未観測値をnullにします。
 
-現在の作業は実装前契約の整備であり、production adapter/Node実行は含みません。2026-09-08の明示指示により、利用不能な外部ChatGPT系スキルを停止し、主担当GPT-6の分析と独立GPT-6・推論Maxレビューへ切り替えます。cleanかつpush済みの固定SHAを対象に必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、実装開始可能性は未確定です。内部レビューを外部ChatGPT Strict passと表記しません。過去のStrict結果は当時の証拠として保持します。
+2026-09-24のユーザー指示は、Issue #8の依存・toolchain・processなど実装を阻む課題について、cleanかつpush済みの固定SHAに対するChatGPT-Use Strict（GPT-5.6 Pro）で根本原因と推奨策を分析し、内容をArtifactへ保存したうえでcanonical authorityとsource/testへ照合することを求めます。この分析はadvisoryであり、独立レビューや`I05-PLAN-008`の実装readiness gateを置き換えません。現在の作業は引き続き実装前契約の整備であり、production adapter/Node実行は含みません。必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、I05-PLAN-002以降のproduction実装開始可能性は未確定です。過去のStrict結果は当時の証拠として保持します。
 
 ## Canonical index and historical evidence boundary (G10)
 
@@ -111,7 +111,7 @@ coding agent が first-party TypeScript adapter を通じ、Next.js repository �
 coding agent が first-party TypeScript adapter を通じ、Next.js repository の module、exported component、props、static relation、client boundary を JSON と PlantUML で取得できる。
 ### I05-REQ-002
 
-Python coreは明示project rootの`package.json`にあるdirect `next` dependencyからapplicabilityを判定し、domain-owned acquisition planでGit source bytesを一度だけ凍結する。one-shot first-party Node adapterはstdin virtual files、bundled TypeScript、versioned closed TrustedTypeEnvironmentだけを解析する。Node.js 22 LTS以上はapplicable Next runだけで要求する。
+Python coreは明示project rootの`package.json`にあるdirect `dependencies.next`または`devDependencies.next`からapplicabilityを判定する。両方に有効な非空stringがある場合は値が同じかに関係なくapplicableとする。root packageがpath inventoryに存在しない場合はnon-applicable、存在するpackageの通常read I/O failureまたは内容のmalformed evidenceは`CSV-NEXT-APPLICABILITY-002`/`applicability`/`payload_unavailable`で閉じ、raw OS errorとpublic pathを出さず、config/source/Nodeを観測しない。source-integrity drift、limits、path-safety/symlink等は既存の専用failureを維持し、package判定後の通常source read failureは`CSV-NEXT-SOURCE-003`/`source_read`とする。domain-owned acquisition planでGit source bytesを一度だけ凍結する。one-shot first-party Node adapterはstdin virtual files、bundled TypeScript、versioned closed TrustedTypeEnvironmentだけを解析する。Node.js 22 LTS以上はapplicable Next runだけで要求する。
 ### I05-REQ-003
 
 Component identityはrepository-relative physical declaration moduleとdeclaration key。named bindingまたはmodule-local `@anonymous-default` slotを使う。export/re-export/alias/defaultは`ExportBindingMember`、route pathとrouter contextはattributeとし、identityに含めない。
@@ -142,7 +142,7 @@ code-structure-viz snapshot --repo . --domain next --format semantic-json --stdo
 ### source acquisition contract
 
 - `--repo`はexact Git rootのまま、repeatable `--project REPOSITORY_RELATIVE_DIRECTORY`でNext project rootを明示する。CLI指定はconfig `[next].projects[].root`を置換し、root固有source/configはproject descriptorから解決する。default projectは`.`。monorepo/workspaceを自動探索しない。
-- project root直下`package.json`のdirect `dependencies.next`または`devDependencies.next`にnon-empty stringがある場合だけapplicableとする。`next.config.*`、directory名、source import、lockfile indirect entryをevidenceにしない。
+- project root直下`package.json`のdirect `dependencies.next`または`devDependencies.next`にnon-empty stringがある場合applicableとする。両方が有効な場合も値の比較なしでapplicableとする。package pathがinventoryにない場合はmissing/non-applicable。inventory上で存在を確認したpackageの通常read I/O failureは`CSV-NEXT-APPLICABILITY-002`、stage `applicability`、`payload_unavailable`、`recoverable=false`、refなしとし、config/source/Nodeへ進まない。source drift、limits、unsafe path、symlink、非regular file、raced missingは既存のfailure classを保ち、package判定後の通常source read failureは`CSV-NEXT-SOURCE-003`/`source_read`とする。`next.config.*`、directory名、source import、lockfile indirect entryをevidenceにしない。
 - domain-owned immutable SourceAcquisitionPlanに従い、Python coreがprogram/control/context bytesを一度だけSourceViewへ凍結する。Nodeへtarget root path/cwdを渡さない。
 - program filesはTS/TSX/JS/JSX、`.d.ts`はcontext-only。`.git`、`node_modules`、`.next`、`out`、`dist`、`build`、`coverage`はhard exclude。test/spec/storyはdefault excludeにしない。
 - config lookupは`tsconfig.json`、`jsconfig.json`、versioned built-in safe configの順。repository-local `extends`、`baseUrl`、`paths`だけをfrozen SourceView内で解決し、package-based extendsやtarget `node_modules`を暗黙に読まない。

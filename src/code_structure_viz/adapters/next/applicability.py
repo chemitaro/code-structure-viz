@@ -259,8 +259,6 @@ def _derive_entries(
                     malformed = True
                 else:
                     direct_versions.append(version.strip())
-            if len(direct_versions) > 1:
-                malformed = True
         except (UnicodeDecodeError, ValueError, RecursionError):
             malformed = True
             direct_versions = []

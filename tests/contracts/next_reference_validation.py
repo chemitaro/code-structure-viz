@@ -2634,7 +2634,6 @@ def _derive_package_applicability_entries(
         try:
             package = _package_json(payload, package_path)
             direct_next = False
-            direct_versions: list[str] = []
             malformed = False
             for table_name in ("dependencies", "devDependencies"):
                 if table_name not in package:
@@ -2650,14 +2649,6 @@ def _derive_package_applicability_entries(
                     malformed = True
                 else:
                     direct_next = True
-                    direct_versions.append(version.strip())
-            # ``dependencies.next`` and ``devDependencies.next`` are two
-            # independent observations of one direct applicability fact.  A
-            # package declaring Next in both tables is rejected as a duplicate
-            # declaration: there is no precedence rule that could safely pick
-            # one range, even when the strings happen to be equal.
-            if len(direct_versions) > 1:
-                malformed = True
             state = "malformed" if malformed else "applicable" if direct_next else "non_applicable"
             evidence = (
                 "malformed_package"

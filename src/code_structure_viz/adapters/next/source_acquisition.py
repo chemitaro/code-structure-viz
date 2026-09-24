@@ -244,8 +244,11 @@ class NextSourceSealReader(NextSourceReader, Protocol):
 class _GuardedSourceReader:
     """Translate trusted descriptor-read failures into closed domain outcomes."""
 
-    def __init__(self, reader: NextSourceSealReader) -> None:
+    def __init__(
+        self, reader: NextSourceSealReader, *, applicability_paths: frozenset[str]
+    ) -> None:
         self._reader = reader
+        self._applicability_paths = applicability_paths
 
     def enumerate_paths(self) -> tuple[str, ...]:
         try:
@@ -265,6 +268,10 @@ class _GuardedSourceReader:
             }:
                 raise NextSourceAcquisitionError(
                     "CSV-NEXT-LIMIT-001", "limits", path=path
+                ) from error
+            if error.kind is SourceReadFailureKind.READ and path in self._applicability_paths:
+                raise NextSourceAcquisitionError(
+                    "CSV-NEXT-APPLICABILITY-002", "applicability"
                 ) from error
             raise NextSourceAcquisitionError(
                 "CSV-NEXT-SOURCE-003", "source_read", path=path
@@ -494,7 +501,13 @@ def seal_source_acquisition(
     if type(max_entities) is not int or not 1 <= max_entities <= 100_000:
         raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "limits")
 
-    guarded_reader = _GuardedSourceReader(reader)
+    applicability_paths = frozenset(
+        "package.json" if root == "." else f"{root}/package.json"
+        for root in intent.project_roots
+    )
+    guarded_reader = _GuardedSourceReader(
+        reader, applicability_paths=applicability_paths
+    )
     acquirer = NextSourceAcquirer(guarded_reader)
     preflight = acquirer.preflight(intent)
     applicability = preflight.matrix

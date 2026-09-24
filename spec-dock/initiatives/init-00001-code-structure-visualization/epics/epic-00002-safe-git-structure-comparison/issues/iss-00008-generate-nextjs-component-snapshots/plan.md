@@ -16,7 +16,7 @@ package_sequence_key: "ISSUE-05"
 
 ## Current v1 normative authority
 
-この節が唯一の現在の実装順序・受入正本です。後続の`Round N`節はhistorical evidence（非normative）として保存し、実装計画を上書きしません。新たなmaterial requirement/security/platform判断は追加せず、採択済みのIssue #8契約と既存public schemaを結ぶ実行可能なreference chainだけをmaterializeします。R23専用authority registryは使用しません。
+この節が唯一の現在の実装順序・受入正本です。後続の`Round N`節はhistorical evidence（非normative）として保存し、実装計画を上書きしません。2026-09-24のユーザーはChatGPT-Use Strict（GPT-5.6 Pro）のdependency-blocker分析を受け、package applicabilityの二つの不一致（両direct declarationの誤判定、およびroot package read-I/O failureのstage/code誤分類）をcurrent-v1契約へ明示して修正することを承認しました。この限定的な要件明確化以外のmaterial requirement/security/platform判断は追加せず、R23専用authority registryは使用しません。
 
 ```text
 frozen package bytes
@@ -28,11 +28,11 @@ frozen package bytes
   -> domain/root/manifest/stdout/stderr/exit
 ```
 
-実装前の順序は、(1) package-only preflight、(2) project-relative controlsとJSONC/local-extends/membership、(3) source graph resolved/open/privacy、(4) process policy/observation、(5) provenance stage matrix、(6) semantic and publication projection、(7) executable coverage registryです。各段階はpositive/negative vector、実schema、reference validatorを同時に追加し、caller-supplied graph/paths/roles/status/bytesを拒否します。`files`/`include`の空配列も明示値として扱い、defaultsは双方が無いときだけです。membership値は宣言元config directoryから解決し、repository-relative POSIX pathへ正規化した後にselected project root containmentを検証します。`test_config_inheritance_retains_origins_through_actual_source_seal`がこのjoinのcurrent-v1 regression authorityです。run/publication provenanceは`run-manifest/v1`とNext domain manifest、checked-in reference/build inventoryは別schema identityです。
+実装前の順序は、(1) package-only preflight、(2) project-relative controlsとJSONC/local-extends/membership、(3) source graph resolved/open/privacy、(4) process policy/observation、(5) provenance stage matrix、(6) semantic and publication projection、(7) executable coverage registryです。package preflightは両direct declarationがvalidならversion equalityに関係なくapplicableとし、inventory上で存在するroot packageの通常`READ` I/O failureだけをAPP-002/applicabilityへ分類します。missing package、limit、integrity、path-safety、later source-readは別outcomeのままです。各段階はpositive/negative vector、実schema、reference validatorを同時に追加し、caller-supplied graph/paths/roles/status/bytesを拒否します。`files`/`include`の空配列も明示値として扱い、defaultsは双方が無いときだけです。membership値は宣言元config directoryから解決し、repository-relative POSIX pathへ正規化した後にselected project root containmentを検証します。`test_config_inheritance_retains_origins_through_actual_source_seal`がこのjoinのcurrent-v1 regression authorityです。run/publication provenanceは`run-manifest/v1`とNext domain manifest、checked-in reference/build inventoryは別schema identityです。
 
 run-level terminalはsemantic/finalizerの前段にある独立した一回限りの分岐として計画する。project-root overlapは`CSV-NEXT-PROJECT-001` usage/exit 2（reader・decoder・finalizer・Artifactなし）、source-integrity driftは`CSV-NEXT-SOURCE-INTEGRITY-001` fatal/exit 1（manifestなし）、handled interruptはcore `CSV-INTERRUPT-001` interrupted/exit 130（cleanup後）へ投影する。全selectorでterminal branchのstdout/stderr/exitを同じdecisionから生成し、付属診断やcandidate bytesを再利用しない。G09のcurrent authorityは現行v1 reference chainを使うRound22 runtime registryに限定し、各criterionのpositive/negative vector、実callable producer、validator、substantive testを双方向に検証する。Round23の旧helperとregistryは`historical_runtime_vector_registry`へ隔離し、current coverageを同じsurrogateで埋めない。
 
-受入では、contract focused test、all contract/full pytest、mypy、ruff、SpecDock、pinned PlantUMLを順に実行します。Windows/OS process-level/将来wheel・sdistはproductionまたは別migrationの計画契約として記録し、実測済みとは主張しません。2026-09-08のユーザー指示により外部ChatGPT系スキルを停止し、主担当GPT-6で修正、独立GPT-6・推論Maxでレビューします。cleanかつpush済みの固定SHAについて必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、production実装を開始しません。後段の外部Strict必須という履歴は現在の検証経路を上書きしません。
+受入では、contract focused test、all contract/full pytest、mypy、ruff、SpecDock、pinned PlantUMLを順に実行します。Windows/OS process-level/将来wheel・sdistはproductionまたは別migrationの計画契約として記録し、実測済みとは主張しません。2026-09-24のユーザー指示により、今回のようなdependency/toolchain/process blockerはChatGPT-Use Strict（GPT-5.6 Pro）でclean/pushed exact-SHA分析し、Artifactとlocal source/testで照合します。このadvisory分析はI05-PLAN-008の独立GPT-6 Max reviewを置き換えず、そのgateを通過するまでproduction実装を開始しません。
 
 ## Canonical execution index and future package gate (G10/G11)
 
@@ -377,6 +377,10 @@ fresh current-SHA Strictはpending/readiness unconfirmed、production implementa
 - anti-shadowing、finite recognition/export、per-project config/module resolution、two-phase freeze、protocol/digest、PropsTypeIR/JS extraction、flow/boundary、partial-safe taint proof、public schema/config/package contractをfield-levelでcanonical Designへ固定する。これをproduction implementation後の判断へ先送りしない。
 
 ### I05-PLAN-001 acceptance-first contract
+
+#### 2026-09-24 dependency-blocker remediation
+
+The user explicitly adopted the best-practice path from the exact-SHA ChatGPT-Use Strict dependency analysis. Current-v1 applicability accepts both valid non-empty direct declarations regardless of equality. An ordinary `SourceReadFailureKind.READ` for an indexed root `package.json` is `CSV-NEXT-APPLICABILITY-002` at `applicability` with no public path and no downstream config/source/Node observation; missing package stays `CSV-NEXT-APPLICABILITY-001`, and limit, source-integrity, path-safety, symlink/non-regular/raced-missing, and later source-read failures retain their existing distinct outcomes. Update catalog, production path, independent reference validator, and executable unit/contract tests together. Do not alter historical Round prose. Actual adapter resource/process implementation remains gated by `I05-PLAN-008`.
 
 - App/Pages Router、named/default/anonymous default、barrel/re-export/alias、reachable/unreachable local Componentをfixture化する。
 - inline/interface/alias/import/destructured/FC/class/forwardRef/generic/union/intersection propsとcomplexity opaqueをfixture化する。

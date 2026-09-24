@@ -94,7 +94,6 @@ def test_applicability_uses_only_direct_next_dependencies_and_canonical_order() 
         b"[]",
         b'{"dependencies":[]}',
         b'{"dependencies":{"next":"  "}}',
-        b'{"dependencies":{"next":"15"},"devDependencies":{"next":"15"}}',
         b'{"dependencies":{"next":"15","next":"16"}}',
         b'{"name":"plain","name":"duplicate"}',
         b'{"dependencies":{"next":NaN}}',
@@ -136,6 +135,21 @@ def test_valid_single_bom_package_and_dependencies_next_are_applicable() -> None
 
     assert matrix.aggregate_state is PackageApplicabilityState.APPLICABLE
     assert matrix.entries[0].evidence == "direct_next_dependency"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"dependencies":{"next":"15"},"devDependencies":{"next":"15"}}',
+        b'{"dependencies":{"next":"14"},"devDependencies":{"next":"^15"}}',
+    ],
+)
+def test_valid_dual_direct_next_declarations_are_applicable(payload: bytes) -> None:
+    matrix = derive_package_applicability_matrix({"package.json": payload}, (".",))
+
+    assert matrix.aggregate_state is PackageApplicabilityState.APPLICABLE
+    assert matrix.entries[0].state is PackageApplicabilityState.APPLICABLE
+    assert matrix.entries[0].evidence is PackageApplicabilityEvidence.DIRECT_NEXT_DEPENDENCY
 
 
 def test_observation_value_exposes_only_safe_package_byte_identities() -> None:

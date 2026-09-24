@@ -5851,8 +5851,8 @@ def test_round19_source_acquisition_union_is_typed_and_fail_closed() -> None:
         (b'{"devDependencies":{"next":"^15"}}', "applicable", "direct_next_dependency"),
         (
             b'{"dependencies":{"next":"14"},"devDependencies":{"next":"15"}}',
-            "malformed",
-            "malformed_package",
+            "applicable",
+            "direct_next_dependency",
         ),
         (b'{"dependencies":{"next":""}}', "malformed", "malformed_package"),
         (b'{"dependencies":{"next":false}}', "malformed", "malformed_package"),
@@ -5944,22 +5944,22 @@ def test_round21_applicability_matrix_owns_filter_probe_and_all_public_surfaces(
     assert malformed["root_manifest"]["exit_code"] == 3
     assert malformed["stdout_result"]["branch"] == "typed_unavailable"
 
-    # A direct declaration in both tables is a duplicate/conflicting
-    # applicability observation and must fail closed before Node probing.
-    conflicting = derive_package_applicability_matrix(
+    # Two valid tables establish the same applicability fact; version text
+    # is deliberately not compared or given precedence.
+    dual_declaration = derive_package_applicability_matrix(
         {"package.json": b'{"dependencies":{"next":"14"},"devDependencies":{"next":"15"}}'},
         (".",),
     )
-    assert conflicting.aggregate_state == "malformed"
-    assert package_applicability_projection(conflicting)["node_probe"] == {
-        "permission": "prohibited",
+    assert dual_declaration.aggregate_state == "applicable"
+    assert package_applicability_projection(dual_declaration)["node_probe"] == {
+        "permission": "permitted",
         "performed": False,
     }
-    duplicate_direct = derive_package_applicability_matrix(
+    equal_dual = derive_package_applicability_matrix(
         {"package.json": b'{"dependencies":{"next":"15"},"devDependencies":{"next":"15"}}'},
         (".",),
     )
-    assert duplicate_direct.aggregate_state == "malformed"
+    assert equal_dual.aggregate_state == "applicable"
 
 
 def test_round21_applicability_source_observation_precedes_node_and_is_read_once() -> None:
@@ -12250,8 +12250,8 @@ def test_contract_fixture_index_materializes_plan_008_vectors() -> None:
     assert all(reverse.values())
 
 
-def test_round22_applicability_duplicate_and_malformed_projection() -> None:
-    """Applicability owns duplicate and malformed package branches."""
+def test_round22_applicability_dual_declarations_and_malformed_projection() -> None:
+    """Dual valid declarations apply; malformed package evidence fails closed."""
 
     equal_dual = derive_package_applicability_matrix(
         {
@@ -12261,15 +12261,14 @@ def test_round22_applicability_duplicate_and_malformed_projection() -> None:
         },
         (".",),
     )
-    assert equal_dual.aggregate_state == "malformed"
-    duplicate_projection = package_applicability_projection(equal_dual)
-    assert duplicate_projection["node_probe"] == {
-        "permission": "prohibited",
+    assert equal_dual.aggregate_state == "applicable"
+    dual_projection = package_applicability_projection(equal_dual)
+    assert dual_projection["node_probe"] == {
+        "permission": "permitted",
         "performed": False,
     }
-    assert duplicate_projection["domain"]["diagnostics"][0]["code"] == (
-        "CSV-NEXT-APPLICABILITY-002"
-    )
+    assert dual_projection["decision_kind"] == "ApplicabilityPreflightDecision"
+    assert dual_projection["domain"]["diagnostics"] == []
     malformed = derive_package_applicability_matrix(
         {"package.json": b'{"dependencies":{"next":false}}'}, (".",)
     )
@@ -12764,7 +12763,9 @@ def test_round23_rg_01_applicability_is_package_first_and_project_filtered() -> 
         ("apps/dual",),
     )
     validate_r23_applicability_projection(dual)
-    assert dual["outcome"] == "payload_unavailable"
+    assert dual["outcome"] == "complete"
+    assert dual["node_probe"] == {"permission": "permitted", "performed": True}
+    assert dual["project_filter"] == ["apps/dual"]
 
 
 def test_round23_rg_02_config_subset_has_one_closed_jsonc_grammar() -> None:
@@ -14097,6 +14098,12 @@ def test_actual_early_failure_preserves_observations_through_publication(
             reader,
         )
         assert isinstance(result, SourceAcquisitionUnavailable)
+        if failure == "package_read":
+            assert (result.diagnostic_code, result.stage, result.path) == (
+                "CSV-NEXT-APPLICABILITY-002",
+                "applicability",
+                None,
+            )
         observed = result.observation_provenance
         assert observed is not None
         reads_at_failure = dict(reader.read_counts)

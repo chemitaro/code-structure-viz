@@ -3,7 +3,7 @@
   "domain": "next",
   "entries": [
     {"code":"CSV-NEXT-APPLICABILITY-001","severity":"info","recoverable":true,"message":"Next.js is not directly declared by the selected project.","ref_permission":"none","outcome":"not_applicable"},
-    {"code":"CSV-NEXT-APPLICABILITY-002","severity":"error","recoverable":false,"message":"The selected project's package applicability evidence is malformed.","ref_permission":"none","outcome":"payload_unavailable"},
+    {"code":"CSV-NEXT-APPLICABILITY-002","severity":"error","recoverable":false,"message":"The selected project's package applicability evidence could not be read or validated.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-CONFIG-001","severity":"error","recoverable":false,"message":"The Next.js configuration is invalid or unsupported.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-CONFIG-002","severity":"error","recoverable":false,"message":"The Next.js configuration requests external or executable type resolution.","ref_permission":"none","outcome":"payload_unavailable"},
     {"code":"CSV-NEXT-EXPORT-001","severity":"error","recoverable":false,"message":"A component export cannot be resolved uniquely.","ref_permission":"symbol","outcome":"payload_unavailable"},

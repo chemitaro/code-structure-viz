@@ -22,6 +22,8 @@ from code_structure_viz.adapters.next.source_acquisition import (
 from code_structure_viz.source.git_repository import Commit, EnumeratedPath
 from code_structure_viz.source.source_view import (
     DescriptorAnchoredSourceReadSession,
+    SourceReadFailure,
+    SourceReadFailureKind,
     SourceView,
 )
 from tests.contracts.test_json_schemas import _validator
@@ -30,6 +32,7 @@ from tests.contracts.test_json_schemas import _validator
 @dataclass
 class MemorySourceReader:
     files: Mapping[str, bytes]
+    read_failures: Mapping[str, SourceReadFailureKind] = field(default_factory=dict)
     reads: list[str] = field(default_factory=list)
     enumerations: int = 0
     seal_calls: int = 0
@@ -40,6 +43,8 @@ class MemorySourceReader:
 
     def read_once(self, path: str) -> bytes:
         self.reads.append(path)
+        if path in self.read_failures:
+            raise SourceReadFailure(path, self.read_failures[path])
         return self.files[path]
 
     def seal(self, *, source_graph_digest: str | None = None) -> SourceView:
@@ -103,6 +108,70 @@ def test_malformed_package_applicability_fails_before_control_reads() -> None:
 
     assert caught.value.code == "CSV-NEXT-APPLICABILITY-002"
     assert caught.value.stage == "applicability"
+    assert reader.reads == ["package.json"]
+    assert reader.seal_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "code", "stage", "diagnostic_path"),
+    [
+        (
+            SourceReadFailureKind.READ,
+            "CSV-NEXT-APPLICABILITY-002",
+            "applicability",
+            None,
+        ),
+        (SourceReadFailureKind.TOO_LARGE, "CSV-NEXT-LIMIT-001", "limits", "package.json"),
+        (
+            SourceReadFailureKind.TOO_MANY_FILES,
+            "CSV-NEXT-LIMIT-001",
+            "limits",
+            "package.json",
+        ),
+        (SourceReadFailureKind.MISSING, "CSV-NEXT-SOURCE-003", "source_read", "package.json"),
+        (
+            SourceReadFailureKind.UNSAFE_PATH,
+            "CSV-NEXT-SOURCE-003",
+            "source_read",
+            "package.json",
+        ),
+        (SourceReadFailureKind.SYMLINK, "CSV-NEXT-SOURCE-003", "source_read", "package.json"),
+        (
+            SourceReadFailureKind.NON_REGULAR,
+            "CSV-NEXT-SOURCE-003",
+            "source_read",
+            "package.json",
+        ),
+    ],
+)
+def test_package_read_failure_classification_precedes_other_observations(
+    failure_kind: SourceReadFailureKind,
+    code: str,
+    stage: str,
+    diagnostic_path: str | None,
+) -> None:
+    reader = MemorySourceReader(
+        {
+            "package.json": b"unreadable",
+            "tsconfig.json": b"must remain unread",
+            "src/page.tsx": b"must remain unread",
+        },
+        read_failures={"package.json": failure_kind},
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent((".",)),
+            reader,
+            trusted_environment_digest="a" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        code,
+        stage,
+        diagnostic_path,
+    )
+    assert str(caught.value) == code
     assert reader.reads == ["package.json"]
     assert reader.seal_calls == 0
 
