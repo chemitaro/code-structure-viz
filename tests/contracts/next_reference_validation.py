@@ -1592,6 +1592,14 @@ class PreResponseFailureDecision:
                 context,
             )
         if self.request is None and (
+            self.stage,
+            self.diagnostic_code,
+        ) in {
+            ("source_selection", "CSV-NEXT-LIMIT-002"),
+            ("source_integrity", "CSV-NEXT-SOURCE-002"),
+        }:
+            assert self.early_read_prefix is not None
+        if self.request is None and (
             self.early_read_prefix is not None or self.stage in {"source_control", "source_read"}
         ):
             source_seal = context.source_acquisition_seal

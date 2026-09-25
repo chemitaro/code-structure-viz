@@ -14384,8 +14384,17 @@ def test_package_preflight_reader_failure_keeps_actual_prefix_through_publicatio
         with pytest.raises(AssertionError):
             replace(
                 decision,
+                early_read_prefix=None,
                 diagnostic={**decision.diagnostic, "path": "src/never-read.tsx"},
             )
+        with pytest.raises(AssertionError):
+            replace(
+                decision,
+                diagnostic={**decision.diagnostic, "path": "src/never-read.tsx"},
+            )
+    else:
+        with pytest.raises(AssertionError):
+            replace(decision, early_read_prefix=None)
     run_wire = next_run_decision_projection(decision)
     validate_next_run_decision_projection(run_wire, decision)
     _validator("next-run-decision-v1.schema.json").validate(run_wire)
@@ -14408,6 +14417,7 @@ def test_package_preflight_reader_failure_keeps_actual_prefix_through_publicatio
     assert manifest["run"]["exit_code"] == publication.exit_code == 3
     assert stdout["selector"] == selector
     assert json.loads(stderr)["code"] == diagnostic_code
+    object.__setattr__(decision, "early_read_prefix", None)
     if diagnostic_code == "CSV-NEXT-SOURCE-002":
         object.__setattr__(
             decision,
