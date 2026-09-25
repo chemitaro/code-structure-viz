@@ -60,7 +60,19 @@
       "then": {"properties": {"observed": {"$ref": "#/$defs/config_observed"}}}
     },
     {
-      "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"enum": ["source_selection", "source_integrity"]}}},
+      "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"const": "source_selection"}, "failure_code": {"const": "CSV-NEXT-LIMIT-002"}}},
+      "then": {"properties": {"observed": {"oneOf": [{"$ref": "#/$defs/preseal_source_observed"}, {"$ref": "#/$defs/config_observed"}, {"$ref": "#/$defs/early_observed"}]}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"const": "source_selection"}, "failure_code": {"const": "CSV-NEXT-SOURCE-003"}}},
+      "then": {"properties": {"observed": {"$ref": "#/$defs/source_observed"}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"const": "source_integrity"}, "failure_code": {"const": "CSV-NEXT-SOURCE-002"}}},
+      "then": {"properties": {"observed": {"oneOf": [{"$ref": "#/$defs/preseal_source_observed"}, {"$ref": "#/$defs/config_observed"}, {"$ref": "#/$defs/early_observed"}]}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "request_independent_failure"}, "stage": {"const": "source_integrity"}, "failure_code": {"const": "CSV-NEXT-SOURCE-003"}}},
       "then": {"properties": {"observed": {"$ref": "#/$defs/source_observed"}}}
     },
     {

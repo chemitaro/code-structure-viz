@@ -834,6 +834,7 @@ def _publication_provenance(
         source_read_failure = (
             normalized_kind == "request_independent_failure" and failure_stage == "source_read"
         )
+        phase_bound_prefixes = _allowed_reader_failure_prefixes(failure_code, failure_stage)
         if source_read_failure:
             allowed_prefixes = {
                 frozenset({"applicability"}),
@@ -846,6 +847,9 @@ def _publication_provenance(
             if "source_plan" in values:
                 assert failure_code == "CSV-NEXT-SOURCE-003"
             expected_observed = frozenset(values)
+        elif phase_bound_prefixes is not None:
+            expected_observed = frozenset(values)
+            assert expected_observed in phase_bound_prefixes
         else:
             expected_observed = _expected_provenance_observed(failure_stage)
         observed = {
@@ -1337,6 +1341,30 @@ PROVENANCE_LATE_STAGES = (
 )
 
 
+def _allowed_reader_failure_prefixes(
+    failure_code: str, stage: str
+) -> frozenset[frozenset[str]] | None:
+    """Return phase-derived prefixes for typed reader failures with shared stages."""
+
+    if stage == "source_selection" and failure_code == "CSV-NEXT-LIMIT-002":
+        return frozenset(
+            {
+                frozenset({"applicability"}),
+                frozenset({"applicability", "config"}),
+                frozenset({"applicability", "config", "source"}),
+            }
+        )
+    if stage == "source_integrity" and failure_code == "CSV-NEXT-SOURCE-002":
+        return frozenset(
+            {
+                frozenset({"applicability"}),
+                frozenset({"applicability", "config"}),
+                frozenset({"applicability", "config", "source"}),
+            }
+        )
+    return None
+
+
 def _expected_provenance_observed(stage: str) -> frozenset[str]:
     """Return the one canonical observed prefix for a failure stage."""
 
@@ -1439,6 +1467,14 @@ def validate_stage_dependent_provenance(value: dict[str, Any]) -> None:
         assert observed_prefix in allowed_prefixes
         if "source_plan" in observed_prefix:
             assert code == "CSV-NEXT-SOURCE-003"
+        expected_observed = observed_prefix
+    elif (phase_prefixes := _allowed_reader_failure_prefixes(code, stage)) is not None:
+        observed_prefix = frozenset(
+            name
+            for name in PROVENANCE_FIELDS
+            if name != "budget" and observed[name]["state"] == "observed"
+        )
+        assert observed_prefix in phase_prefixes
         expected_observed = observed_prefix
     else:
         expected_observed = _expected_provenance_observed(stage)
@@ -2302,7 +2338,13 @@ class EarlySourceReadPrefix:
     path: str | None
 
     def __post_init__(self) -> None:
-        assert self.stage in {"applicability", "source_control", "source_read"}
+        assert self.stage in {
+            "applicability",
+            "source_control",
+            "source_read",
+            "source_selection",
+            "source_integrity",
+        }
         assert self.phase in {"applicability", "root_config", "local_extends", "program", "context"}
         assert self.failure_kind is None or isinstance(
             self.failure_kind, ReferenceSourceFailureKind
@@ -2337,6 +2379,8 @@ class EarlySourceReadPrefix:
             for _, phase in self.read_phases
         )
         if self.stage == "source_read":
+            assert self.diagnostic_code in {"CSV-NEXT-LIMIT-001", "CSV-NEXT-SOURCE-003"}
+        if self.stage in {"source_read", "source_selection", "source_integrity"}:
             assert self.failure_kind is not None
             failure_projection = _REFERENCE_READ_FAILURES[self.failure_kind]
             assert failure_projection.diagnostic_code == self.diagnostic_code
@@ -2406,6 +2450,14 @@ class EarlySourceReadPrefix:
             values["config"] = observations_for("root_config", "local_extends")
         if self.phase in {"program", "context"}:
             values["source"] = observations_for("program", "context")
+        expected_fields = {
+            "applicability": {"applicability"},
+            "root_config": {"applicability", "config"},
+            "local_extends": {"applicability", "config"},
+            "program": {"applicability", "config", "source"},
+            "context": {"applicability", "config", "source"},
+        }[self.phase]
+        assert set(values) == expected_fields
         return _publication_provenance(
             kind="request_independent_failure",
             failure_stage=self.stage,
@@ -2445,6 +2497,12 @@ _REFERENCE_READ_FAILURES: dict[ReferenceSourceFailureKind, _ReferenceSourceFailu
     ReferenceSourceFailureKind.TOO_LARGE: _ReferenceSourceFailureProjection(
         "CSV-NEXT-LIMIT-001", "source_read", False
     ),
+    ReferenceSourceFailureKind.TOO_MANY_FILES: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-LIMIT-002", "source_selection", False
+    ),
+    ReferenceSourceFailureKind.SYMLINK: _ReferenceSourceFailureProjection(
+        "CSV-NEXT-SOURCE-002", "source_integrity", True
+    ),
     ReferenceSourceFailureKind.UNSAFE_PATH: _ReferenceSourceFailureProjection(
         "CSV-NEXT-SOURCE-003", "source_read", True
     ),
@@ -2469,8 +2527,11 @@ class InstrumentedSourceReader:
         revision_after: str | None = None,
         source_graph: dict[str, Any] | None = None,
         read_failures: Mapping[str, str | ReferenceSourceFailureKind] | None = None,
+        max_files: int = 20_000,
     ) -> None:
+        assert type(max_files) is int and max_files > 0
         self._files = dict(files)
+        self._max_files = max_files
         self.snapshot_id = snapshot_id
         self.revision_before = revision
         self.revision_after = revision if revision_after is None else revision_after
@@ -2481,7 +2542,7 @@ class InstrumentedSourceReader:
                 assert (
                     failure in _REFERENCE_READ_FAILURES
                     or failure is ReferenceSourceFailureKind.INTEGRITY_DRIFT
-                ), f"{failure.value} is not a source-read failure"
+                ), f"{failure.value} has no source-reader failure projection"
         self._observed_files: dict[str, bytes] = {}
         self._observed_read_failures: dict[str, str] = {}
         self._observed_read_phases: dict[str, str] = {}
@@ -2518,10 +2579,20 @@ class InstrumentedSourceReader:
         assert not self.sealed, "SourceView is sealed; filesystem reads are forbidden"
         assert phase in {"applicability", "root_config", "local_extends", "program", "context"}
         assert path in self._files, path
-        self.read_counts[path] = self.read_counts.get(path, 0) + 1
-        assert self.read_counts[path] == 1, path
+        assert path not in self.read_counts, path
         self._observed_read_phases[path] = phase
         self._last_read_phase = phase
+        if len(self.read_counts) >= self._max_files:
+            self._observed_read_failures[path] = "CSV-NEXT-LIMIT-002"
+            raise SourceAcquisitionError(
+                "CSV-NEXT-LIMIT-002",
+                "source_selection",
+                f"source read-count limit exceeded: {path}",
+                reference_failure_kind=ReferenceSourceFailureKind.TOO_MANY_FILES,
+                acquisition_phase=phase,
+            )
+        self.read_counts[path] = self.read_counts.get(path, 0) + 1
+        assert self.read_counts[path] == 1, path
         if path in self._read_failures:
             configured_failure = self._read_failures[path]
             if isinstance(configured_failure, ReferenceSourceFailureKind):
@@ -9376,6 +9447,7 @@ class SourceAcquisitionUnavailable:
             "CSV-NEXT-APPLICABILITY-002",
             "CSV-NEXT-CONFIG-001",
             "CSV-NEXT-CONFIG-002",
+            "CSV-NEXT-SOURCE-002",
             "CSV-NEXT-SOURCE-003",
             "CSV-NEXT-LIMIT-001",
             "CSV-NEXT-LIMIT-002",
@@ -9694,10 +9766,19 @@ def seal_source_acquisition_result(
             project_roots=tuple(sorted(failure.project_roots, key=_path_sort_key))
         )
     except SourceAcquisitionError as failure:
-        if failure.stage == "source_integrity":
+        if failure.stage == "source_integrity" and failure.code in {
+            "CSV-NEXT-SOURCE-INTEGRITY-001",
+            "CSV-NEXT-SOURCE-003",
+        }:
+            if failure.code == "CSV-NEXT-SOURCE-003":
+                assert failure.reference_failure_kind is None
             return SourceIntegrityFatal(
                 diagnostic_code="CSV-NEXT-SOURCE-INTEGRITY-001", stage=failure.stage
             )
+        if failure.stage == "source_integrity":
+            assert failure.code == "CSV-NEXT-SOURCE-002"
+            assert failure.reference_failure_kind is ReferenceSourceFailureKind.SYMLINK
+            assert failure.acquisition_phase is not None
         code = failure.code if failure.code != "CSV-NEXT-SOURCE-001" else "CSV-NEXT-SOURCE-003"
         path = failure.path if _diagnostic_catalog()[code]["ref_permission"] == "path" else None
         return SourceAcquisitionUnavailable(
@@ -9710,7 +9791,14 @@ def seal_source_acquisition_result(
                 failure_kind=failure.reference_failure_kind,
                 phase=failure.acquisition_phase,
             )
-            if failure.stage in {"applicability", "source_control", "source_read"}
+            if failure.stage
+            in {
+                "applicability",
+                "source_control",
+                "source_read",
+                "source_selection",
+                "source_integrity",
+            }
             else None,
             path=path,
         )

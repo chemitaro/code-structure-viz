@@ -12704,8 +12704,9 @@ def test_round22_runtime_registry_executes_vectors_and_named_validators() -> Non
         "test_nonordinary_read_failure_preserves_classification_and_actual_phase_prefix",
         "test_actual_integrity_drift_is_fatal_before_publication_for_every_phase",
         "test_source_read_failure_matrix_excludes_selection_and_integrity_triggers",
-        "test_source_reader_rejects_selection_and_integrity_failure_injection",
-        "test_selection_and_symlink_boundaries_keep_classification_through_publication",
+        "test_source_reader_projects_typed_selection_and_integrity_failures",
+        "test_source_file_symlink_failure_keeps_actual_prefix_through_publication",
+        "test_package_preflight_reader_failure_keeps_actual_prefix_through_publication",
     } <= set(fixture["criterion_test_map"]["round22.rg-01"])
     known_vector_ids = set(fixture["positive"]) | set(fixture["negative"])
     validate_runtime_vector_registry(
@@ -14137,122 +14138,257 @@ def test_source_read_failure_matrix_excludes_selection_and_integrity_triggers(
 
 
 @pytest.mark.parametrize(
-    "failure_kind",
+    ("failure_kind", "diagnostic_code", "stage", "path"),
     [
-        ReferenceSourceFailureKind.TOO_MANY_FILES,
-        ReferenceSourceFailureKind.SYMLINK,
-    ],
-    ids=["too-many-files", "symlink"],
-)
-def test_source_reader_rejects_selection_and_integrity_failure_injection(
-    failure_kind: ReferenceSourceFailureKind,
-) -> None:
-    with pytest.raises(AssertionError, match="not a source-read failure"):
-        InstrumentedSourceReader(
-            {"src/page.tsx": b"export default function Page() { return null; }"},
-            read_failures={"src/page.tsx": failure_kind},
-        )
-
-
-@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
-@pytest.mark.parametrize(
-    ("failure_kind", "diagnostic_code", "stage", "path", "selected_paths", "max_files"),
-    [
-        (
-            ReferenceSourceFailureKind.TOO_MANY_FILES,
-            "CSV-NEXT-LIMIT-002",
-            "source_selection",
-            None,
-            ("package.json", "src/page.tsx"),
-            1,
-        ),
+        (ReferenceSourceFailureKind.TOO_MANY_FILES, "CSV-NEXT-LIMIT-002", "source_selection", None),
         (
             ReferenceSourceFailureKind.SYMLINK,
             "CSV-NEXT-SOURCE-002",
             "source_integrity",
-            "src/page.tsx",
-            ("src/page.tsx",),
-            20_000,
+            "package.json",
         ),
     ],
-    ids=["file-count-selection", "symlink-integrity"],
+    ids=["too-many-files", "symlink"],
 )
-def test_selection_and_symlink_boundaries_keep_classification_through_publication(
-    selector: str | None,
+def test_source_reader_projects_typed_selection_and_integrity_failures(
     failure_kind: ReferenceSourceFailureKind,
     diagnostic_code: str,
     stage: str,
     path: str | None,
-    selected_paths: tuple[str, ...],
-    max_files: int,
 ) -> None:
-    observed_source: dict[str, Any]
-    if failure_kind is ReferenceSourceFailureKind.TOO_MANY_FILES:
-        assert len(selected_paths) > max_files
-        observed_source = {"selected_paths": list(selected_paths)}
-    else:
-        assert failure_kind is ReferenceSourceFailureKind.SYMLINK
-        assert path in selected_paths
-        observed_source = {"selected_path_kind": "symlink", "selected_path": path}
-
     reader = InstrumentedSourceReader(
-        {selected_path: b"private-unread" for selected_path in selected_paths}
+        {"package.json": b'{"dependencies":{"next":"15"}}'},
+        read_failures={"package.json": failure_kind},
     )
-    assert set(reader.enumerate_paths((".",), ())) == set(selected_paths)
-    assert reader.read_counts == {}
+    reader.enumerate_paths((".",), ())
 
-    run_context = _run_context(selector=selector, independent=True)
-    provenance = _publication_provenance(
-        kind="request_independent_failure",
-        failure_stage=stage,
-        failure_code=diagnostic_code,
-        budget_observed=False,
-        observed_values={
-            "applicability": {"applicable_projects": ["."]},
-            "config": [],
-            "source": observed_source,
-            "limits": {"max_files": max_files},
-            "source_plan": {"selected_paths": list(selected_paths)},
+    with pytest.raises(SourceAcquisitionError) as caught:
+        reader.read("package.json", phase="applicability")
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        diagnostic_code,
+        stage,
+        path,
+    )
+    assert caught.value.reference_failure_kind is failure_kind
+    assert caught.value.acquisition_phase == "applicability"
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+def test_source_file_symlink_failure_keeps_actual_prefix_through_publication(
+    selector: str | None,
+) -> None:
+    reader = InstrumentedSourceReader(
+        {
+            "package.json": b'{"dependencies":{"next":"15"}}',
+            "tsconfig.json": b"{}",
+            "src/page.tsx": b"must not be read",
         },
+        read_failures={"src/page.tsx": ReferenceSourceFailureKind.SYMLINK},
     )
-    decision_context = NextDecisionContext(
-        run_context=run_context,
-        request_id=None,
-        targets=(),
-        limits=None,
-        stage=stage,
-        diagnostic_code=diagnostic_code,
-        failure_kind=decision_failure_kind(diagnostic_code),
-        known_counts=_decision_known_counts(None),
-        source_failure_ledger=(),
-        outcome="payload_unavailable",
-        payload_unavailable=True,
-        exit_code=3,
-        provenance_observation=provenance,
-        provenance="request_independent_failure",
-    )
-    decision = pre_response_failure_decision(
-        None,
-        stage=stage,
-        diagnostic_code=diagnostic_code,
-        decision_context=decision_context,
-        path=path,
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=(".",), control_candidates=("tsconfig.json",)),
+        reader,
     )
 
-    assert decision.diagnostic["path"] == path
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert (result.diagnostic_code, result.stage, result.path) == (
+        "CSV-NEXT-SOURCE-002",
+        "source_integrity",
+        "src/page.tsx",
+    )
+    prefix = result.early_read_prefix
+    provenance = result.observation_provenance
+    assert prefix is not None and prefix.phase == "program"
+    assert provenance is not None
+    assert reader.seal_calls == 0
+    assert set(reader.read_counts) == {"package.json", "tsconfig.json", "src/page.tsx"}
+    assert {name for name, row in provenance["observed"].items() if row["state"] == "observed"} == {
+        "applicability",
+        "config",
+        "source",
+    }
+
+    decision = source_acquisition_failure_decision(
+        result, _run_context(selector=selector, independent=True)
+    )
     run_wire = next_run_decision_projection(decision)
     validate_next_run_decision_projection(run_wire, decision)
     _validator("next-run-decision-v1.schema.json").validate(run_wire)
-    assert (run_wire["outcome"], run_wire["exit_code"]) == ("payload_unavailable", 3)
-    assert run_wire["provenance"]["stage"] == stage
-    assert run_wire["provenance"]["failure_code"] == diagnostic_code
-    assert run_wire["request"] is None and run_wire["response"] is None
-
     publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
     publication_wire = next_publication_decision_projection(publication)
     validate_next_publication_decision_projection(publication_wire, publication)
     _validator("next-publication-decision-v1.schema.json").validate(publication_wire)
     domain, manifest, stdout, artifacts, stderr = _validate_publication_chain(publication)
+
+    assert publication_wire["semantic_decision"] == run_wire
+    assert publication_wire["response"] is None and publication_wire["artifacts"] == []
+    assert domain["payload_available"] is False and artifacts == {}
+    assert (domain["config"]["failure_stage"], domain["config"]["failure_code"]) == (
+        "source_integrity",
+        "CSV-NEXT-SOURCE-002",
+    )
+    assert [(item["code"], item["path"]) for item in domain["diagnostics"]] == [
+        ("CSV-NEXT-SOURCE-002", "src/page.tsx")
+    ]
+    assert manifest["run"]["exit_code"] == publication.exit_code == 3
+    assert stdout["selector"] == selector
+    assert json.loads(stderr)["code"] == "CSV-NEXT-SOURCE-002"
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "stage"),
+    [
+        ("CSV-NEXT-LIMIT-002", "source_selection"),
+        ("CSV-NEXT-SOURCE-002", "source_integrity"),
+    ],
+    ids=["package-read-count-limit", "package-symlink"],
+)
+def test_package_preflight_failure_prefix_is_accepted_by_provenance_schema(
+    failure_code: str, stage: str
+) -> None:
+    observed = {
+        field_name: _observation_row(
+            field_name,
+            field_name == "applicability",
+            observed_value={"packages": [{"path": "package.json", "state": "failed"}]}
+            if field_name == "applicability"
+            else None,
+        )
+        for field_name in (
+            "applicability",
+            "config",
+            "source",
+            "request",
+            "limits",
+            "source_plan",
+            "toolchain",
+            "trusted_environment",
+            "compatibility",
+            "process_launch",
+            "response",
+            "budget",
+        )
+    }
+    provenance = {
+        "kind": "request_independent_failure",
+        "stage": stage,
+        "failure_code": failure_code,
+        "observed": observed,
+    }
+
+    _validator("next-provenance-v1.schema.json").validate(provenance)
+
+
+def test_preseal_file_count_limit_schema_rejects_synthetic_source_plan_suffix() -> None:
+    observed = {
+        field_name: _observation_row(
+            field_name,
+            field_name in {"applicability", "config", "source", "limits", "source_plan"},
+            observed_value={"invented": field_name},
+        )
+        for field_name in (
+            "applicability",
+            "config",
+            "source",
+            "request",
+            "limits",
+            "source_plan",
+            "toolchain",
+            "trusted_environment",
+            "compatibility",
+            "process_launch",
+            "response",
+            "budget",
+        )
+    }
+    provenance = {
+        "kind": "request_independent_failure",
+        "stage": "source_selection",
+        "failure_code": "CSV-NEXT-LIMIT-002",
+        "observed": observed,
+    }
+
+    with pytest.raises(ValidationError):
+        _validator("next-provenance-v1.schema.json").validate(provenance)
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize(
+    ("case", "diagnostic_code", "stage", "path"),
+    [
+        ("package-symlink", "CSV-NEXT-SOURCE-002", "source_integrity", "apps/web/package.json"),
+        ("package-read-count-limit", "CSV-NEXT-LIMIT-002", "source_selection", None),
+    ],
+    ids=["package-symlink", "multi-root-read-count-limit"],
+)
+def test_package_preflight_reader_failure_keeps_actual_prefix_through_publication(
+    selector: str | None,
+    case: str,
+    diagnostic_code: str,
+    stage: str,
+    path: str | None,
+) -> None:
+    roots: tuple[str, ...]
+    files: dict[str, bytes]
+    if case == "package-symlink":
+        roots = ("apps/web",)
+        files = {
+            "apps/web/package.json": b'{"dependencies":{"next":"15"}}',
+            "apps/web/tsconfig.json": b"must remain unread",
+            "apps/web/src/page.tsx": b"must remain unread",
+        }
+        reader = InstrumentedSourceReader(
+            files,
+            read_failures={
+                "apps/web/package.json": ReferenceSourceFailureKind.SYMLINK,
+            },
+        )
+    else:
+        assert case == "package-read-count-limit"
+        roots = ("apps/a", "apps/b")
+        files = {
+            "apps/a/package.json": b'{"dependencies":{"next":"15"}}',
+            "apps/b/package.json": b'{"dependencies":{"next":"15"}}',
+            "apps/a/tsconfig.json": b"must remain unread",
+            "apps/b/tsconfig.json": b"must remain unread",
+        }
+        reader = InstrumentedSourceReader(files, max_files=1)
+
+    result = seal_source_acquisition_result(
+        SourceDiscoveryIntent(project_roots=roots, control_candidates=()), reader
+    )
+
+    assert isinstance(result, SourceAcquisitionUnavailable)
+    assert (result.diagnostic_code, result.stage, result.path) == (
+        diagnostic_code,
+        stage,
+        path,
+    )
+    assert result.early_read_prefix is not None
+    assert result.early_read_prefix.phase == "applicability"
+    assert result.seal is None
+    assert result.observation_provenance is not None
+    assert {
+        name
+        for name, row in result.observation_provenance["observed"].items()
+        if row["state"] == "observed"
+    } == {"applicability"}
+    assert reader.enumeration_calls == 1 and reader.seal_calls == 0
+    assert all("tsconfig.json" not in read_path for read_path in reader.read_counts)
+
+    decision = source_acquisition_failure_decision(
+        result, _run_context(selector=selector, independent=True)
+    )
+    run_wire = next_run_decision_projection(decision)
+    validate_next_run_decision_projection(run_wire, decision)
+    _validator("next-run-decision-v1.schema.json").validate(run_wire)
+    publication = finalize_publication_decision(decision, adapter_stdout_chunks=())
+    publication_wire = next_publication_decision_projection(publication)
+    validate_next_publication_decision_projection(publication_wire, publication)
+    _validator("next-publication-decision-v1.schema.json").validate(publication_wire)
+    domain, manifest, stdout, artifacts, stderr = _validate_publication_chain(publication)
+
     assert publication_wire["semantic_decision"] == run_wire
     assert publication_wire["response"] is None and publication_wire["artifacts"] == []
     assert domain["payload_available"] is False and artifacts == {}
@@ -14266,7 +14402,33 @@ def test_selection_and_symlink_boundaries_keep_classification_through_publicatio
     assert manifest["run"]["exit_code"] == publication.exit_code == 3
     assert stdout["selector"] == selector
     assert json.loads(stderr)["code"] == diagnostic_code
-    assert reader.read_counts == {} and reader.seal_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "stage"),
+    [
+        ("CSV-NEXT-LIMIT-002", "source_selection"),
+        ("CSV-NEXT-SOURCE-002", "source_integrity"),
+    ],
+    ids=["package-read-count-limit", "package-symlink"],
+)
+def test_reference_provenance_builder_does_not_invent_package_phase_suffix(
+    failure_code: str, stage: str
+) -> None:
+    provenance = _publication_provenance(
+        kind="request_independent_failure",
+        failure_stage=stage,
+        failure_code=failure_code,
+        budget_observed=False,
+        observed_values={
+            "applicability": {"packages": [{"path": "package.json", "state": "failed"}]}
+        },
+    )
+
+    assert {name for name, row in provenance["observed"].items() if row["state"] == "observed"} == {
+        "applicability"
+    }
+    _validator("next-provenance-v1.schema.json").validate(provenance)
 
 
 @pytest.mark.parametrize(

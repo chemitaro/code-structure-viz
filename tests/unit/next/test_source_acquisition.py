@@ -169,6 +169,83 @@ def test_package_read_failure_classification_precedes_other_observations(
     assert reader.seal_calls == 0
 
 
+def test_package_preflight_rejects_actual_symlink_with_source_integrity_classification(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    package = repository / "apps/web/package.json"
+    package.parent.mkdir(parents=True)
+    outside = tmp_path / "outside-package.json"
+    outside.write_bytes(b'{"dependencies":{"next":"15"}}')
+    package.symlink_to(outside)
+    entries = (EnumeratedPath("apps/web/package.json", PurePosixPath("apps/web/package.json")),)
+    head = Commit("9" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=20_000,
+        max_file_bytes=4 * 1024 * 1024,
+        max_total_bytes=64 * 1024 * 1024,
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent(("apps/web",)),
+            reader,
+            trusted_environment_digest="9" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        "CSV-NEXT-SOURCE-002",
+        "source_integrity",
+        "apps/web/package.json",
+    )
+
+
+def test_multiple_package_preflight_roots_preserve_reader_file_limit_classification(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    first = repository / "apps/a/package.json"
+    second = repository / "apps/b/package.json"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    package_bytes = b'{"dependencies":{"next":"15"}}'
+    first.write_bytes(package_bytes)
+    second.write_bytes(package_bytes)
+    entries = tuple(
+        EnumeratedPath(path, PurePosixPath(path))
+        for path in ("apps/a/package.json", "apps/b/package.json")
+    )
+    head = Commit("a" * 40)
+    reader = DescriptorAnchoredSourceReadSession(
+        repository,
+        entries,
+        head_state=head,
+        current_entries=lambda: entries,
+        current_head_state=lambda: head,
+        max_files=1,
+        max_file_bytes=4 * 1024 * 1024,
+        max_total_bytes=64 * 1024 * 1024,
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent(("apps/a", "apps/b")),
+            reader,
+            trusted_environment_digest="a" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        "CSV-NEXT-LIMIT-002",
+        "source_selection",
+        None,
+    )
+
+
 def test_source_acquisition_seal_cannot_be_constructed_from_injected_plan_and_view() -> None:
     with pytest.raises(TypeError, match="created by seal_source_acquisition"):
         SourceAcquisitionSeal(
