@@ -47,8 +47,13 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 | 1 | `I05-PLAN-000` | Requirement/Design/Plan、HTML、既存schemaの現行v1採択 | G10で正本境界を明示。production codeは変更しない。 |
 | 2 | `I05-PLAN-001` | fixture、positive/negative vector、reference validator/test、schema cross-check | G09までの現行registryは26件。旧R23 36件はhistorical selectorだけで実行する。 |
 | 3 | `I05-PLAN-008` | clean/pushed fixed SHA、全品質gate、サブエージェントを使わないChatGPT Code Review Strict（ユーザー指定GPT-6 Pro） | `P0=0 / P1=0 / review_status=pass`になるまで次へ進まない。モデルの実選択を直接観測できない場合は、その限界をArtifactに明記する。 |
-| 4 | `I05-PLAN-002`〜`007` | production adapter、Node process、semantic/publication、stdout、hardening | 上記gate通過後だけ開始。source-sealed request builderの先行スライス以外は未実装・未認定。 |
-| 5 | G11（`I05-PLAN-006`へ接続） | 将来のwheel/sdist runtime build inventoryとpackage受入れ | schema/docsで境界のみ固定。現行commitでbuild・依存・lockfileを変更しない。 |
+| 4 | `I05-PLAN-002A` | 採択済みlocator/version ownerによるpackage adapter identity resolver | current-SHA Strict gate通過後に開始。`tests/unit/next/test_runner.py`で単一resource bytes由来のstable version/hashとfail-closedを検証し、Node probe/spawnは行わない。 |
+| 5 | `I05-PLAN-002`〜`007` | Node process、semantic/publication、stdout、hardening | 002Aと上記gateの後に開始。source-sealed request builderの既存スライス以外は未実装・未認定。 |
+| 6 | G11（`I05-PLAN-006`へ接続） | 将来のwheel/sdist runtime build inventoryとpackage受入れ | schema/docsで境界のみ固定。現行commitでbuild・依存・lockfileを変更しない。 |
+
+2026-09-25、ユーザーは直前に提示したadapter identity候補を採択して作業を進めるよう指示した。Designの「Production adapter identity」節がcanonical decisionであり、source fileのSHAではなく、locatorで得たentrypointの同一bytesからheader versionとfull-content SHA-256を導出する。既存のdecision-candidate Artifactは当時の未採択状態を記録する履歴evidenceとして保持し、本文を遡及編集しない。
+
+同日、GitHub connectorがbranch tip `d01852d0f53b14bcada03f92408864ad52a2396a` を確認した。直前の累積review passはparent `54bf763f230cd89159542204562daa8ca0835754` に対するもので、`d01852d`はreview evidence Artifactだけを追加したcommitである。今回のGPT-5.6 Pro Use Strict（picker evidence: GPT-5.6 Sol / Pro）はcurrent tipの設計分析でありCode Review passではない。従って本Planの`I05-PLAN-008` exact-current-SHA gateは本変更candidateに対して未通過とし、canonical update後のclean/pushed SHAでfresh Code Review Strictを通過するまでproduction codeを開始しない。分析結果は`artifacts/20260925t112900z-disc-issue8-python-typescript-readiness-analysis.md`に保存する。
 
 2026-09-24のユーザー指示による実装再開では、OS process boundaryより前のhost-independentなsource-sealed request builderだけを先行実装した。これは`I05-PLAN-008`のfixed-SHA Strict gate、`I05-PLAN-002`の完了、Node起動、macOS support、production `available`を証明しない。続く`chatgpt-code-review-strict`試行は応答JSON不正でwrapper exit 20となったため、valid review pass/failとして扱わない。差分のローカルadjudicationとテスト証拠はtracked artifact `20260923t163655z-disc-issue8-verified-fd-dependency-analysis.md`に記録する。
 
@@ -365,6 +370,7 @@ fresh current-SHA Strictはpending/readiness unconfirmed、production implementa
 | I05-PLAN-000 | implementation判断を残さないfield-level identity/source/protocol/type/taint/public schema/config/package contractをcanonical Designへ固定する。 | I05-DES-001〜007 |
 | I05-PLAN-001 | identity/export、project/target、protocol、type IR、relations/boundary、outcome/publication、TrustedTypeEnvironment、packaging/regressionのI05-AT-001〜011 fixtures/schemaを先に固定する。 | I05-DES-001〜007 |
 | I05-PLAN-008 | actual schema/docs/catalog/golden/mutation fixtureを含むclean pushed exact SHAでChatGPT Use Strictを再実行し、P0/P1=0をproduction implementation gateとする。 | I05-DES-001〜007 |
+| I05-PLAN-002A | accepted production resource identityからadapter schema/version/hashを単一bytes ownerで解決し、失敗時にfallbackしないpackage resource resolverを実装・試験する。 | I05-DES-006 |
 | I05-PLAN-002 | domain-owned SourceAcquisitionPlan、Next config/project/target parser、frozen-bytes request、hardened one-shot Node boundaryを実装する。 | I05-DES-002, I05-DES-006 |
 | I05-PLAN-003 | declaration identity、bindings、Component recognition、closed props IR、two-plane relations、positive-evidence boundaryを実装する。 | I05-DES-003 |
 | I05-PLAN-004 | untrusted response strict validation/ID再計算、semantic JSON、PlantUML、manifest、closed registry/publicationを接続する。 | I05-DES-004 |
@@ -381,6 +387,7 @@ fresh current-SHA Strictはpending/readiness unconfirmed、production implementa
   人間向けHTMLのvisual explanationをcanonical R/D/Pへ反映する。
 - current production package/core pathsを`未実装`とするstale記述を修正し、existing extension pointとnew planned pathを分離する。
 - anti-shadowing、finite recognition/export、per-project config/module resolution、two-phase freeze、protocol/digest、PropsTypeIR/JS extraction、flow/boundary、partial-safe taint proof、public schema/config/package contractをfield-levelでcanonical Designへ固定する。これをproduction implementation後の判断へ先送りしない。
+- production adapter identityのresource locator、version owner、同一bytesのhash対象、初期stable versionをDesignへ採択済み決定として固定する。元の推奨候補は`artifacts/20260924t002133z-disc-issue8-strict-dependency-adapter-identity.md`。
 
 ### I05-PLAN-001 acceptance-first contract
 
@@ -407,6 +414,14 @@ The user explicitly adopted the best-practice path from the exact-SHA ChatGPT-Us
 - `review_status=pass`かつP0/P1=0を必須gateとする。findingはcanonical authority/current sourceと照合して修復し、同じ累積固定点からfresh exact-SHA reviewを再実行する。Strictの無効応答、connector不一致、候補SHA不一致はpassではない。P2/P3だけでは自動修復・review loopを開始しない。passはIssue実装完了ではない。
 
 ### I05-PLAN-002 bridge and adapter boundary
+
+#### I05-PLAN-002A first vertical slice: packaged adapter identity resolver
+
+- Production path: `src/code_structure_viz/adapters/next/runner.py`; focused public-interface tests: `tests/unit/next/test_runner.py`.
+- Resolve only `importlib.resources.files("code_structure_viz").joinpath("_next_runtime", "next-adapter.mjs")`. Read its bytes once; derive the closed stable version from the first-line marker and SHA-256 from those exact full bytes, including the marker.
+- Reject missing/non-file/read failures, empty content, malformed/missing/duplicate/non-first marker, prerelease/build/leading-zero versions, BOM/CRLF/extra whitespace, and any attempt to use caller metadata, checkout path, or test fixture as fallback.
+- This slice proves only pre-launch resource identity. Keep Node version probing, process policy construction, actual spawn/process observation, and package acceptance as later separately observable stages.
+- Implement one behavior per TDD Red→Green cycle; the test may substitute only the `importlib.resources` filesystem boundary, not expose caller-controlled resource identity in the production interface.
 
 existing extension points:
 

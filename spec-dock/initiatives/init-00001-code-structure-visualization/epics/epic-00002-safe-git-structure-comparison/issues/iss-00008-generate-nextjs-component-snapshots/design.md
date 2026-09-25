@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-24"
+最終更新: "2026-09-25"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -68,7 +68,7 @@ run-level terminal branchはpublication finalizerの前に一度だけ分岐し�
 | process / toolchain / compatibility | `I05-DES-006` | process policy/observation、compatibility、limits、trusted environment schema; `validate_process_launch_policy`、`validate_process_launch_observation`、`validate_compatibility_descriptor`、`validate_limits`、`validate_trusted_environment`; `test_round18_process_descriptor_requires_os_identity_and_spawn_binding`、`test_compatibility_binds_observed_runtime_content` | policyとactual observationを混同せず、host依存値をportable digestへ混入させず、fixtureをproduction証拠に昇格させない。 |
 | request/response と decision | `I05-DES-004`、`I05-DES-005` | request/response、run/publication decision、provenance schema; `validate_request_envelope`、`validate_response_envelope`、`validate_next_run_decision_projection`、`validate_next_publication_decision_projection`、`finalize_publication_decision`; `test_capture_success_routes_schema_valid_private_response_to_one_decision`、`test_validated_decision_is_the_only_publication_authority` | bounded decode→closed schema→proof/reference→decisionの一入口を守り、publicationはvalidated decisionだけを入力にする。 |
 | public projection と stdout | `I05-DES-001`、`I05-DES-007` | semantic/domain/run manifest、stdout-result、diagnostic schema; `validate_domain_manifest`、`validate_run_manifest`、`validate_run_status_vector`、`validate_plantuml_contract`; `test_next_stdout_matrix_has_exact_bytes_for_core_outcomes`、`test_round21_terminal_run_publication_is_manifest_free_and_selector_exact` | semantic/PlantUML/manifest/stdout/stderr/exitは同じsealed decisionから投影し、raw source/proofを公開しない。 |
-| runtime resource identity | `I05-DES-006` | `next-reference-runtime-inventory-v1`（現在）／`next-runtime-build-inventory-v1`（将来） | 参照fixtureの対応と出荷archiveの実memberを別identityで管理し、inventoryからrun成功やpackage同梱を推論しない。 |
+| runtime resource identity | `I05-DES-006` | `next-reference-runtime-inventory-v1`（現在）／`next-runtime-build-inventory-v1`（将来）／次節のproduction adapter identity | 参照fixtureの対応、production entrypoint identity、出荷archiveの実memberを別々に証明し、inventoryからrun成功やpackage同梱を推論しない。 |
 
 ### currentとhistoricalの機械的な境界
 
@@ -77,6 +77,22 @@ run-level terminal branchはpublication finalizerの前に一度だけ分岐し�
 ### resource identityの二層化
 
 `next-reference-runtime-inventory/v1` はチェックイン済み参照fixtureを検査するだけで、wheel/sdistのmemberを表しません。将来 `next-runtime-build-inventory/v1` を生成するときは、build recipeとlocked inputからsource path、package path、role、実bytes、licenseを測定し、wheelとsdistのarchiveから再読した結果を完全一致させます。どちらのinventoryもrun/publication manifestの代替ではなく、run manifestはその実行で観測したdecisionだけを投影します。
+
+### Production adapter identity（2026-09-25 accepted decision）
+
+2026-09-25のユーザー指示により、Artifact `20260924t002133z-disc-issue8-strict-dependency-adapter-identity.md` の推奨候補を採用します。本番entrypointの唯一のresource locatorは次です。
+
+```python
+importlib.resources.files("code_structure_viz").joinpath(
+    "_next_runtime", "next-adapter.mjs"
+)
+```
+
+checkout、caller-provided path/metadata、fixture、sidecar version manifestへのfallbackは設けません。entrypointの先頭行はASCIIの `// CodeStructureViz-Adapter-Version: <MAJOR>.<MINOR>.<PATCH>\n` とし、versionは各数値がcanonical decimal（`0`または先頭ゼロのない正整数）のstable `x.y.z`だけを許可します。初期versionは `0.1.0` です。BOM、CRLF、追加空白、欠落・重複・先頭以外のmarker、prerelease/build metadataは拒否します。
+
+resolverはこのpackage resourceを一度だけ読み、その保持した同じ完全なbytes（version markerを含む）のSHA-256を `adapter.sha256` とします。`adapter.version`もそのbytesの先頭markerからのみ導出します。Python distribution version `0.1.0.dev0`、build recipe、external inventoryはこのentrypoint versionのauthorityにしません。resourceの欠落・非regular file・read失敗・不正headerはfail-closedです。
+
+この判断が確定するのはpre-launchのresource locator/version/content digestです。Node probe、policy materialization、実spawn、OS process observation、wheel/sdist収録、production availabilityは別々の後続証拠として扱い、resolver成功から推論しません。実際のlaunch observationは既存のverified-open/process identity契約に従い、測定したadapter content identityと実行対象の対応を別途証明します。
 
 ## 設計目標
 
