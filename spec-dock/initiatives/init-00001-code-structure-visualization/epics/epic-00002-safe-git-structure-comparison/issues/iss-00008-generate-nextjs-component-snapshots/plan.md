@@ -34,7 +34,7 @@ frozen package bytes
 
 run-level terminalはsemantic/finalizerの前段にある独立した一回限りの分岐として計画する。project-root overlapは`CSV-NEXT-PROJECT-001` usage/exit 2（reader・decoder・finalizer・Artifactなし）、source-integrity driftは`CSV-NEXT-SOURCE-INTEGRITY-001` fatal/exit 1（manifestなし）、handled interruptはcore `CSV-INTERRUPT-001` interrupted/exit 130（cleanup後）へ投影する。全selectorでterminal branchのstdout/stderr/exitを同じdecisionから生成し、付属診断やcandidate bytesを再利用しない。G09のcurrent authorityは現行v1 reference chainを使うRound22 runtime registryに限定し、各criterionのpositive/negative vector、実callable producer、validator、substantive testを双方向に検証する。Round23の旧helperとregistryは`historical_runtime_vector_registry`へ隔離し、current coverageを同じsurrogateで埋めない。
 
-受入では、contract focused test、all contract/full pytest、mypy、ruff、SpecDock、pinned PlantUMLを順に実行します。Windows/OS process-level/将来wheel・sdistはproductionまたは別migrationの計画契約として記録し、実測済みとは主張しません。2026-09-24のユーザー指示により、今回のようなdependency/toolchain/process blockerはChatGPT-Use Strict（GPT-5.6 Pro）でclean/pushed exact-SHA分析し、Artifactとlocal source/testで照合します。このadvisory分析はI05-PLAN-008の独立GPT-6 Max reviewを置き換えず、そのgateを通過するまでproduction実装を開始しません。
+受入では、contract focused test、all contract/full pytest、mypy、ruff、SpecDock、pinned PlantUMLを順に実行します。Windows/OS process-level/将来wheel・sdistはproductionまたは別migrationの計画契約として記録し、実測済みとは主張しません。2026-09-24のユーザー指示により、今回のようなdependency/toolchain/process blockerはChatGPT-Use Strict（GPT-5.6 Pro）でclean/pushed exact-SHA分析し、Artifactとlocal source/testで照合します。このadvisory分析自体はI05-PLAN-008のコードレビューを置き換えません。2026-09-25のユーザー指示によりサブエージェントレビューは禁止され、review routeはChatGPT Code Review Strictとユーザー指定のGPT-6 Proを使います。モデル選択の観測限界は該当review Artifactに記録し、実際のモデルidentityを証明できたと推測しません。
 
 ## Canonical execution index and future package gate (G10/G11)
 
@@ -46,11 +46,13 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 | --- | --- | --- | --- |
 | 1 | `I05-PLAN-000` | Requirement/Design/Plan、HTML、既存schemaの現行v1採択 | G10で正本境界を明示。production codeは変更しない。 |
 | 2 | `I05-PLAN-001` | fixture、positive/negative vector、reference validator/test、schema cross-check | G09までの現行registryは26件。旧R23 36件はhistorical selectorだけで実行する。 |
-| 3 | `I05-PLAN-008` | clean/pushed fixed SHA、全品質gate、独立GPT-6 Max review | `P0=0 / P1=0 / review_status=pass`になるまで次へ進まない。 |
+| 3 | `I05-PLAN-008` | clean/pushed fixed SHA、全品質gate、サブエージェントを使わないChatGPT Code Review Strict（ユーザー指定GPT-6 Pro） | `P0=0 / P1=0 / review_status=pass`になるまで次へ進まない。モデルの実選択を直接観測できない場合は、その限界をArtifactに明記する。 |
 | 4 | `I05-PLAN-002`〜`007` | production adapter、Node process、semantic/publication、stdout、hardening | 上記gate通過後だけ開始。source-sealed request builderの先行スライス以外は未実装・未認定。 |
 | 5 | G11（`I05-PLAN-006`へ接続） | 将来のwheel/sdist runtime build inventoryとpackage受入れ | schema/docsで境界のみ固定。現行commitでbuild・依存・lockfileを変更しない。 |
 
 2026-09-24のユーザー指示による実装再開では、OS process boundaryより前のhost-independentなsource-sealed request builderだけを先行実装した。これは`I05-PLAN-008`のfixed-SHA Strict gate、`I05-PLAN-002`の完了、Node起動、macOS support、production `available`を証明しない。続く`chatgpt-code-review-strict`試行は応答JSON不正でwrapper exit 20となったため、valid review pass/failとして扱わない。差分のローカルadjudicationとテスト証拠はtracked artifact `20260923t163655z-disc-issue8-verified-fd-dependency-analysis.md`に記録する。
+
+2026-09-25、ユーザー指定の累積固定点`f4159066f3954454ad2f0c2701fa54bf1bc7bc4a`からHEAD `3172bb86b8c36a87f722dd62bd80c1b9321a2382`まで18 commits / 24 changed filesのfresh ChatGPT Code Review Strictが、valid `review_status=pass`、findings 0、confidence 0.86を返した。GitHub connectorはrepository、branch、exact SHAを一致確認した。Oracle logは`requested=gpt-6-pro`、`target=Latest`、`Thinking time: Pro`であり、GPT-6 Proを要求した事実は確認できるがbackend model identityは断定しない。レビュー自体はtests/toolsを実行せず、exact-HEAD CI run `36100007408`と独立に扱う。詳細・限界は`artifacts/20260925t063051z-disc-issue8-cumulative-strict-code-review-3172bb8.md`に記録する。このreview passはproduction readiness、Issue #8全体の完了、adapter identityの未決判断を解決しない。
 
 I05-PLAN-008のpre-response projection gateでは、validated requestに明示targetがある一方でresponse decode/validationより前に失敗しvalidated target proofがない経路を、全selector（省略、manifest、semantic-json、PlantUML）で検証します。request/config/run identityのtargetは保持し、target-completeness行・target failure reason・`CSV-NEXT-TARGET-001`は生成せず、既存のpre-response diagnostic/statusとpayload-unavailable publicationを保つことを確認します。`test_response_boundary_failures_are_pre_response_decisions`と実publication-chain regressionをこの基準へ合わせます。
 
