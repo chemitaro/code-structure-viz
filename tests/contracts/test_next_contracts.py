@@ -14380,6 +14380,12 @@ def test_package_preflight_reader_failure_keeps_actual_prefix_through_publicatio
     decision = source_acquisition_failure_decision(
         result, _run_context(selector=selector, independent=True)
     )
+    if diagnostic_code == "CSV-NEXT-SOURCE-002":
+        with pytest.raises(AssertionError):
+            replace(
+                decision,
+                diagnostic={**decision.diagnostic, "path": "src/never-read.tsx"},
+            )
     run_wire = next_run_decision_projection(decision)
     validate_next_run_decision_projection(run_wire, decision)
     _validator("next-run-decision-v1.schema.json").validate(run_wire)
@@ -14402,6 +14408,108 @@ def test_package_preflight_reader_failure_keeps_actual_prefix_through_publicatio
     assert manifest["run"]["exit_code"] == publication.exit_code == 3
     assert stdout["selector"] == selector
     assert json.loads(stderr)["code"] == diagnostic_code
+    if diagnostic_code == "CSV-NEXT-SOURCE-002":
+        object.__setattr__(
+            decision,
+            "diagnostic",
+            {**decision.diagnostic, "path": "src/never-read.tsx"},
+        )
+        with pytest.raises(AssertionError):
+            finalize_publication_decision(decision, adapter_stdout_chunks=())
+
+
+@pytest.mark.parametrize("selector", [None, "manifest", "next:semantic-json", "next:plantuml"])
+@pytest.mark.parametrize(
+    ("diagnostic_code", "stage"),
+    [
+        ("CSV-NEXT-LIMIT-002", "source_selection"),
+        ("CSV-NEXT-SOURCE-002", "source_integrity"),
+    ],
+    ids=["package-read-count-limit", "package-symlink"],
+)
+def test_package_preflight_decision_rejects_later_phase_reader_prefix(
+    selector: str | None,
+    diagnostic_code: str,
+    stage: str,
+) -> None:
+    if stage == "source_selection":
+        package_result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(project_roots=("apps/a", "apps/b"), control_candidates=()),
+            InstrumentedSourceReader(
+                {
+                    "apps/a/package.json": b'{"dependencies":{"next":"15"}}',
+                    "apps/b/package.json": b'{"dependencies":{"next":"15"}}',
+                },
+                max_files=1,
+            ),
+        )
+        later_phase_result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(
+                project_roots=("apps/web",),
+                control_candidates=("apps/web/tsconfig.json",),
+            ),
+            InstrumentedSourceReader(
+                {
+                    "apps/web/package.json": b'{"dependencies":{"next":"15"}}',
+                    "apps/web/tsconfig.json": (b'{"files":["src/first.tsx","src/second.tsx"]}'),
+                    "apps/web/src/first.tsx": b"export const First = 1",
+                    "apps/web/src/second.tsx": b"export const Second = 2",
+                },
+                max_files=3,
+            ),
+        )
+    else:
+        package_result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(project_roots=("apps/web",), control_candidates=()),
+            InstrumentedSourceReader(
+                {"apps/web/package.json": b'{"dependencies":{"next":"15"}}'},
+                read_failures={
+                    "apps/web/package.json": ReferenceSourceFailureKind.SYMLINK,
+                },
+            ),
+        )
+        later_phase_result = seal_source_acquisition_result(
+            SourceDiscoveryIntent(
+                project_roots=("apps/web",),
+                control_candidates=("apps/web/tsconfig.json",),
+            ),
+            InstrumentedSourceReader(
+                {
+                    "apps/web/package.json": b'{"dependencies":{"next":"15"}}',
+                    "apps/web/tsconfig.json": b"{}",
+                    "apps/web/src/page.tsx": b"source",
+                },
+                read_failures={
+                    "apps/web/src/page.tsx": ReferenceSourceFailureKind.SYMLINK,
+                },
+            ),
+        )
+
+    assert isinstance(package_result, SourceAcquisitionUnavailable)
+    assert isinstance(later_phase_result, SourceAcquisitionUnavailable)
+    assert (package_result.diagnostic_code, package_result.stage) == (diagnostic_code, stage)
+    assert (later_phase_result.diagnostic_code, later_phase_result.stage) == (
+        diagnostic_code,
+        stage,
+    )
+    assert package_result.early_read_prefix is not None
+    later_prefix = later_phase_result.early_read_prefix
+    later_provenance = later_phase_result.observation_provenance
+    assert later_prefix is not None and later_prefix.phase == "program"
+    assert later_provenance is not None
+    assert {
+        name for name, row in later_provenance["observed"].items() if row["state"] == "observed"
+    } == {"applicability", "config", "source"}
+
+    decision = source_acquisition_failure_decision(
+        package_result, _run_context(selector=selector, independent=True)
+    )
+    with pytest.raises(AssertionError):
+        replace(decision, early_read_prefix=later_prefix)
+
+    object.__setattr__(decision, "early_read_prefix", later_prefix)
+    with pytest.raises(AssertionError):
+        finalize_publication_decision(decision, adapter_stdout_chunks=())
 
 
 @pytest.mark.parametrize(

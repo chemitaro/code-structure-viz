@@ -1591,7 +1591,9 @@ class PreResponseFailureDecision:
                 self.run_context,
                 context,
             )
-        if self.request is None and self.stage in {"source_control", "source_read"}:
+        if self.request is None and (
+            self.early_read_prefix is not None or self.stage in {"source_control", "source_read"}
+        ):
             source_seal = context.source_acquisition_seal
             if self.early_read_prefix is not None:
                 prefix = self.early_read_prefix
