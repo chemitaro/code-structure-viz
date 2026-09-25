@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-24"
+最終更新: "2026-09-25"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -52,7 +52,7 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 
 2026-09-24のユーザー指示による実装再開では、OS process boundaryより前のhost-independentなsource-sealed request builderだけを先行実装した。これは`I05-PLAN-008`のfixed-SHA Strict gate、`I05-PLAN-002`の完了、Node起動、macOS support、production `available`を証明しない。続く`chatgpt-code-review-strict`試行は応答JSON不正でwrapper exit 20となったため、valid review pass/failとして扱わない。差分のローカルadjudicationとテスト証拠はtracked artifact `20260923t163655z-disc-issue8-verified-fd-dependency-analysis.md`に記録する。
 
-2026-09-25、ユーザー指定の累積固定点`f4159066f3954454ad2f0c2701fa54bf1bc7bc4a`からHEAD `3172bb86b8c36a87f722dd62bd80c1b9321a2382`まで18 commits / 24 changed filesのfresh ChatGPT Code Review Strictが、valid `review_status=pass`、findings 0、confidence 0.86を返した。GitHub connectorはrepository、branch、exact SHAを一致確認した。Oracle logは`requested=gpt-6-pro`、`target=Latest`、`Thinking time: Pro`であり、GPT-6 Proを要求した事実は確認できるがbackend model identityは断定しない。レビュー自体はtests/toolsを実行せず、exact-HEAD CI run `36100007408`と独立に扱う。詳細・限界は`artifacts/20260925t063051z-disc-issue8-cumulative-strict-code-review-3172bb8.md`に記録する。このreview passはproduction readiness、Issue #8全体の完了、adapter identityの未決判断を解決しない。
+2026-09-25、ユーザー指定の累積固定点`f4159066f3954454ad2f0c2701fa54bf1bc7bc4a`からHEAD `3172bb86b8c36a87f722dd62bd80c1b9321a2382`まで18 commits / 24 changed filesのfresh ChatGPT Code Review Strictが、valid `review_status=pass`、findings 0、confidence 0.86を返した。GitHub connectorはrepository、branch、exact SHAを一致確認した。Oracle logは`requested=gpt-6-pro`、`target=Latest`、`Thinking time: Pro`であり、GPT-6 Proを要求した事実は確認できるがbackend model identityは断定しない。レビュー自体はtests/toolsを実行せず、exact-HEAD CI run `36100007408`と独立に扱う。詳細・限界は`artifacts/20260925t063051z-disc-issue8-cumulative-strict-code-review-3172bb8.md`に記録する。このpassは`3172bb8...`の差分だけに結び付く過去証拠であり、後続のnormative Plan修正を含むcandidateのpassではない。production readiness、Issue #8全体の完了、adapter identityの未決判断も解決しない。修正後candidateは同じユーザー選択済み固定点からfresh exact-SHA reviewを通す。
 
 I05-PLAN-008のpre-response projection gateでは、validated requestに明示targetがある一方でresponse decode/validationより前に失敗しvalidated target proofがない経路を、全selector（省略、manifest、semantic-json、PlantUML）で検証します。request/config/run identityのtargetは保持し、target-completeness行・target failure reason・`CSV-NEXT-TARGET-001`は生成せず、既存のpre-response diagnostic/statusとpayload-unavailable publicationを保つことを確認します。`test_response_boundary_failures_are_pre_response_decisions`と実publication-chain regressionをこの基準へ合わせます。
 
@@ -403,8 +403,8 @@ The user explicitly adopted the best-practice path from the exact-SHA ChatGPT-Us
 
 - private request/response/model、TrustedTypeEnvironment、Next semantic/domain manifest/config/runtime member/licenseのJSON Schema、diagnostic catalog、semantic/PlantUML contract docs、positive/negative mutation vectorsを実ファイルとして固定する。
 - P0/P1 closureのローカル証拠は、`tests/contracts/test_json_schemas.py`（schema registry、既存Python/SQLAlchemy golden、public Next branch）と `tests/contracts/test_next_contracts.py`（cross-record reference validator、status matrix、known-answer/golden vectors）で再実行できる形にする。新しいNext production behavior、Node adapter、依存関係はこのstepへ含めない。
-- SpecDock/schema/HTML/format validation、clean commit/push、exact upstream SHA binding後に、現在許可された独立GPT-6 Max reviewerでP0/P1とcontract gapをレビューする。外部ChatGPT系skillが利用可能になった場合も、別経路の証拠として固定SHA・clean stateを再確認する。
-- findingをcanonical authority/current sourceへ照合して修復し、fresh exact SHAでP0/P1=0まで再レビューする。passはIssue実装完了ではない。
+- SpecDock/schema/HTML/format validation、clean commit/push、exact upstream SHA binding後に、サブエージェントを使わないfresh ChatGPT Code Review Strictを実行する。固定点はユーザーが明示選択した累積review baseとし、今回の選択は`f4159066f3954454ad2f0c2701fa54bf1bc7bc4a`である。対象repo/branch/SHAをGitHub connectorで確認し、全current-v1範囲をレビューする。レビュー要求はユーザー指定の`gpt-6-pro` / Proとし、wrapper/Oracleが実際のbackend identityを証明しない場合はその限界をArtifactへ記録する。reviewerはtests/toolsを実行したと主張せず、各品質gateの結果は独立した同一candidate証拠で示す。
+- `review_status=pass`かつP0/P1=0を必須gateとする。findingはcanonical authority/current sourceと照合して修復し、同じ累積固定点からfresh exact-SHA reviewを再実行する。Strictの無効応答、connector不一致、候補SHA不一致はpassではない。P2/P3だけでは自動修復・review loopを開始しない。passはIssue実装完了ではない。
 
 ### I05-PLAN-002 bridge and adapter boundary
 
