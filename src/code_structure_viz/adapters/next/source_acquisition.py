@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from code_structure_viz.adapters.next.applicability import (
     PackageApplicabilityMatrix,
@@ -257,6 +257,12 @@ class _GuardedSourceReader:
             raise NextSourceIntegrityError() from error
 
     def read_once(self, path: str) -> bytes:
+        return self._read_once(path, phase="source_read")
+
+    def read_control_once(self, path: str) -> bytes:
+        return self._read_once(path, phase="source_control")
+
+    def _read_once(self, path: str, *, phase: Literal["source_read", "source_control"]) -> bytes:
         try:
             return self._reader.read_once(path)
         except SourceDriftError as error:
@@ -275,6 +281,10 @@ class _GuardedSourceReader:
             if error.kind is SourceReadFailureKind.READ and path in self._applicability_paths:
                 raise NextSourceAcquisitionError(
                     "CSV-NEXT-APPLICABILITY-002", "applicability"
+                ) from error
+            if error.kind is SourceReadFailureKind.READ and phase == "source_control":
+                raise NextSourceAcquisitionError(
+                    "CSV-NEXT-SOURCE-003", "source_control", path=path
                 ) from error
             raise NextSourceAcquisitionError(
                 "CSV-NEXT-SOURCE-003", "source_read", path=path
@@ -375,7 +385,11 @@ class NextSourceAcquirer:
         observations: list[tuple[str, bytes | None]] = []
         for root in roots:
             package_path = "package.json" if root == "." else f"{root}/package.json"
-            payload = self._read_once(package_path) if package_path in self._path_set else None
+            payload = (
+                self._read_once(package_path, phase="applicability")
+                if package_path in self._path_set
+                else None
+            )
             if payload is not None and not isinstance(payload, bytes):
                 raise ValueError("source reader must return frozen package bytes")
             observations.append((package_path, payload))
@@ -425,7 +439,7 @@ class NextSourceAcquirer:
                     path = queue.pop(0)
                     if path in controls_for_project:
                         continue
-                    payload = self._read_once(path)
+                    payload = self._read_once(path, phase="source_control")
                     controls_for_project[path] = payload
                     frozen_controls[path] = payload
                     value = parse_control_jsonc(payload, path=path)
@@ -474,12 +488,34 @@ class NextSourceAcquirer:
     def _project_control_path(project_root: str, control_name: str) -> str:
         return control_name if project_root == "." else f"{project_root}/{control_name}"
 
-    def _read_once(self, path: str) -> bytes:
+    def _read_once(
+        self,
+        path: str,
+        *,
+        phase: Literal["applicability", "source_control", "source_read"] = "source_read",
+    ) -> bytes:
         if path not in self._path_set:
             raise ValueError("source path is not in the frozen inventory")
         if path in self._observed:
             raise ValueError("source path bytes were requested more than once")
-        payload = self._reader.read_once(path)
+        try:
+            if phase == "source_control":
+                read_control_once = getattr(self._reader, "read_control_once", None)
+                payload = (
+                    read_control_once(path)
+                    if callable(read_control_once)
+                    else self._reader.read_once(path)
+                )
+            else:
+                payload = self._reader.read_once(path)
+        except SourceReadFailure as error:
+            if error.kind is not SourceReadFailureKind.READ:
+                raise
+            if phase == "applicability":
+                raise NextSourceAcquisitionError(
+                    "CSV-NEXT-APPLICABILITY-002", "applicability"
+                ) from error
+            raise NextSourceAcquisitionError("CSV-NEXT-SOURCE-003", phase, path=path) from error
         if not isinstance(payload, bytes):
             raise ValueError("source reader must return frozen bytes")
         self._observed[path] = payload
@@ -563,7 +599,7 @@ def seal_source_acquisition(
     for path in source_paths:
         if path in contents:
             continue
-        payload = acquirer._read_once(path)
+        payload = acquirer._read_once(path, phase="source_read")
         if len(payload) > limits["max_file_bytes"]:
             raise NextSourceAcquisitionError("CSV-NEXT-LIMIT-001", "source_read")
         total_bytes += len(payload)

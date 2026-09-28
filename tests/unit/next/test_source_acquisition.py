@@ -169,6 +169,82 @@ def test_package_read_failure_classification_precedes_other_observations(
     assert reader.seal_calls == 0
 
 
+@pytest.mark.parametrize(
+    ("files", "failed_path", "expected_reads"),
+    [
+        (
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"include":["src/**"]}',
+                "src/page.tsx": b"export default function Page() { return null; }",
+            },
+            "tsconfig.json",
+            ["package.json", "tsconfig.json"],
+        ),
+        (
+            {
+                "package.json": b'{"dependencies":{"next":"15"}}',
+                "tsconfig.json": b'{"extends":"./base.json"}',
+                "base.json": b'{"include":["src/**"]}',
+                "src/page.tsx": b"export default function Page() { return null; }",
+            },
+            "base.json",
+            ["package.json", "tsconfig.json", "base.json"],
+        ),
+    ],
+    ids=["root-config", "local-extends"],
+)
+def test_control_read_failure_preserves_source_control_stage(
+    files: dict[str, bytes], failed_path: str, expected_reads: list[str]
+) -> None:
+    reader = MemorySourceReader(
+        files,
+        read_failures={failed_path: SourceReadFailureKind.READ},
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent((".",)),
+            reader,
+            trusted_environment_digest="a" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        "CSV-NEXT-SOURCE-003",
+        "source_control",
+        failed_path,
+    )
+    assert reader.reads == expected_reads
+    assert reader.seal_calls == 0
+
+
+@pytest.mark.parametrize("failed_path", ["src/page.tsx", "src/global.d.ts"])
+def test_program_and_context_read_failures_remain_source_read(failed_path: str) -> None:
+    reader = MemorySourceReader(
+        {
+            "package.json": b'{"dependencies":{"next":"15"}}',
+            "tsconfig.json": b'{"include":["src/**"]}',
+            "src/page.tsx": b"export default function Page() { return null; }",
+            "src/global.d.ts": b"declare const marker: string;",
+        },
+        read_failures={failed_path: SourceReadFailureKind.READ},
+    )
+
+    with pytest.raises(NextSourceAcquisitionError) as caught:
+        source_acquisition.seal_source_acquisition(
+            SourceDiscoveryIntent((".",)),
+            reader,
+            trusted_environment_digest="a" * 64,
+        )
+
+    assert (caught.value.code, caught.value.stage, caught.value.path) == (
+        "CSV-NEXT-SOURCE-003",
+        "source_read",
+        failed_path,
+    )
+    assert reader.seal_calls == 0
+
+
 def test_package_preflight_rejects_actual_symlink_with_source_integrity_classification(
     tmp_path: Path,
 ) -> None:
