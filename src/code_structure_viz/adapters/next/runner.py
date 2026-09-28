@@ -36,7 +36,7 @@ def resolve_next_adapter_identity() -> NextAdapterIdentity:
         content = resource.read_bytes()
     except NextAdapterIdentityError:
         raise
-    except (ModuleNotFoundError, OSError) as error:
+    except (ImportError, OSError) as error:
         raise NextAdapterIdentityError("packaged Next adapter entrypoint is unavailable") from error
 
     if content.count(_VERSION_MARKER) != 1:

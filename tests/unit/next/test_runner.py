@@ -116,6 +116,20 @@ def test_missing_package_resource_fails_closed_without_fallback(
     assert requested_packages == ["code_structure_viz"]
 
 
+def test_resource_package_import_error_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+
+    def files(package_name: str) -> object:
+        raise ImportError(f"cannot load {package_name}")
+
+    monkeypatch.setattr(resources, "files", files)
+
+    with pytest.raises(runner.NextAdapterIdentityError):
+        runner.resolve_next_adapter_identity()
+
+
 def test_duplicate_version_marker_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
