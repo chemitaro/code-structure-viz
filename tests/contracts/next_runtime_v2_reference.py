@@ -1,5 +1,6 @@
 """Data-only A-runtime reference producers; never a production runner."""
 
+import base64
 import hashlib
 import json
 import re
@@ -8,15 +9,27 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitionSeal
+from tests.contracts.next_reference_validation import (
+    canonical_json_bytes,
+    digest,
+    project_config_digest,
+    recompute_record_id,
+)
 from tests.contracts.next_runtime_v2_validation import (
     process_payload_gate_v2,
     validate_execution_asset_identity_v1,
     validate_launch_policy_assets_v2,
     validate_process_launch_policy_v2,
     validate_process_observation_v2,
+    validate_request_frame_v2,
+    validate_request_json_limits_v2,
+    validate_request_record_v2,
+    validate_request_stdin_bytes_v2,
     validate_response_frame_bytes_v2,
     validate_runtime_binding_identity_v1,
     validate_runtime_binding_observation_v1,
+    validate_source_seal_trusted_v2,
     validate_trusted_environment_manifest_v2,
 )
 from tests.contracts.next_trusted_profile_v1_reference import (
@@ -275,3 +288,112 @@ def retain_response_frame_v2(raw: bytes, *, limits: dict[str, int]) -> RetainedR
 
     validate_response_frame_bytes_v2(raw, limits)
     return RetainedResponseFrameV2._from_validated(raw)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class RetainedRequestFrameV2:
+    """Generated private bytes bound to one source seal, not a Node observation."""
+
+    canonical_bytes: bytes = field(repr=False)
+    request_id: str
+    source_seal_id: str = field(repr=False)
+    execution_asset_set_id: str = field(repr=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("request frames are created by build_request_frame_v2")
+
+    @classmethod
+    def _from_builder(
+        cls, *, raw: bytes, request_id: str, source_seal_id: str, execution_asset_set_id: str
+    ) -> "RetainedRequestFrameV2":
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "canonical_bytes", raw)
+        object.__setattr__(instance, "request_id", request_id)
+        object.__setattr__(instance, "source_seal_id", source_seal_id)
+        object.__setattr__(instance, "execution_asset_set_id", execution_asset_set_id)
+        return instance
+
+    def record(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self.canonical_bytes))
+
+
+def build_request_frame_v2(
+    seal: SourceAcquisitionSeal,
+    assets: RetainedExecutionAssets,
+    *,
+    targets: list[str],
+    run_context: dict[str, Any],
+) -> RetainedRequestFrameV2:
+    """Reference projection from retained owners; never reopen target/package files."""
+
+    validate_source_seal_trusted_v2(seal, assets)
+    plan = seal.final_plan
+    applicable_roots = set(seal.package_applicability.applicable_projects)
+    projects: dict[str, dict[str, Any]] = {}
+    for row in plan["projects"]:
+        if row["root"] not in applicable_roots:
+            continue
+        project = {
+            "kind": "project",
+            **{
+                key: deepcopy(row[key])
+                for key in ("root", "source_roots", "config_path", "compiler_options")
+            },
+            "file_ids": [],
+        }
+        project["id"] = recompute_record_id(project)
+        project["config_digest"] = project_config_digest(project)
+        projects[row["root"]] = project
+    source = {item.path.as_posix(): item for item in seal.source_view.files}
+    files = []
+    for row in plan["file_role_map"]:
+        if row["project_root"] not in applicable_roots:
+            continue
+        observed = source[row["path"]]
+        file_record = {
+            "kind": "file",
+            "path": row["path"],
+            "project_id": projects[row["project_root"]]["id"],
+            "roles": list(row["roles"]),
+            "effective_role": row["effective_role"],
+            "size_bytes": observed.size_bytes,
+            "sha256": observed.sha256,
+            "content_base64": base64.b64encode(observed.content).decode("ascii"),
+        }
+        file_record["id"] = recompute_record_id(file_record)
+        files.append(file_record)
+        projects[row["project_root"]]["file_ids"].append(file_record["id"])
+    for project in projects.values():
+        project["file_ids"].sort()
+    request = {
+        "schema": "code-structure-viz.next-adapter-request/v2",
+        "protocol": "code-structure-viz.next-adapter/v2",
+        "adapter_version": assets.adapter_identity()["version"],
+        "trusted_type_environment": trusted_environment_manifest_v2(assets)[
+            "environment_descriptor"
+        ],
+        "runtime_requirement": {
+            "schema": "code-structure-viz.next-node-runtime-requirement/v1",
+            "engine": "node",
+            "release": "stable",
+            "minimum_major": 22,
+        },
+        "projects": [projects[root] for root in sorted(projects, key=lambda p: p.encode("utf-8"))],
+        "files": sorted(files, key=lambda item: item["id"]),
+        "targets": list(targets),
+        "limits": plan["limits"],
+        "run_context": deepcopy(run_context),
+    }
+    validate_request_json_limits_v2(request, request["limits"])
+    request["request_id"] = digest(request)
+    validate_request_record_v2(request)
+    raw = canonical_json_bytes(request)
+    validate_request_stdin_bytes_v2(raw, request["limits"])
+    retained = RetainedRequestFrameV2._from_builder(
+        raw=raw,
+        request_id=request["request_id"],
+        source_seal_id=seal.seal_id,
+        execution_asset_set_id=assets.descriptor()["asset_set_id"],
+    )
+    validate_request_frame_v2(retained, seal, assets)
+    return retained

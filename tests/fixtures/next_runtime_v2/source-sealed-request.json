@@ -1,0 +1,140 @@
+{
+  "schema": "code-structure-viz.next-adapter-request/v2",
+  "protocol": "code-structure-viz.next-adapter/v2",
+  "adapter_version": "0.1.0",
+  "trusted_type_environment": {
+    "schema": "code-structure-viz.next-trusted-types/v2",
+    "environment_version": "2",
+    "semantic_profile_id": "next-trusted-profile-v1",
+    "sha256": "49458cb6f0f5097d486a2e4f7691f3f80d1e62ea4dbc65ceff00b862ce84e366"
+  },
+  "runtime_requirement": {
+    "schema": "code-structure-viz.next-node-runtime-requirement/v1",
+    "engine": "node",
+    "release": "stable",
+    "minimum_major": 22
+  },
+  "projects": [
+    {
+      "kind": "project",
+      "root": ".",
+      "source_roots": [
+        "src"
+      ],
+      "config_path": "tsconfig.json",
+      "compiler_options": {
+        "allow_js": true,
+        "check_js": false,
+        "jsx": "preserve",
+        "module": "esnext",
+        "module_resolution": "bundler",
+        "base_url": null,
+        "paths": {}
+      },
+      "file_ids": [
+        "next:file:6e5a491cdd30e69e4cf115a95b99ad11d83beac749f4f20d7fa12cb26d9f7c0c",
+        "next:file:8cb22e35356bd13a3869a5dd8bd680300b8f8ba5bd33bcdbfc7653cc1eba3e76",
+        "next:file:c5682d41cbd3e90660a43a123464d5f3e07a5536afab19de928c1aebdbf2153b",
+        "next:file:c891008136a6466799eb75e12e6b6d7b2bdb35587cb8c2f96b3b5a720da870bf"
+      ],
+      "id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "config_digest": "382ca8954a897ab23fcde46fc2c166ff7f3db5a453165aac875627f281525c05"
+    }
+  ],
+  "files": [
+    {
+      "kind": "file",
+      "id": "next:file:6e5a491cdd30e69e4cf115a95b99ad11d83beac749f4f20d7fa12cb26d9f7c0c",
+      "path": "package.json",
+      "project_id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "roles": [
+        "control"
+      ],
+      "effective_role": "control",
+      "size_bytes": 30,
+      "sha256": "e1cba2a2526ff053f2d5931bf33cfc1e9eabf400fe0651ee341cb4dac23e29f4",
+      "content_base64": "eyJkZXBlbmRlbmNpZXMiOnsibmV4dCI6IjE1In19"
+    },
+    {
+      "kind": "file",
+      "id": "next:file:8cb22e35356bd13a3869a5dd8bd680300b8f8ba5bd33bcdbfc7653cc1eba3e76",
+      "path": "src/global.d.ts",
+      "project_id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "roles": [
+        "context"
+      ],
+      "effective_role": "context",
+      "size_bytes": 44,
+      "sha256": "65e3515e1c638bba5eeb9be4f9683446b044200f044ad46c8687065a30e4c608",
+      "content_base64": "ZGVjbGFyZSBpbnRlcmZhY2UgV2luZG93IHsgbWFya2VyOiBzdHJpbmc7IH0="
+    },
+    {
+      "kind": "file",
+      "id": "next:file:c5682d41cbd3e90660a43a123464d5f3e07a5536afab19de928c1aebdbf2153b",
+      "path": "src/page.tsx",
+      "project_id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "roles": [
+        "program"
+      ],
+      "effective_role": "program",
+      "size_bytes": 47,
+      "sha256": "50188fd41b2d6a90005f84bd0b549a2e32510d1f6304f6fa8249df308fa16986",
+      "content_base64": "ZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gUGFnZSgpIHsgcmV0dXJuIG51bGw7IH0="
+    },
+    {
+      "kind": "file",
+      "id": "next:file:c891008136a6466799eb75e12e6b6d7b2bdb35587cb8c2f96b3b5a720da870bf",
+      "path": "tsconfig.json",
+      "project_id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "roles": [
+        "control"
+      ],
+      "effective_role": "control",
+      "size_bytes": 24,
+      "sha256": "d22d6c841f113e55b1ad3c0858b78148e6c5196bb88c91b8cd213f22b7524a9b",
+      "content_base64": "eyJpbmNsdWRlIjpbInNyYy8qKi8qIl19"
+    }
+  ],
+  "targets": [
+    "path:src/page.tsx"
+  ],
+  "limits": {
+    "max_entities": 500,
+    "max_files": 20000,
+    "max_file_bytes": 4194304,
+    "max_decoded_bytes": 67108864,
+    "max_encoded_stdin_bytes": 100663296,
+    "max_json_nesting": 64,
+    "max_json_string_bytes": 8388608,
+    "max_array_items": 100000,
+    "max_total_array_items": 100000,
+    "max_collection_items": 20000,
+    "max_model_records": 10000,
+    "max_stdout_bytes": 16777216,
+    "max_adapter_response_bytes": 16777216,
+    "max_selected_stdout_bytes": 16777216,
+    "max_stderr_bytes": 65536,
+    "max_adapter_stderr_capture_bytes": 65536,
+    "max_adapter_stdout_capture_bytes": 16777216,
+    "timeout_seconds": 60,
+    "v8_old_space_mib": 512,
+    "max_type_depth": 16,
+    "max_type_nodes_per_prop": 512,
+    "max_union_members": 64,
+    "max_intersection_members": 64,
+    "max_nested_properties": 256,
+    "max_signatures_per_component": 16,
+    "max_flow_visits": 10000,
+    "max_alias_edges": 64
+  },
+  "run_context": {
+    "requested_formats": [
+      "semantic-json"
+    ],
+    "budget_requested": null,
+    "budget_resolved": 500,
+    "budget_source": "builtin",
+    "stdout_selector": null
+  },
+  "request_id": "364ae1c7150c97541f990bffc4a864ebc405cdf5d0472f3c250434a8f1375197"
+}

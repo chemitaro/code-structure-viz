@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -11,7 +12,13 @@ from typing import TYPE_CHECKING, Any, cast
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from referencing import Registry, Resource
 
-from tests.contracts.next_reference_validation import bounded_decode_json
+from tests.contracts.next_reference_validation import (
+    bounded_decode_json,
+    canonical_json_bytes,
+    canonical_run_context,
+    digest,
+    validate_request_files,
+)
 from tests.contracts.next_trusted_profile_v1_reference import (
     PROFILE_DECLARATIONS,
     TRUSTED_PACKAGE_PREFIX,
@@ -23,6 +30,7 @@ if TYPE_CHECKING:
     from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitionSeal
     from tests.contracts.next_runtime_v2_reference import (
         RetainedExecutionAssets,
+        RetainedRequestFrameV2,
         RetainedResponseFrameV2,
     )
 
@@ -82,6 +90,135 @@ def validate_trusted_environment_manifest_shape_v2(value: dict[str, Any]) -> Non
     """Closed manifest shape only, not profile, hash or retained-byte admission."""
 
     _validate_schema("next-trusted-type-environment-v2", value)
+
+
+def validate_request_shape_v2(value: dict[str, Any]) -> None:
+    """Closed generated request shape, without source/byte-owner admission."""
+
+    _validate_schema("next-adapter-request-v2", value)
+
+
+def validate_request_json_limits_v2(value: object, limits: dict[str, int]) -> None:
+    """Generated JSON bounds; response aggregate-array limits do not apply."""
+
+    _validate_schema("next-limits-v1", limits)
+    pending = [(value, 1)]
+    while pending:
+        current, depth = pending.pop()
+        if depth > limits["max_json_nesting"]:
+            raise ValueError("request exceeds max_json_nesting before encoding")
+        if (
+            isinstance(current, str)
+            and len(current.encode("utf-8")) > limits["max_json_string_bytes"]
+        ):
+            raise ValueError("request exceeds max_json_string_bytes before encoding")
+        if isinstance(current, dict):
+            if any(not isinstance(key, str) for key in current):
+                raise ValueError("request JSON object keys must be strings")
+            if any(len(key.encode("utf-8")) > limits["max_json_string_bytes"] for key in current):
+                raise ValueError("request exceeds max_json_string_bytes before encoding")
+            pending.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, list):
+            if len(current) > limits["max_array_items"]:
+                raise ValueError("request exceeds max_array_items before encoding")
+            pending.extend((item, depth + 1) for item in current)
+
+
+def validate_request_stdin_bytes_v2(raw: bytes, limits: dict[str, int]) -> None:
+    """Actual encoded byte cap only, not JSON shape or source admission."""
+
+    if not isinstance(raw, bytes):
+        raise TypeError("request input must be immutable bytes")
+    _validate_schema("next-limits-v1", limits)
+    if len(raw) > limits["max_encoded_stdin_bytes"]:
+        raise ValueError("request exceeds max_encoded_stdin_bytes before send")
+
+
+def validate_request_record_v2(value: dict[str, Any]) -> None:
+    """Validate generated request data; the retained-source join is separate."""
+
+    validate_request_json_limits_v2(value, value.get("limits", {}))
+    validate_request_shape_v2(value)
+    if value["request_id"] != digest(
+        {key: item for key, item in value.items() if key != "request_id"}
+    ):
+        raise ValueError("request_id differs from the new request preimage")
+    if value["run_context"]["budget_resolved"] != value["limits"]["max_entities"]:
+        raise ValueError("request context budget differs from its source-sealed limits")
+    try:
+        canonical_run_context(**value["run_context"])
+        validate_request_files(value)
+    except AssertionError as error:
+        raise ValueError("request violates its source/entity or context contract") from error
+
+
+def validate_request_source_binding_v2(
+    value: dict[str, Any], seal: SourceAcquisitionSeal, owner: RetainedExecutionAssets
+) -> None:
+    """Independent data joins; never regenerate expected bytes with the builder."""
+
+    from tests.contracts.next_runtime_v2_reference import trusted_environment_manifest_v2
+
+    validate_source_seal_trusted_v2(seal, owner)
+    validate_request_record_v2(value)
+    if value["adapter_version"] != owner.adapter_identity()["version"] or (
+        value["trusted_type_environment"]
+        != trusted_environment_manifest_v2(owner)["environment_descriptor"]
+    ):
+        raise ValueError("request differs from its retained adapter/trusted identity")
+    plan = seal.final_plan
+    if value["limits"] != plan["limits"]:
+        raise ValueError("request limits differ from their source seal")
+    applicable = set(seal.package_applicability.applicable_projects)
+    projects = {row["root"]: row for row in value["projects"]}
+    expected_projects = {row["root"]: row for row in plan["projects"] if row["root"] in applicable}
+    if set(projects) != set(expected_projects) or any(
+        row[key] != expected_projects[root][key]
+        for root, row in projects.items()
+        for key in ("root", "source_roots", "config_path", "compiler_options")
+    ):
+        raise ValueError("request projects differ from their source seal")
+    source = {item.path.as_posix(): item for item in seal.source_view.files}
+    roles = {row["path"]: row for row in plan["file_role_map"] if row["project_root"] in applicable}
+    files = {row["path"]: row for row in value["files"]}
+    if set(files) != set(roles):
+        raise ValueError("request file membership differs from its source seal")
+    for path, row in files.items():
+        role = roles[path]
+        observed = source[path]
+        if (
+            row["project_id"] != projects[role["project_root"]]["id"]
+            or row["roles"] != role["roles"]
+            or row["effective_role"] != role["effective_role"]
+            or row["size_bytes"] != observed.size_bytes
+            or row["sha256"] != observed.sha256
+            or base64.b64decode(row["content_base64"], validate=True) != observed.content
+        ):
+            raise ValueError("request file roles/bytes differ from their source seal")
+
+
+def validate_request_frame_v2(
+    frame: RetainedRequestFrameV2, seal: SourceAcquisitionSeal, owner: RetainedExecutionAssets
+) -> None:
+    """Admit immutable generated request bytes only at their actual owner join."""
+
+    from tests.contracts.next_runtime_v2_reference import RetainedRequestFrameV2
+
+    if type(frame) is not RetainedRequestFrameV2:
+        raise TypeError("request validation requires a retained request frame owner")
+    validate_source_seal_trusted_v2(seal, owner)
+    if frame.source_seal_id != seal.seal_id:
+        raise ValueError("request source seal identity differs from its actual owner")
+    if frame.execution_asset_set_id != owner.descriptor()["asset_set_id"]:
+        raise ValueError("request execution asset identity differs from its retained owner")
+    validate_request_stdin_bytes_v2(frame.canonical_bytes, seal.final_plan["limits"])
+    value = frame.record()
+    validate_request_source_binding_v2(value, seal, owner)
+    if (
+        value["request_id"] != frame.request_id
+        or canonical_json_bytes(value) != frame.canonical_bytes
+    ):
+        raise ValueError("request canonical bytes/id differ from their retained frame")
 
 
 def validate_trusted_environment_manifest_v2(

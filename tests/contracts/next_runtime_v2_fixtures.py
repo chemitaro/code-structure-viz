@@ -11,7 +11,12 @@ from code_structure_viz.source.git_repository import Commit, EnumeratedPath
 from code_structure_viz.source.source_view import DescriptorAnchoredSourceReadSession
 
 
-def sealed_source_fixture_v1(tmp_path: Path, *, trusted_digest: str) -> SourceAcquisitionSeal:
+def sealed_source_fixture_v1(
+    tmp_path: Path,
+    *,
+    trusted_digest: str,
+    page_content: bytes = b"export default function Page() { return null; }",
+) -> SourceAcquisitionSeal:
     """Use the existing real source acquisition; never construct a synthetic seal."""
 
     repository = tmp_path / "repo"
@@ -19,7 +24,7 @@ def sealed_source_fixture_v1(tmp_path: Path, *, trusted_digest: str) -> SourceAc
     files = {
         "package.json": b'{"dependencies":{"next":"15"}}',
         "tsconfig.json": b'{"include":["src/**/*"]}',
-        "src/page.tsx": b"export default function Page() { return null; }",
+        "src/page.tsx": page_content,
         "src/global.d.ts": b"declare interface Window { marker: string; }",
     }
     for relative_path, content in files.items():

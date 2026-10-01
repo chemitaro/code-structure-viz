@@ -69,6 +69,8 @@ A02-2のresponse初スライスは`docs/contracts/next-adapter-response-v2.md`�
 
 trusted manifest/descriptor v2は`docs/contracts/next-trusted-type-environment-v2.md`へ具体化しました。新descriptorのlogical profile preimageはfixed package pathを除き、新manifest preimageはdescriptor hashとfixed package mappingを含みます。宣言bytesと14 symbols、意味profile=1を維持し、旧v1 hash/preimageを改変しません。同じretained ownerの固定4 declaration/role/bytes、全metadata、両hashを検証し、実source-seal/v1のopaque digestとpolicyへjoinします。constructor/duck ownerや再hashされた偽profileを拒否します。起動前readonly descriptorは期待する宣言metadataであり、実Node/TS/child利用の観測ではありません。source-phase coordinator、request/stdin/response/proof、compatibility/provenance/public closureと実packageは後続gateです。
 
+source-sealed request v2は`docs/contracts/next-adapter-request-v2.md`です。同じseal-owned source/limitsと保持資材から生成し、runtime requirementだけを事前wireへ入れます。request_idは新全preimageのpinned Unicode 15.0.0 canonical digest、wireはself IDを含む末尾LF無しの一つのJSONです。独立validatorでsource/config/role/bytes、adapter/trusted metadata、context budget、canonical bytesをjoinし、private source-seal/asset-set stampsで別ownerへの再bindingを拒否します。depth 64/per-array 100k/key/value string 8 MiB、実encoded stdin 96 MiBを検証し、response-only aggregate capはrequestへ適用しません。保持ownerが正常でも実送信・child echo・Core proof・compatibility・publicationの認定にはなりません。
+
 ```plantuml
 @startuml
 title Current v1: single authority chain
