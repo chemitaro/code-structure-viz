@@ -15,6 +15,7 @@ from referencing import Registry, Resource
 from tests.contracts.next_reference_validation import (
     COLLECTIONS,
     ModelRecordLimitError,
+    _assert_target_keys,
     _is_program_file,
     _record_references,
     _target_duplicate_module_exceptions,
@@ -51,6 +52,7 @@ if TYPE_CHECKING:
         RejectedResponseFrameV2,
         RejectedSemanticDecisionV2,
         RetainedExecutionAssets,
+        RetainedNextAnalysisContextV2,
         RetainedRequestFrameV2,
         RetainedResponseFrameV2,
         RetainedRuntimeResultV2,
@@ -74,6 +76,8 @@ def _validate_schema(name: str, value: object, fragment: str = "") -> None:
     for path in (ROOT / "schemas").glob("*.schema.json"):
         schema = json.loads(path.read_text(encoding="utf-8"))
         identifier = schema.get("$id")
+        if path.name == "semantic-v1.schema.json":
+            identifier = "urn:code-structure-viz:schema:semantic-v1"
         if isinstance(identifier, str):
             registry = registry.with_resource(identifier, Resource.from_contents(schema))
     target = cast(
@@ -319,6 +323,73 @@ def validate_request_source_binding_v2(
             raise ValueError("request file roles/bytes differ from their source seal")
 
 
+def validate_next_analysis_context_v2(
+    context: RetainedNextAnalysisContextV2,
+    seal: SourceAcquisitionSeal,
+    owner: RetainedExecutionAssets,
+) -> None:
+    """Independently join resolved parent intent/config to its retained owners."""
+
+    from tests.contracts.next_runtime_v2_reference import RetainedNextAnalysisContextV2
+
+    if type(context) is not RetainedNextAnalysisContextV2:
+        raise TypeError("analysis validation requires a retained analysis context owner")
+    validate_source_seal_trusted_v2(seal, owner)
+    if context.source_seal() is not seal or context.execution_assets() is not owner:
+        raise ValueError("analysis context differs from its source/asset owners")
+    intent = context.analysis_intent()
+    run_context = context.run_context()
+    config = context.domain_config()
+    _validate_schema("next-run-context-v1", run_context)
+    if set(intent) != {"targets", "upstream_depth", "downstream_depth"}:
+        raise ValueError("analysis context intent is not closed")
+    if type(intent["targets"]) is not list or any(
+        type(target) is not str for target in intent["targets"]
+    ):
+        raise TypeError("analysis context targets must be a list")
+    try:
+        _assert_target_keys(intent["targets"])
+        canonical_context = canonical_run_context(**run_context)
+    except AssertionError as exc:
+        raise ValueError("analysis context intent violates its v1 invariants") from exc
+    if any(
+        type(intent[field]) is not int or not 0 <= intent[field] <= 64
+        for field in ("upstream_depth", "downstream_depth")
+    ):
+        raise ValueError("analysis context depth must be an integer in 0..64")
+    plan = seal.final_plan
+    if canonical_context["budget_resolved"] != plan["limits"]["max_entities"]:
+        raise ValueError("context budget differs from its source seal limits")
+    applicable = set(seal.package_applicability.applicable_projects)
+    expected = {
+        "schema": "code-structure-viz.domain-config/next/v1",
+        "request_independent": False,
+        "projects": [row for row in plan["projects"] if row["root"] in applicable],
+        "targets": intent["targets"],
+        "upstream_depth": intent["upstream_depth"],
+        "downstream_depth": intent["downstream_depth"],
+        "formats": canonical_context["requested_formats"],
+        "limits": plan["limits"],
+        "trusted_environment_digest": plan["trusted_environment_digest"],
+        "source_plan": plan,
+        "source_plan_digest": seal.plan_digest,
+        "config_resolution": plan["config_resolution"],
+    }
+    expected["domain_config_digest"] = digest(expected)
+    if config != expected or run_context != canonical_context:
+        raise ValueError("analysis context config differs from its retained owners/intent")
+    if any(
+        canonical_json_bytes(value) != retained
+        for value, retained in (
+            (intent, context._intent_bytes),
+            (run_context, context._run_context_bytes),
+            (config, context._config_bytes),
+        )
+    ):
+        raise ValueError("analysis context bytes are not canonical")
+    _validate_schema("next-config-v1", config)
+
+
 def validate_request_frame_v2(
     frame: RetainedRequestFrameV2, seal: SourceAcquisitionSeal, owner: RetainedExecutionAssets
 ) -> None:
@@ -333,9 +404,26 @@ def validate_request_frame_v2(
         raise ValueError("request source seal identity differs from its actual owner")
     if frame.execution_asset_set_id != owner.descriptor()["asset_set_id"]:
         raise ValueError("request execution asset identity differs from its retained owner")
+    context = frame.analysis_context()
+    validate_next_analysis_context_v2(context, seal, owner)
+    expected_context_digest = digest(
+        {
+            "domain_config_digest": context.domain_config()["domain_config_digest"],
+            "run_context": context.run_context(),
+            "source_seal_id": seal.seal_id,
+            "execution_asset_set_id": owner.descriptor()["asset_set_id"],
+        }
+    )
+    if frame.analysis_context_digest != expected_context_digest:
+        raise ValueError("request analysis context identity differs from its retained intent")
     validate_request_stdin_bytes_v2(frame.canonical_bytes, seal.final_plan["limits"])
     value = frame.record()
     validate_request_source_binding_v2(value, seal, owner)
+    if (
+        value["targets"] != context.analysis_intent()["targets"]
+        or value["run_context"] != context.run_context()
+    ):
+        raise ValueError("request differs from its retained analysis context")
     if (
         value["request_id"] != frame.request_id
         or canonical_json_bytes(value) != frame.canonical_bytes

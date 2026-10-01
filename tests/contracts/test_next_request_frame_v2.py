@@ -12,7 +12,10 @@ from jsonschema import ValidationError  # type: ignore[import-untyped]
 
 from tests.contracts import next_runtime_v2_reference, next_runtime_v2_validation
 from tests.contracts.next_reference_validation import LIMIT_DEFAULTS, digest, project_config_digest
-from tests.contracts.next_runtime_v2_fixtures import sealed_source_fixture_v1
+from tests.contracts.next_runtime_v2_fixtures import (
+    analysis_context_fixture_v2,
+    sealed_source_fixture_v1,
+)
 from tests.contracts.test_next_trusted_environment_v2 import profile_members
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,7 +91,11 @@ def test_request_v2_uses_source_and_asset_owners_without_actual_runtime_fields(
     ]
     seal = sealed_source_fixture_v1(tmp_path, trusted_digest=descriptor["sha256"])
     retained = next_runtime_v2_reference.build_request_frame_v2(
-        seal, assets, targets=["path:src/page.tsx"], run_context=run_context()
+        seal,
+        assets,
+        analysis_context_fixture_v2(
+            seal, assets, targets=["path:src/page.tsx"], run_context=run_context()
+        ),
     )
     wire = retained.record()
     expected = json.loads(
@@ -132,7 +139,7 @@ def test_request_context_budget_cannot_disagree_with_source_seal_limits(tmp_path
     context["budget_resolved"] = 499
     with pytest.raises(ValueError, match="context budget"):
         next_runtime_v2_reference.build_request_frame_v2(
-            seal, assets, targets=[], run_context=context
+            seal, assets, analysis_context_fixture_v2(seal, assets, targets=[], run_context=context)
         )
 
 
@@ -144,7 +151,11 @@ def test_request_builder_checks_generated_structure_before_hash_or_schema(tmp_pa
     seal = sealed_source_fixture_v1(tmp_path, trusted_digest=descriptor["sha256"])
     with pytest.raises(ValueError, match="max_json_string_bytes"):
         next_runtime_v2_reference.build_request_frame_v2(
-            seal, assets, targets=["a" * 8_388_609], run_context=run_context()
+            seal,
+            assets,
+            analysis_context_fixture_v2(
+                seal, assets, targets=["a" * 8_388_609], run_context=run_context()
+            ),
         )
 
 
@@ -156,12 +167,16 @@ def test_request_builder_rejects_noncanonical_target_order_without_reordering_it
         "environment_descriptor"
     ]
     seal = sealed_source_fixture_v1(tmp_path, trusted_digest=descriptor["sha256"])
-    with pytest.raises(ValueError, match="source/entity or context"):
+    with pytest.raises(ValueError, match="analysis context intent"):
         next_runtime_v2_reference.build_request_frame_v2(
             seal,
             assets,
-            targets=["path:src/page.tsx", "path:src/global.d.ts"],
-            run_context=run_context(),
+            analysis_context_fixture_v2(
+                seal,
+                assets,
+                targets=["path:src/page.tsx", "path:src/global.d.ts"],
+                run_context=run_context(),
+            ),
         )
 
 
@@ -172,7 +187,9 @@ def test_request_record_recomputes_its_id_from_the_new_preimage(tmp_path: Path) 
     ]
     seal = sealed_source_fixture_v1(tmp_path, trusted_digest=descriptor["sha256"])
     retained = next_runtime_v2_reference.build_request_frame_v2(
-        seal, assets, targets=[], run_context=run_context()
+        seal,
+        assets,
+        analysis_context_fixture_v2(seal, assets, targets=[], run_context=run_context()),
     )
     value = retained.record()
     value["request_id"] = "0" * 64
@@ -187,7 +204,9 @@ def test_request_frame_joins_its_actual_source_seal_not_a_second_snapshot(tmp_pa
     ]
     seal = sealed_source_fixture_v1(tmp_path, trusted_digest=descriptor["sha256"])
     retained = next_runtime_v2_reference.build_request_frame_v2(
-        seal, assets, targets=[], run_context=run_context()
+        seal,
+        assets,
+        analysis_context_fixture_v2(seal, assets, targets=[], run_context=run_context()),
     )
     next_runtime_v2_validation.validate_request_frame_v2(retained, seal, assets)
     other_root = tmp_path / "other"
@@ -211,7 +230,9 @@ def test_request_owner_stamp_rejects_other_assets_with_the_same_header_and_profi
     ]
     seal = sealed_source_fixture_v1(tmp_path, trusted_digest=descriptor["sha256"])
     retained = next_runtime_v2_reference.build_request_frame_v2(
-        seal, assets, targets=[], run_context=run_context()
+        seal,
+        assets,
+        analysis_context_fixture_v2(seal, assets, targets=[], run_context=run_context()),
     )
     entry = "code_structure_viz/_next_runtime/next-adapter.mjs"
     members[entry] = ("adapter", members[entry][1] + b"// different adapter body\n")
@@ -232,7 +253,9 @@ def test_self_consistent_rehashed_request_cannot_replace_its_source_or_asset_own
     ]
     seal = sealed_source_fixture_v1(tmp_path, trusted_digest=descriptor["sha256"])
     retained = next_runtime_v2_reference.build_request_frame_v2(
-        seal, assets, targets=[], run_context=run_context()
+        seal,
+        assets,
+        analysis_context_fixture_v2(seal, assets, targets=[], run_context=run_context()),
     )
     value = retained.record()
     page = next(row for row in value["files"] if row["path"] == "src/page.tsx")
@@ -278,7 +301,7 @@ def test_request_projection_is_fresh_and_uses_frozen_source_not_later_disk_bytes
     (tmp_path / "repo/src/page.tsx").write_bytes(b"later disk bytes must not be read")
     context = run_context()
     retained = next_runtime_v2_reference.build_request_frame_v2(
-        seal, assets, targets=[], run_context=context
+        seal, assets, analysis_context_fixture_v2(seal, assets, targets=[], run_context=context)
     )
     context["requested_formats"].append("plantuml")
     projection = retained.record()
@@ -328,7 +351,9 @@ def test_request_schema_rejects_actual_runtime_and_parent_private_fields(
     ]
     seal = sealed_source_fixture_v1(tmp_path, trusted_digest=descriptor["sha256"])
     value = next_runtime_v2_reference.build_request_frame_v2(
-        seal, assets, targets=[], run_context=run_context()
+        seal,
+        assets,
+        analysis_context_fixture_v2(seal, assets, targets=[], run_context=run_context()),
     ).record()
     value[field] = "0" * 64
     with pytest.raises(ValidationError, match="Additional properties"):

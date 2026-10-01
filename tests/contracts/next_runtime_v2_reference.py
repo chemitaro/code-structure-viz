@@ -28,6 +28,7 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_compatibility_descriptor_v2,
     validate_execution_asset_identity_v1,
     validate_launch_policy_assets_v2,
+    validate_next_analysis_context_v2,
     validate_observation_request_v2,
     validate_process_launch_policy_v2,
     validate_process_observation_v2,
@@ -345,6 +346,92 @@ def inspect_response_frame_v2(
 
 
 @dataclass(frozen=True, slots=True, init=False)
+class RetainedNextAnalysisContextV2:
+    """Immutable parent intent/config; not a child or selected-graph certificate."""
+
+    _seal: SourceAcquisitionSeal = field(repr=False)
+    _assets: RetainedExecutionAssets = field(repr=False)
+    _intent_bytes: bytes = field(repr=False)
+    _run_context_bytes: bytes = field(repr=False)
+    _config_bytes: bytes = field(repr=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("analysis contexts are created by retain_next_analysis_context_v2")
+
+    @classmethod
+    def _from_validated_intent(
+        cls,
+        seal: SourceAcquisitionSeal,
+        assets: RetainedExecutionAssets,
+        intent: dict[str, Any],
+        context: dict[str, Any],
+        config: dict[str, Any],
+    ) -> "RetainedNextAnalysisContextV2":
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "_seal", seal)
+        object.__setattr__(instance, "_assets", assets)
+        object.__setattr__(instance, "_intent_bytes", canonical_json_bytes(intent))
+        object.__setattr__(instance, "_run_context_bytes", canonical_json_bytes(context))
+        object.__setattr__(instance, "_config_bytes", canonical_json_bytes(config))
+        return instance
+
+    def source_seal(self) -> SourceAcquisitionSeal:
+        return self._seal
+
+    def execution_assets(self) -> RetainedExecutionAssets:
+        return self._assets
+
+    def analysis_intent(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._intent_bytes))
+
+    def run_context(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._run_context_bytes))
+
+    def domain_config(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._config_bytes))
+
+
+def retain_next_analysis_context_v2(
+    seal: SourceAcquisitionSeal,
+    assets: RetainedExecutionAssets,
+    *,
+    targets: list[str],
+    upstream_depth: int,
+    downstream_depth: int,
+    run_context: dict[str, Any],
+) -> RetainedNextAnalysisContextV2:
+    """Seal resolved intent without accepting caller-selected config or digests."""
+
+    validate_source_seal_trusted_v2(seal, assets)
+    plan = seal.final_plan
+    applicable = set(seal.package_applicability.applicable_projects)
+    intent = {
+        "targets": deepcopy(targets),
+        "upstream_depth": upstream_depth,
+        "downstream_depth": downstream_depth,
+    }
+    validate_request_json_limits_v2({"intent": intent, "run_context": run_context}, plan["limits"])
+    config = {
+        "schema": "code-structure-viz.domain-config/next/v1",
+        "request_independent": False,
+        "projects": [deepcopy(row) for row in plan["projects"] if row["root"] in applicable],
+        **intent,
+        "formats": deepcopy(run_context["requested_formats"]),
+        "limits": deepcopy(plan["limits"]),
+        "trusted_environment_digest": plan["trusted_environment_digest"],
+        "source_plan": plan,
+        "source_plan_digest": seal.plan_digest,
+        "config_resolution": deepcopy(plan["config_resolution"]),
+    }
+    config["domain_config_digest"] = digest(config)
+    retained = RetainedNextAnalysisContextV2._from_validated_intent(
+        seal, assets, intent, run_context, config
+    )
+    validate_next_analysis_context_v2(retained, seal, assets)
+    return retained
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class RetainedRequestFrameV2:
     """Generated private bytes bound to one source seal, not a Node observation."""
 
@@ -352,35 +439,47 @@ class RetainedRequestFrameV2:
     request_id: str
     source_seal_id: str = field(repr=False)
     execution_asset_set_id: str = field(repr=False)
+    _analysis_context: RetainedNextAnalysisContextV2 = field(repr=False)
+    analysis_context_digest: str = field(repr=False)
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         raise TypeError("request frames are created by build_request_frame_v2")
 
     @classmethod
     def _from_builder(
-        cls, *, raw: bytes, request_id: str, source_seal_id: str, execution_asset_set_id: str
+        cls,
+        *,
+        raw: bytes,
+        request_id: str,
+        source_seal_id: str,
+        execution_asset_set_id: str,
+        analysis_context: RetainedNextAnalysisContextV2,
+        analysis_context_digest: str,
     ) -> "RetainedRequestFrameV2":
         instance = object.__new__(cls)
         object.__setattr__(instance, "canonical_bytes", raw)
         object.__setattr__(instance, "request_id", request_id)
         object.__setattr__(instance, "source_seal_id", source_seal_id)
         object.__setattr__(instance, "execution_asset_set_id", execution_asset_set_id)
+        object.__setattr__(instance, "_analysis_context", analysis_context)
+        object.__setattr__(instance, "analysis_context_digest", analysis_context_digest)
         return instance
 
     def record(self) -> dict[str, Any]:
         return cast(dict[str, Any], json.loads(self.canonical_bytes))
 
+    def analysis_context(self) -> RetainedNextAnalysisContextV2:
+        return self._analysis_context
+
 
 def build_request_frame_v2(
     seal: SourceAcquisitionSeal,
     assets: RetainedExecutionAssets,
-    *,
-    targets: list[str],
-    run_context: dict[str, Any],
+    analysis_context: RetainedNextAnalysisContextV2,
 ) -> RetainedRequestFrameV2:
     """Reference projection from retained owners; never reopen target/package files."""
 
-    validate_source_seal_trusted_v2(seal, assets)
+    validate_next_analysis_context_v2(analysis_context, seal, assets)
     plan = seal.final_plan
     applicable_roots = set(seal.package_applicability.applicable_projects)
     projects: dict[str, dict[str, Any]] = {}
@@ -434,9 +533,9 @@ def build_request_frame_v2(
         },
         "projects": [projects[root] for root in sorted(projects, key=lambda p: p.encode("utf-8"))],
         "files": sorted(files, key=lambda item: item["id"]),
-        "targets": list(targets),
+        "targets": analysis_context.analysis_intent()["targets"],
         "limits": plan["limits"],
-        "run_context": deepcopy(run_context),
+        "run_context": analysis_context.run_context(),
     }
     validate_request_json_limits_v2(request, request["limits"])
     request["request_id"] = digest(request)
@@ -448,6 +547,15 @@ def build_request_frame_v2(
         request_id=request["request_id"],
         source_seal_id=seal.seal_id,
         execution_asset_set_id=assets.descriptor()["asset_set_id"],
+        analysis_context=analysis_context,
+        analysis_context_digest=digest(
+            {
+                "domain_config_digest": analysis_context.domain_config()["domain_config_digest"],
+                "run_context": analysis_context.run_context(),
+                "source_seal_id": seal.seal_id,
+                "execution_asset_set_id": assets.descriptor()["asset_set_id"],
+            }
+        ),
     )
     validate_request_frame_v2(retained, seal, assets)
     return retained

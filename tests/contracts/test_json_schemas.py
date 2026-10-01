@@ -20,6 +20,7 @@ from code_structure_viz.adapters.sqlalchemy.model import (
 from code_structure_viz.adapters.sqlalchemy.semantic_json import render_semantic_snapshot
 from code_structure_viz.source.source_view import SourceView
 from tests.contracts.ecmascript_unicode_15_0 import TABLE_DIGEST
+from tests.contracts.next_public_semantic_v2_validation import validate_semantic_dispatcher_v2
 from tests.contracts.next_reference_validation import (
     _compatibility_descriptor_snapshot,
     _process_launch_for_toolchain,
@@ -117,10 +118,12 @@ def _validator(name: str) -> Draft202012Validator:
         "next-package-applicability-v1.schema.json",
         "next-applicability-decision-v1.schema.json",
         "next-semantic-v1.schema.json",
+        "next-semantic-v2.schema.json",
         "next-trusted-type-environment-v1.schema.json",
         "run-manifest-v1.schema.json",
         "run-summary-v1.schema.json",
         "semantic-v1.schema.json",
+        "semantic-v2.schema.json",
         "stdout-result-v1.schema.json",
     ],
 )
@@ -1859,9 +1862,9 @@ def test_schemas_accept_captured_complete_diff_json(tmp_path: Path) -> None:
     _validator("file-change-set-v1.schema.json").validate(
         json.loads((output / "file-changes.json").read_bytes())
     )
-    _validator("semantic-v1.schema.json").validate(
-        json.loads((output / "python.diff.semantic.json").read_bytes())
-    )
+    semantic = json.loads((output / "python.diff.semantic.json").read_bytes())
+    _validator("semantic-v1.schema.json").validate(semantic)
+    validate_semantic_dispatcher_v2(semantic)
     manifest = json.loads((output / "run-manifest.json").read_bytes())
     validator = _validator("run-manifest-v1.schema.json")
     validator.validate(manifest)
@@ -1969,6 +1972,7 @@ def test_schemas_accept_captured_sqlalchemy_diff_json(tmp_path: Path) -> None:
     semantic = json.loads((output / "sqlalchemy.diff.semantic.json").read_bytes())
     semantic_validator = _validator("semantic-v1.schema.json")
     semantic_validator.validate(semantic)
+    validate_semantic_dispatcher_v2(semantic)
     cross_domain_semantic = deepcopy(semantic)
     cross_domain_semantic["before"]["domain"] = "python"
     with pytest.raises(ValidationError):

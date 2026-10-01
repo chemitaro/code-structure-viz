@@ -1,0 +1,413 @@
+{
+  "type": "semantic_snapshot",
+  "schema": "code-structure-viz.semantic/v2",
+  "domain": "next",
+  "document_kind": "snapshot",
+  "status": "complete",
+  "source": {
+    "schema": "code-structure-viz.source-view/v1",
+    "kind": "working-tree",
+    "head_commit": "1111111111111111111111111111111111111111",
+    "fingerprint": "76735ef6c1348911877ecf97d4550b3d6676749c66736ab32c37354610a6ccc2",
+    "file_count": 4
+  },
+  "request": {
+    "schema": "code-structure-viz.next-snapshot-request/v1",
+    "projects": [
+      {
+        "compiler_options": {
+          "allow_js": true,
+          "base_url": null,
+          "check_js": false,
+          "jsx": "preserve",
+          "module": "esnext",
+          "module_resolution": "bundler",
+          "paths": {}
+        },
+        "config_path": "tsconfig.json",
+        "root": ".",
+        "source_roots": [
+          "src"
+        ]
+      }
+    ],
+    "targets": [],
+    "upstream_depth": 1,
+    "downstream_depth": 1,
+    "formats": [
+      "semantic-json"
+    ],
+    "limits": {
+      "max_adapter_response_bytes": 16777216,
+      "max_adapter_stderr_capture_bytes": 65536,
+      "max_adapter_stdout_capture_bytes": 16777216,
+      "max_alias_edges": 64,
+      "max_array_items": 100000,
+      "max_collection_items": 20000,
+      "max_decoded_bytes": 67108864,
+      "max_encoded_stdin_bytes": 100663296,
+      "max_entities": 500,
+      "max_file_bytes": 4194304,
+      "max_files": 20000,
+      "max_flow_visits": 10000,
+      "max_intersection_members": 64,
+      "max_json_nesting": 64,
+      "max_json_string_bytes": 8388608,
+      "max_model_records": 10000,
+      "max_nested_properties": 256,
+      "max_selected_stdout_bytes": 16777216,
+      "max_signatures_per_component": 16,
+      "max_stderr_bytes": 65536,
+      "max_stdout_bytes": 16777216,
+      "max_total_array_items": 100000,
+      "max_type_depth": 16,
+      "max_type_nodes_per_prop": 512,
+      "max_union_members": 64,
+      "timeout_seconds": 60,
+      "v8_old_space_mib": 512
+    },
+    "trusted_environment_digest": "49458cb6f0f5097d486a2e4f7691f3f80d1e62ea4dbc65ceff00b862ce84e366",
+    "source_plan": {
+      "config_resolution": [
+        {
+          "config_path": "tsconfig.json",
+          "declaring_paths": [
+            {
+              "option": "include",
+              "path": "tsconfig.json"
+            }
+          ],
+          "membership": {
+            "exclude": [],
+            "kind": "include",
+            "patterns": [
+              "src/**/*"
+            ]
+          },
+          "path_resolution_order": [],
+          "project_root": "."
+        }
+      ],
+      "context_suffixes": [
+        ".d.ts"
+      ],
+      "file_role_map": [
+        {
+          "effective_role": "control",
+          "path": "package.json",
+          "project_root": ".",
+          "roles": [
+            "control"
+          ]
+        },
+        {
+          "effective_role": "program",
+          "path": "src/Card.tsx",
+          "project_root": ".",
+          "roles": [
+            "program"
+          ]
+        },
+        {
+          "effective_role": "context",
+          "path": "src/global.d.ts",
+          "project_root": ".",
+          "roles": [
+            "context"
+          ]
+        },
+        {
+          "effective_role": "control",
+          "path": "tsconfig.json",
+          "project_root": ".",
+          "roles": [
+            "control"
+          ]
+        }
+      ],
+      "hard_exclusions": [
+        ".git",
+        "node_modules",
+        ".next",
+        "out",
+        "dist",
+        "build",
+        "coverage"
+      ],
+      "limits": {
+        "max_adapter_response_bytes": 16777216,
+        "max_adapter_stderr_capture_bytes": 65536,
+        "max_adapter_stdout_capture_bytes": 16777216,
+        "max_alias_edges": 64,
+        "max_array_items": 100000,
+        "max_collection_items": 20000,
+        "max_decoded_bytes": 67108864,
+        "max_encoded_stdin_bytes": 100663296,
+        "max_entities": 500,
+        "max_file_bytes": 4194304,
+        "max_files": 20000,
+        "max_flow_visits": 10000,
+        "max_intersection_members": 64,
+        "max_json_nesting": 64,
+        "max_json_string_bytes": 8388608,
+        "max_model_records": 10000,
+        "max_nested_properties": 256,
+        "max_selected_stdout_bytes": 16777216,
+        "max_signatures_per_component": 16,
+        "max_stderr_bytes": 65536,
+        "max_stdout_bytes": 16777216,
+        "max_total_array_items": 100000,
+        "max_type_depth": 16,
+        "max_type_nodes_per_prop": 512,
+        "max_union_members": 64,
+        "timeout_seconds": 60,
+        "v8_old_space_mib": 512
+      },
+      "local_extends": [],
+      "program_suffixes": [
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx"
+      ],
+      "projects": [
+        {
+          "compiler_options": {
+            "allow_js": true,
+            "base_url": null,
+            "check_js": false,
+            "jsx": "preserve",
+            "module": "esnext",
+            "module_resolution": "bundler",
+            "paths": {}
+          },
+          "config_path": "tsconfig.json",
+          "root": ".",
+          "source_roots": [
+            "src"
+          ]
+        }
+      ],
+      "resolved_control_paths": [
+        {
+          "path": "package.json",
+          "project_root": "."
+        },
+        {
+          "path": "tsconfig.json",
+          "project_root": "."
+        }
+      ],
+      "schema": "code-structure-viz.source-acquisition-plan/next/v1",
+      "source_graph": {
+        "edges": [],
+        "graph_digest": "1d23fad011680df6c947113ffc48b250d32295472bb6aceadb3661da51d05752",
+        "nodes": [
+          {
+            "content_sha256": "d22d6c841f113e55b1ad3c0858b78148e6c5196bb88c91b8cd213f22b7524a9b",
+            "id": "3fd0bd2191ae21a39819858e8ee2261d6578f9c4b10e1c49c1be48c6e0617053",
+            "path": "tsconfig.json",
+            "project_root": "."
+          },
+          {
+            "content_sha256": "e1cba2a2526ff053f2d5931bf33cfc1e9eabf400fe0651ee341cb4dac23e29f4",
+            "id": "66a6817f370e8b5ad926be8c06c67bc68a1c00d681a21440a5cb6aea26916599",
+            "path": "package.json",
+            "project_root": "."
+          },
+          {
+            "content_sha256": "65e3515e1c638bba5eeb9be4f9683446b044200f044ad46c8687065a30e4c608",
+            "id": "c678f6be1141450dc68be77b2b233ccdb977ca17fc2e83489fed125397bc2760",
+            "path": "src/global.d.ts",
+            "project_root": "."
+          },
+          {
+            "content_sha256": "de3f522a805aa175a15048d461e16156456a385c2e10349eae919724c2b5c83c",
+            "id": "e4526f22a4900c5f0758344100c899d529eeef6e2ae94f10828a0df5d55412b9",
+            "path": "src/Card.tsx",
+            "project_root": "."
+          }
+        ],
+        "open_edges": []
+      },
+      "trusted_environment_digest": "49458cb6f0f5097d486a2e4f7691f3f80d1e62ea4dbc65ceff00b862ce84e366",
+      "version": "1"
+    },
+    "source_plan_digest": "20f9ba11006bbee9e0f5f956b06c4e20077a75929316c287ba3f1189aa3b8205",
+    "domain_config_digest": "ea556736736d81a3dbbb53cb4f0e4daac01eac55855195a44d3003ac40589894",
+    "run_fingerprint": "066d76ba2cfbae97b137a7a1bd59a4181dee2c0ccf31f5c013a9a1735dc8c56e"
+  },
+  "identity_versions": {
+    "project": 1,
+    "file": 1,
+    "module": 1,
+    "component": 1,
+    "member": 1,
+    "relation": 1,
+    "fact": 1,
+    "props_ir": 1
+  },
+  "compatibility_descriptor": {
+    "algorithm_versions": {
+      "boundary": 1,
+      "export": 1,
+      "fact": 1,
+      "identifier_unicode": "ecma-unicode-15.0",
+      "identifier_unicode_table_digest": "c9336daa555ce98e93cbd48e6b91df22f50a221881bd10b3ed79cf9180297969",
+      "props": 1,
+      "recognition": 1,
+      "relation": 1
+    },
+    "compatibility_id": "0b0d3113311bac4b3788dbd6bb4d643adb181599c7b9e7e7ae7235e382397728",
+    "identity_versions": {
+      "component": 1,
+      "fact": 1,
+      "file": 1,
+      "member": 1,
+      "module": 1,
+      "project": 1,
+      "props_ir": 1,
+      "relation": 1
+    },
+    "portable_toolchain_fingerprint": "2654b8357780949c2f53254993c9bcbfd911c2222d3a69b6d1a6e4028330b888",
+    "runtime_binding_profile_id": "next-public-spawn-runtime-v1",
+    "schema": "code-structure-viz.next-semantic-compatibility/v2",
+    "semantic_profile_id": "next-trusted-profile-v1",
+    "semantic_schema": "code-structure-viz.semantic/v2",
+    "trusted_type_environment_digest": "49458cb6f0f5097d486a2e4f7691f3f80d1e62ea4dbc65ceff00b862ce84e366",
+    "typescript_identity": "typescript-5.9.2",
+    "unicode_profile": {
+      "algorithm_version": "unicode-nfc-15.0.0",
+      "full_scalar_kat_digest": "61f9ea3772b20f223112b3709361f387cde38bf0c5b7c329aeae49fd0d7de3d5",
+      "normalization": "NFC",
+      "profile_id": "unicode-15.0.0-nfc-v1",
+      "table_digest": "877b34f03bc09c193fb9014c381b3d3d980dea0676b942b4d54f56c1e11a6eb2",
+      "unicode_version": "15.0.0"
+    }
+  },
+  "semantic_compatibility_id": "0b0d3113311bac4b3788dbd6bb4d643adb181599c7b9e7e7ae7235e382397728",
+  "projects": [
+    {
+      "compiler_options": {
+        "allow_js": true,
+        "base_url": null,
+        "check_js": false,
+        "jsx": "preserve",
+        "module": "esnext",
+        "module_resolution": "bundler",
+        "paths": {}
+      },
+      "config_digest": "382ca8954a897ab23fcde46fc2c166ff7f3db5a453165aac875627f281525c05",
+      "config_path": "tsconfig.json",
+      "file_ids": [
+        "next:file:6e5a491cdd30e69e4cf115a95b99ad11d83beac749f4f20d7fa12cb26d9f7c0c",
+        "next:file:8cb22e35356bd13a3869a5dd8bd680300b8f8ba5bd33bcdbfc7653cc1eba3e76",
+        "next:file:c891008136a6466799eb75e12e6b6d7b2bdb35587cb8c2f96b3b5a720da870bf",
+        "next:file:f3c110b418c294c89ddfe275c4b844cda0ae4a977ee2b0e4583458d8faeb4a64"
+      ],
+      "id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "kind": "project",
+      "root": ".",
+      "source_roots": [
+        "src"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "effective_role": "control",
+      "id": "next:file:6e5a491cdd30e69e4cf115a95b99ad11d83beac749f4f20d7fa12cb26d9f7c0c",
+      "kind": "file",
+      "path": "package.json",
+      "project_id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "roles": [
+        "control"
+      ],
+      "sha256": "e1cba2a2526ff053f2d5931bf33cfc1e9eabf400fe0651ee341cb4dac23e29f4",
+      "size_bytes": 30
+    },
+    {
+      "effective_role": "context",
+      "id": "next:file:8cb22e35356bd13a3869a5dd8bd680300b8f8ba5bd33bcdbfc7653cc1eba3e76",
+      "kind": "file",
+      "path": "src/global.d.ts",
+      "project_id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "roles": [
+        "context"
+      ],
+      "sha256": "65e3515e1c638bba5eeb9be4f9683446b044200f044ad46c8687065a30e4c608",
+      "size_bytes": 44
+    },
+    {
+      "effective_role": "control",
+      "id": "next:file:c891008136a6466799eb75e12e6b6d7b2bdb35587cb8c2f96b3b5a720da870bf",
+      "kind": "file",
+      "path": "tsconfig.json",
+      "project_id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "roles": [
+        "control"
+      ],
+      "sha256": "d22d6c841f113e55b1ad3c0858b78148e6c5196bb88c91b8cd213f22b7524a9b",
+      "size_bytes": 24
+    },
+    {
+      "effective_role": "program",
+      "id": "next:file:f3c110b418c294c89ddfe275c4b844cda0ae4a977ee2b0e4583458d8faeb4a64",
+      "kind": "file",
+      "path": "src/Card.tsx",
+      "project_id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "roles": [
+        "program"
+      ],
+      "sha256": "de3f522a805aa175a15048d461e16156456a385c2e10349eae919724c2b5c83c",
+      "size_bytes": 16
+    }
+  ],
+  "members": [],
+  "relations": [],
+  "facts": [
+    {
+      "kind": "router_context",
+      "id": "next:fact:88cd5b76689041e7b68f733b5fc162f5ae0cdff5aef9f10c861f6ab5a7959999",
+      "owner_id": "next:module:824683f7952e8b11fdeb41f85419fe44398dac828c221140a11bd31e433df71e",
+      "value": "none"
+    }
+  ],
+  "coverage": {
+    "counts": {
+      "projects": 1,
+      "files": 4,
+      "modules": 1,
+      "components": 0,
+      "members": 0,
+      "relations": 0,
+      "facts": 1,
+      "internal_entities": 1,
+      "discovered": 7,
+      "published": 7,
+      "excluded": 0,
+      "failed": 0
+    },
+    "failed_files": [],
+    "affected_ids": [],
+    "taint_frontier": [],
+    "opaque_reason_counts": {},
+    "unknown_relation_count": 0,
+    "correlation_losses": [],
+    "non_component_value_export_count": 0,
+    "type_only_export_count": 0,
+    "target_completeness": []
+  },
+  "diagnostics": [],
+  "entities": [
+    {
+      "kind": "module",
+      "id": "next:module:824683f7952e8b11fdeb41f85419fe44398dac828c221140a11bd31e433df71e",
+      "project_id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "path": "src/Card.tsx",
+      "router_context": "none",
+      "client_entry": false,
+      "derived_roles": []
+    }
+  ]
+}

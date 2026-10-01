@@ -12,7 +12,10 @@ from jsonschema import ValidationError  # type: ignore[import-untyped]
 from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitionSeal
 from tests.contracts import next_runtime_v2_reference, next_runtime_v2_validation
 from tests.contracts.next_reference_validation import digest
-from tests.contracts.next_runtime_v2_fixtures import sealed_source_fixture_v1
+from tests.contracts.next_runtime_v2_fixtures import (
+    analysis_context_fixture_v2,
+    sealed_source_fixture_v1,
+)
 from tests.contracts.test_next_process_observation_v2 import complete_evidence, policy_fixture
 from tests.contracts.test_next_request_frame_v2 import run_context
 from tests.contracts.test_next_trusted_environment_v2 import profile_members
@@ -34,7 +37,11 @@ def request_inputs(
     ]
     seal = sealed_source_fixture_v1(tmp_path, trusted_digest=trusted["sha256"])
     request = next_runtime_v2_reference.build_request_frame_v2(
-        seal, assets, targets=["path:src/page.tsx"], run_context=run_context()
+        seal,
+        assets,
+        analysis_context_fixture_v2(
+            seal, assets, targets=["path:src/page.tsx"], run_context=run_context()
+        ),
     )
     policy = policy_fixture()
     policy.update(
@@ -474,7 +481,14 @@ def test_compatibility_excludes_host_paths_policy_observation_and_request_state(
         seal, assets, request, policy, first_observation, response
     )
     other_request = next_runtime_v2_reference.build_request_frame_v2(
-        seal, assets, targets=[], run_context={**run_context(), "requested_formats": ["plantuml"]}
+        seal,
+        assets,
+        analysis_context_fixture_v2(
+            seal,
+            assets,
+            targets=[],
+            run_context={**run_context(), "requested_formats": ["plantuml"]},
+        ),
     )
     assert other_request.request_id != request.request_id
     relocated = deepcopy(policy)

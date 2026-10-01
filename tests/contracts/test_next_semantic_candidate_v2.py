@@ -16,7 +16,10 @@ from tests.contracts.next_reference_validation import (
     digest,
     expected_export_observations,
 )
-from tests.contracts.next_runtime_v2_fixtures import sealed_source_fixture_v1
+from tests.contracts.next_runtime_v2_fixtures import (
+    analysis_context_fixture_v2,
+    sealed_source_fixture_v1,
+)
 from tests.contracts.test_next_exchange_v2 import exchange_evidence, request_inputs, shape_wire
 from tests.contracts.test_next_process_observation_v2 import policy_fixture
 from tests.contracts.test_next_request_frame_v2 import run_context
@@ -75,15 +78,19 @@ def core_inputs(
     request = next_runtime_v2_reference.build_request_frame_v2(
         seal,
         assets,
-        targets=targets or [],
-        run_context=run_context()
-        if max_entities == 500
-        else {
-            **run_context(),
-            "budget_requested": max_entities,
-            "budget_resolved": max_entities,
-            "budget_source": "cli",
-        },
+        analysis_context_fixture_v2(
+            seal,
+            assets,
+            targets=targets or [],
+            run_context=run_context()
+            if max_entities == 500
+            else {
+                **run_context(),
+                "budget_requested": max_entities,
+                "budget_resolved": max_entities,
+                "budget_source": "cli",
+            },
+        ),
     )
     policy = policy_fixture()
     policy.update(

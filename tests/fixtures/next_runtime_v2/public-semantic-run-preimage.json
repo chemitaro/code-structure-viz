@@ -1,0 +1,71 @@
+{
+  "source_view_fingerprint": "76735ef6c1348911877ecf97d4550b3d6676749c66736ab32c37354610a6ccc2",
+  "source_plan_digest": "20f9ba11006bbee9e0f5f956b06c4e20077a75929316c287ba3f1189aa3b8205",
+  "domain_config_digest": "ea556736736d81a3dbbb53cb4f0e4daac01eac55855195a44d3003ac40589894",
+  "projects": [
+    {
+      "compiler_options": {
+        "allow_js": true,
+        "base_url": null,
+        "check_js": false,
+        "jsx": "preserve",
+        "module": "esnext",
+        "module_resolution": "bundler",
+        "paths": {}
+      },
+      "config_digest": "382ca8954a897ab23fcde46fc2c166ff7f3db5a453165aac875627f281525c05",
+      "config_path": "tsconfig.json",
+      "file_ids": [
+        "next:file:6e5a491cdd30e69e4cf115a95b99ad11d83beac749f4f20d7fa12cb26d9f7c0c",
+        "next:file:8cb22e35356bd13a3869a5dd8bd680300b8f8ba5bd33bcdbfc7653cc1eba3e76",
+        "next:file:c891008136a6466799eb75e12e6b6d7b2bdb35587cb8c2f96b3b5a720da870bf",
+        "next:file:f3c110b418c294c89ddfe275c4b844cda0ae4a977ee2b0e4583458d8faeb4a64"
+      ],
+      "id": "next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25",
+      "kind": "project",
+      "root": ".",
+      "source_roots": [
+        "src"
+      ]
+    }
+  ],
+  "targets": [],
+  "formats": [
+    "semantic-json"
+  ],
+  "stdout_selector": null,
+  "limits": {
+    "max_adapter_response_bytes": 16777216,
+    "max_adapter_stderr_capture_bytes": 65536,
+    "max_adapter_stdout_capture_bytes": 16777216,
+    "max_alias_edges": 64,
+    "max_array_items": 100000,
+    "max_collection_items": 20000,
+    "max_decoded_bytes": 67108864,
+    "max_encoded_stdin_bytes": 100663296,
+    "max_entities": 500,
+    "max_file_bytes": 4194304,
+    "max_files": 20000,
+    "max_flow_visits": 10000,
+    "max_intersection_members": 64,
+    "max_json_nesting": 64,
+    "max_json_string_bytes": 8388608,
+    "max_model_records": 10000,
+    "max_nested_properties": 256,
+    "max_selected_stdout_bytes": 16777216,
+    "max_signatures_per_component": 16,
+    "max_stderr_bytes": 65536,
+    "max_stdout_bytes": 16777216,
+    "max_total_array_items": 100000,
+    "max_type_depth": 16,
+    "max_type_nodes_per_prop": 512,
+    "max_union_members": 64,
+    "timeout_seconds": 60,
+    "v8_old_space_mib": 512
+  },
+  "node_version": "22.10.0",
+  "typescript_version": "5.9.2",
+  "adapter_version": "0.1.0",
+  "protocol": "code-structure-viz.next-adapter/v2",
+  "trusted_environment_digest": "49458cb6f0f5097d486a2e4f7691f3f80d1e62ea4dbc65ceff00b862ce84e366"
+}

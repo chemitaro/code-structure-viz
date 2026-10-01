@@ -4,17 +4,19 @@
 
 rootは`schema=code-structure-viz.next-adapter-request/v2`、`protocol=code-structure-viz.next-adapter/v2`のclosed objectです。runtime requirementはstable Node major≥22という**期待条件**で、実Node version、candidate path/hash、runtime binding、compatibilityを持ちません。実versionは同じchild processのresponse controlで初めて観測します。
 
-referenceの`build_request_frame_v2(source_seal, retained_assets, targets=..., run_context=...)`が通常生成入口です。実`SourceAcquisitionSeal`と同じimmutable execution asset ownerを要求します。trusted descriptor v2は保持宣言のreadonly metadataから導出し、sealのopaque digestとjoinします。adapter versionも同じ保持entrypointのheaderから導出し、callerのfree identityを受け取りません。このmetadataはchildのTS利用・起動成功を証明しません。
+referenceの`retain_next_analysis_context_v2(source_seal, retained_assets, targets=..., upstream_depth=..., downstream_depth=..., run_context=...)`が、解決済みの親intentを保持します。`build_request_frame_v2(source_seal, retained_assets, analysis_context)`はその同じownerだけを受け、旧loose keyword overloadを持ちません。実`SourceAcquisitionSeal`と同じimmutable execution asset ownerを要求します。trusted descriptor v2は保持宣言のreadonly metadataから導出し、sealのopaque digestとjoinします。adapter versionも同じ保持entrypointのheaderから導出し、callerのfree identityを受け取りません。このmetadataはchildのTS利用・起動成功を証明しません。
 
 projects/filesはsealのfinal plan、applicable project集合、凍結済みSourceViewから導出します。target repositoryやinstalled packageを再readしません。非applicable projectを除き、project root/config/options、file membership/role/base64 bytes/size/hashを独立validatorでsealへjoinします。roles、entity ID、project config digest、path/targetのcanonical orderとNFCは維持するsemantic/source algorithm v1です。
 
 targets/run contextはanalysis intentです。builderは入力順を黙って並べ替えず、canonical orderを要求します。resolved budgetはseal-owned `limits.max_entities`と等しい値でなければ拒否します。validatorはschema shapeだけでなく、run-context/source/entity invariantを検証します。
 
+`RetainedNextAnalysisContextV2`はtargets、明示depth（各integer 0..64）、run context、同じsealから導出したclosed domain-config/v1とそのdigestをimmutable bytesに保持します。caller-selected config/digest、depthのdefault/coercion、別source/asset ownerは受けません。fresh getterの変更は保持値へ戻りません。これは親のresolved analysis intentであり、任意depthのgraph選択や実compilerがintentを実行した証明ではありません。実TypeScript/query-selectionとの接続はA04の受入れです。
+
 ## Canonical bytesとdigest
 
 `request_id`はself fieldだけを除く**新request全体**のdigestです。unchanged Unicode 15.0.0 NFC、sorted keys、compact UTF-8、float/NaN禁止というsemantic canonical codecを使います。実runtime identityを後からrequestへ補完しません。wire bytesはrequest_idを含むcanonical JSON一つで、末尾LF無しです。request preimage digestとfull wire bytesのSHAは別です。
 
-`RetainedRequestFrameV2`はimmutable canonical bytes/request ID、非serialized source-seal ID/execution-asset-set IDを保持し、fresh record projectionを返します。直接constructorやduck frameをadmissionに使いません。private owner stampにより、同じversion header/trusted profileを持つ別adapter bodyへの再bindingを拒否します。これはsame-UID敵対者へのsecurity boundaryではなく、owner間の整合契約です。raw source bytesとprivate stampをreprへ出しません。
+`RetainedRequestFrameV2`はimmutable canonical bytes/request ID、非serialized source-seal ID/execution-asset-set ID、同じanalysis contextとprivate context digestを保持し、fresh record projectionを返します。context digestの閉じたpreimageは`{domain_config_digest,run_context,source_seal_id,execution_asset_set_id}`です。同じchild wireになる別depth contextへの差し替えも拒否します。depth/config/digestを新しいwire fieldへ追加せず、同じintentの既存wire bytes/request IDを変えません。直接constructorやduck frameをadmissionに使いません。private owner stampにより、同じversion header/trusted profileを持つ別adapter bodyへの再bindingを拒否します。これはsame-UID敵対者へのsecurity boundaryではなく、owner間の整合契約です。raw source bytesとprivate stampをreprへ出しません。
 
 `validate_request_record_v2`はself-consistentなデータまで、`validate_request_source_binding_v2`は実sealと保持adapter/trusted metadataへの独立joinまで、`validate_request_frame_v2`はtyped owner stampとcanonical bytesまでを検証します。validatorはbuilderで期待requestを再生成しません。旧v1 request envelope/runtime gateへ変換もしません。再利用する旧reference helpersは変更しないsource/entity ID、canonical codec、context/files invariantだけです。
 

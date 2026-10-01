@@ -1,6 +1,7 @@
 """Contract-test source fixtures, independent of runtime/process admission."""
 
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any
 
 from code_structure_viz.adapters.next.source_acquisition import (
     SourceAcquisitionSeal,
@@ -9,6 +10,33 @@ from code_structure_viz.adapters.next.source_acquisition import (
 )
 from code_structure_viz.source.git_repository import Commit, EnumeratedPath
 from code_structure_viz.source.source_view import DescriptorAnchoredSourceReadSession
+
+if TYPE_CHECKING:
+    from tests.contracts.next_runtime_v2_reference import (
+        RetainedExecutionAssets,
+        RetainedNextAnalysisContextV2,
+    )
+
+
+def analysis_context_fixture_v2(
+    seal: SourceAcquisitionSeal,
+    assets: "RetainedExecutionAssets",
+    *,
+    targets: list[str],
+    run_context: dict[str, Any],
+) -> "RetainedNextAnalysisContextV2":
+    """The existing known-corpus cases have explicitly resolved depths 1/1."""
+
+    from tests.contracts.next_runtime_v2_reference import retain_next_analysis_context_v2
+
+    return retain_next_analysis_context_v2(
+        seal,
+        assets,
+        targets=targets,
+        upstream_depth=1,
+        downstream_depth=1,
+        run_context=run_context,
+    )
 
 
 def sealed_source_fixture_v1(

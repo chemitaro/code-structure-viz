@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:semantic-v2",
+  "title": "CodeStructureViz semantic dispatcher v2; unchanged Python/SQLAlchemy v1 and Next v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "schema", "domain", "document_kind", "status", "diagnostics"],
+  "properties": {
+    "type": {}, "schema": {}, "domain": {}, "document_kind": {}, "status": {},
+    "incomplete_kind": {}, "source": {}, "request": {}, "coverage": {},
+    "before": {}, "after": {}, "before_snapshot_sha256": {}, "after_snapshot_sha256": {},
+    "file_change_set": {}, "semantic_change_set": {}, "entities": {}, "members": {},
+    "relations": {}, "facts": {}, "projects": {}, "files": {},
+    "semantic_compatibility_id": {}, "compatibility_descriptor": {}, "identity_versions": {},
+    "diagnostics": {}
+  },
+  "oneOf": [
+    {
+      "allOf": [
+        {"$ref": "urn:code-structure-viz:schema:semantic-v1"},
+        {"properties": {"domain": {"enum": ["python", "sqlalchemy"]}}, "required": ["domain"]}
+      ]
+    },
+    {"$ref": "urn:code-structure-viz:schema:next-semantic-v2"}
+  ]
+}
