@@ -107,6 +107,7 @@ def _validator(name: str) -> Draft202012Validator:
         "next-run-decision-v1.schema.json",
         "next-run-decision-v2.schema.json",
         "next-publication-decision-v1.schema.json",
+        "next-publication-candidates-v2.schema.json",
         "next-export-graph-raw-v1.schema.json",
         "next-limits-v1.schema.json",
         "next-reference-runtime-inventory-v1.schema.json",

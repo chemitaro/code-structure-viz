@@ -17,6 +17,19 @@ from tests.contracts.next_runtime_v2_validation import (
 )
 
 
+def _require_public_integer_numbers(value: Any) -> None:
+    """The closed public schema has integer counts, never floating-point values."""
+
+    if type(value) is float:
+        raise ValueError("public numbers must retain integer representations")
+    if isinstance(value, dict):
+        for child in value.values():
+            _require_public_integer_numbers(child)
+    elif isinstance(value, list):
+        for child in value:
+            _require_public_integer_numbers(child)
+
+
 def validate_public_semantic_document_v2(
     value: dict[str, Any], decision: ValidatedSemanticDecisionV2
 ) -> None:
@@ -24,6 +37,7 @@ def validate_public_semantic_document_v2(
 
     validate_semantic_decision_v2(decision)
     _validate_schema("next-semantic-v2", value)
+    _require_public_integer_numbers(value)
     gate = decision.gate()
     if gate["payload_available"] is not True or gate["outcome"] not in {"complete", "partial_safe"}:
         raise ValueError("public semantic validation requires an available Core decision")

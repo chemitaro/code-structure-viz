@@ -47,6 +47,8 @@ producerはCore gateを再検証し、source/request/compatibility/modelをfresh
 
 `validate_public_semantic_document_v2(record, decision)`はproducerや共有expected-record builderを呼ばず、schema、同じsource/assets/request/context、config digest、13-key fingerprint、Core outcome、compatibility、collections/orderを独立joinします。shape-validな別source/coverage/order/status、再hashした別intent/compatibilityも拒否します。canonical codec、SHA-256、変更しないentity/source algorithmsだけを共有します。
 
+公開schemaの数値fieldはすべて整数です。数学上の整数値floatを許すJSON Schemaのshape検証だけに頼らず、公開record全体でnative floatを拒否します。整数と同値の`1.0`を、改変candidate側だけでなく元Coreの投影からも認めません。boolを整数へcoerceせず、文字列・配列順序の元の完全一致も維持します。数値literalの実値はTypeIRへ公開しません。
+
 ## 同じ判定から一度保持するsemantic candidate bytes
 
 `retain_public_semantic_artifact_v2(decision)`は同じavailable Core ownerだけを受け、上のpublic recordをUnicode 15.0.0 NFC・key-sort・compact UTF-8 JSON＋末尾LF一つへ一度serializeします。caller bytes、descriptor、status、measurementを引数にしません。nominal `RetainedPublicSemanticArtifactV2`はconstructorを閉じ、同じdecision・immutable bytes・canonical descriptor bytesを保持します。descriptor getterはfresh objectで、source diskの再readを行いません。
@@ -55,7 +57,7 @@ descriptorの六fieldは`path=next.snapshot.semantic.json`、`domain=next`、`fo
 
 `validate_public_semantic_artifact_v2(artifact, decision)`はexact nominal typeとsame-object Core ownerを確認し、保持bytesをdecodeして独立public-record validatorへjoinします。元bytesがcanonical JSON＋LFと完全一致すること、closed descriptorのconstants・実len/hashを検証します。別recordやnoncanonical bytesのsize/hashだけを再計算しても拒否します。producerや共有expected-record builderを呼ばずに検証します。
 
-固定ASCII public literalを独立`jq -cS . <file>`でserializeすると、LF込み9472 bytes、SHA-256は`545389abfa3975b2c95083db9cca6b8efbe071c4526b90cbe55fe9bdc84b5957`です。これは保持candidate bytesのknown vectorで、未実施のfilesystem persist・selected-copy measurement・final publication sealの代用ではありません。requested formatの実publication、PlantUML、全manifest/stdout/exitとselected stdout exact/+1は後続finalizer gateへ残します。persisted artifactにselected-stdout capを先行適用しません。
+固定ASCII public literalを独立`jq -cS . <file>`でserializeすると、LF込み9472 bytes、SHA-256は`545389abfa3975b2c95083db9cca6b8efbe071c4526b90cbe55fe9bdc84b5957`です。これは保持candidate bytesのknown vectorで、未実施のfilesystem persist・selected-copy measurement・final publication sealの代用ではありません。要求済みJSON／PlantUMLの候補bytesと元captureの引継ぎは[publication candidates v2](next-publication-candidates-v2.md)へ閉じます。requested formatの実publication、全manifest/stdout/exitとselected stdout exact/+1は後続finalizer gateへ残します。candidateにselected-stdout capを先行適用しません。
 
 ## Generic dispatcher v2
 

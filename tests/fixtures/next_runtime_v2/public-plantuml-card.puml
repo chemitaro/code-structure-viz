@@ -1,0 +1,24 @@
+@startuml
+title CodeStructureViz Next snapshot
+note top: status=complete; coverage=complete
+legend
+N_P project
+N_M module
+N_C component
+<<export_binding>> export member
+<<import_binding>> import member
+<<prop>> prop member
+--> static_import|literal_dynamic_import
+..> jsx_render|component_wrap
+facet=role:<value|type>|reexport=<true|false>|boundary=<none|server_to_client_entry>
+marker=client_entry|router_context=<context>|client_dependency|server_candidate|unknown
+marker=partial_safe
+external=cloud-after-components-before-members
+sort=kind-prefixed-id-utf8
+endlegend
+package "P:next:project:530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25" as N_P_530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25 {
+}
+component "M:src/Card.tsx" as N_M_824683f7952e8b11fdeb41f85419fe44398dac828c221140a11bd31e433df71e
+N_M_824683f7952e8b11fdeb41f85419fe44398dac828c221140a11bd31e433df71e : marker=unknown
+N_P_530b20c858c6039c19737f386f96cfabdadda6b8a0a1c98b5ca639beb2765c25 .. N_M_824683f7952e8b11fdeb41f85419fe44398dac828c221140a11bd31e433df71e : contains
+@enduml
