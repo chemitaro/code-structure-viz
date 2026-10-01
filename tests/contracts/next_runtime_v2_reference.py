@@ -18,6 +18,7 @@ from tests.contracts.next_reference_validation import (
 )
 from tests.contracts.next_runtime_v2_validation import (
     process_payload_gate_v2,
+    validate_compatibility_descriptor_v2,
     validate_execution_asset_identity_v1,
     validate_launch_policy_assets_v2,
     validate_process_launch_policy_v2,
@@ -30,8 +31,10 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_runtime_binding_identity_v1,
     validate_runtime_binding_observation_v1,
     validate_source_seal_trusted_v2,
+    validate_transport_exchange_v2,
     validate_trusted_environment_manifest_v2,
 )
+from tests.contracts.next_semantic_profile_v1_reference import semantic_compatibility_metadata_v2
 from tests.contracts.next_trusted_profile_v1_reference import (
     PROFILE_DECLARATIONS,
     TRUSTED_PACKAGE_PREFIX,
@@ -397,3 +400,85 @@ def build_request_frame_v2(
     )
     validate_request_frame_v2(retained, seal, assets)
     return retained
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class ValidatedTransportCandidateV2:
+    """Closed data joins only: not Core proof, actual TS or OS acceptance."""
+
+    _request: RetainedRequestFrameV2 = field(repr=False)
+    _response: RetainedResponseFrameV2 = field(repr=False)
+    _runtime_binding_bytes: bytes = field(repr=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("transport candidates are created by retain_transport_candidate_v2")
+
+    @classmethod
+    def _from_exchange(
+        cls,
+        request: RetainedRequestFrameV2,
+        response: RetainedResponseFrameV2,
+        binding: dict[str, Any],
+    ) -> "ValidatedTransportCandidateV2":
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "_request", request)
+        object.__setattr__(instance, "_response", response)
+        object.__setattr__(
+            instance,
+            "_runtime_binding_bytes",
+            json.dumps(
+                binding, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8"),
+        )
+        return instance
+
+    @property
+    def request_id(self) -> str:
+        return self._request.request_id
+
+    def request_frame(self) -> RetainedRequestFrameV2:
+        return self._request
+
+    def response_frame(self) -> RetainedResponseFrameV2:
+        return self._response
+
+    def runtime_binding(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._runtime_binding_bytes))
+
+    def semantic_payload(self) -> dict[str, Any]:
+        return cast(dict[str, Any], self._response.semantic_payload())
+
+
+def retain_transport_candidate_v2(
+    seal: SourceAcquisitionSeal,
+    assets: RetainedExecutionAssets,
+    request: RetainedRequestFrameV2,
+    policy: dict[str, Any],
+    observation: dict[str, Any],
+    response: RetainedResponseFrameV2,
+) -> ValidatedTransportCandidateV2:
+    """Reference-only whole exchange seal; never trust a free gate checkbox."""
+
+    validate_transport_exchange_v2(seal, assets, request, policy, observation, response)
+    binding = runtime_binding_from_observation_v1(policy, assets, observation)
+    return ValidatedTransportCandidateV2._from_exchange(request, response, binding)
+
+
+def compatibility_descriptor_v2(candidate: ValidatedTransportCandidateV2) -> dict[str, Any]:
+    """Parent-owned projection after whole exchange joins, never from child fields."""
+
+    if type(candidate) is not ValidatedTransportCandidateV2:
+        raise TypeError("compatibility requires a whole-exchange transport candidate owner")
+    binding = candidate.runtime_binding()
+    value = {
+        "schema": "code-structure-viz.next-semantic-compatibility/v2",
+        **semantic_compatibility_metadata_v2(),
+        "typescript_identity": binding["typescript_identity"],
+        "trusted_type_environment_digest": binding["trusted_type_environment_digest"],
+        "portable_toolchain_fingerprint": binding["runtime_toolchain_fingerprint"],
+    }
+    value["compatibility_id"] = digest(
+        {key: item for key, item in value.items() if key != "schema"}
+    )
+    validate_compatibility_descriptor_v2(value, candidate)
+    return value

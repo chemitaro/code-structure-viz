@@ -1,0 +1,38 @@
+{
+  "schema": "code-structure-viz.next-semantic-compatibility/v2",
+  "semantic_schema": "code-structure-viz.semantic/v2",
+  "identity_versions": {
+    "project": 1,
+    "file": 1,
+    "module": 1,
+    "component": 1,
+    "member": 1,
+    "relation": 1,
+    "fact": 1,
+    "props_ir": 1
+  },
+  "algorithm_versions": {
+    "recognition": 1,
+    "export": 1,
+    "props": 1,
+    "relation": 1,
+    "fact": 1,
+    "boundary": 1,
+    "identifier_unicode": "ecma-unicode-15.0",
+    "identifier_unicode_table_digest": "c9336daa555ce98e93cbd48e6b91df22f50a221881bd10b3ed79cf9180297969"
+  },
+  "semantic_profile_id": "next-trusted-profile-v1",
+  "unicode_profile": {
+    "profile_id": "unicode-15.0.0-nfc-v1",
+    "unicode_version": "15.0.0",
+    "normalization": "NFC",
+    "algorithm_version": "unicode-nfc-15.0.0",
+    "table_digest": "877b34f03bc09c193fb9014c381b3d3d980dea0676b942b4d54f56c1e11a6eb2",
+    "full_scalar_kat_digest": "61f9ea3772b20f223112b3709361f387cde38bf0c5b7c329aeae49fd0d7de3d5"
+  },
+  "runtime_binding_profile_id": "next-public-spawn-runtime-v1",
+  "typescript_identity": "typescript-5.9.2",
+  "trusted_type_environment_digest": "49458cb6f0f5097d486a2e4f7691f3f80d1e62ea4dbc65ceff00b862ce84e366",
+  "portable_toolchain_fingerprint": "2654b8357780949c2f53254993c9bcbfd911c2222d3a69b6d1a6e4028330b888",
+  "compatibility_id": "0b0d3113311bac4b3788dbd6bb4d643adb181599c7b9e7e7ae7235e382397728"
+}

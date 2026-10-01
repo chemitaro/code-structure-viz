@@ -71,6 +71,8 @@ trusted manifest/descriptor v2は`docs/contracts/next-trusted-type-environment-v
 
 source-sealed request v2は`docs/contracts/next-adapter-request-v2.md`です。同じseal-owned source/limitsと保持資材から生成し、runtime requirementだけを事前wireへ入れます。request_idは新全preimageのpinned Unicode 15.0.0 canonical digest、wireはself IDを含む末尾LF無しの一つのJSONです。独立validatorでsource/config/role/bytes、adapter/trusted metadata、context budget、canonical bytesをjoinし、private source-seal/asset-set stampsで別ownerへの再bindingを拒否します。depth 64/per-array 100k/key/value string 8 MiB、実encoded stdin 96 MiBを検証し、response-only aggregate capはrequestへ適用しません。保持ownerが正常でも実送信・child echo・Core proof・compatibility・publicationの認定にはなりません。
 
+whole-exchange data joinsは`docs/contracts/next-adapter-exchange-v2.md`です。policy/request/source/assets、prepared stdin/capture、retained response SHA/control/count、echoとtransport gateを一つのfactoryで閉じ、`ValidatedTransportCandidateV2`へimmutable frame/bindingを保持します。正常captureのchild failureやlate drift/cleanupはcandidateを生成せず、prefixだけを維持します。このdata-only ownerはCore model/proof認定ではありません。parent-owned compatibility v2は`docs/contracts/next-compatibility-v2.md`。new semantic schema、unchanged IDs/algorithms/Unicode/trusted meaning、explicit binding profile、joined TS/trust/portable fingerprintの9 fieldsをpreimageにし、host/request/source stateを除きます。旧v1 envelope/hashを互換viewにしません。Core semantic/provenance/public全closureは後続です。
+
 ```plantuml
 @startuml
 title Current v1: single authority chain

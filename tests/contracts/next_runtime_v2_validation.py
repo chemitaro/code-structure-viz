@@ -19,6 +19,7 @@ from tests.contracts.next_reference_validation import (
     digest,
     validate_request_files,
 )
+from tests.contracts.next_semantic_profile_v1_reference import semantic_compatibility_metadata_v2
 from tests.contracts.next_trusted_profile_v1_reference import (
     PROFILE_DECLARATIONS,
     TRUSTED_PACKAGE_PREFIX,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
         RetainedExecutionAssets,
         RetainedRequestFrameV2,
         RetainedResponseFrameV2,
+        ValidatedTransportCandidateV2,
     )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -330,6 +332,42 @@ def validate_launch_policy_trusted_v2(
         raise ValueError("policy differs from its retained trusted environment")
 
 
+def validate_launch_policy_request_v2(
+    policy: dict[str, Any],
+    request: RetainedRequestFrameV2,
+    seal: SourceAcquisitionSeal,
+    owner: RetainedExecutionAssets,
+) -> None:
+    """Join policy to the actual generated request and retained byte owners."""
+
+    validate_request_frame_v2(request, seal, owner)
+    validate_launch_policy_trusted_v2(policy, owner)
+    if policy["request_id"] != request.request_id:
+        raise ValueError("policy differs from its source-owned request identity")
+    record = request.record()
+    if policy["limits"] != record["limits"]:
+        raise ValueError("policy differs from its source-owned request limits")
+    if policy["runtime_requirement"] != record["runtime_requirement"]:
+        raise ValueError("policy differs from its source-owned runtime requirement")
+
+
+def validate_observation_request_v2(
+    observation: dict[str, Any],
+    policy: dict[str, Any],
+    request: RetainedRequestFrameV2,
+    seal: SourceAcquisitionSeal,
+    owner: RetainedExecutionAssets,
+) -> None:
+    """Join all observed phases to prepared stdin; not real capture evidence."""
+
+    validate_launch_policy_request_v2(policy, request, seal, owner)
+    validate_process_observation_v2(observation, policy)
+    if observation["capture"] is not None and (
+        observation["capture"]["stdin_bytes"] != len(request.canonical_bytes)
+    ):
+        raise ValueError("observed stdin size differs from its prepared request bytes")
+
+
 def validate_source_seal_trusted_v2(
     seal: SourceAcquisitionSeal, owner: RetainedExecutionAssets
 ) -> None:
@@ -620,6 +658,83 @@ def validate_response_frame_observation_v2(
         or value["capture"]["stdout_bytes"] != len(frame.raw_bytes)
     ):
         raise ValueError("observation is not joined to its retained response bytes")
+
+
+def validate_response_request_v2(
+    response: RetainedResponseFrameV2,
+    request: RetainedRequestFrameV2,
+    seal: SourceAcquisitionSeal,
+    owner: RetainedExecutionAssets,
+) -> None:
+    """Request/response echoes only; independent Core model/proof checks remain."""
+
+    from tests.contracts.next_runtime_v2_reference import RetainedResponseFrameV2
+
+    if type(response) is not RetainedResponseFrameV2:
+        raise TypeError("response request join requires a retained frame owner")
+    validate_request_frame_v2(request, seal, owner)
+    record = request.record()
+    validate_response_frame_bytes_v2(response.raw_bytes, record["limits"])
+    control = response.control()
+    if control["adapter_version"] != record["adapter_version"]:
+        raise ValueError("response adapter version differs from its retained request identity")
+    binding = control["binding"]
+    if binding["state"] == "bound" and binding["request_id"] != request.request_id:
+        raise ValueError("response request binding differs from its prepared frame")
+    payload = response.semantic_payload()
+    if payload is not None:
+        expected = {
+            "trusted_type_environment_digest": record["trusted_type_environment"]["sha256"],
+            "limits": record["limits"],
+            "run_context": record["run_context"],
+        }
+        if any(payload[key] != value for key, value in expected.items()):
+            raise ValueError("response semantic echo differs from its source-owned request")
+
+
+def validate_transport_exchange_v2(
+    seal: SourceAcquisitionSeal,
+    owner: RetainedExecutionAssets,
+    request: RetainedRequestFrameV2,
+    policy: dict[str, Any],
+    observation: dict[str, Any],
+    response: RetainedResponseFrameV2,
+) -> None:
+    """Full data-only transport join; no Core semantic or actual OS certificate."""
+
+    validate_observation_request_v2(observation, policy, request, seal, owner)
+    validate_response_request_v2(response, request, seal, owner)
+    validate_response_frame_observation_v2(observation, policy, response)
+    if not observation["transport_payload_admissible"]:
+        raise ValueError("exchange has no transport-admissible semantic candidate")
+
+
+def validate_compatibility_descriptor_v2(
+    value: dict[str, Any], candidate: ValidatedTransportCandidateV2
+) -> None:
+    """Lock semantic metadata and join it to the whole-exchange runtime owner."""
+
+    from tests.contracts.next_runtime_v2_reference import ValidatedTransportCandidateV2
+
+    if type(candidate) is not ValidatedTransportCandidateV2:
+        raise TypeError("compatibility requires a whole-exchange transport candidate owner")
+    _validate_schema("next-compatibility-v2", value)
+    if any(value[key] != item for key, item in semantic_compatibility_metadata_v2().items()):
+        raise ValueError("compatibility differs from its locked semantic profile")
+    binding = candidate.runtime_binding()
+    validate_runtime_binding_identity_v1(binding)
+    expected = {
+        "runtime_binding_profile_id": binding["runtime_binding_profile_id"],
+        "typescript_identity": binding["typescript_identity"],
+        "trusted_type_environment_digest": binding["trusted_type_environment_digest"],
+        "portable_toolchain_fingerprint": binding["runtime_toolchain_fingerprint"],
+    }
+    if any(value[key] != item for key, item in expected.items()):
+        raise ValueError("compatibility differs from its retained runtime binding")
+    if value["compatibility_id"] != digest(
+        {key: item for key, item in value.items() if key not in {"schema", "compatibility_id"}}
+    ):
+        raise ValueError("compatibility_id differs from its new portable preimage")
 
 
 def _cleanup_is_verified(cleanup: dict[str, Any]) -> bool:
