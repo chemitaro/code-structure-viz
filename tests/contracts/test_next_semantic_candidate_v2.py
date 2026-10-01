@@ -527,10 +527,17 @@ def test_proof_selected_taint_is_not_upgraded_to_safe_partial_by_the_entity_gate
     ]
 
 
-@pytest.mark.parametrize("delta", [0, 1])
-def test_source_bound_generated_model_record_limit_exact_plus_one(
+def model_record_inputs(
     tmp_path: Path, delta: int
-) -> None:
+) -> tuple[
+    SourceAcquisitionSeal,
+    next_runtime_v2_reference.RetainedExecutionAssets,
+    next_runtime_v2_reference.RetainedRequestFrameV2,
+    dict[str, Any],
+    dict[str, Any],
+]:
+    """Generate actual 10,000/+1 wire records on the existing four-file source seal."""
+
     seal, assets, request, policy, wire = core_inputs(tmp_path)
     model = wire["semantic_payload"]["model"]
     component_id = "next:component:6227b1d19e897d12ed303743051ed58b6fac3fd2b7c64b03175713939d0cc3d9"
@@ -585,6 +592,14 @@ def test_source_bound_generated_model_record_limit_exact_plus_one(
     ]
     update_model_digest(wire)
     assert model["coverage"]["counts"]["published"] == 10_000 + delta
+    return seal, assets, request, policy, wire
+
+
+@pytest.mark.parametrize("delta", [0, 1])
+def test_source_bound_generated_model_record_limit_exact_plus_one(
+    tmp_path: Path, delta: int
+) -> None:
+    seal, assets, request, policy, wire = model_record_inputs(tmp_path, delta)
     candidate = candidate_for(seal, assets, request, policy, wire)
     if delta == 0:
         gate = next_runtime_v2_validation.validate_semantic_candidate_v2(candidate, seal, assets)

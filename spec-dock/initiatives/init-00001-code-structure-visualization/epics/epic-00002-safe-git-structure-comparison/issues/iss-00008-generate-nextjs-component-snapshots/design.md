@@ -79,6 +79,8 @@ runtime-result / provenanceの初スライスは`docs/contracts/next-provenance-
 
 続くtransport failure-prefix closureで、stage/spawn、write/read、actual cap+1、binding/echo/exit mismatchとdecoder/schema rejectionを既存catalogへ結びます。named post-spawn causeに実spawn/capture、exit mismatchにactual control/exit不一致、echo mismatchにsame-request violationを要求します。新`RejectedResponseFrameV2`は原body/parsed object/controlを保持せず、limits・元bytes identity・decoder実measurementだけを持ち、same captureへjoinします。未検証controlをpartial bodyから補完せず、捕捉interruptはordinary provenanceの外のcore terminal branchへ渡します。actual OSの時系列/capture ownershipとCore invalid/record-limit、source reader prefix、公表全chainは残るgateです。
 
+Core failure closureは`docs/contracts/next-semantic-admission-v2.md`のtyped unionです。expected child payload invariantを専用errorからopaque rejectionへ閉じ、model/proof-validなrecord +1だけ実countを保持します。owner錯誤と無関係の内部errorを通常failureへ潰しません。same-runtime candidate/source/assetsにjoinしたCore rejectionは実control prefixを保持し、semantic/compatibility/model/budget suffixを未認定に保ちます。public known measurementとreader-owned source prefix・publication全refs、actual OS/TSは後続gateです。
+
 ```plantuml
 @startuml
 title Current v1: single authority chain

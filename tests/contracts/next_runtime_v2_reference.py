@@ -10,6 +10,12 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitionSeal
+from tests.contracts.next_core_failure_v2_reference import (
+    RejectedSemanticDecisionV2 as RejectedSemanticDecisionV2,
+)
+from tests.contracts.next_core_failure_v2_reference import (
+    inspect_semantic_candidate_v2 as inspect_semantic_candidate_v2,
+)
 from tests.contracts.next_reference_validation import (
     canonical_json_bytes,
     digest,
@@ -26,6 +32,7 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_process_launch_policy_v2,
     validate_process_observation_v2,
     validate_rejected_frame_observation_v2,
+    validate_rejected_semantic_decision_v2,
     validate_request_frame_v2,
     validate_request_json_limits_v2,
     validate_request_record_v2,
@@ -798,7 +805,7 @@ def portable_launch_value_v2(policy: dict[str, Any]) -> dict[str, Any]:
 
 def runtime_provenance_values_v2(
     result: RetainedRuntimeResultV2,
-    semantic_decision: ValidatedSemanticDecisionV2 | None = None,
+    semantic_decision: ValidatedSemanticDecisionV2 | RejectedSemanticDecisionV2 | None = None,
 ) -> dict[str, Any]:
     """Actual retained inputs, with a portable projection of host-local observations."""
 
@@ -837,21 +844,25 @@ def runtime_provenance_values_v2(
         "budget": None,
     }
     if semantic_decision is not None:
-        validate_semantic_decision_v2(semantic_decision)
+        if isinstance(semantic_decision, RejectedSemanticDecisionV2):
+            validate_rejected_semantic_decision_v2(semantic_decision)
+        else:
+            validate_semantic_decision_v2(semantic_decision)
         if (
             semantic_decision.transport_candidate() is not result.transport_candidate()
             or semantic_decision.source_seal() is not seal
             or semantic_decision.execution_assets() is not assets
         ):
             raise ValueError("provenance Core decision is not joined to the same runtime owner")
-        payload = semantic_decision.transport_candidate().semantic_payload()
-        gate = semantic_decision.gate()
-        values.update(
-            semantic_payload=payload,
-            compatibility=semantic_decision.compatibility_descriptor(),
-            model=payload["model"],
-            budget=gate if gate["actual"] is not None else None,
-        )
+        if isinstance(semantic_decision, ValidatedSemanticDecisionV2):
+            payload = semantic_decision.transport_candidate().semantic_payload()
+            gate = semantic_decision.gate()
+            values.update(
+                semantic_payload=payload,
+                compatibility=semantic_decision.compatibility_descriptor(),
+                model=payload["model"],
+                budget=gate if gate["actual"] is not None else None,
+            )
     return values
 
 
@@ -882,7 +893,7 @@ def provenance_observation_v2(field_name: str, value: Any) -> dict[str, Any]:
 def runtime_provenance_v2(
     result: RetainedRuntimeResultV2,
     *,
-    semantic_decision: ValidatedSemanticDecisionV2 | None = None,
+    semantic_decision: ValidatedSemanticDecisionV2 | RejectedSemanticDecisionV2 | None = None,
 ) -> dict[str, Any]:
     """Reference prefix; failure rows do not admit a semantic model or proof."""
 
@@ -921,7 +932,18 @@ def runtime_provenance_v2(
         if failure is None:
             raise ValueError("runtime result has no closed provenance branch yet")
         kind, (stage, code) = "request_bound_failure", failure
-    elif result.result_kind == "success" and semantic_decision is not None:
+    elif result.result_kind == "success" and isinstance(
+        semantic_decision, RejectedSemanticDecisionV2
+    ):
+        core_failure = semantic_decision.failure()
+        kind, stage, code = (
+            "request_bound_failure",
+            core_failure["stage"],
+            core_failure["diagnostic_code"],
+        )
+    elif result.result_kind == "success" and isinstance(
+        semantic_decision, ValidatedSemanticDecisionV2
+    ):
         gate = semantic_decision.gate()
         if gate["outcome"] == "payload_unavailable":
             code = gate["diagnostic_code"]

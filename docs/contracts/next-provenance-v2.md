@@ -6,7 +6,7 @@
 
 現在のreference laneは、actual `SourceAcquisitionSeal`から作ったrequestとretained assets、policy、process observation、complete frameをjoinする`RetainedRuntimeResultV2`を入力にします。これは**referenceデータの保持・検証owner**であり、OS spawnやTypeScript実行の証明ではありません。実OS ownerはA04の受入れで実装・検証します。
 
-schemaは四つのkindを区別します。runtime reference producer/validatorはclosed child/control、通常transport causesとmatching Core ownerを扱います。interruptはordinary provenanceを作らないterminal routeです。request-independent reader phase/source failure、invalid Core/record-limit failure、run/publication/public exact refsは後続A02 gateです。shapeにbranchがあることを、未実装branchの認定にしません。
+schemaは四つのkindを区別します。runtime reference producer/validatorはclosed child/control、通常transport causes、matching Core admission/rejection ownerを扱います。interruptはordinary provenanceを作らないterminal routeです。request-independent reader phase/source failure、run/publication/public exact refsは後続A02 gateです。shapeにbranchがあることを、未実装branchの認定にしません。
 
 ## Runtime結果の保持
 
@@ -94,10 +94,14 @@ process-start valueはspawn primitiveと、実spawn parametersの同じlogical p
 | actual exit mismatch | bound failure / node_process / NODE-004。actual control prefixを保持 |
 | late cleanup/candidate/assets drift | bound failure / node_process / NODE-004 |
 | Core target/export/entity unavailable | bound failure / target_resolution・response_validation・model_validation / TARGET-001・EXPORT-001・LIMIT-005 |
+| Core payload invariant rejection | bound failure / response_validation / PROTOCOL-001。actual control prefixのみ保持 |
+| Core model/proof-valid record +1 | bound failure / model_validation / LIMIT-005。実countはprivate failure ownerに保持 |
 | matching Core complete/partial_safe | bound success / null / null |
 
 codeは表中の短縮名に`CSV-NEXT-`を付けます。新stageはv2の閉じた対応であり、旧v1 matrix/schemaを変更しません。failureはobserved prefixを保持し、未観測suffixをsuccess defaultで埋めません。target/export gateのentity actualがnullならbudget rowもnullです。
 
 frame-invalidの元raw hash/length/decoder measurementはprivate rejection ownerだけの値です。provenanceにcontrol_response rowを捏造して載せず、未検証version/controlとsemantic suffixはnullのままです。stdout capture cap breachをframe rejectionとして再分類せず、cap gateより先にdecoderを呼びません。interruptにNext failure code/通常provenanceを生成しません。
+
+Core rejectionは`RejectedSemanticDecisionV2`とsame-runtime candidate/source/assetsの一致を要求します。同じrequest IDや同じcontentを持つ別exchangeでも再bindingしません。failure/code/reason/countは元candidateの再検証へjoinし、未admitted semantic/compatibility/model/budget suffixを生成しません。record実countはentity budgetの測定値ではなく、今後のpublic known measurementへ渡すprivate metadataです。無関係の内部エラーやowner錯誤をcatalog failureに変換しません。
 
 `runtime_provenance_v2`はmatching opaque runtime/Core ownersから生成します。`validate_runtime_provenance_v2`はclosed schema、kind/stage/code、17 states/digestsを同じretained valuesから再検証します。別exchangeのCore owner、free status、schema-valid rehashed row、v1 identity/slotsを拒否します。known corpusによるCore reference evidenceを、任意sourceの実TS意味認定やA03/Issue全体のpassへ読み替えません。

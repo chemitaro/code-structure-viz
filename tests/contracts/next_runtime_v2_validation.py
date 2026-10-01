@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitionSeal
     from tests.contracts.next_runtime_v2_reference import (
         RejectedResponseFrameV2,
+        RejectedSemanticDecisionV2,
         RetainedExecutionAssets,
         RetainedRequestFrameV2,
         RetainedResponseFrameV2,
@@ -58,6 +59,14 @@ if TYPE_CHECKING:
     )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+class SemanticCandidateInvalidErrorV2(ValueError):
+    """An expected child payload invariant failure, not an arbitrary internal error."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        self.reason = reason
+        super().__init__(message)
 
 
 def _validate_schema(name: str, value: object, fragment: str = "") -> None:
@@ -131,16 +140,27 @@ def validate_runtime_provenance_v2(
     value: dict[str, Any],
     result: RetainedRuntimeResultV2,
     *,
-    semantic_decision: ValidatedSemanticDecisionV2 | None = None,
+    semantic_decision: ValidatedSemanticDecisionV2 | RejectedSemanticDecisionV2 | None = None,
 ) -> None:
     """Recalculate each digest from the actual immutable owner, not the public row."""
 
-    from tests.contracts.next_runtime_v2_reference import runtime_provenance_values_v2
+    from tests.contracts.next_runtime_v2_reference import (
+        RejectedSemanticDecisionV2,
+        ValidatedSemanticDecisionV2,
+        runtime_provenance_values_v2,
+    )
 
     validate_provenance_shape_v2(value)
     actual_values = runtime_provenance_values_v2(result, semantic_decision)
     expected: tuple[str, str | None, str | None]
-    if result.result_kind == "success" and semantic_decision is not None:
+    if result.result_kind == "success" and isinstance(
+        semantic_decision, RejectedSemanticDecisionV2
+    ):
+        failure = semantic_decision.failure()
+        expected = "request_bound_failure", failure["stage"], failure["diagnostic_code"]
+    elif result.result_kind == "success" and isinstance(
+        semantic_decision, ValidatedSemanticDecisionV2
+    ):
         gate = semantic_decision.gate()
         if gate["outcome"] == "payload_unavailable":
             stage = {
@@ -941,19 +961,26 @@ def validate_semantic_candidate_v2(
     validate_response_request_v2(candidate.response_frame(), candidate.request_frame(), seal, owner)
     payload = candidate.semantic_payload()
     if payload["model_digest"] != digest(payload["model"]):
-        raise ValueError("semantic model digest differs from the retained payload")
+        raise SemanticCandidateInvalidErrorV2(
+            "model_digest", "semantic model digest differs from the retained payload"
+        )
     try:
         _validate_project_correspondence(
             candidate.request_frame().record()["projects"], payload["model"]["projects"]
         )
     except AssertionError as exc:
-        raise ValueError("semantic project correspondence differs from its frozen request") from exc
+        raise SemanticCandidateInvalidErrorV2(
+            "project_correspondence",
+            "semantic project correspondence differs from its frozen request",
+        ) from exc
     expected_files = [
         {key: value for key, value in record.items() if key != "content_base64"}
         for record in candidate.request_frame().record()["files"]
     ]
     if payload["model"]["files"] != expected_files:
-        raise ValueError("semantic file correspondence differs from its frozen request")
+        raise SemanticCandidateInvalidErrorV2(
+            "file_correspondence", "semantic file correspondence differs from its frozen request"
+        )
     request = candidate.request_frame().record()
     model, proof = payload["model"], payload["proof"]
     program_keys = {
@@ -963,7 +990,10 @@ def validate_semantic_candidate_v2(
         if row["collection"] in {"projects", "files"} and row.get("record") is not None:
             # Every frozen source project/file is already required in model correspondence.
             # A supplied proof-only source record is therefore not another observed source.
-            raise ValueError("proof-only source metadata is outside the frozen request owner")
+            raise SemanticCandidateInvalidErrorV2(
+                "proof_source_owner",
+                "proof-only source metadata is outside the frozen request owner",
+            )
         if (
             row["collection"] == "modules"
             and (record := row.get("record")) is not None
@@ -972,7 +1002,9 @@ def validate_semantic_candidate_v2(
                 or (record.get("project_id"), record.get("path")) not in program_keys
             )
         ):
-            raise ValueError("proof-only module has no frozen program source owner")
+            raise SemanticCandidateInvalidErrorV2(
+                "proof_module_owner", "proof-only module has no frozen program source owner"
+            )
     context = canonical_run_context(**payload["run_context"])
     try:
         target_failure = target_completeness_failure(model, request["targets"])
@@ -995,8 +1027,9 @@ def validate_semantic_candidate_v2(
             if (record := row.get("record")) is not None:
                 references = {value for value in _record_references(record) if value is not None}
                 if not references <= known_ids | allowed_ids:
-                    raise ValueError(
-                        "proof-only record contains a dangling reference outside its owner"
+                    raise SemanticCandidateInvalidErrorV2(
+                        "proof_references",
+                        "proof-only record contains a dangling reference outside its owner",
                     )
         if target_failure is not None:
             _validate_target_exception_proof_base(proof, model, request["targets"], target_failure)
@@ -1008,7 +1041,9 @@ def validate_semantic_candidate_v2(
             return target_failure_decision(proof_failure, context)
         outcome = derive_pre_budget_outcome(proof, model)
     except AssertionError as exc:
-        raise ValueError("semantic model/proof violates its closed invariants") from exc
+        raise SemanticCandidateInvalidErrorV2(
+            "model_proof", "semantic model/proof violates its closed invariants"
+        ) from exc
     _published, _proof_only, wire_records = response_model_record_counts(model, proof)
     if wire_records > request["limits"]["max_model_records"]:
         raise ModelRecordLimitError(wire_records)
@@ -1032,6 +1067,37 @@ def validate_semantic_decision_v2(decision: ValidatedSemanticDecisionV2) -> None
     if decision.gate() != expected:
         raise ValueError("semantic gate differs from its retained Core decision")
     validate_compatibility_descriptor_v2(decision.compatibility_descriptor(), candidate)
+
+
+def validate_rejected_semantic_decision_v2(decision: RejectedSemanticDecisionV2) -> None:
+    """Recompute closed failure metadata from the same candidate, not a failure label."""
+
+    from tests.contracts.next_runtime_v2_reference import RejectedSemanticDecisionV2
+
+    if type(decision) is not RejectedSemanticDecisionV2:
+        raise TypeError("Core rejection validation requires a rejected decision owner")
+    try:
+        validate_semantic_candidate_v2(
+            decision.transport_candidate(), decision.source_seal(), decision.execution_assets()
+        )
+    except ModelRecordLimitError as failure:
+        expected = {
+            "stage": "model_validation",
+            "diagnostic_code": "CSV-NEXT-LIMIT-005",
+            "reason": "max_model_records",
+            "model_records": failure.measured,
+        }
+    except SemanticCandidateInvalidErrorV2 as failure:
+        expected = {
+            "stage": "response_validation",
+            "diagnostic_code": "CSV-NEXT-PROTOCOL-001",
+            "reason": failure.reason,
+            "model_records": None,
+        }
+    else:
+        raise ValueError("Core rejection requires an actually invalid or over-limit candidate")
+    if decision.failure() != expected:
+        raise ValueError("Core failure metadata differs from its retained candidate")
 
 
 def _cleanup_is_verified(cleanup: dict[str, Any]) -> bool:
