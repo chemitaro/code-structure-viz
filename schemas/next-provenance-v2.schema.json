@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-provenance-v2",
+  "title": "CodeStructureViz Next owner-derived observation provenance v2",
+  "description": "Portable digests of named retained observations. Actual owner/value joins and reader phases require the reference validator; shape is not an execution certificate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kind", "stage", "failure_code", "observed"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-provenance/v2"},
+    "kind": {"enum": ["request_bound_success", "request_bound_failure", "request_independent_not_applicable", "request_independent_failure"]},
+    "stage": {"type": ["string", "null"]},
+    "failure_code": {"type": ["string", "null"]},
+    "observed": {"$ref": "#/$defs/observation_map"}
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {"const": "request_bound_success"}, "stage": {"const": null}, "failure_code": {"const": null},
+        "observed": {"properties": {
+          "applicability": {"$ref": "#/$defs/observed"}, "config": {"$ref": "#/$defs/observed"},
+          "source": {"$ref": "#/$defs/observed"}, "limits": {"$ref": "#/$defs/observed"},
+          "source_plan": {"$ref": "#/$defs/observed"}, "trusted_environment": {"$ref": "#/$defs/observed"},
+          "runtime_bundle": {"$ref": "#/$defs/observed"}, "node_candidate": {"$ref": "#/$defs/observed"},
+          "request": {"$ref": "#/$defs/observed"}, "launch_policy": {"$ref": "#/$defs/observed"},
+          "process_start": {"$ref": "#/$defs/observed"}, "node_version": {"$ref": "#/$defs/observed"},
+          "control_response": {"$ref": "#/$defs/observed"}, "semantic_payload": {"$ref": "#/$defs/observed"},
+          "compatibility": {"$ref": "#/$defs/observed"}, "model": {"$ref": "#/$defs/observed"},
+          "budget": {"$ref": "#/$defs/observed"}
+        }}
+      }
+    },
+    {
+      "properties": {
+        "kind": {"const": "request_bound_failure"},
+        "observed": {"properties": {
+          "applicability": {"$ref": "#/$defs/observed"}, "config": {"$ref": "#/$defs/observed"},
+          "source": {"$ref": "#/$defs/observed"}, "limits": {"$ref": "#/$defs/observed"},
+          "source_plan": {"$ref": "#/$defs/observed"}, "trusted_environment": {"$ref": "#/$defs/observed"},
+          "runtime_bundle": {"$ref": "#/$defs/observed"}, "request": {"$ref": "#/$defs/observed"}
+        }}
+      },
+      "$ref": "#/$defs/failure_identity"
+    },
+    {
+      "properties": {
+        "kind": {"const": "request_independent_not_applicable"},
+        "stage": {"const": "applicability"}, "failure_code": {"const": "CSV-NEXT-APPLICABILITY-001"},
+        "observed": {"properties": {
+          "applicability": {"$ref": "#/$defs/observed"}, "config": {"$ref": "#/$defs/unobserved"},
+          "source": {"$ref": "#/$defs/unobserved"}, "limits": {"$ref": "#/$defs/unobserved"},
+          "source_plan": {"$ref": "#/$defs/unobserved"}, "trusted_environment": {"$ref": "#/$defs/unobserved"},
+          "runtime_bundle": {"$ref": "#/$defs/unobserved"}, "node_candidate": {"$ref": "#/$defs/unobserved"},
+          "request": {"$ref": "#/$defs/unobserved"}, "launch_policy": {"$ref": "#/$defs/unobserved"},
+          "process_start": {"$ref": "#/$defs/unobserved"}, "node_version": {"$ref": "#/$defs/unobserved"},
+          "control_response": {"$ref": "#/$defs/unobserved"}, "semantic_payload": {"$ref": "#/$defs/unobserved"},
+          "compatibility": {"$ref": "#/$defs/unobserved"}, "model": {"$ref": "#/$defs/unobserved"},
+          "budget": {"$ref": "#/$defs/unobserved"}
+        }}
+      }
+    },
+    {
+      "properties": {
+        "kind": {"const": "request_independent_failure"},
+        "stage": {"enum": ["applicability", "config_validation", "project_validation", "source_control", "source_selection", "source_read", "source_integrity", "trust_validation", "node_discovery", "stdin_encode"]},
+        "observed": {"properties": {
+          "request": {"$ref": "#/$defs/unobserved"}, "launch_policy": {"$ref": "#/$defs/unobserved"},
+          "process_start": {"$ref": "#/$defs/unobserved"}, "node_version": {"$ref": "#/$defs/unobserved"},
+          "control_response": {"$ref": "#/$defs/unobserved"}, "semantic_payload": {"$ref": "#/$defs/unobserved"},
+          "compatibility": {"$ref": "#/$defs/unobserved"}, "model": {"$ref": "#/$defs/unobserved"},
+          "budget": {"$ref": "#/$defs/unobserved"}
+        }}
+      },
+      "$ref": "#/$defs/failure_identity"
+    }
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"failure_code": {"enum": ["CSV-NEXT-NODE-001", "CSV-NEXT-NODE-002", "CSV-NEXT-NODE-003", "CSV-NEXT-NODE-004", "CSV-NEXT-PROTOCOL-001"]}}},
+      "then": {"properties": {"observed": {"properties": {
+        "semantic_payload": {"$ref": "#/$defs/unobserved"}, "compatibility": {"$ref": "#/$defs/unobserved"},
+        "model": {"$ref": "#/$defs/unobserved"}, "budget": {"$ref": "#/$defs/unobserved"}
+      }}}}
+    },
+    {
+      "if": {"properties": {"stage": {"const": "runtime_validation"}}},
+      "then": {"properties": {"kind": {"const": "request_bound_failure"}, "observed": {"properties": {
+        "process_start": {"$ref": "#/$defs/observed"}, "node_version": {"$ref": "#/$defs/observed"},
+        "control_response": {"$ref": "#/$defs/observed"}
+      }}}}
+    }
+  ],
+  "$defs": {
+    "observed": {
+      "type": "object", "additionalProperties": false, "required": ["state", "value"],
+      "properties": {
+        "state": {"const": "observed"},
+        "value": {
+          "type": "object", "additionalProperties": false, "required": ["schema", "version", "sha256"],
+          "properties": {
+            "schema": {"const": "code-structure-viz.next-observation/v2"}, "version": {"const": 2},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      }
+    },
+    "unobserved": {
+      "type": "object", "additionalProperties": false, "required": ["state", "value"],
+      "properties": {"state": {"const": "unobserved"}, "value": {"const": null}}
+    },
+    "row": {"oneOf": [{"$ref": "#/$defs/observed"}, {"$ref": "#/$defs/unobserved"}]},
+    "observation_map": {
+      "type": "object", "additionalProperties": false,
+      "required": ["applicability", "config", "source", "limits", "source_plan", "trusted_environment", "runtime_bundle", "node_candidate", "request", "launch_policy", "process_start", "node_version", "control_response", "semantic_payload", "compatibility", "model", "budget"],
+      "properties": {
+        "applicability": {"$ref": "#/$defs/row"}, "config": {"$ref": "#/$defs/row"},
+        "source": {"$ref": "#/$defs/row"}, "limits": {"$ref": "#/$defs/row"},
+        "source_plan": {"$ref": "#/$defs/row"}, "trusted_environment": {"$ref": "#/$defs/row"},
+        "runtime_bundle": {"$ref": "#/$defs/row"}, "node_candidate": {"$ref": "#/$defs/row"},
+        "request": {"$ref": "#/$defs/row"}, "launch_policy": {"$ref": "#/$defs/row"},
+        "process_start": {"$ref": "#/$defs/row"}, "node_version": {"$ref": "#/$defs/row"},
+        "control_response": {"$ref": "#/$defs/row"}, "semantic_payload": {"$ref": "#/$defs/row"},
+        "compatibility": {"$ref": "#/$defs/row"}, "model": {"$ref": "#/$defs/row"},
+        "budget": {"$ref": "#/$defs/row"}
+      }
+    },
+    "failure_identity": {
+      "oneOf": [
+        {"properties": {"failure_code": {"const": "CSV-NEXT-APPLICABILITY-002"}, "stage": {"const": "applicability"}}},
+        {"properties": {"failure_code": {"enum": ["CSV-NEXT-CONFIG-001", "CSV-NEXT-CONFIG-002"]}, "stage": {"enum": ["config_validation", "source_control"]}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-PROJECT-002"}, "stage": {"const": "project_validation"}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-SOURCE-002"}, "stage": {"const": "source_integrity"}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-SOURCE-003"}, "stage": {"enum": ["source_control", "source_selection", "source_read", "source_integrity"]}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-TARGET-001"}, "stage": {"const": "target_resolution"}}},
+        {"properties": {"failure_code": {"enum": ["CSV-NEXT-TRUST-001", "CSV-NEXT-TRUST-002", "CSV-NEXT-TRUST-003"]}, "stage": {"const": "trust_validation"}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-001"}, "stage": {"enum": ["node_discovery", "runtime_validation"]}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-002"}, "stage": {"const": "node_spawn"}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-003"}, "stage": {"const": "node_timeout"}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-NODE-004"}, "stage": {"enum": ["node_process", "bootstrap", "semantic_analysis"]}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-001"}, "stage": {"enum": ["source_read", "stdin_encode"]}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-002"}, "stage": {"const": "source_selection"}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-003"}, "stage": {"enum": ["adapter_stdout_capture", "adapter_stderr_capture", "response_raw_bytes", "response_decode", "public_stderr_capture"]}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-004"}, "stage": {"const": "adapter_heap"}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-LIMIT-005"}, "stage": {"const": "model_validation"}}},
+        {"properties": {"failure_code": {"const": "CSV-NEXT-PROTOCOL-001"}, "stage": {"enum": ["stdin_encode", "response_decode", "response_protocol", "response_schema", "response_validation"]}}},
+        {"properties": {"failure_code": {"enum": ["CSV-NEXT-EXPORT-001", "CSV-NEXT-IDENTITY-001"]}, "stage": {"const": "response_validation"}}}
+      ]
+    }
+  }
+}

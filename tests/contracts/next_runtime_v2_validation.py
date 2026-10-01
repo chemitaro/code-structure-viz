@@ -51,6 +51,7 @@ if TYPE_CHECKING:
         RetainedExecutionAssets,
         RetainedRequestFrameV2,
         RetainedResponseFrameV2,
+        RetainedRuntimeResultV2,
         ValidatedSemanticDecisionV2,
         ValidatedTransportCandidateV2,
     )
@@ -117,6 +118,74 @@ def validate_request_shape_v2(value: dict[str, Any]) -> None:
     """Closed generated request shape, without source/byte-owner admission."""
 
     _validate_schema("next-adapter-request-v2", value)
+
+
+def validate_provenance_shape_v2(value: dict[str, Any]) -> None:
+    """Closed public shape only; actual observation values require retained owners."""
+
+    _validate_schema("next-provenance-v2", value)
+
+
+def validate_runtime_provenance_v2(
+    value: dict[str, Any],
+    result: RetainedRuntimeResultV2,
+    *,
+    semantic_decision: ValidatedSemanticDecisionV2 | None = None,
+) -> None:
+    """Recalculate each digest from the actual immutable owner, not the public row."""
+
+    from tests.contracts.next_runtime_v2_reference import runtime_provenance_values_v2
+
+    validate_provenance_shape_v2(value)
+    actual_values = runtime_provenance_values_v2(result, semantic_decision)
+    expected: tuple[str, str | None, str | None]
+    if result.result_kind == "success" and semantic_decision is not None:
+        gate = semantic_decision.gate()
+        if gate["outcome"] == "payload_unavailable":
+            stage = {
+                "CSV-NEXT-TARGET-001": "target_resolution",
+                "CSV-NEXT-EXPORT-001": "response_validation",
+                "CSV-NEXT-LIMIT-005": "model_validation",
+            }[gate["diagnostic_code"]]
+            expected = "request_bound_failure", stage, gate["diagnostic_code"]
+        else:
+            expected = "request_bound_success", None, None
+    elif result.result_kind == "unsupported_runtime":
+        expected = "request_bound_failure", "runtime_validation", "CSV-NEXT-NODE-001"
+    elif result.result_kind in {"protocol_failure", "bootstrap_failure", "semantic_failure"}:
+        child_identity = {
+            "protocol_failure": ("response_protocol", "CSV-NEXT-PROTOCOL-001"),
+            "bootstrap_failure": ("bootstrap", "CSV-NEXT-NODE-004"),
+            "semantic_failure": ("semantic_analysis", "CSV-NEXT-NODE-004"),
+        }[result.result_kind]
+        expected = "request_bound_failure", *child_identity
+    elif result.result_kind == "transport_failure":
+        transport_identity = {
+            "timeout": ("node_timeout", "CSV-NEXT-NODE-003"),
+            "cleanup_unverified": ("node_process", "CSV-NEXT-NODE-004"),
+            "candidate_drift": ("node_process", "CSV-NEXT-NODE-004"),
+            "assets_drift": ("node_process", "CSV-NEXT-NODE-004"),
+        }.get(result.observation()["terminal_cause"])
+        if transport_identity is None:
+            raise ValueError("runtime result has no closed provenance result identity")
+        expected = "request_bound_failure", *transport_identity
+    else:
+        raise ValueError("runtime result has no closed provenance result identity")
+    if tuple(value[key] for key in ("kind", "stage", "failure_code")) != expected:
+        raise ValueError("provenance result identity differs from its retained runtime/Core owners")
+    for field_name, actual in actual_values.items():
+        row = value["observed"][field_name]
+        if (row["state"] == "observed") is not (actual is not None):
+            raise ValueError("provenance observation state differs from its retained owner")
+        if actual is not None and row["value"]["sha256"] != digest(
+            {
+                "schema": "code-structure-viz.next-observation/v2",
+                "version": 2,
+                "field": field_name,
+                "value": actual,
+            }
+        ):
+            raise ValueError("provenance observation digest differs from its retained owner")
 
 
 def validate_request_json_limits_v2(value: object, limits: dict[str, int]) -> None:

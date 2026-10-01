@@ -75,6 +75,8 @@ whole-exchange data joinsは`docs/contracts/next-adapter-exchange-v2.md`です�
 
 Coreのreference admissionは`docs/contracts/next-semantic-admission-v2.md`です。同じtyped transport/source/assetsからmodel digest、project/file correspondence、基礎record、proof-only source/ownership、target/taint/proof、record/entity budget、export/outcomeを閉じ、parent compatibilityとともにimmutable `ValidatedSemanticDecisionV2`へ保持します。free gate/statusや旧runtime/envelope certificateを入力にしません。selected cardinalityの限定例外にも完全なproof baseが必要で、不正record/proofをtarget/予算failureで隠しません。old semantic proof/export oracleのknown corpusはreference evidenceに限定し、productionではactual frozen inputに結合するTS/witness経路を実装します。この内部Core ownerをpublic/failure unionやfinal publication/実TSの認定へ読み替えません。
 
+runtime-result / provenanceの初スライスは`docs/contracts/next-provenance-v2.md`です。同じsource/assets/request/policy/observation/frameをimmutable `RetainedRuntimeResultV2`へjoinし、正常transportだけにcandidateを保持します。closed child failure、timeout、late cleanup/driftでは既検証control/version prefixと元frame descriptorを維持し、failure raw buffersやsemantic candidateを保持しません。foreign child bindingを親requestへ修正せず、mismatch labelだけの偽failureを拒否します。17 named observationsはversioned wrapper・slot名・同じownerの実値からhashし、readonly expected trusted metadataと実TS利用、実spawn parametersとexpected compiler metadataを分離します。host paths/PIDだけの変更ではpublic provenanceを変えません。matching Core ownerがある場合だけsemantic/compatibility/model/budgetを投影し、target failureの未実測budgetはnullです。request-independent reader prefix、その他transport/Core failure、public exact-ref全chainは未完了で、schema shapeを未実装branchの認定に使いません。
+
 ```plantuml
 @startuml
 title Current v1: single authority chain

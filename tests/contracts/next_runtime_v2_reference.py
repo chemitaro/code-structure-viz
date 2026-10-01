@@ -21,6 +21,7 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_compatibility_descriptor_v2,
     validate_execution_asset_identity_v1,
     validate_launch_policy_assets_v2,
+    validate_observation_request_v2,
     validate_process_launch_policy_v2,
     validate_process_observation_v2,
     validate_request_frame_v2,
@@ -28,9 +29,12 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_request_record_v2,
     validate_request_stdin_bytes_v2,
     validate_response_frame_bytes_v2,
+    validate_response_frame_observation_v2,
+    validate_response_request_v2,
     validate_runtime_binding_identity_v1,
     validate_runtime_binding_observation_v1,
     validate_semantic_candidate_v2,
+    validate_semantic_decision_v2,
     validate_source_seal_trusted_v2,
     validate_transport_exchange_v2,
     validate_trusted_environment_manifest_v2,
@@ -465,6 +469,130 @@ def retain_transport_candidate_v2(
     return ValidatedTransportCandidateV2._from_exchange(request, response, binding)
 
 
+@dataclass(frozen=True, slots=True, init=False)
+class RetainedRuntimeResultV2:
+    """Private data-only result, with no raw failure buffers or semantic certificate."""
+
+    _seal: SourceAcquisitionSeal = field(repr=False)
+    _assets: RetainedExecutionAssets = field(repr=False)
+    _request: RetainedRequestFrameV2 = field(repr=False)
+    _policy_bytes: bytes = field(repr=False)
+    _observation_bytes: bytes = field(repr=False)
+    _response_descriptor_bytes: bytes = field(repr=False)
+    _candidate: ValidatedTransportCandidateV2 | None = field(repr=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("runtime results are created by retain_runtime_result_v2")
+
+    @classmethod
+    def _from_joined_observations(
+        cls,
+        seal: SourceAcquisitionSeal,
+        assets: RetainedExecutionAssets,
+        request: RetainedRequestFrameV2,
+        policy: dict[str, Any],
+        observation: dict[str, Any],
+        descriptor: dict[str, Any] | None,
+        candidate: ValidatedTransportCandidateV2 | None,
+    ) -> "RetainedRuntimeResultV2":
+        instance = object.__new__(cls)
+        for owner_name, owner in (("_seal", seal), ("_assets", assets), ("_request", request)):
+            object.__setattr__(instance, owner_name, owner)
+        for bytes_name, record in (
+            ("_policy_bytes", policy),
+            ("_observation_bytes", observation),
+            ("_response_descriptor_bytes", descriptor),
+        ):
+            object.__setattr__(
+                instance,
+                bytes_name,
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8"),
+            )
+        object.__setattr__(instance, "_candidate", candidate)
+        return instance
+
+    @property
+    def result_kind(self) -> str:
+        observation = self.observation()
+        if observation["terminal_cause"] != "none":
+            return "transport_failure"
+        return cast(str, observation["response"]["control"]["result_kind"])
+
+    def observation(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._observation_bytes))
+
+    def control(self) -> dict[str, Any] | None:
+        response = self.observation()["response"]
+        return None if response is None else cast(dict[str, Any], response["control"])
+
+    def response_descriptor(self) -> dict[str, Any] | None:
+        return cast(dict[str, Any] | None, json.loads(self._response_descriptor_bytes))
+
+    def transport_candidate(self) -> ValidatedTransportCandidateV2 | None:
+        return self._candidate
+
+    def source_seal(self) -> SourceAcquisitionSeal:
+        return self._seal
+
+    def execution_assets(self) -> RetainedExecutionAssets:
+        return self._assets
+
+    def request_frame(self) -> RetainedRequestFrameV2:
+        return self._request
+
+    def policy(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._policy_bytes))
+
+
+def retain_runtime_result_v2(
+    seal: SourceAcquisitionSeal,
+    assets: RetainedExecutionAssets,
+    request: RetainedRequestFrameV2,
+    policy: dict[str, Any],
+    observation: dict[str, Any],
+    response: RetainedResponseFrameV2 | None,
+) -> RetainedRuntimeResultV2:
+    """Preserve a joined closed result, not a success default for child failures."""
+
+    validate_observation_request_v2(observation, policy, request, seal, assets)
+    if observation["terminal_cause"] == "binding_mismatch" and not (
+        observation["response"] is not None
+        and observation["response"]["control"]["binding"]["state"] == "bound"
+        and observation["response"]["control"]["binding"]["request_id"] != request.request_id
+    ):
+        raise ValueError("binding mismatch requires an actual foreign control binding")
+    descriptor = None
+    if observation["response"] is None:
+        if response is not None:
+            raise ValueError("runtime result cannot attach an unobserved response frame")
+    else:
+        if response is None:
+            raise ValueError("runtime control requires the retained complete frame")
+        validate_response_frame_observation_v2(observation, policy, response)
+        if observation["terminal_cause"] == "none":
+            validate_response_request_v2(response, request, seal, assets)
+        descriptor = {
+            "raw_sha256": response.sha256,
+            "byte_length": len(response.raw_bytes),
+            "canonical_json": response.raw_bytes
+            == canonical_json_bytes(json.loads(response.raw_bytes)),
+        }
+    candidate = (
+        retain_transport_candidate_v2(seal, assets, request, policy, observation, response)
+        if observation["transport_payload_admissible"] and response is not None
+        else None
+    )
+    return RetainedRuntimeResultV2._from_joined_observations(
+        seal, assets, request, policy, observation, descriptor, candidate
+    )
+
+
 def compatibility_descriptor_v2(candidate: ValidatedTransportCandidateV2) -> dict[str, Any]:
     """Parent-owned projection after whole exchange joins, never from child fields."""
 
@@ -547,3 +675,191 @@ def decide_semantic_candidate_v2(
     return ValidatedSemanticDecisionV2._from_validated_core(
         candidate, seal, assets, gate, compatibility
     )
+
+
+PROVENANCE_SLOTS_V2 = (
+    "applicability",
+    "config",
+    "source",
+    "limits",
+    "source_plan",
+    "trusted_environment",
+    "runtime_bundle",
+    "node_candidate",
+    "request",
+    "launch_policy",
+    "process_start",
+    "node_version",
+    "control_response",
+    "semantic_payload",
+    "compatibility",
+    "model",
+    "budget",
+)
+
+
+def portable_launch_value_v2(policy: dict[str, Any]) -> dict[str, Any]:
+    """Observation preimage only, not a policy-schema alias or runtime fingerprint."""
+
+    validate_process_launch_policy_v2(policy)
+    return {
+        "producer": policy["producer"],
+        "node_candidate": {"sha256": policy["node_candidate"]["sha256"]},
+        **{
+            key: deepcopy(policy[key])
+            for key in (
+                "runtime_requirement",
+                "execution_asset_set_id",
+                "adapter",
+                "typescript_identity",
+                "trusted_environment_digest",
+                "shell",
+                "passed_environment",
+                "stdio",
+                "fd_inheritance",
+                "process_group",
+                "limits",
+            )
+        },
+        "argv": [
+            {"kind": "node_candidate", "sha256": policy["node_candidate"]["sha256"]},
+            policy["argv"][1],
+            {"kind": "execution_member", "package_path": policy["adapter"]["entrypoint_member"]},
+        ],
+        "cwd": {"kind": "empty_private_directory"},
+    }
+
+
+def runtime_provenance_values_v2(
+    result: RetainedRuntimeResultV2,
+    semantic_decision: ValidatedSemanticDecisionV2 | None = None,
+) -> dict[str, Any]:
+    """Actual retained inputs, with a portable projection of host-local observations."""
+
+    if type(result) is not RetainedRuntimeResultV2:
+        raise TypeError("runtime provenance requires the retained runtime result owner")
+    seal, assets, request = result.source_seal(), result.execution_assets(), result.request_frame()
+    policy, observation = result.policy(), result.observation()
+    validate_observation_request_v2(observation, policy, request, seal, assets)
+    plan, control = seal.final_plan, result.control()
+    portable_policy = portable_launch_value_v2(policy)
+    values = {
+        "applicability": seal.package_applicability.observation_value(),
+        "config": plan["projects"],
+        "source": seal.source_view.fingerprint_value(),
+        "limits": plan["limits"],
+        "source_plan": plan,
+        # This is the expected read-only descriptor, never evidence of a TS import.
+        "trusted_environment": trusted_environment_manifest_v2(assets)["environment_descriptor"],
+        "runtime_bundle": assets.descriptor(),
+        "node_candidate": {"sha256": policy["node_candidate"]["sha256"]},
+        "request": request.record(),
+        "launch_policy": portable_policy,
+        "process_start": None
+        if observation["spawn"] is None
+        else {
+            "primitive": observation["spawn"]["primitive"],
+            "parameters": {key: portable_policy[key] for key in observation["spawn"]["parameters"]},
+        },
+        "node_version": None if control is None else control["runtime"],
+        "control_response": None
+        if control is None
+        else {"control": control, "response": result.response_descriptor()},
+        "semantic_payload": None,
+        "compatibility": None,
+        "model": None,
+        "budget": None,
+    }
+    if semantic_decision is not None:
+        validate_semantic_decision_v2(semantic_decision)
+        if (
+            semantic_decision.transport_candidate() is not result.transport_candidate()
+            or semantic_decision.source_seal() is not seal
+            or semantic_decision.execution_assets() is not assets
+        ):
+            raise ValueError("provenance Core decision is not joined to the same runtime owner")
+        payload = semantic_decision.transport_candidate().semantic_payload()
+        gate = semantic_decision.gate()
+        values.update(
+            semantic_payload=payload,
+            compatibility=semantic_decision.compatibility_descriptor(),
+            model=payload["model"],
+            budget=gate if gate["actual"] is not None else None,
+        )
+    return values
+
+
+def provenance_observation_v2(field_name: str, value: Any) -> dict[str, Any]:
+    """Digest a closed named observation value, not a field-name success marker."""
+
+    if field_name not in PROVENANCE_SLOTS_V2:
+        raise ValueError("unknown provenance observation field")
+    if value is None:
+        return {"state": "unobserved", "value": None}
+    return {
+        "state": "observed",
+        "value": {
+            "schema": "code-structure-viz.next-observation/v2",
+            "version": 2,
+            "sha256": digest(
+                {
+                    "schema": "code-structure-viz.next-observation/v2",
+                    "version": 2,
+                    "field": field_name,
+                    "value": value,
+                }
+            ),
+        },
+    }
+
+
+def runtime_provenance_v2(
+    result: RetainedRuntimeResultV2,
+    *,
+    semantic_decision: ValidatedSemanticDecisionV2 | None = None,
+) -> dict[str, Any]:
+    """Reference prefix; failure rows do not admit a semantic model or proof."""
+
+    values = runtime_provenance_values_v2(result, semantic_decision)
+    stage: str | None
+    code: str | None
+    if result.result_kind == "unsupported_runtime":
+        kind, stage, code = "request_bound_failure", "runtime_validation", "CSV-NEXT-NODE-001"
+    elif result.result_kind in {"protocol_failure", "bootstrap_failure", "semantic_failure"}:
+        stage, code = {
+            "protocol_failure": ("response_protocol", "CSV-NEXT-PROTOCOL-001"),
+            "bootstrap_failure": ("bootstrap", "CSV-NEXT-NODE-004"),
+            "semantic_failure": ("semantic_analysis", "CSV-NEXT-NODE-004"),
+        }[result.result_kind]
+        kind = "request_bound_failure"
+    elif result.result_kind == "transport_failure":
+        failure = {
+            "timeout": ("node_timeout", "CSV-NEXT-NODE-003"),
+            "cleanup_unverified": ("node_process", "CSV-NEXT-NODE-004"),
+            "candidate_drift": ("node_process", "CSV-NEXT-NODE-004"),
+            "assets_drift": ("node_process", "CSV-NEXT-NODE-004"),
+        }.get(result.observation()["terminal_cause"])
+        if failure is None:
+            raise ValueError("runtime result has no closed provenance branch yet")
+        kind, (stage, code) = "request_bound_failure", failure
+    elif result.result_kind == "success" and semantic_decision is not None:
+        gate = semantic_decision.gate()
+        if gate["outcome"] == "payload_unavailable":
+            code = gate["diagnostic_code"]
+            stage = {
+                "CSV-NEXT-TARGET-001": "target_resolution",
+                "CSV-NEXT-EXPORT-001": "response_validation",
+                "CSV-NEXT-LIMIT-005": "model_validation",
+            }[code]
+            kind = "request_bound_failure"
+        else:
+            kind, stage, code = "request_bound_success", None, None
+    else:
+        raise ValueError("runtime result has no closed provenance branch yet")
+    return {
+        "schema": "code-structure-viz.next-provenance/v2",
+        "kind": kind,
+        "stage": stage,
+        "failure_code": code,
+        "observed": {key: provenance_observation_v2(key, value) for key, value in values.items()},
+    }
