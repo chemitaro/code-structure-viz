@@ -4,7 +4,7 @@
 
 `schemas/next-semantic-v2.schema.json`は`domain=next`、`document_kind=snapshot`、`schema=code-structure-viz.semantic/v2`のclosed public recordです。compatibilityはv2へのexact ref、entity/proof/source/path/config/run-context/limitsの意味とID algorithmはv1を保持します。旧Next semantic文書全体をv2として検証するfallbackは作りません。
 
-これはA02のreference data契約です。Artifact作成、末尾LF付きpublication bytes、実measurement、PlantUML、run/domain/root manifest、stdout/stderr/exit、実Node/TypeScript/CLI、installed packageは認定しません。新資材failure policyもここで採択しません。
+これはA02のreference data契約です。public record単体ではArtifact作成、末尾LF付きpublication bytes、実measurement、PlantUML、run/domain/root manifest、stdout/stderr/exit、実Node/TypeScript/CLI、installed packageは認定しません。新資材failure policyもここで採択しません。次節のretained candidate bytesもfilesystem publicationの認定とは別です。
 
 ## 親が保持する入力と公開可能性
 
@@ -46,6 +46,16 @@ TypeScript 5.9.2というmetadataは実TS import/useの観測ではありませ�
 producerはCore gateを再検証し、source/request/compatibility/modelをfresh recordへ投影します。modules/componentsだけをfull IDのUTF-8 byte順へmergeし、他のcollectionはCoreで認定済みの順序を維持します。raw source、base64、proof、private control/stamp、host process fieldsを公開しません。
 
 `validate_public_semantic_document_v2(record, decision)`はproducerや共有expected-record builderを呼ばず、schema、同じsource/assets/request/context、config digest、13-key fingerprint、Core outcome、compatibility、collections/orderを独立joinします。shape-validな別source/coverage/order/status、再hashした別intent/compatibilityも拒否します。canonical codec、SHA-256、変更しないentity/source algorithmsだけを共有します。
+
+## 同じ判定から一度保持するsemantic candidate bytes
+
+`retain_public_semantic_artifact_v2(decision)`は同じavailable Core ownerだけを受け、上のpublic recordをUnicode 15.0.0 NFC・key-sort・compact UTF-8 JSON＋末尾LF一つへ一度serializeします。caller bytes、descriptor、status、measurementを引数にしません。nominal `RetainedPublicSemanticArtifactV2`はconstructorを閉じ、同じdecision・immutable bytes・canonical descriptor bytesを保持します。descriptor getterはfresh objectで、source diskの再readを行いません。
+
+descriptorの六fieldは`path=next.snapshot.semantic.json`、`domain=next`、`format=semantic-json`、`media_type=application/json`、保持bytesの実`size_bytes`と`sha256`です。旧publication schemaのversionless `$defs/artifact_descriptor`だけをclosed shapeとして再利用し、旧publication decision全体・旧runtime validatorへ変換しません。
+
+`validate_public_semantic_artifact_v2(artifact, decision)`はexact nominal typeとsame-object Core ownerを確認し、保持bytesをdecodeして独立public-record validatorへjoinします。元bytesがcanonical JSON＋LFと完全一致すること、closed descriptorのconstants・実len/hashを検証します。別recordやnoncanonical bytesのsize/hashだけを再計算しても拒否します。producerや共有expected-record builderを呼ばずに検証します。
+
+固定ASCII public literalを独立`jq -cS . <file>`でserializeすると、LF込み9472 bytes、SHA-256は`545389abfa3975b2c95083db9cca6b8efbe071c4526b90cbe55fe9bdc84b5957`です。これは保持candidate bytesのknown vectorで、未実施のfilesystem persist・selected-copy measurement・final publication sealの代用ではありません。requested formatの実publication、PlantUML、全manifest/stdout/exitとselected stdout exact/+1は後続finalizer gateへ残します。persisted artifactにselected-stdout capを先行適用しません。
 
 ## Generic dispatcher v2
 

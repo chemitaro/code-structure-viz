@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-10-01"
+最終更新: "2026-10-02"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -39,7 +39,7 @@ package_sequence_key: "ISSUE-05"
 | --- | --- | --- |
 | `A02-1` 起動契約 | runtime requirement/execution assets/binding leaf、policy/observation v2。事前actual version無し、concrete/portable分離、closed records、旧強保証field拒否、owner joinsの正負tests | requirement/policy/assets/binding/observationからraw frame/trusted/source/requestまでのdata-only owner joinsはGREEN。production変更無し。actual stage/spawn/TSはA04のgateであり未認定。 |
 | `A02-2` private wire/compatibility | request intent、single control/nullable semantic response、binding/exit/frame相互検証、retained owner由来のruntime/compatibility preimages | request/response全data chain、transport/compatibility/Core reference admission、通常transport failure-prefix、Core invalid/record-limit typed unionはGREEN。interruptはordinary provenanceの外。public known measurements、網羅vector・全gateは未完了。 |
-| `A02-3` provenance/public refs | trusted manifest/descriptor、source-phase/actual observed slots、run/publication/domain/semantic/root/stdoutのv2 exact-ref closure。元助言のstdout-v1維持は採らない | trusted metadata/実source seal/policy data joins、bound runtime/Core owners由来の17-slot provenance、available public semantic-v2 / generic dispatcher-v2とprivate parent contextのreference初スライスはGREEN。reader-owned request-independent prefix、readonly source-phase sequence、全failure branches・run/publication/domain/root/stdoutのexact-ref closureは未完了。 |
+| `A02-3` provenance/public refs | trusted manifest/descriptor、source-phase/actual observed slots、run/publication/domain/semantic/root/stdoutのv2 exact-ref closure。元助言のstdout-v1維持は採らない | trusted metadata/実source seal/policy data joins、bound runtime/Core owners由来の17-slot provenance、available public semantic-v2 / generic dispatcher-v2とprivate parent context、同じCore ownerのretained semantic candidate bytes/descriptorのreference初スライスはGREEN。reader-owned request-independent prefix、readonly source-phase sequence、全failure branches・run/publication/domain/root/stdoutのexact-ref closureは未完了。 |
 | `A02-4` gate入力 | 小さい独立v2 reference modules、known literal/mutations、v1不変性、各terminal selector/failure/publicationの全chain、全local品質gate、clean/pushed fixed SHA | 未完了。これが揃うまでA03/productionへ進めない。 |
 
 各unitは一つのpublic contract seamのtestを先に失敗させ、最小のschema/reference変更で同じtestを通します。旧巨大validatorを複製せず、source/semantic algorithmの回帰とv2 runtime laneを別々に維持します。typed failureとcleanupの未確認をsuccess fixtureで隠しません。
@@ -69,6 +69,8 @@ Core rejection closureはexpected payload violationと内部/owner errorを分�
 source-prefix限定Strict advisoryはexact `e15033d6...`でcompleted、元実行exit0です。原回答とlocal adjudicationを`artifacts/20261001t122734z--issue8-a-source-prefix-analysis.md`、`artifacts/20261001t122836z-decision-candidate-a-source-prefix-asset-failure-adjudication.md`へ保存しました。expected metadataを保持するclarificationだけをCurrent R/Dへ反映し、新asset diagnostic/outcomeは未採択のdecision-candidateとして分離します。重要な未決境界は通常I/Oをdomain unavailable、立証済みinstalled package violationをrun-level fatalへ分けるかです。回答前にcode/message/catalog/schemaへ新policyを実装しません。新code採択後も旧catalog v1を上書きせず、新chainのexact依存closureを検証します。source file/decoded total/countを実evidenceで区別し、既存仕様のdecoded total=`LIMIT-002/source_read`へ整合させる作業は未完了です。A02のreference journalをproduction実測と呼ばず、production source APIの改造はA03後のA04へ保持します。
 
 その未決policyに依存しないpublic semantic初スライスは、exact `ae15deb...`のChatGPT Implementation Brief Strict（GPT-5.6 Sol / Pro、exit0、両picker verified）をローカル照合して実装しました。原回答は`artifacts/20261001t142559z--a02-public-semantic-v2.md`、採否・TDD・検証範囲は`artifacts/20261001t142600z-disc-a-public-semantic-v2-contract-slice.md`です。nominal parent analysis contextをrequestに保持し、既存wire/IDを変えずdepth/config digestのfree補完とcontext差し替えを拒否します。decision-only public producer/独立validatorはcomplete-empty・証明付きpartial-safeとunavailable拒否を分離し、13-key fingerprintとmodel/orderを同じownerへ結びます。generic v2はNext-v2と既存Python/SQLAlchemy-v1だけをrouteし、旧Next-v1 bypassを拒否します。focused70 testsがpass。actual query-selection/TS、reader prefix/asset policy、public byte measurement、run/publication/domain/root/stdout全refs、A02全gate/A03は未完了です。
+
+続くavailable semantic bytesスライスは`700d0df...`を起点に正本のsingle-owner/canonical bytes契約から機械的にbriefを抽出しました。同じCore decisionからLF付きUTF-8 bytesを一度保持し、固定六field descriptorの実len/hashを独立validatorへjoinします。新26 testsがpass。別owner・再hashした別record・noncanonical bytes、caller descriptor変更、source disk変更後の再readを拒否または不変で検証しました。evidenceは`artifacts/20261001t150558z-disc-a-public-semantic-bytes-v2-contract-slice.md`。ここでのdescriptorは保持candidateの属性で、persisted Artifact・selected-copy measurement・publication sealの認定ではありません。PlantUML、run/domain/root/stdout全refsと未決asset policy、A02全gate/A03は残します。
 
 rollbackはA runtimeのproduction admissionを無効にしてNextをtyped unavailableへ戻し、Python/SQLAlchemyと保存済み旧recordを維持します。旧verified-FD名への偽装fallback、runtime取得、platform縮小は行いません。forward recoveryは主担当が新recordの対応closureとnegative vectorを修復し、task-scoped commit/push後にfresh exact-SHA gateを取り直します。target repositoryやpersistent user dataのmigrationはありません。
 
