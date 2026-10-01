@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-adapter-response-v2",
+  "title": "CodeStructureViz single Next adapter response v2",
+  "description": "One closed runtime control and nullable semantic payload. Runtime binding and compatibility are parent-owned, never child-authored. Proof semantics and owner joins require independent validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "control", "semantic_payload"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-adapter-response/v2"},
+    "control": {"$ref": "urn:code-structure-viz:schema:next-process-launch-observation-v2#/$defs/response_control"},
+    "semantic_payload": {"oneOf": [{"$ref": "#/$defs/semantic_payload"}, {"type": "null"}]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"control": {"properties": {"result_kind": {"const": "success"}}}}},
+      "then": {"properties": {"semantic_payload": {"$ref": "#/$defs/semantic_payload"}}},
+      "else": {"properties": {"semantic_payload": {"type": "null"}}}
+    }
+  ],
+  "$defs": {
+    "semantic_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typescript_identity", "trusted_type_environment_digest", "identity_versions", "limits", "run_context", "model", "proof", "model_digest"],
+      "properties": {
+        "typescript_identity": {"const": "typescript-5.9.2"},
+        "trusted_type_environment_digest": {"$ref": "urn:code-structure-viz:schema:next-execution-assets-v1#/$defs/digest"},
+        "identity_versions": {"$ref": "urn:code-structure-viz:schema:next-semantic-v1#/$defs/identity_versions"},
+        "limits": {"$ref": "urn:code-structure-viz:schema:next-limits-v1"},
+        "run_context": {"$ref": "urn:code-structure-viz:schema:next-run-context-v1"},
+        "model": {"$ref": "urn:code-structure-viz:schema:next-adapter-response-v1#/$defs/model"},
+        "proof": {"$ref": "urn:code-structure-viz:schema:next-adapter-response-v1#/$defs/proof"},
+        "model_digest": {"$ref": "urn:code-structure-viz:schema:next-execution-assets-v1#/$defs/digest"}
+      }
+    }
+  }
+}

@@ -65,6 +65,8 @@ observation producerはreference evidenceのclosed inputからowner fields/polic
 
 これらはデータの一貫性であり、実response bytes/SHA/control/countersへのjoinはA02-2、trusted descriptor/profile完全性はA02-3、実OS owner観測はA04の必須gateです。referenceのplaceholder SHAやpid、boolを実測扱いしません。private wire/compatibility/provenance/public closureは未完了です。
 
+A02-2のresponse初スライスは`docs/contracts/next-adapter-response-v2.md`です。rootはschema/control/nullable semantic payloadの一つのclosed JSON。runtime binding/compatibilityをchildから除き、既存要素/model/proof defsとwire非依存bounded JSON grammarだけを再利用します。immutable raw frame ownerを通常factoryで生成し、元bytesのSHA/control/observed stdout量をprocess recordへjoinします。success payload shapeとCore proof acceptanceを区別し、request bytes/owner/context/trusted/proof/compatibility joinsとpublic closureは未完了のままです。
+
 ```plantuml
 @startuml
 title Current v1: single authority chain

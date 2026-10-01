@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from tests.contracts.next_runtime_v2_validation import (
     process_payload_gate_v2,
@@ -14,6 +14,7 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_launch_policy_assets_v2,
     validate_process_launch_policy_v2,
     validate_process_observation_v2,
+    validate_response_frame_bytes_v2,
     validate_runtime_binding_identity_v1,
     validate_runtime_binding_observation_v1,
 )
@@ -167,3 +168,34 @@ def runtime_binding_from_observation_v1(
     )
     validate_runtime_binding_observation_v1(binding, policy, assets, observation)
     return binding
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class RetainedResponseFrameV2:
+    """Immutable response-byte authority; never a semantic or OS certificate."""
+
+    raw_bytes: bytes = field(repr=False)
+    sha256: str
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("response frames are created by retain_response_frame_v2")
+
+    @classmethod
+    def _from_validated(cls, raw: bytes) -> "RetainedResponseFrameV2":
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "raw_bytes", raw)
+        object.__setattr__(instance, "sha256", hashlib.sha256(raw).hexdigest())
+        return instance
+
+    def control(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self.raw_bytes)["control"])
+
+    def semantic_payload(self) -> dict[str, Any] | None:
+        return cast(dict[str, Any] | None, json.loads(self.raw_bytes)["semantic_payload"])
+
+
+def retain_response_frame_v2(raw: bytes, *, limits: dict[str, int]) -> RetainedResponseFrameV2:
+    """Freeze a reference response frame; no caller metadata is response authority."""
+
+    validate_response_frame_bytes_v2(raw, limits)
+    return RetainedResponseFrameV2._from_validated(raw)

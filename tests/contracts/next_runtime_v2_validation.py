@@ -11,8 +11,13 @@ from typing import TYPE_CHECKING, Any, cast
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from referencing import Registry, Resource
 
+from tests.contracts.next_reference_validation import bounded_decode_json
+
 if TYPE_CHECKING:
-    from tests.contracts.next_runtime_v2_reference import RetainedExecutionAssets
+    from tests.contracts.next_runtime_v2_reference import (
+        RetainedExecutionAssets,
+        RetainedResponseFrameV2,
+    )
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -326,6 +331,45 @@ def validate_response_control_v2(value: dict[str, Any]) -> None:
         or runtime["eligibility"] not in {"invalid", "unsupported"}
     ):
         raise ValueError("unsupported_runtime control requires a bound ineligible runtime")
+
+
+def validate_response_frame_shape_v2(value: dict[str, Any]) -> None:
+    """Validate closed frame shape/control, not semantic proof or request-owner joins."""
+
+    _validate_schema("next-adapter-response-v2", value)
+    validate_response_control_v2(value["control"])
+
+
+def validate_response_frame_bytes_v2(raw: bytes, limits: dict[str, int]) -> None:
+    """Use the unchanged wire-agnostic bounded JSON grammar, never v1 runtime admission."""
+
+    if not isinstance(raw, bytes):
+        raise TypeError("response frame input must already be immutable bytes")
+    _validate_schema("next-limits-v1", limits)
+    decoded = bounded_decode_json(raw, limits=limits)
+    if not decoded["allowed"]:
+        raise ValueError(f"response frame rejected: {decoded['reason']}")
+    validate_response_frame_shape_v2(decoded["value"])
+
+
+def validate_response_frame_observation_v2(
+    value: dict[str, Any], policy: dict[str, Any], frame: RetainedResponseFrameV2
+) -> None:
+    """Join a raw frame to its observation; request/proof/OS joins are separate."""
+
+    from tests.contracts.next_runtime_v2_reference import RetainedResponseFrameV2
+
+    if type(frame) is not RetainedResponseFrameV2:
+        raise TypeError("response observation join requires the retained frame owner")
+    validate_process_observation_v2(value, policy)
+    validate_response_frame_bytes_v2(frame.raw_bytes, policy["limits"])
+    if (
+        value["response"] is None
+        or value["response"]["sha256"] != frame.sha256
+        or value["response"]["control"] != frame.control()
+        or value["capture"]["stdout_bytes"] != len(frame.raw_bytes)
+    ):
+        raise ValueError("observation is not joined to its retained response bytes")
 
 
 def _cleanup_is_verified(cleanup: dict[str, Any]) -> bool:
