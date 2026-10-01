@@ -134,6 +134,51 @@ def test_binding_mismatch_label_requires_an_actual_foreign_control_binding(tmp_p
         )
 
 
+def test_exit_mismatch_label_cannot_replace_an_actually_matching_exit(tmp_path: Path) -> None:
+    _seal, _assets, request, policy = request_inputs(tmp_path)
+    frame = next_runtime_v2_reference.retain_response_frame_v2(
+        json.dumps(shape_wire(request)).encode(), limits=request.record()["limits"]
+    )
+    evidence = exchange_evidence(policy, request, frame)
+    evidence["terminal_cause"] = "exit_mismatch"
+    evidence["capture"]["stdout_retained_bytes"] = 0
+    with pytest.raises(ValueError, match="exit mismatch requires"):
+        next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+
+
+def test_response_invalid_label_requires_an_actual_transport_echo_violation(tmp_path: Path) -> None:
+    seal, assets, request, policy = request_inputs(tmp_path)
+    frame = next_runtime_v2_reference.retain_response_frame_v2(
+        json.dumps(shape_wire(request)).encode(), limits=request.record()["limits"]
+    )
+    evidence = exchange_evidence(policy, request, frame)
+    evidence["terminal_cause"] = "response_invalid"
+    evidence["capture"]["stdout_retained_bytes"] = 0
+    observation = next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+    with pytest.raises(ValueError, match="response mismatch requires"):
+        next_runtime_v2_reference.retain_runtime_result_v2(
+            seal, assets, request, policy, observation, frame
+        )
+
+
+def test_response_invalid_cannot_claim_an_echo_violation_without_a_complete_frame(
+    tmp_path: Path,
+) -> None:
+    seal, assets, request, policy = request_inputs(tmp_path)
+    evidence = complete_evidence(policy)
+    evidence.update(response=None, terminal_cause="response_invalid")
+    evidence["capture"].update(
+        stdin_bytes=len(request.canonical_bytes),
+        stdin_sent_bytes=len(request.canonical_bytes),
+        stdout_retained_bytes=0,
+    )
+    observation = next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+    with pytest.raises(ValueError, match="response mismatch requires a complete"):
+        next_runtime_v2_reference.retain_runtime_result_v2(
+            seal, assets, request, policy, observation, None
+        )
+
+
 @pytest.mark.parametrize(
     ("kind", "exit_code", "bound", "runtime"),
     [
@@ -220,6 +265,45 @@ def test_pre_spawn_failure_does_not_claim_a_process_or_frame(tmp_path: Path, cau
     assert result.control() is None
     assert result.response_descriptor() is None
     assert result.transport_candidate() is None
+
+
+@pytest.mark.parametrize(
+    "cause",
+    [
+        "write_failed",
+        "read_failed",
+        "timeout",
+        "frame_invalid",
+        "response_invalid",
+        "exit_mismatch",
+    ],
+)
+def test_post_spawn_failure_cannot_be_fabricated_without_a_process(
+    tmp_path: Path, cause: str
+) -> None:
+    _seal, _assets, _request, policy = request_inputs(tmp_path)
+    evidence = complete_evidence(policy)
+    evidence.update(spawn=None, capture=None, response=None, exit_code=None, terminal_cause=cause)
+    evidence["cleanup"]["direct_child_waited"] = False
+    with pytest.raises(ValueError, match="post-spawn failure requires"):
+        next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+
+
+def test_pre_spawn_interrupt_is_terminal_not_an_ordinary_domain_failure(tmp_path: Path) -> None:
+    seal, assets, request, policy = request_inputs(tmp_path)
+    evidence = complete_evidence(policy)
+    evidence.update(
+        spawn=None, capture=None, response=None, exit_code=None, terminal_cause="interrupted"
+    )
+    evidence["cleanup"]["direct_child_waited"] = False
+    observation = next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+    runtime = next_runtime_v2_reference.retain_runtime_result_v2(
+        seal, assets, request, policy, observation, None
+    )
+    assert runtime.result_kind == "interrupted"
+    assert runtime.transport_candidate() is None
+    with pytest.raises(ValueError, match="terminal interrupt"):
+        next_runtime_v2_reference.runtime_provenance_v2(runtime)
 
 
 def test_result_freezes_inputs_and_returns_fresh_observation_projections(tmp_path: Path) -> None:

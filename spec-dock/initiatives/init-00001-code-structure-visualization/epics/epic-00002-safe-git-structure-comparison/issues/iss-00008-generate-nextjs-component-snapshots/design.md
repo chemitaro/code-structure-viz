@@ -77,6 +77,8 @@ Coreのreference admissionは`docs/contracts/next-semantic-admission-v2.md`で�
 
 runtime-result / provenanceの初スライスは`docs/contracts/next-provenance-v2.md`です。同じsource/assets/request/policy/observation/frameをimmutable `RetainedRuntimeResultV2`へjoinし、正常transportだけにcandidateを保持します。closed child failure、timeout、late cleanup/driftでは既検証control/version prefixと元frame descriptorを維持し、failure raw buffersやsemantic candidateを保持しません。foreign child bindingを親requestへ修正せず、mismatch labelだけの偽failureを拒否します。17 named observationsはversioned wrapper・slot名・同じownerの実値からhashし、readonly expected trusted metadataと実TS利用、実spawn parametersとexpected compiler metadataを分離します。host paths/PIDだけの変更ではpublic provenanceを変えません。matching Core ownerがある場合だけsemantic/compatibility/model/budgetを投影し、target failureの未実測budgetはnullです。request-independent reader prefix、その他transport/Core failure、public exact-ref全chainは未完了で、schema shapeを未実装branchの認定に使いません。
 
+続くtransport failure-prefix closureで、stage/spawn、write/read、actual cap+1、binding/echo/exit mismatchとdecoder/schema rejectionを既存catalogへ結びます。named post-spawn causeに実spawn/capture、exit mismatchにactual control/exit不一致、echo mismatchにsame-request violationを要求します。新`RejectedResponseFrameV2`は原body/parsed object/controlを保持せず、limits・元bytes identity・decoder実measurementだけを持ち、same captureへjoinします。未検証controlをpartial bodyから補完せず、捕捉interruptはordinary provenanceの外のcore terminal branchへ渡します。actual OSの時系列/capture ownershipとCore invalid/record-limit、source reader prefix、公表全chainは残るgateです。
+
 ```plantuml
 @startuml
 title Current v1: single authority chain

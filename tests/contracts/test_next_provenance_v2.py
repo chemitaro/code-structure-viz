@@ -217,6 +217,157 @@ def test_timeout_prefix_stops_before_version_but_keeps_the_prepared_request(tmp_
     next_runtime_v2_validation.validate_provenance_shape_v2(provenance)
 
 
+@pytest.mark.parametrize("cause", ["stage_failed", "spawn_failed"])
+def test_failed_prelaunch_never_claims_a_started_process_or_runtime(
+    tmp_path: Path, cause: str
+) -> None:
+    seal, assets, request, policy = request_inputs(tmp_path)
+    evidence = complete_evidence(policy)
+    evidence.update(spawn=None, capture=None, response=None, exit_code=None, terminal_cause=cause)
+    evidence["cleanup"]["direct_child_waited"] = False
+    observation = next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+    runtime = next_runtime_v2_reference.retain_runtime_result_v2(
+        seal, assets, request, policy, observation, None
+    )
+    value = next_runtime_v2_reference.runtime_provenance_v2(runtime)
+    assert (value["kind"], value["stage"], value["failure_code"]) == (
+        "request_bound_failure",
+        "node_spawn",
+        "CSV-NEXT-NODE-002",
+    )
+    assert [key for key in SLOTS if value["observed"][key]["state"] == "observed"] == list(
+        SLOTS[:10]
+    )
+    next_runtime_v2_validation.validate_runtime_provenance_v2(value, runtime)
+
+
+@pytest.mark.parametrize(
+    ("stream", "measured", "stage"),
+    [
+        ("stdout", 16_777_217, "adapter_stdout_capture"),
+        ("stderr", 65_537, "adapter_stderr_capture"),
+    ],
+)
+def test_capture_cap_plus_one_has_limit_failure_without_a_semantic_suffix(
+    tmp_path: Path, stream: str, measured: int, stage: str
+) -> None:
+    seal, assets, request, policy = request_inputs(tmp_path)
+    evidence = complete_evidence(policy)
+    evidence.update(response=None, exit_code=-15, terminal_cause=stream + "_limit")
+    evidence["capture"].update(
+        stdin_bytes=len(request.canonical_bytes),
+        stdin_sent_bytes=len(request.canonical_bytes),
+        stdout_bytes=0,
+        stdout_retained_bytes=0,
+        stderr_bytes=0,
+        stderr_retained_bytes=0,
+    )
+    evidence["capture"][stream + "_bytes"] = measured
+    evidence["capture"][stream + "_eof"] = False
+    evidence["cleanup"].update(group_stop="verified", signals=["TERM"])
+    observation = next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+    runtime = next_runtime_v2_reference.retain_runtime_result_v2(
+        seal, assets, request, policy, observation, None
+    )
+    value = next_runtime_v2_reference.runtime_provenance_v2(runtime)
+    assert (value["stage"], value["failure_code"]) == (stage, "CSV-NEXT-LIMIT-003")
+    assert [key for key in SLOTS if value["observed"][key]["state"] == "observed"] == list(
+        SLOTS[:11]
+    )
+    next_runtime_v2_validation.validate_runtime_provenance_v2(value, runtime)
+
+
+@pytest.mark.parametrize("cause", ["write_failed", "read_failed"])
+def test_transport_io_failure_keeps_prepared_request_but_no_invented_control(
+    tmp_path: Path, cause: str
+) -> None:
+    seal, assets, request, policy = request_inputs(tmp_path)
+    evidence = complete_evidence(policy)
+    evidence.update(response=None, exit_code=-15, terminal_cause=cause)
+    evidence["capture"].update(
+        stdin_bytes=len(request.canonical_bytes),
+        stdin_sent_bytes=1 if cause == "write_failed" else len(request.canonical_bytes),
+        stdout_bytes=0 if cause == "write_failed" else 17,
+        stdout_retained_bytes=0,
+        stdout_eof=False,
+    )
+    evidence["cleanup"].update(group_stop="verified", signals=["TERM"])
+    observation = next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+    runtime = next_runtime_v2_reference.retain_runtime_result_v2(
+        seal, assets, request, policy, observation, None
+    )
+    value = next_runtime_v2_reference.runtime_provenance_v2(runtime)
+    assert (value["stage"], value["failure_code"]) == ("node_process", "CSV-NEXT-NODE-004")
+    assert [key for key in SLOTS if value["observed"][key]["state"] == "observed"] == list(
+        SLOTS[:11]
+    )
+    next_runtime_v2_validation.validate_runtime_provenance_v2(value, runtime)
+
+
+@pytest.mark.parametrize(
+    ("cause", "stage", "code"),
+    [
+        ("binding_mismatch", "response_validation", "CSV-NEXT-PROTOCOL-001"),
+        ("exit_mismatch", "node_process", "CSV-NEXT-NODE-004"),
+    ],
+)
+def test_complete_control_mismatch_preserves_actual_prefix_without_a_candidate(
+    tmp_path: Path, cause: str, stage: str, code: str
+) -> None:
+    seal, assets, request, policy = request_inputs(tmp_path)
+    wire = shape_wire(request)
+    if cause == "binding_mismatch":
+        wire["control"]["binding"]["request_id"] = "0" * 64
+    frame = next_runtime_v2_reference.retain_response_frame_v2(
+        json.dumps(wire).encode(), limits=request.record()["limits"]
+    )
+    evidence = exchange_evidence(policy, request, frame)
+    evidence["terminal_cause"] = cause
+    evidence["capture"]["stdout_retained_bytes"] = 0
+    if cause == "exit_mismatch":
+        evidence["exit_code"] = 1
+    observation = next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+    runtime = next_runtime_v2_reference.retain_runtime_result_v2(
+        seal, assets, request, policy, observation, frame
+    )
+    value = next_runtime_v2_reference.runtime_provenance_v2(runtime)
+    assert (value["stage"], value["failure_code"]) == (stage, code)
+    assert [key for key in SLOTS if value["observed"][key]["state"] == "observed"] == list(
+        SLOTS[:13]
+    )
+    assert runtime.control() == wire["control"]
+    assert runtime.transport_candidate() is None
+    next_runtime_v2_validation.validate_runtime_provenance_v2(value, runtime)
+
+
+def test_invalid_semantic_echo_is_protocol_failure_with_only_the_control_prefix(
+    tmp_path: Path,
+) -> None:
+    seal, assets, request, policy = request_inputs(tmp_path)
+    wire = shape_wire(request)
+    wire["semantic_payload"]["trusted_type_environment_digest"] = "0" * 64
+    frame = next_runtime_v2_reference.retain_response_frame_v2(
+        json.dumps(wire).encode(), limits=request.record()["limits"]
+    )
+    evidence = exchange_evidence(policy, request, frame)
+    evidence["terminal_cause"] = "response_invalid"
+    evidence["capture"]["stdout_retained_bytes"] = 0
+    observation = next_runtime_v2_reference.reference_process_observation_v2(policy, evidence)
+    runtime = next_runtime_v2_reference.retain_runtime_result_v2(
+        seal, assets, request, policy, observation, frame
+    )
+    value = next_runtime_v2_reference.runtime_provenance_v2(runtime)
+    assert (value["stage"], value["failure_code"]) == (
+        "response_validation",
+        "CSV-NEXT-PROTOCOL-001",
+    )
+    assert [key for key in SLOTS if value["observed"][key]["state"] == "observed"] == list(
+        SLOTS[:13]
+    )
+    assert runtime.transport_candidate() is None
+    next_runtime_v2_validation.validate_runtime_provenance_v2(value, runtime)
+
+
 def test_proof_bound_target_failure_is_not_success_and_has_no_entity_measurement(
     tmp_path: Path,
 ) -> None:

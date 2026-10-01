@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 from referencing import Registry, Resource
 
 from tests.contracts.next_reference_validation import (
@@ -48,6 +48,7 @@ from tests.contracts.next_trusted_profile_v1_reference import (
 if TYPE_CHECKING:
     from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitionSeal
     from tests.contracts.next_runtime_v2_reference import (
+        RejectedResponseFrameV2,
         RetainedExecutionAssets,
         RetainedRequestFrameV2,
         RetainedResponseFrameV2,
@@ -161,11 +162,22 @@ def validate_runtime_provenance_v2(
         expected = "request_bound_failure", *child_identity
     elif result.result_kind == "transport_failure":
         transport_identity = {
+            "stage_failed": ("node_spawn", "CSV-NEXT-NODE-002"),
+            "spawn_failed": ("node_spawn", "CSV-NEXT-NODE-002"),
+            "write_failed": ("node_process", "CSV-NEXT-NODE-004"),
+            "read_failed": ("node_process", "CSV-NEXT-NODE-004"),
+            "binding_mismatch": ("response_validation", "CSV-NEXT-PROTOCOL-001"),
+            "response_invalid": ("response_validation", "CSV-NEXT-PROTOCOL-001"),
+            "exit_mismatch": ("node_process", "CSV-NEXT-NODE-004"),
+            "stdout_limit": ("adapter_stdout_capture", "CSV-NEXT-LIMIT-003"),
+            "stderr_limit": ("adapter_stderr_capture", "CSV-NEXT-LIMIT-003"),
             "timeout": ("node_timeout", "CSV-NEXT-NODE-003"),
             "cleanup_unverified": ("node_process", "CSV-NEXT-NODE-004"),
             "candidate_drift": ("node_process", "CSV-NEXT-NODE-004"),
             "assets_drift": ("node_process", "CSV-NEXT-NODE-004"),
         }.get(result.observation()["terminal_cause"])
+        if (rejection := result.frame_rejection()) is not None:
+            transport_identity = rejection["stage"], rejection["diagnostic_code"]
         if transport_identity is None:
             raise ValueError("runtime result has no closed provenance result identity")
         expected = "request_bound_failure", *transport_identity
@@ -547,6 +559,18 @@ def validate_process_observation_v2(value: dict[str, Any], policy: dict[str, Any
         raise ValueError("observed process group is not the new session leader group")
     if value["terminal_cause"] in {"stage_failed", "spawn_failed"} and value["spawn"] is not None:
         raise ValueError("pre-spawn failure cannot include a successful spawn observation")
+    if value["terminal_cause"] in {
+        "write_failed",
+        "read_failed",
+        "stdout_limit",
+        "stderr_limit",
+        "timeout",
+        "frame_invalid",
+        "response_invalid",
+        "binding_mismatch",
+        "exit_mismatch",
+    } and (value["spawn"] is None or value["capture"] is None):
+        raise ValueError("post-spawn failure requires actual spawn and capture observations")
     if value["spawn"] is None and any(
         value[key] is not None for key in ("capture", "exit_code", "response")
     ):
@@ -602,7 +626,11 @@ def validate_process_observation_v2(value: dict[str, Any], policy: dict[str, Any
             and binding["request_id"] != policy["request_id"]
         ):
             raise ValueError("normal control response has an unrelated request binding")
-    if value["terminal_cause"] == "none" and value["response"] is not None:
+    if value["terminal_cause"] == "exit_mismatch" and (
+        value["response"] is None or value["exit_code"] is None
+    ):
+        raise ValueError("exit mismatch requires an observed control and actual exit")
+    if value["terminal_cause"] in {"none", "exit_mismatch"} and value["response"] is not None:
         expected_exit = {
             "success": 0,
             "protocol_failure": 65,
@@ -610,7 +638,9 @@ def validate_process_observation_v2(value: dict[str, Any], policy: dict[str, Any
             "bootstrap_failure": 67,
             "semantic_failure": 68,
         }[value["response"]["control"]["result_kind"]]
-        if value["exit_code"] != expected_exit:
+        if value["terminal_cause"] == "exit_mismatch" and value["exit_code"] == expected_exit:
+            raise ValueError("exit mismatch requires an actual control/exit disagreement")
+        if value["terminal_cause"] == "none" and value["exit_code"] != expected_exit:
             raise ValueError("normal control response and child exit code disagree")
     if value["terminal_cause"] == "none" and not _cleanup_is_verified(value["cleanup"]):
         raise ValueError("normal terminal cause cannot hide unverified cleanup")
@@ -726,6 +756,78 @@ def validate_response_frame_bytes_v2(raw: bytes, limits: dict[str, int]) -> None
     if not decoded["allowed"]:
         raise ValueError(f"response frame rejected: {decoded['reason']}")
     validate_response_frame_shape_v2(decoded["value"])
+
+
+def response_rejection_v2(raw: bytes, limits: dict[str, int]) -> dict[str, Any] | None:
+    """Classify bounded bytes; a caller-supplied result dict is not an owner."""
+
+    if not isinstance(raw, bytes):
+        raise TypeError("response frame input must already be immutable bytes")
+    _validate_schema("next-limits-v1", limits)
+    decoded = bounded_decode_json(raw, limits=limits)
+    stage, reason = "response_decode", decoded.get("reason")
+    if decoded["allowed"]:
+        try:
+            validate_response_frame_shape_v2(decoded["value"])
+        except (ValidationError, ValueError):
+            stage, reason = "response_schema", "closed_response_shape"
+        else:
+            return None
+    code = "CSV-NEXT-PROTOCOL-001"
+    if reason == "max_adapter_response_bytes":
+        stage, code = "response_raw_bytes", "CSV-NEXT-LIMIT-003"
+    elif reason in {
+        "max_json_nesting",
+        "max_array_items",
+        "max_total_array_items",
+        "max_json_string_bytes",
+    }:
+        code = "CSV-NEXT-LIMIT-003"
+    return {
+        "stage": stage,
+        "diagnostic_code": code,
+        "reason": reason,
+        "raw_sha256": hashlib.sha256(raw).hexdigest(),
+        "byte_length": len(raw),
+        "measurement": {
+            key: decoded[key]
+            for key in (
+                "bytes",
+                "total_array_items",
+                "array_count",
+                "max_array_items",
+                "max_nesting",
+                "max_string_bytes",
+                "failed_at_byte",
+                "materialized",
+            )
+        },
+    }
+
+
+def validate_rejected_frame_observation_v2(
+    observation: dict[str, Any], policy: dict[str, Any], rejected: RejectedResponseFrameV2 | None
+) -> None:
+    """Join decoder-owned rejected byte measurement to the same complete capture."""
+
+    from tests.contracts.next_runtime_v2_reference import RejectedResponseFrameV2
+
+    if type(rejected) is not RejectedResponseFrameV2:
+        raise TypeError("frame-invalid result requires the rejected byte owner")
+    assert rejected is not None
+    validate_process_observation_v2(observation, policy)
+    failure, capture = rejected.failure(), observation["capture"]
+    if rejected.limits() != policy["limits"]:
+        raise ValueError("rejected frame limits differ from the retained request policy")
+    if (
+        observation["terminal_cause"] != "frame_invalid"
+        or observation["response"] is not None
+        or capture is None
+        or not capture["stdout_eof"]
+        or capture["stdout_bytes"] != failure["byte_length"]
+        or capture["stdout_bytes"] > policy["limits"]["max_adapter_stdout_capture_bytes"]
+    ):
+        raise ValueError("rejected frame is not joined to its complete captured bytes")
 
 
 def validate_response_frame_observation_v2(

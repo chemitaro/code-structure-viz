@@ -6,7 +6,7 @@
 
 現在のreference laneは、actual `SourceAcquisitionSeal`から作ったrequestとretained assets、policy、process observation、complete frameをjoinする`RetainedRuntimeResultV2`を入力にします。これは**referenceデータの保持・検証owner**であり、OS spawnやTypeScript実行の証明ではありません。実OS ownerはA04の受入れで実装・検証します。
 
-schemaは四つのkindを区別します。runtime reference producer/validatorで検証済みなのはrequest-boundの正常child/control、timeout、late cleanup/driftとmatching Core ownerです。request-independent reader phase/source failure、その他transport failure、invalid Core/record-limit failure、run/publication/public exact refsは後続A02 gateです。shapeにbranchがあることを、未実装branchの認定にしません。
+schemaは四つのkindを区別します。runtime reference producer/validatorはclosed child/control、通常transport causesとmatching Core ownerを扱います。interruptはordinary provenanceを作らないterminal routeです。request-independent reader phase/source failure、invalid Core/record-limit failure、run/publication/public exact refsは後続A02 gateです。shapeにbranchがあることを、未実装branchの認定にしません。
 
 ## Runtime結果の保持
 
@@ -14,6 +14,7 @@ schemaは四つのkindを区別します。runtime reference producer/validator�
 - child failureは`protocol_failure`/`unsupported_runtime`/`bootstrap_failure`/`semantic_failure`のclosed controlと元frameのdescriptorを保持し、semantic candidateはnullです。
 - transport failureでcomplete frameを既検証ならcontrol/version prefixを保持できます。ただしraw failure stdout/stderr buffersとsemantic candidateを保持しません。partial/unobserved frameからcontrolを補完せず、観測にないframeを付けません。
 - foreign child request bindingはそのままfailure evidenceへ保持し、親request IDへ修正しません。`binding_mismatch`というlabelだけでは足りず、元frameの実foreign bindingを必要とします。
+- named exit/echo mismatchにもactual control/exitまたはcomplete frame/request echo違反を要求します。frame-invalidはdecoder-owned rejectionのlimits/captured bytesへjoinし、元bodyやcontrolを保持しません。捕捉interruptはcore terminal branchに残し、普通のfailure provenanceへ変換しません。
 - descriptorは`raw_sha256`、`byte_length`、`canonical_json`だけです。SHA/lengthは元bytes、flagはpinned canonical JSON bytesと元bytesの全量一致です。whitespace/LFを許可したframeでflagがfalseでも、別digestにreserializeしません。
 - 直接constructor、duck owner、free capture/control/hash、mutable input aliasesはauthorityになりません。取得したprojectionはfresh copyです。private constructor helperはtrusted Python内部用であり、hostile same-UIDへのsecurity boundaryではありません。
 
@@ -84,11 +85,19 @@ process-start valueはspawn primitiveと、実spawn parametersの同じlogical p
 | protocol failure | bound failure / response_protocol / PROTOCOL-001 |
 | bootstrap failure | bound failure / bootstrap / NODE-004 |
 | catastrophic semantic failure | bound failure / semantic_analysis / NODE-004 |
+| stage/spawn failed | bound failure / node_spawn / NODE-002。process_start以後は未観測 |
+| write/read failed | bound failure / node_process / NODE-004。未観測controlを補完しない |
+| stdout/stderr cap+1 | bound failure / adapter_stdout_capture・adapter_stderr_capture / LIMIT-003 |
 | timeout | bound failure / node_timeout / NODE-003 |
+| frame rejected | bound failure / response_raw_bytes・response_decode・response_schema / decoder-owned LIMIT-003・PROTOCOL-001 |
+| foreign binding / invalid echo | bound failure / response_validation / PROTOCOL-001。actual control prefixを保持 |
+| actual exit mismatch | bound failure / node_process / NODE-004。actual control prefixを保持 |
 | late cleanup/candidate/assets drift | bound failure / node_process / NODE-004 |
 | Core target/export/entity unavailable | bound failure / target_resolution・response_validation・model_validation / TARGET-001・EXPORT-001・LIMIT-005 |
 | matching Core complete/partial_safe | bound success / null / null |
 
 codeは表中の短縮名に`CSV-NEXT-`を付けます。新stageはv2の閉じた対応であり、旧v1 matrix/schemaを変更しません。failureはobserved prefixを保持し、未観測suffixをsuccess defaultで埋めません。target/export gateのentity actualがnullならbudget rowもnullです。
+
+frame-invalidの元raw hash/length/decoder measurementはprivate rejection ownerだけの値です。provenanceにcontrol_response rowを捏造して載せず、未検証version/controlとsemantic suffixはnullのままです。stdout capture cap breachをframe rejectionとして再分類せず、cap gateより先にdecoderを呼びません。interruptにNext failure code/通常provenanceを生成しません。
 
 `runtime_provenance_v2`はmatching opaque runtime/Core ownersから生成します。`validate_runtime_provenance_v2`はclosed schema、kind/stage/code、17 states/digestsを同じretained valuesから再検証します。別exchangeのCore owner、free status、schema-valid rehashed row、v1 identity/slotsを拒否します。known corpusによるCore reference evidenceを、任意sourceの実TS意味認定やA03/Issue全体のpassへ読み替えません。

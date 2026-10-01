@@ -18,12 +18,14 @@ from tests.contracts.next_reference_validation import (
 )
 from tests.contracts.next_runtime_v2_validation import (
     process_payload_gate_v2,
+    response_rejection_v2,
     validate_compatibility_descriptor_v2,
     validate_execution_asset_identity_v1,
     validate_launch_policy_assets_v2,
     validate_observation_request_v2,
     validate_process_launch_policy_v2,
     validate_process_observation_v2,
+    validate_rejected_frame_observation_v2,
     validate_request_frame_v2,
     validate_request_json_limits_v2,
     validate_request_record_v2,
@@ -299,6 +301,43 @@ def retain_response_frame_v2(raw: bytes, *, limits: dict[str, int]) -> RetainedR
 
 
 @dataclass(frozen=True, slots=True, init=False)
+class RejectedResponseFrameV2:
+    """Bounded decoder failure metadata only; no raw body or validated control."""
+
+    _failure_bytes: bytes = field(repr=False)
+    _limits_bytes: bytes = field(repr=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("response rejections are created by inspect_response_frame_v2")
+
+    @classmethod
+    def _from_rejected_bytes(
+        cls, failure: dict[str, Any], limits: dict[str, int]
+    ) -> "RejectedResponseFrameV2":
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "_failure_bytes", canonical_json_bytes(failure))
+        object.__setattr__(instance, "_limits_bytes", canonical_json_bytes(limits))
+        return instance
+
+    def failure(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._failure_bytes))
+
+    def limits(self) -> dict[str, int]:
+        return cast(dict[str, int], json.loads(self._limits_bytes))
+
+
+def inspect_response_frame_v2(
+    raw: bytes, *, limits: dict[str, int]
+) -> RetainedResponseFrameV2 | RejectedResponseFrameV2:
+    """Retain a valid frame or typed rejection, never a raw failure buffer."""
+
+    failure = response_rejection_v2(raw, limits)
+    if failure is not None:
+        return RejectedResponseFrameV2._from_rejected_bytes(failure, limits)
+    return retain_response_frame_v2(raw, limits=limits)
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class RetainedRequestFrameV2:
     """Generated private bytes bound to one source seal, not a Node observation."""
 
@@ -480,6 +519,7 @@ class RetainedRuntimeResultV2:
     _observation_bytes: bytes = field(repr=False)
     _response_descriptor_bytes: bytes = field(repr=False)
     _candidate: ValidatedTransportCandidateV2 | None = field(repr=False)
+    _rejected_frame: RejectedResponseFrameV2 | None = field(repr=False)
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         raise TypeError("runtime results are created by retain_runtime_result_v2")
@@ -494,6 +534,7 @@ class RetainedRuntimeResultV2:
         observation: dict[str, Any],
         descriptor: dict[str, Any] | None,
         candidate: ValidatedTransportCandidateV2 | None,
+        rejected_frame: RejectedResponseFrameV2 | None = None,
     ) -> "RetainedRuntimeResultV2":
         instance = object.__new__(cls)
         for owner_name, owner in (("_seal", seal), ("_assets", assets), ("_request", request)):
@@ -515,11 +556,14 @@ class RetainedRuntimeResultV2:
                 ).encode("utf-8"),
             )
         object.__setattr__(instance, "_candidate", candidate)
+        object.__setattr__(instance, "_rejected_frame", rejected_frame)
         return instance
 
     @property
     def result_kind(self) -> str:
         observation = self.observation()
+        if observation["terminal_cause"] == "interrupted":
+            return "interrupted"
         if observation["terminal_cause"] != "none":
             return "transport_failure"
         return cast(str, observation["response"]["control"]["result_kind"])
@@ -533,6 +577,9 @@ class RetainedRuntimeResultV2:
 
     def response_descriptor(self) -> dict[str, Any] | None:
         return cast(dict[str, Any] | None, json.loads(self._response_descriptor_bytes))
+
+    def frame_rejection(self) -> dict[str, Any] | None:
+        return None if self._rejected_frame is None else self._rejected_frame.failure()
 
     def transport_candidate(self) -> ValidatedTransportCandidateV2 | None:
         return self._candidate
@@ -556,11 +603,22 @@ def retain_runtime_result_v2(
     request: RetainedRequestFrameV2,
     policy: dict[str, Any],
     observation: dict[str, Any],
-    response: RetainedResponseFrameV2 | None,
+    response: RetainedResponseFrameV2 | RejectedResponseFrameV2 | None,
 ) -> RetainedRuntimeResultV2:
     """Preserve a joined closed result, not a success default for child failures."""
 
     validate_observation_request_v2(observation, policy, request, seal, assets)
+    if response is not None and type(response) not in {
+        RetainedResponseFrameV2,
+        RejectedResponseFrameV2,
+    }:
+        raise TypeError("runtime response requires a retained frame owner")
+    rejected = response if isinstance(response, RejectedResponseFrameV2) else None
+    frame = response if isinstance(response, RetainedResponseFrameV2) else None
+    if observation["terminal_cause"] == "frame_invalid":
+        validate_rejected_frame_observation_v2(observation, policy, rejected)
+    elif rejected is not None:
+        raise ValueError("rejected frame requires the actual frame-invalid cause")
     if observation["terminal_cause"] == "binding_mismatch" and not (
         observation["response"] is not None
         and observation["response"]["control"]["binding"]["state"] == "bound"
@@ -569,27 +627,35 @@ def retain_runtime_result_v2(
         raise ValueError("binding mismatch requires an actual foreign control binding")
     descriptor = None
     if observation["response"] is None:
-        if response is not None:
+        if observation["terminal_cause"] == "response_invalid":
+            raise ValueError("response mismatch requires a complete joined frame")
+        if frame is not None:
             raise ValueError("runtime result cannot attach an unobserved response frame")
     else:
-        if response is None:
+        if frame is None:
             raise ValueError("runtime control requires the retained complete frame")
-        validate_response_frame_observation_v2(observation, policy, response)
+        validate_response_frame_observation_v2(observation, policy, frame)
         if observation["terminal_cause"] == "none":
-            validate_response_request_v2(response, request, seal, assets)
+            validate_response_request_v2(frame, request, seal, assets)
+        if observation["terminal_cause"] == "response_invalid":
+            try:
+                validate_response_request_v2(frame, request, seal, assets)
+            except ValueError:
+                pass  # Retain the actual closed control, never its invalid semantic echo.
+            else:
+                raise ValueError("response mismatch requires an actual transport echo violation")
         descriptor = {
-            "raw_sha256": response.sha256,
-            "byte_length": len(response.raw_bytes),
-            "canonical_json": response.raw_bytes
-            == canonical_json_bytes(json.loads(response.raw_bytes)),
+            "raw_sha256": frame.sha256,
+            "byte_length": len(frame.raw_bytes),
+            "canonical_json": frame.raw_bytes == canonical_json_bytes(json.loads(frame.raw_bytes)),
         }
     candidate = (
-        retain_transport_candidate_v2(seal, assets, request, policy, observation, response)
-        if observation["transport_payload_admissible"] and response is not None
+        retain_transport_candidate_v2(seal, assets, request, policy, observation, frame)
+        if observation["transport_payload_admissible"] and frame is not None
         else None
     )
     return RetainedRuntimeResultV2._from_joined_observations(
-        seal, assets, request, policy, observation, descriptor, candidate
+        seal, assets, request, policy, observation, descriptor, candidate, rejected
     )
 
 
@@ -821,6 +887,8 @@ def runtime_provenance_v2(
     """Reference prefix; failure rows do not admit a semantic model or proof."""
 
     values = runtime_provenance_values_v2(result, semantic_decision)
+    if result.result_kind == "interrupted":
+        raise ValueError("terminal interrupt requires the core interrupted/exit-130 branch")
     stage: str | None
     code: str | None
     if result.result_kind == "unsupported_runtime":
@@ -834,11 +902,22 @@ def runtime_provenance_v2(
         kind = "request_bound_failure"
     elif result.result_kind == "transport_failure":
         failure = {
+            "stage_failed": ("node_spawn", "CSV-NEXT-NODE-002"),
+            "spawn_failed": ("node_spawn", "CSV-NEXT-NODE-002"),
+            "write_failed": ("node_process", "CSV-NEXT-NODE-004"),
+            "read_failed": ("node_process", "CSV-NEXT-NODE-004"),
+            "binding_mismatch": ("response_validation", "CSV-NEXT-PROTOCOL-001"),
+            "response_invalid": ("response_validation", "CSV-NEXT-PROTOCOL-001"),
+            "exit_mismatch": ("node_process", "CSV-NEXT-NODE-004"),
+            "stdout_limit": ("adapter_stdout_capture", "CSV-NEXT-LIMIT-003"),
+            "stderr_limit": ("adapter_stderr_capture", "CSV-NEXT-LIMIT-003"),
             "timeout": ("node_timeout", "CSV-NEXT-NODE-003"),
             "cleanup_unverified": ("node_process", "CSV-NEXT-NODE-004"),
             "candidate_drift": ("node_process", "CSV-NEXT-NODE-004"),
             "assets_drift": ("node_process", "CSV-NEXT-NODE-004"),
         }.get(result.observation()["terminal_cause"])
+        if (rejection := result.frame_rejection()) is not None:
+            failure = rejection["stage"], rejection["diagnostic_code"]
         if failure is None:
             raise ValueError("runtime result has no closed provenance branch yet")
         kind, (stage, code) = "request_bound_failure", failure

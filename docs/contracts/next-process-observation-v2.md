@@ -15,6 +15,7 @@ portable [runtime binding](next-runtime-binding-v1.md)は別preimageです。pol
 ## 観測prefixとcleanup
 
 - `spawn=null`ならcapture/exit/responseもnullです。未起動の子をwaitしたりgroupへsignalしたりした記録を拒否します。stage/spawn failureにsuccessful spawnを付けません。
+- write/read/cap/timeout/frame/response/binding/exit mismatchという起動後のcauseには実spawn/captureを要求します。capture/responseが無い状態へ起動後のcause名だけを付けません。
 - actual spawnのparametersはpolicyのargv/shell/cwd/passed env/stdio/FD/groupと全量一致し、new sessionのleader PIDとPGIDが一致します。passed envとNode内部env、継承FDと内部FDは別です。
 - `capture`はencoded stdin、送信済みstdin、読み取ったstdout/stderr、現在保持しているraw bytes、EOFを分離します。観測・encode量より大きい保持/送信量を拒否します。
 - 各captureはcap+1までのbounded measurementです。exact capは上限内、named `stdout_limit`/`stderr_limit`は対応streamのcap+1実測を必要とします。childが将来出力し得る総量ではありません。
@@ -38,6 +39,8 @@ bindingは`unbound/null`または`bound/request_id`のclosed unionです。runti
 | `semantic_failure` | 68 | bound・supported runtime | 無し。catastrophic failure専用。 |
 
 request binding/adapter versionとpolicyのjoin、正常controlと実exitの対応を検証します。normal transportのchild `success`は、semantic completeを意味しません。partial-safe/target failureはpayloadをCoreが判定します。
+
+named `exit_mismatch`はcomplete controlとactual exitを必要とし、表の対応exitと実際に異なる場合だけ保持します。正常exitをmismatchへ書き換えません。`response_invalid`はretained complete frameの実request echo違反、`binding_mismatch`はactual foreign child bindingを必要とします。frame-invalidは別のdecoder-owned rejected byte ownerへjoinし、未検証controlを生成しません。捕捉interruptはordinary Next provenance/publicationから除外し、core interrupted/exit130のterminal routeへ渡します。
 
 ## Transport gateと未完了のjoin
 

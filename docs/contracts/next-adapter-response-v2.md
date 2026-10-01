@@ -10,11 +10,15 @@ payloadは固定TS/trusted identity、identity versions、limits、run context�
 
 ## Bytesからの入口
 
-referenceの`retain_response_frame_v2(raw, limits=...)`が唯一の通常生成入口です。immutable bytesだけを受け、bounded JSON→closed frame schema→control整合を検証して`RetainedResponseFrameV2`へ保持します。public constructor、mutable input、callerのhash/control metadataによる置換は許可しません。readonly bytes/hashとfresh control/payload projectionを提供し、raw bytesをreprへ出しません。
+正常frameの通常生成入口はreferenceの`retain_response_frame_v2(raw, limits=...)`です。immutable bytesだけを受け、bounded JSON→closed frame schema→control整合を検証して`RetainedResponseFrameV2`へ保持します。public constructor、mutable input、callerのhash/control metadataによる置換は許可しません。readonly bytes/hashとfresh control/payload projectionを提供し、raw bytesをreprへ出しません。
 
 保持するidentityは受信した**元bytes全体**のSHA-256です。再serializeしたJSONのhashではありません。末尾LF/許容JSON whitespaceもraw measurement/hashに含めます。BOM/banner/複数JSON/partial JSON、duplicate keys、既存nesting/string/array/total-array capを拒否します。16 MiB raw response capはJSON decode/materializationより先に測り、whitespace paddingもexact受理/+1拒否です。
 
 bounded JSONは変更しない既存のwire非依存`bounded_decode_json`を再利用しています。旧runtime validator・record・coverage certificateは使用しません。このreference helper依存とpayload defs参照を明示し、旧v1 runtimeのpassをv2受入れとして数えません。
+
+失敗も返す入口`inspect_response_frame_v2`は、正常frameまたはimmutable `RejectedResponseFrameV2`のclosed unionです。rejectionは元bytesのhash/length、同じlimits、decoderの実measurement、closed stage/code/reasonだけを保持し、raw body/parsed object/controlを保持しません。raw capは`response_raw_bytes/LIMIT-003`、nesting/string/per-array/aggregate capは`response_decode/LIMIT-003`、malformed grammarは`response_decode/PROTOCOL-001`、closed schema/control違反は`response_schema/PROTOCOL-001`です。型名やfree failure dictからownerを生成しません。
+
+runtime resultへのrejection joinはsame limits、実spawn/capture、stdout EOF、元byte length全量一致、stdout capture cap内、`frame_invalid`、control未観測を要求します。現在はraw response capとstdout capture capがともに16 MiBなので、実captureの+1はdecoderへ渡さず`stdout_limit`になります。standalone raw-decoderの+1 testを、executorがcapture gateを越えてdecodeした証拠と数えません。schema不正のbodyにcontrolらしい値があってもvalidated controlへ昇格しません。
 
 ## 観測へのjoinと残るgate
 
