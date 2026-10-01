@@ -16,6 +16,9 @@ def sealed_source_fixture_v1(
     *,
     trusted_digest: str,
     page_content: bytes = b"export default function Page() { return null; }",
+    program_path: str = "src/page.tsx",
+    config_content: bytes = b'{"include":["src/**/*"]}',
+    max_entities: int = 500,
 ) -> SourceAcquisitionSeal:
     """Use the existing real source acquisition; never construct a synthetic seal."""
 
@@ -23,8 +26,8 @@ def sealed_source_fixture_v1(
     repository.mkdir()
     files = {
         "package.json": b'{"dependencies":{"next":"15"}}',
-        "tsconfig.json": b'{"include":["src/**/*"]}',
-        "src/page.tsx": page_content,
+        "tsconfig.json": config_content,
+        program_path: page_content,
         "src/global.d.ts": b"declare interface Window { marker: string; }",
     }
     for relative_path, content in files.items():
@@ -47,7 +50,10 @@ def sealed_source_fixture_v1(
         max_total_bytes=64 * 1024 * 1024,
     )
     seal = seal_source_acquisition(
-        SourceDiscoveryIntent((".",)), reader, trusted_environment_digest=trusted_digest
+        SourceDiscoveryIntent((".",)),
+        reader,
+        trusted_environment_digest=trusted_digest,
+        max_entities=max_entities,
     )
     assert isinstance(seal, SourceAcquisitionSeal)
     return seal

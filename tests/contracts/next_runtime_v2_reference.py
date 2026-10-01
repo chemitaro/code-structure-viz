@@ -30,6 +30,7 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_response_frame_bytes_v2,
     validate_runtime_binding_identity_v1,
     validate_runtime_binding_observation_v1,
+    validate_semantic_candidate_v2,
     validate_source_seal_trusted_v2,
     validate_transport_exchange_v2,
     validate_trusted_environment_manifest_v2,
@@ -482,3 +483,67 @@ def compatibility_descriptor_v2(candidate: ValidatedTransportCandidateV2) -> dic
     )
     validate_compatibility_descriptor_v2(value, candidate)
     return value
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class ValidatedSemanticDecisionV2:
+    """Reference Core authority, not actual TypeScript or publication acceptance."""
+
+    _candidate: ValidatedTransportCandidateV2 = field(repr=False)
+    _seal: SourceAcquisitionSeal = field(repr=False)
+    _assets: RetainedExecutionAssets = field(repr=False)
+    _gate_bytes: bytes = field(repr=False)
+    _compatibility_bytes: bytes = field(repr=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("semantic decisions are created by decide_semantic_candidate_v2")
+
+    @classmethod
+    def _from_validated_core(
+        cls,
+        candidate: ValidatedTransportCandidateV2,
+        seal: SourceAcquisitionSeal,
+        assets: RetainedExecutionAssets,
+        gate: dict[str, Any],
+        compatibility: dict[str, Any],
+    ) -> "ValidatedSemanticDecisionV2":
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "_candidate", candidate)
+        object.__setattr__(instance, "_seal", seal)
+        object.__setattr__(instance, "_assets", assets)
+        object.__setattr__(instance, "_gate_bytes", canonical_json_bytes(gate))
+        object.__setattr__(instance, "_compatibility_bytes", canonical_json_bytes(compatibility))
+        return instance
+
+    @property
+    def request_id(self) -> str:
+        return self._candidate.request_id
+
+    def transport_candidate(self) -> ValidatedTransportCandidateV2:
+        return self._candidate
+
+    def source_seal(self) -> SourceAcquisitionSeal:
+        return self._seal
+
+    def execution_assets(self) -> RetainedExecutionAssets:
+        return self._assets
+
+    def gate(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._gate_bytes))
+
+    def compatibility_descriptor(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._compatibility_bytes))
+
+
+def decide_semantic_candidate_v2(
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    assets: RetainedExecutionAssets,
+) -> ValidatedSemanticDecisionV2:
+    """Mint an immutable authority only after source, model and proof admission."""
+
+    gate = validate_semantic_candidate_v2(candidate, seal, assets)
+    compatibility = compatibility_descriptor_v2(candidate)
+    return ValidatedSemanticDecisionV2._from_validated_core(
+        candidate, seal, assets, gate, compatibility
+    )

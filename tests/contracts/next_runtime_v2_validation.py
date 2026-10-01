@@ -13,10 +13,28 @@ from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from referencing import Registry, Resource
 
 from tests.contracts.next_reference_validation import (
+    COLLECTIONS,
+    ModelRecordLimitError,
+    _is_program_file,
+    _record_references,
+    _target_duplicate_module_exceptions,
+    _target_missing_module_exceptions,
+    _validate_project_correspondence,
+    _validate_response_base,
+    _validate_target_exception_proof_base,
     bounded_decode_json,
     canonical_json_bytes,
     canonical_run_context,
+    derive_pre_budget_outcome,
     digest,
+    entity_budget_gate,
+    export_failure_decision,
+    response_model_record_counts,
+    target_completeness_failure,
+    target_failure_decision,
+    target_failure_from_proof,
+    validate_model,
+    validate_proof,
     validate_request_files,
 )
 from tests.contracts.next_semantic_profile_v1_reference import semantic_compatibility_metadata_v2
@@ -33,6 +51,7 @@ if TYPE_CHECKING:
         RetainedExecutionAssets,
         RetainedRequestFrameV2,
         RetainedResponseFrameV2,
+        ValidatedSemanticDecisionV2,
         ValidatedTransportCandidateV2,
     )
 
@@ -735,6 +754,113 @@ def validate_compatibility_descriptor_v2(
         {key: item for key, item in value.items() if key not in {"schema", "compatibility_id"}}
     ):
         raise ValueError("compatibility_id differs from its new portable preimage")
+
+
+def validate_semantic_candidate_v2(
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    owner: RetainedExecutionAssets,
+) -> dict[str, Any]:
+    """Core checks are separate from the transport owner and its true predicate."""
+
+    from tests.contracts.next_runtime_v2_reference import ValidatedTransportCandidateV2
+
+    if type(candidate) is not ValidatedTransportCandidateV2:
+        raise TypeError("Core requires a whole-exchange transport candidate owner")
+    validate_response_request_v2(candidate.response_frame(), candidate.request_frame(), seal, owner)
+    payload = candidate.semantic_payload()
+    if payload["model_digest"] != digest(payload["model"]):
+        raise ValueError("semantic model digest differs from the retained payload")
+    try:
+        _validate_project_correspondence(
+            candidate.request_frame().record()["projects"], payload["model"]["projects"]
+        )
+    except AssertionError as exc:
+        raise ValueError("semantic project correspondence differs from its frozen request") from exc
+    expected_files = [
+        {key: value for key, value in record.items() if key != "content_base64"}
+        for record in candidate.request_frame().record()["files"]
+    ]
+    if payload["model"]["files"] != expected_files:
+        raise ValueError("semantic file correspondence differs from its frozen request")
+    request = candidate.request_frame().record()
+    model, proof = payload["model"], payload["proof"]
+    program_keys = {
+        (file["project_id"], file["path"]) for file in request["files"] if _is_program_file(file)
+    }
+    for row in proof["discovered_records"]:
+        if row["collection"] in {"projects", "files"} and row.get("record") is not None:
+            # Every frozen source project/file is already required in model correspondence.
+            # A supplied proof-only source record is therefore not another observed source.
+            raise ValueError("proof-only source metadata is outside the frozen request owner")
+        if (
+            row["collection"] == "modules"
+            and (record := row.get("record")) is not None
+            and (
+                record.get("kind") != "module"
+                or (record.get("project_id"), record.get("path")) not in program_keys
+            )
+        ):
+            raise ValueError("proof-only module has no frozen program source owner")
+    context = canonical_run_context(**payload["run_context"])
+    try:
+        target_failure = target_completeness_failure(model, request["targets"])
+        allowed_keys, allowed_ids = _target_missing_module_exceptions(
+            model, request["targets"], target_failure
+        )
+        allowed_duplicates = _target_duplicate_module_exceptions(
+            model, request["targets"], target_failure
+        )
+        _validate_response_base(
+            payload,
+            allowed_missing_module_keys=allowed_keys,
+            allowed_missing_module_ids=allowed_ids,
+            allowed_duplicate_module_keys=allowed_duplicates,
+        )
+        known_ids = {record["id"] for collection in COLLECTIONS for record in model[collection]} | {
+            row["record_id"] for row in proof["discovered_records"]
+        }
+        for row in proof["discovered_records"]:
+            if (record := row.get("record")) is not None:
+                references = {value for value in _record_references(record) if value is not None}
+                if not references <= known_ids | allowed_ids:
+                    raise ValueError(
+                        "proof-only record contains a dangling reference outside its owner"
+                    )
+        if target_failure is not None:
+            _validate_target_exception_proof_base(proof, model, request["targets"], target_failure)
+            return target_failure_decision(target_failure, context)
+        actual = validate_model(model, max_model_records=request["limits"]["max_total_array_items"])
+        validate_proof(proof, model, request_targets=request["targets"])
+        proof_failure = target_failure_from_proof(proof)
+        if proof_failure is not None:
+            return target_failure_decision(proof_failure, context)
+        outcome = derive_pre_budget_outcome(proof, model)
+    except AssertionError as exc:
+        raise ValueError("semantic model/proof violates its closed invariants") from exc
+    _published, _proof_only, wire_records = response_model_record_counts(model, proof)
+    if wire_records > request["limits"]["max_model_records"]:
+        raise ModelRecordLimitError(wire_records)
+    export_failure = export_failure_decision(proof, context)
+    if export_failure is not None:
+        return export_failure
+    return entity_budget_gate(actual, original_outcome=outcome, run_context=context)
+
+
+def validate_semantic_decision_v2(decision: ValidatedSemanticDecisionV2) -> None:
+    """Recheck the same immutable Core owners, never a caller-supplied gate dict."""
+
+    from tests.contracts.next_runtime_v2_reference import ValidatedSemanticDecisionV2
+
+    if type(decision) is not ValidatedSemanticDecisionV2:
+        raise TypeError("semantic validation requires a Core decision owner")
+    candidate = decision.transport_candidate()
+    expected = validate_semantic_candidate_v2(
+        candidate, decision.source_seal(), decision.execution_assets()
+    )
+    if decision.gate() != expected:
+        raise ValueError("semantic gate differs from its retained Core decision")
+    validate_compatibility_descriptor_v2(decision.compatibility_descriptor(), candidate)
 
 
 def _cleanup_is_verified(cleanup: dict[str, Any]) -> bool:

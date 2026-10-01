@@ -73,6 +73,8 @@ source-sealed request v2は`docs/contracts/next-adapter-request-v2.md`です。�
 
 whole-exchange data joinsは`docs/contracts/next-adapter-exchange-v2.md`です。policy/request/source/assets、prepared stdin/capture、retained response SHA/control/count、echoとtransport gateを一つのfactoryで閉じ、`ValidatedTransportCandidateV2`へimmutable frame/bindingを保持します。正常captureのchild failureやlate drift/cleanupはcandidateを生成せず、prefixだけを維持します。このdata-only ownerはCore model/proof認定ではありません。parent-owned compatibility v2は`docs/contracts/next-compatibility-v2.md`。new semantic schema、unchanged IDs/algorithms/Unicode/trusted meaning、explicit binding profile、joined TS/trust/portable fingerprintの9 fieldsをpreimageにし、host/request/source stateを除きます。旧v1 envelope/hashを互換viewにしません。Core semantic/provenance/public全closureは後続です。
 
+Coreのreference admissionは`docs/contracts/next-semantic-admission-v2.md`です。同じtyped transport/source/assetsからmodel digest、project/file correspondence、基礎record、proof-only source/ownership、target/taint/proof、record/entity budget、export/outcomeを閉じ、parent compatibilityとともにimmutable `ValidatedSemanticDecisionV2`へ保持します。free gate/statusや旧runtime/envelope certificateを入力にしません。selected cardinalityの限定例外にも完全なproof baseが必要で、不正record/proofをtarget/予算failureで隠しません。old semantic proof/export oracleのknown corpusはreference evidenceに限定し、productionではactual frozen inputに結合するTS/witness経路を実装します。この内部Core ownerをpublic/failure unionやfinal publication/実TSの認定へ読み替えません。
+
 ```plantuml
 @startuml
 title Current v1: single authority chain
