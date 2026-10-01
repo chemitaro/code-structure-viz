@@ -30,6 +30,7 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_launch_policy_assets_v2,
     validate_next_analysis_context_v2,
     validate_observation_request_v2,
+    validate_observed_response_receipt_before_disposal_v2,
     validate_process_launch_policy_v2,
     validate_process_observation_v2,
     validate_rejected_frame_observation_v2,
@@ -43,6 +44,7 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_response_request_v2,
     validate_runtime_binding_identity_v1,
     validate_runtime_binding_observation_v1,
+    validate_runtime_result_v2,
     validate_semantic_candidate_v2,
     validate_semantic_decision_v2,
     validate_source_seal_trusted_v2,
@@ -624,6 +626,50 @@ def retain_transport_candidate_v2(
 
 
 @dataclass(frozen=True, slots=True, init=False)
+class RetainedObservedResponseReceiptV2:
+    """Live-validated metadata, never retained response bytes or semantic authority."""
+
+    _request: RetainedRequestFrameV2 = field(repr=False)
+    _observation_bytes: bytes = field(repr=False)
+    _descriptor_bytes: bytes = field(repr=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("response receipts are created by retain_runtime_result_v2")
+
+    def request_frame(self) -> RetainedRequestFrameV2:
+        return self._request
+
+    def control(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._observation_bytes)["response"]["control"])
+
+    def descriptor(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._descriptor_bytes))
+
+
+def _retain_observed_response_receipt_v2(
+    request: RetainedRequestFrameV2,
+    observation_snapshot: bytes,
+    frame: RetainedResponseFrameV2,
+) -> RetainedObservedResponseReceiptV2:
+    receipt = object.__new__(RetainedObservedResponseReceiptV2)
+    object.__setattr__(receipt, "_request", request)
+    object.__setattr__(receipt, "_observation_bytes", observation_snapshot)
+    object.__setattr__(
+        receipt,
+        "_descriptor_bytes",
+        canonical_json_bytes(
+            {
+                "raw_sha256": hashlib.sha256(frame.raw_bytes).hexdigest(),
+                "byte_length": len(frame.raw_bytes),
+                "canonical_json": frame.raw_bytes
+                == canonical_json_bytes(json.loads(frame.raw_bytes)),
+            }
+        ),
+    )
+    return receipt
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class RetainedRuntimeResultV2:
     """Private data-only result, with no raw failure buffers or semantic certificate."""
 
@@ -632,7 +678,7 @@ class RetainedRuntimeResultV2:
     _request: RetainedRequestFrameV2 = field(repr=False)
     _policy_bytes: bytes = field(repr=False)
     _observation_bytes: bytes = field(repr=False)
-    _response_descriptor_bytes: bytes = field(repr=False)
+    _response_receipt: RetainedObservedResponseReceiptV2 | None = field(repr=False)
     _candidate: ValidatedTransportCandidateV2 | None = field(repr=False)
     _rejected_frame: RejectedResponseFrameV2 | None = field(repr=False)
 
@@ -645,31 +691,18 @@ class RetainedRuntimeResultV2:
         seal: SourceAcquisitionSeal,
         assets: RetainedExecutionAssets,
         request: RetainedRequestFrameV2,
-        policy: dict[str, Any],
-        observation: dict[str, Any],
-        descriptor: dict[str, Any] | None,
+        policy_snapshot: bytes,
+        observation_snapshot: bytes,
+        receipt: RetainedObservedResponseReceiptV2 | None,
         candidate: ValidatedTransportCandidateV2 | None,
         rejected_frame: RejectedResponseFrameV2 | None = None,
     ) -> "RetainedRuntimeResultV2":
         instance = object.__new__(cls)
         for owner_name, owner in (("_seal", seal), ("_assets", assets), ("_request", request)):
             object.__setattr__(instance, owner_name, owner)
-        for bytes_name, record in (
-            ("_policy_bytes", policy),
-            ("_observation_bytes", observation),
-            ("_response_descriptor_bytes", descriptor),
-        ):
-            object.__setattr__(
-                instance,
-                bytes_name,
-                json.dumps(
-                    record,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8"),
-            )
+        object.__setattr__(instance, "_policy_bytes", policy_snapshot)
+        object.__setattr__(instance, "_observation_bytes", observation_snapshot)
+        object.__setattr__(instance, "_response_receipt", receipt)
         object.__setattr__(instance, "_candidate", candidate)
         object.__setattr__(instance, "_rejected_frame", rejected_frame)
         return instance
@@ -691,7 +724,10 @@ class RetainedRuntimeResultV2:
         return None if response is None else cast(dict[str, Any], response["control"])
 
     def response_descriptor(self) -> dict[str, Any] | None:
-        return cast(dict[str, Any] | None, json.loads(self._response_descriptor_bytes))
+        return None if self._response_receipt is None else self._response_receipt.descriptor()
+
+    def observed_response_receipt(self) -> RetainedObservedResponseReceiptV2 | None:
+        return self._response_receipt
 
     def frame_rejection(self) -> dict[str, Any] | None:
         return None if self._rejected_frame is None else self._rejected_frame.failure()
@@ -722,6 +758,13 @@ def retain_runtime_result_v2(
 ) -> RetainedRuntimeResultV2:
     """Preserve a joined closed result, not a success default for child failures."""
 
+    policy_snapshot = json.dumps(
+        policy, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    observation_snapshot = json.dumps(
+        observation, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    policy, observation = json.loads(policy_snapshot), json.loads(observation_snapshot)
     validate_observation_request_v2(observation, policy, request, seal, assets)
     if response is not None and type(response) not in {
         RetainedResponseFrameV2,
@@ -740,7 +783,7 @@ def retain_runtime_result_v2(
         and observation["response"]["control"]["binding"]["request_id"] != request.request_id
     ):
         raise ValueError("binding mismatch requires an actual foreign control binding")
-    descriptor = None
+    receipt = None
     if observation["response"] is None:
         if observation["terminal_cause"] == "response_invalid":
             raise ValueError("response mismatch requires a complete joined frame")
@@ -752,26 +795,26 @@ def retain_runtime_result_v2(
         validate_response_frame_observation_v2(observation, policy, frame)
         if observation["terminal_cause"] == "none":
             validate_response_request_v2(frame, request, seal, assets)
-        if observation["terminal_cause"] == "response_invalid":
-            try:
-                validate_response_request_v2(frame, request, seal, assets)
-            except ValueError:
-                pass  # Retain the actual closed control, never its invalid semantic echo.
-            else:
-                raise ValueError("response mismatch requires an actual transport echo violation")
-        descriptor = {
-            "raw_sha256": frame.sha256,
-            "byte_length": len(frame.raw_bytes),
-            "canonical_json": frame.raw_bytes == canonical_json_bytes(json.loads(frame.raw_bytes)),
-        }
+        receipt = _retain_observed_response_receipt_v2(request, observation_snapshot, frame)
+        validate_observed_response_receipt_before_disposal_v2(
+            receipt,
+            frame,
+            request=request,
+            observation_snapshot=observation_snapshot,
+            policy=policy,
+            seal=seal,
+            assets=assets,
+        )
     candidate = (
         retain_transport_candidate_v2(seal, assets, request, policy, observation, frame)
         if observation["transport_payload_admissible"] and frame is not None
         else None
     )
-    return RetainedRuntimeResultV2._from_joined_observations(
-        seal, assets, request, policy, observation, descriptor, candidate, rejected
+    result = RetainedRuntimeResultV2._from_joined_observations(
+        seal, assets, request, policy_snapshot, observation_snapshot, receipt, candidate, rejected
     )
+    validate_runtime_result_v2(result)
+    return result
 
 
 def compatibility_descriptor_v2(candidate: ValidatedTransportCandidateV2) -> dict[str, Any]:
@@ -919,6 +962,7 @@ def runtime_provenance_values_v2(
 
     if type(result) is not RetainedRuntimeResultV2:
         raise TypeError("runtime provenance requires the retained runtime result owner")
+    validate_runtime_result_v2(result)
     seal, assets, request = result.source_seal(), result.execution_assets(), result.request_frame()
     policy, observation = result.policy(), result.observation()
     validate_observation_request_v2(observation, policy, request, seal, assets)

@@ -20,6 +20,8 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Verification
 
+- A02 descriptor-only response receipt初スライス: exact `9b5e0d0...`のImplementation Brief Strict初回878行とsame-author訂正739行を主担当が読み、failure完全frame保持の助言を不採用・訂正。receiptは同じrequest／immutable observation snapshot／三field descriptorのみで、live byte独立検証と破棄後のmetadata照合を分離しました。新26 testsを含む関連13-module selection491 passed（398.88s、large cases除外無し）、既存Python／SQLAlchemy16 goldens＋Currentdoc pointer1の別selection17 passed（5.49s）、Ruff/format213 files、mypy177 source filesがpass。selectionは合算しません。実LF263 bytes／SHA `39f69e2d...`とcontrol-response KATを独立固定し、別snapshot／candidate混入／成功frame変更／decoder owner欠落／偽mismatch labelをRed→Greenで拒否しました。evidenceは`artifacts/20261001t161225z-01-disc-a-response-receipt-v2-contract-slice.md`。旧schema／src／依存／golden bytesは不変。run2 schema/ownerと全branch、provenance producer-value-helper依存除去、全public refs／新ASSET policy／全A02／A03／actual TS・OS・packageは未完了です。
+
 - macOS 27.0.1 arm64 / Python 3.12.11 / Node 22.10.0・24.14.0、Linux arm64 / Python 3.12.14 / Node 22.0.0・22.23.3で、synthetic bootstrap/spawnの8 checksをpass。
 - Node 20.19.5（macOS）/20.19.4（Linux）はanalyzer初期化前に拒否を確認。harnessは期待した拒否を検証してexit 0、子はexit 66。
 - 実16 MiB stdout / 64 KiB stderrのexact/+1、TERM-resistant親/子を含むtimeout cleanup、別private cwd、env/継承FDを確認。実TypeScriptのacceptanceではありません。

@@ -53,6 +53,7 @@ if TYPE_CHECKING:
         RejectedSemanticDecisionV2,
         RetainedExecutionAssets,
         RetainedNextAnalysisContextV2,
+        RetainedObservedResponseReceiptV2,
         RetainedRequestFrameV2,
         RetainedResponseFrameV2,
         RetainedRuntimeResultV2,
@@ -956,6 +957,175 @@ def validate_response_frame_observation_v2(
         or value["capture"]["stdout_bytes"] != len(frame.raw_bytes)
     ):
         raise ValueError("observation is not joined to its retained response bytes")
+
+
+def validate_observed_response_receipt_before_disposal_v2(
+    receipt: RetainedObservedResponseReceiptV2,
+    frame: RetainedResponseFrameV2,
+    *,
+    request: RetainedRequestFrameV2,
+    observation_snapshot: bytes,
+    policy: dict[str, Any],
+    seal: SourceAcquisitionSeal,
+    assets: RetainedExecutionAssets,
+) -> None:
+    """Recalculate original byte facts while the complete frame is still live."""
+
+    from tests.contracts.next_runtime_v2_reference import RetainedObservedResponseReceiptV2
+
+    if type(receipt) is not RetainedObservedResponseReceiptV2:
+        raise TypeError("response receipt requires its nominal owner")
+    if (
+        receipt.request_frame() is not request
+        or receipt._observation_bytes is not observation_snapshot
+    ):
+        raise ValueError("response receipt differs from its request/observation owner")
+    observation = json.loads(observation_snapshot)
+    validate_observation_request_v2(observation, policy, request, seal, assets)
+    validate_response_frame_observation_v2(observation, policy, frame)
+    raw_sha = hashlib.sha256(frame.raw_bytes).hexdigest()
+    expected = {
+        "raw_sha256": raw_sha,
+        "byte_length": len(frame.raw_bytes),
+        "canonical_json": frame.raw_bytes == canonical_json_bytes(json.loads(frame.raw_bytes)),
+    }
+    if (
+        frame.sha256 != raw_sha
+        or observation["response"]["sha256"] != raw_sha
+        or receipt.descriptor() != expected
+        or receipt.control() != json.loads(frame.raw_bytes)["control"]
+    ):
+        raise ValueError("response receipt differs from the independently measured live bytes")
+    control = json.loads(frame.raw_bytes)["control"]
+    binding = control["binding"]
+    foreign_binding = binding["state"] == "bound" and binding["request_id"] != request.request_id
+    if observation["terminal_cause"] == "binding_mismatch" and not foreign_binding:
+        raise ValueError("binding mismatch requires an actual foreign control binding")
+    if observation["terminal_cause"] == "response_invalid":
+        record = request.record()
+        payload = json.loads(frame.raw_bytes)["semantic_payload"]
+        echo_violation = payload is not None and any(
+            payload[key] != actual
+            for key, actual in {
+                "trusted_type_environment_digest": record["trusted_type_environment"]["sha256"],
+                "limits": record["limits"],
+                "run_context": record["run_context"],
+            }.items()
+        )
+        if not (
+            foreign_binding
+            or control["adapter_version"] != record["adapter_version"]
+            or echo_violation
+        ):
+            raise ValueError("response mismatch requires an actual transport echo violation")
+
+
+def validate_observed_response_receipt_v2(
+    receipt: RetainedObservedResponseReceiptV2, result: RetainedRuntimeResultV2
+) -> None:
+    """Check sealed metadata joins; do not claim byte recomputation after disposal."""
+
+    from tests.contracts.next_runtime_v2_reference import (
+        RetainedObservedResponseReceiptV2,
+        RetainedRuntimeResultV2,
+    )
+
+    if type(receipt) is not RetainedObservedResponseReceiptV2:
+        raise TypeError("response receipt requires its nominal owner")
+    if type(result) is not RetainedRuntimeResultV2:
+        raise TypeError("response receipt requires the retained runtime result owner")
+    if (
+        receipt is not result.observed_response_receipt()
+        or receipt.request_frame() is not result.request_frame()
+        or receipt._observation_bytes is not result._observation_bytes
+    ):
+        raise ValueError("response receipt differs from its same-runtime owner")
+    observation = result.observation()
+    validate_observation_request_v2(
+        observation,
+        result.policy(),
+        result.request_frame(),
+        result.source_seal(),
+        result.execution_assets(),
+    )
+    descriptor = receipt.descriptor()
+    if (
+        set(descriptor) != {"raw_sha256", "byte_length", "canonical_json"}
+        or not isinstance(descriptor["raw_sha256"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", descriptor["raw_sha256"]) is None
+        or type(descriptor["byte_length"]) is not int
+        or not (
+            0 < descriptor["byte_length"] <= result.policy()["limits"]["max_adapter_response_bytes"]
+        )
+        or type(descriptor["canonical_json"]) is not bool
+        or receipt._descriptor_bytes != canonical_json_bytes(descriptor)
+    ):
+        raise ValueError("response receipt requires closed immutable descriptor metadata")
+    if (
+        observation["response"] is None
+        or observation["response"]["sha256"] != descriptor["raw_sha256"]
+        or observation["capture"]["stdout_bytes"] != descriptor["byte_length"]
+        or observation["response"]["control"] != receipt.control()
+    ):
+        raise ValueError("response receipt differs from its retained control/capture")
+
+
+def validate_runtime_result_v2(result: RetainedRuntimeResultV2) -> None:
+    """Validate a result's retained metadata, not actual OS/TypeScript execution."""
+
+    from tests.contracts.next_runtime_v2_reference import (
+        RetainedRuntimeResultV2,
+        ValidatedTransportCandidateV2,
+    )
+
+    if type(result) is not RetainedRuntimeResultV2:
+        raise TypeError("runtime validation requires the retained runtime result owner")
+    observation = result.observation()
+    validate_observation_request_v2(
+        observation,
+        result.policy(),
+        result.request_frame(),
+        result.source_seal(),
+        result.execution_assets(),
+    )
+    receipt = result.observed_response_receipt()
+    if (observation["response"] is not None) is not (receipt is not None):
+        raise ValueError("runtime complete control requires its observed response receipt")
+    if observation["terminal_cause"] == "frame_invalid":
+        validate_rejected_frame_observation_v2(observation, result.policy(), result._rejected_frame)
+    elif result._rejected_frame is not None:
+        raise ValueError("runtime rejection owner requires the actual frame-invalid cause")
+    if receipt is not None:
+        validate_observed_response_receipt_v2(receipt, result)
+    candidate = result.transport_candidate()
+    if observation["transport_payload_admissible"] is not (candidate is not None):
+        raise ValueError("runtime failure/success candidate retention differs from the actual gate")
+    if candidate is not None:
+        if type(candidate) is not ValidatedTransportCandidateV2:
+            raise TypeError("runtime candidate requires the whole-exchange owner")
+        if candidate.request_frame() is not result.request_frame():
+            raise ValueError("runtime candidate differs from its retained request owner")
+        validate_transport_exchange_v2(
+            result.source_seal(),
+            result.execution_assets(),
+            result.request_frame(),
+            result.policy(),
+            observation,
+            candidate.response_frame(),
+        )
+        validate_runtime_binding_observation_v1(
+            candidate.runtime_binding(), result.policy(), result.execution_assets(), observation
+        )
+        assert receipt is not None
+        validate_observed_response_receipt_before_disposal_v2(
+            receipt,
+            candidate.response_frame(),
+            request=result.request_frame(),
+            observation_snapshot=result._observation_bytes,
+            policy=result.policy(),
+            seal=result.source_seal(),
+            assets=result.execution_assets(),
+        )
 
 
 def validate_response_request_v2(

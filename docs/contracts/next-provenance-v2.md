@@ -18,6 +18,14 @@ schemaは四つのkindを区別します。runtime reference producer/validator�
 - descriptorは`raw_sha256`、`byte_length`、`canonical_json`だけです。SHA/lengthは元bytes、flagはpinned canonical JSON bytesと元bytesの全量一致です。whitespace/LFを許可したframeでflagがfalseでも、別digestにreserializeしません。
 - 直接constructor、duck owner、free capture/control/hash、mutable input aliasesはauthorityになりません。取得したprojectionはfresh copyです。private constructor helperはtrusted Python内部用であり、hostile same-UIDへのsecurity boundaryではありません。
 
+### Response descriptorの検証時点
+
+request-bound reference laneは`RetainedObservedResponseReceiptV2`へ三field descriptorを保持します。receiptは同じ親requestとruntime resultが一回保持した同じimmutable observation snapshotへ結び、元frame／semantic payload／proofを保持しません。`response_descriptor()`はこのreceiptのfresh projectionで、descriptorの別正本はありません。
+
+`validate_observed_response_receipt_before_disposal_v2`はframeがliveの間に実raw SHA／len／canonical flag、control/capture、actual binding／echo違反を独立検証します。failure bodyを破棄した後の`validate_observed_response_receipt_v2`はsealed receipt／request／snapshot／control/captureを照合するだけで、破棄済みbytesやechoを再計算したとは表現しません。admitted transport candidateがある経路だけ、`validate_runtime_result_v2`が保持frameとbindingを再検証します。decoder rejectionのmetadata ownerは別のままで、complete-response receiptを生成しません。
+
+capture-stage retained byte count、返却ownerの本文非保持、caller入力やheapの物理消去は別の事実です。closed child failureのcapture計測値を破棄証明用のゼロへ書き換えません。receiptを次のrun2へ渡すreference初スライスは完了しましたが、run2 schema／公開refs全closureとprovenance validatorのproducer-value-helper依存除去は未完了です。
+
 ## Observationのpreimage
 
 観測済みrowは`state=observed`とdescriptor、未観測rowは`state=unobserved,value=null`です。観測済みdescriptorは次です。
