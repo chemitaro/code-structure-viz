@@ -141,6 +141,105 @@ def validate_provenance_shape_v2(value: dict[str, Any]) -> None:
     _validate_schema("next-provenance-v2", value)
 
 
+def _retained_provenance_values_v2(
+    result: RetainedRuntimeResultV2,
+    semantic_decision: ValidatedSemanticDecisionV2 | RejectedSemanticDecisionV2 | None,
+) -> dict[str, Any]:
+    """Validator-local derivation; do not share a producer's expected-value builder."""
+
+    from tests.contracts.next_runtime_v2_reference import (
+        RejectedSemanticDecisionV2,
+        RetainedRuntimeResultV2,
+        ValidatedSemanticDecisionV2,
+    )
+
+    if type(result) is not RetainedRuntimeResultV2:
+        raise TypeError("runtime provenance requires the retained runtime result owner")
+    validate_runtime_result_v2(result)
+    seal, request = result.source_seal(), result.request_frame()
+    policy, observation = result.policy(), result.observation()
+    # Concrete owners have already been joined. Construct the portable projection
+    # here without calling portable_launch_value_v2 or any provenance producer.
+    portable = {
+        "producer": policy["producer"],
+        "node_candidate": {"sha256": policy["node_candidate"]["sha256"]},
+        **{
+            key: policy[key]
+            for key in (
+                "runtime_requirement",
+                "execution_asset_set_id",
+                "adapter",
+                "typescript_identity",
+                "trusted_environment_digest",
+                "shell",
+                "passed_environment",
+                "stdio",
+                "fd_inheritance",
+                "process_group",
+                "limits",
+            )
+        },
+        "argv": [
+            {"kind": "node_candidate", "sha256": policy["node_candidate"]["sha256"]},
+            policy["argv"][1],
+            {"kind": "execution_member", "package_path": policy["adapter"]["entrypoint_member"]},
+        ],
+        "cwd": {"kind": "empty_private_directory"},
+    }
+    plan, control = seal.final_plan, result.control()
+    values = {
+        "applicability": seal.package_applicability.observation_value(),
+        "config": plan["projects"],
+        "source": seal.source_view.fingerprint_value(),
+        "limits": plan["limits"],
+        "source_plan": plan,
+        # The actual retained request's readonly descriptor was independently
+        # joined to the same assets/seal; it is not a TypeScript-use observation.
+        "trusted_environment": request.record()["trusted_type_environment"],
+        "runtime_bundle": result.execution_assets().descriptor(),
+        "node_candidate": {"sha256": policy["node_candidate"]["sha256"]},
+        "request": request.record(),
+        "launch_policy": portable,
+        "process_start": None
+        if observation["spawn"] is None
+        else {
+            "primitive": observation["spawn"]["primitive"],
+            "parameters": {key: portable[key] for key in observation["spawn"]["parameters"]},
+        },
+        "node_version": control["runtime"] if control is not None else None,
+        "control_response": {"control": control, "response": result.response_descriptor()}
+        if control is not None
+        else None,
+        "semantic_payload": None,
+        "compatibility": None,
+        "model": None,
+        "budget": None,
+    }
+    if semantic_decision is not None:
+        if type(semantic_decision) not in {ValidatedSemanticDecisionV2, RejectedSemanticDecisionV2}:
+            raise TypeError("provenance requires a nominal Core decision owner")
+        if isinstance(semantic_decision, ValidatedSemanticDecisionV2):
+            validate_semantic_decision_v2(semantic_decision)
+        else:
+            validate_rejected_semantic_decision_v2(semantic_decision)
+        if (
+            semantic_decision.transport_candidate() is not result.transport_candidate()
+            or semantic_decision.source_seal() is not seal
+            or semantic_decision.execution_assets() is not result.execution_assets()
+        ):
+            raise ValueError("provenance Core decision is not joined to the same runtime owner")
+        if isinstance(semantic_decision, ValidatedSemanticDecisionV2):
+            payload, gate = (
+                semantic_decision.transport_candidate().semantic_payload(),
+                semantic_decision.gate(),
+            )
+            values["semantic_payload"] = payload
+            values["compatibility"] = semantic_decision.compatibility_descriptor()
+            values["model"] = payload["model"]
+            values["budget"] = gate if gate["actual"] is not None else None
+    return values
+
+
 def validate_runtime_provenance_v2(
     value: dict[str, Any],
     result: RetainedRuntimeResultV2,
@@ -152,11 +251,10 @@ def validate_runtime_provenance_v2(
     from tests.contracts.next_runtime_v2_reference import (
         RejectedSemanticDecisionV2,
         ValidatedSemanticDecisionV2,
-        runtime_provenance_values_v2,
     )
 
     validate_provenance_shape_v2(value)
-    actual_values = runtime_provenance_values_v2(result, semantic_decision)
+    actual_values = _retained_provenance_values_v2(result, semantic_decision)
     expected: tuple[str, str | None, str | None]
     if result.result_kind == "success" and isinstance(
         semantic_decision, RejectedSemanticDecisionV2
@@ -214,6 +312,8 @@ def validate_runtime_provenance_v2(
         row = value["observed"][field_name]
         if (row["state"] == "observed") is not (actual is not None):
             raise ValueError("provenance observation state differs from its retained owner")
+        if actual is not None and type(row["value"]["version"]) is not int:
+            raise ValueError("provenance observation version requires an integer")
         if actual is not None and row["value"]["sha256"] != digest(
             {
                 "schema": "code-structure-viz.next-observation/v2",

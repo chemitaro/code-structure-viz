@@ -6,7 +6,7 @@
 
 現在のreference laneは、actual `SourceAcquisitionSeal`から作ったrequestとretained assets、policy、process observation、complete frameをjoinする`RetainedRuntimeResultV2`を入力にします。これは**referenceデータの保持・検証owner**であり、OS spawnやTypeScript実行の証明ではありません。実OS ownerはA04の受入れで実装・検証します。
 
-schemaは四つのkindを区別します。runtime reference producer/validatorはclosed child/control、通常transport causes、matching Core admission/rejection ownerを扱います。interruptはordinary provenanceを作らないterminal routeです。request-independent reader phase/source failure、run/publication/public exact refsは後続A02 gateです。shapeにbranchがあることを、未実装branchの認定にしません。
+schemaは四つのkindを区別します。runtime reference producer/validatorはclosed child/control、通常transport causes、matching Core admission/rejection ownerを扱います。interruptはordinary provenanceを作らないterminal routeです。request-bound run2は[専用のclosed recordとowner validator](next-run-decision-v2.md)へ結合します。request-independent reader phase/source failure、publication/public exact refsは後続A02 gateです。shapeにbranchがあることを、未実装branchの認定にしません。
 
 ## Runtime結果の保持
 
@@ -24,7 +24,7 @@ request-bound reference laneは`RetainedObservedResponseReceiptV2`へ三field de
 
 `validate_observed_response_receipt_before_disposal_v2`はframeがliveの間に実raw SHA／len／canonical flag、control/capture、actual binding／echo違反を独立検証します。failure bodyを破棄した後の`validate_observed_response_receipt_v2`はsealed receipt／request／snapshot／control/captureを照合するだけで、破棄済みbytesやechoを再計算したとは表現しません。admitted transport candidateがある経路だけ、`validate_runtime_result_v2`が保持frameとbindingを再検証します。decoder rejectionのmetadata ownerは別のままで、complete-response receiptを生成しません。
 
-capture-stage retained byte count、返却ownerの本文非保持、caller入力やheapの物理消去は別の事実です。closed child failureのcapture計測値を破棄証明用のゼロへ書き換えません。receiptを次のrun2へ渡すreference初スライスは完了しましたが、run2 schema／公開refs全closureとprovenance validatorのproducer-value-helper依存除去は未完了です。
+capture-stage retained byte count、返却ownerの本文非保持、caller入力やheapの物理消去は別の事実です。closed child failureのcapture計測値を破棄証明用のゼロへ書き換えません。receiptをrequest-bound run2へ渡すreference契約とprovenance validatorのproducer-value-helper依存除去を実装しました。request-independent prefix／公開refs全closureと実製品の受入れは未完了です。
 
 ## Observationのpreimage
 
@@ -110,6 +110,8 @@ codeは表中の短縮名に`CSV-NEXT-`を付けます。新stageはv2の閉じ�
 
 frame-invalidの元raw hash/length/decoder measurementはprivate rejection ownerだけの値です。provenanceにcontrol_response rowを捏造して載せず、未検証version/controlとsemantic suffixはnullのままです。stdout capture cap breachをframe rejectionとして再分類せず、cap gateより先にdecoderを呼びません。interruptにNext failure code/通常provenanceを生成しません。
 
-Core rejectionは`RejectedSemanticDecisionV2`とsame-runtime candidate/source/assetsの一致を要求します。同じrequest IDや同じcontentを持つ別exchangeでも再bindingしません。failure/code/reason/countは元candidateの再検証へjoinし、未admitted semantic/compatibility/model/budget suffixを生成しません。record実countはentity budgetの測定値ではなく、今後のpublic known measurementへ渡すprivate metadataです。無関係の内部エラーやowner錯誤をcatalog failureに変換しません。
+Core rejectionは`RejectedSemanticDecisionV2`とsame-runtime candidate/source/assetsの一致を要求します。同じrequest IDや同じcontentを持つ別exchangeでも再bindingしません。failure/code/reason/countは元candidateの再検証へjoinし、未admitted semantic/compatibility/model/budget suffixを生成しません。record実countはentity budgetの測定値ではなく、request-bound run2の`model_record_limit`へ同じfailure ownerから渡すmetadataです。無関係の内部エラーやowner錯誤をcatalog failureに変換しません。
 
-`runtime_provenance_v2`はmatching opaque runtime/Core ownersから生成します。`validate_runtime_provenance_v2`はclosed schema、kind/stage/code、17 states/digestsを同じretained valuesから再検証します。別exchangeのCore owner、free status、schema-valid rehashed row、v1 identity/slotsを拒否します。known corpusによるCore reference evidenceを、任意sourceの実TS意味認定やA03/Issue全体のpassへ読み替えません。
+`runtime_provenance_v2`はmatching opaque runtime/Core ownersから生成します。`validate_runtime_provenance_v2`はproducerの`runtime_provenance_values_v2`／`runtime_provenance_v2`／`portable_launch_value_v2`に依存せず、validator-localに同じretained ownersの17 valuesとportable policy/spawn projectionを再導出します。trusted expected descriptorは検証済みrequestを同じassets/sealへjoinした値です。closed schema、kind/stage/code、17 states/digestsを別経路で照合し、別exchangeのCore owner、free status、schema-valid rehashed row、v1 identity/slotsを拒否します。
+
+独立literalと全slotの再hash mutationsを固定し、producer-helper依存除去は直接source確認でも検証します。internal collaboratorをmonkeypatchするtestは採用しません。codec/SHA、immutable定数、offline loader、変えないsource/semantic algorithmsと下位owner validatorsの共有は維持します。この限定変更を下位helper内部まで含む全製品の独立性認定、任意sourceの実TS意味認定、A03/Issue全体のpassへ読み替えません。
