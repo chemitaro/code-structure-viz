@@ -13253,7 +13253,8 @@ def test_round23_rg_17_graph_digest_binds_source_bytes_and_edge_occurrence() -> 
 
 def test_round23_rg_18_current_schema_and_history_contract_are_explicit() -> None:
     # The old round umbrella was a test-only surrogate and is intentionally
-    # gone.  Current-v1 authority is composed from the public schemas below.
+    # gone. Preserve the v1 baseline fixture, but route new runtime design
+    # through the adopted authority rather than calling this production proof.
     assert not (ROOT / "schemas" / "next-round23-authority-v1.schema.json").exists()
     assert (ROOT / "schemas" / "next-domain-manifest-v1.schema.json").exists()
     assert (ROOT / "schemas" / "run-manifest-v1.schema.json").exists()
@@ -13306,7 +13307,8 @@ def test_round23_rg_18_current_schema_and_history_contract_are_explicit() -> Non
         / "plan.md",
     ):
         text = path.read_text(encoding="utf-8")
-        assert "Current v1 normative authority" in text
+        assert "## Current normative authority" in text
+        assert "20261001t024645z-adr-issue8-trusted-toolchain-launch-model.md" in text
         assert "historical" in text.lower()
 
 

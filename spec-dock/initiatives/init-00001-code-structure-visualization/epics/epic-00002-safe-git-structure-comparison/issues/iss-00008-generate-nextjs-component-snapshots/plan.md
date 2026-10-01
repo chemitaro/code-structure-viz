@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-25"
+最終更新: "2026-10-01"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -14,9 +14,26 @@ package_sequence_key: "ISSUE-05"
 
 詳細: [Issue Plan Guide](../../../../../../docs/authoring/issue-plan.md)
 
-## Current v1 normative authority
+## Current normative authority
 
-この節が唯一の現在の実装順序・受入正本です。後続の`Round N`節はhistorical evidence（非normative）として保存し、実装計画を上書きしません。2026-09-24のユーザーはChatGPT-Use Strict（GPT-5.6 Pro）のdependency-blocker分析を受け、package applicabilityの二つの不一致（両direct declarationの誤判定、およびroot package read-I/O failureのstage/code誤分類）をcurrent-v1契約へ明示して修正することを承認しました。この限定的な要件明確化以外のmaterial requirement/security/platform判断は追加せず、R23専用authority registryは使用しません。
+この節が唯一の現在の実装順序・受入正本です。後続の`Round N`節はhistorical evidence（非normative）として保存し、実装計画を上書きしません。2026-10-01のユーザーはA runtime model一式を採択しました。accepted ADR `artifacts/20261001t024645z-adr-issue8-trusted-toolchain-launch-model.md`とRequirement/DesignのA節を入力とし、下記runtime移行順序を既存`I05-PLAN-002`再開の前提へ追加します。過去のpackage-only/identity resolver/S1のreview passは各固定SHA/範囲の証拠であり、新runtime契約のpassではありません。R23専用authority registryは使用しません。
+
+### A runtime移行の順序
+
+| 順序 / unit | 出口条件 | 次段階へ渡すもの |
+| --- | --- | --- |
+| `A-00` 採択 | trusted user toolchain、macOS/Linux、外部明示Node、同一process bootstrap、strong same-UID非目標を正本へ固定 | accepted ADR、R/D/P。採択済み。 |
+| `A-01` 非production実機spike | 両OS/Python 3.12でpublic spawn、private資材/空cwd、閉じた応答、実version/旧版拒否、env/継承FD、caps/timeout/cleanupを実測 | evidence Artifact、保存したharness/assets。結果はReport参照。実TS/package受入れの代用不可。 |
+| `A-02` 機械的契約移行 | Designのprocess/transport/compatibility/provenance/public-record closure、closed producer/validator、positive/negative vectors、failure mapping、portable hash preimageを同じversionへ整合 | 新version schema/docs/referenceとfocused Red→Green、旧v1回帰証拠の分離。未完了。 |
+| `A-03` 独立Strict gate | clean/pushed exact SHA、該当local品質gate、独立ChatGPT Code Review Strictのvalid `P0=0 / P1=0 / review_status=pass` | A-02の閉じた仕様と固定SHA certificate。単なるadvisory分析、spikeレビュー、過去S1 passでは代替不可。 |
+| `A-04` production vertical実装 | package保持bytes→policy/spawn/bootstrap→実TypeScript→Python独立検証→CLI/JSON/PlantUMLを計画順にTDDで接続 | 実process/CLI acceptance、予算/interrupt/drift/未実行sentinel/許可外read。A-03の後。 |
+| `A-05` Issue受入れ | 両OS/minimum+更新lane、checkout外offline wheel/sdist/licenses、既存domain不変、Final Quality Gate | Issue全体のReport/認定。未完了。 |
+
+一度にproduction analyzer全体を書かず、一つのobservable behaviorをRed→Greenにします。runtimeの新recordを旧v1 verified-FD recordへ変換してgateを通すことはしません。reference 26件の旧runtime vectorsを新方式のcoverageとして数えず、維持するsource/semantic regressionと新runtime coverageを分けます。
+
+rollbackはA runtimeのproduction admissionを無効にしてNextをtyped unavailableへ戻し、Python/SQLAlchemyと保存済み旧recordを維持します。旧verified-FD名への偽装fallback、runtime取得、platform縮小は行いません。forward recoveryは主担当が新recordの対応closureとnegative vectorを修復し、task-scoped commit/push後にfresh exact-SHA gateを取り直します。target repositoryやpersistent user dataのmigrationはありません。
+
+各stepの外部reviewはユーザーが許可したGPT-5.6 Sol / Extra Highを基本とし、FinalにはGPT-5.6 Sol / Proを使えます。依頼モデル/推論値と実picker観測を区別します。ユーザーのサブエージェント禁止を守り、レビューも主担当がStrict wrapperへ直接依頼します。長時間jobは元のsession/logで静かに待ち、進捗確認のためにBrowser Useを使いません。
 
 ```text
 frozen package bytes
@@ -40,7 +57,7 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 
 ### 実装順序の選択規則
 
-実装者は、上の `Current v1 normative authority`、この節の順序表、下記のschema/validator/testを現在の入力として使用します。後半の `Round N` 節は履歴証拠であり、実装順序・受入れ条件・registryの既定値を上書きしません。履歴との不一致を見つけた場合は履歴を編集せず、現行のschema/validator/testと新しいArtifactへ修正理由を記録します。
+実装者は、上の `Current normative authority` とA runtime移行を先に読み、この節の旧indexを維持するbaselineとして参照します。旧runtimeのschema/validator/test、後半の `Round N` 節はAのreadinessを満たしません。歴史を上書きせず、新versionの対応closureと新Artifactへ移行理由を記録します。
 
 | 順序 | Plan ID / owner | 現在の成果物またはgate | 状態と停止条件 |
 | --- | --- | --- | --- |

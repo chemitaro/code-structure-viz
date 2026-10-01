@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-25"
+最終更新: "2026-10-01"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -14,9 +14,33 @@ package_sequence_key: "ISSUE-05"
 
 詳細: [Design Guide](../../../../../../docs/authoring/design.md)
 
-## Current v1 normative authority
+## Current normative authority
 
-ここが現在の唯一の設計正本です。本文後半の`Round N`節はhistorical evidence（非normative）であり、後続実装が別のauthorityとして参照してはなりません。current v1の機械的な対応は既存のpublic schema群、`tests/contracts/next_reference_validation.py`、およびそれらを結ぶ実チェーンのfixture/testです。ラウンド専用umbrella schemaはauthorityではありません。
+ここが現在の唯一の設計正本です。本文後半の`Round N`節はhistorical evidence（非normative）であり、後続実装が別のauthorityとして参照してはなりません。維持するsource/semantic/publicationのv1 baselineは既存のpublic schema群、`tests/contracts/next_reference_validation.py`、それらを結ぶfixture/testです。runtime移行のclosureは次節の別gateです。ラウンド専用umbrella schemaはauthorityではありません。
+
+2026-10-01、Aをaccepted ADR `artifacts/20261001t024645z-adr-issue8-trusted-toolchain-launch-model.md`へ固定しました。runtimeの唯一のtarget designは次節です。旧process-v1のverified-FD/actual-image equality、起動前実version、root literal entrypoint、2要素argvは新productionのauthorityではありません。旧schema/validator/fixtureは同じidentityのまま改変せず履歴/回帰として保持します。source/semantic意味とpublicationのsingle-owner原則は維持し、runtimeに依存するcompatibility/provenance/public schemaの移行を明示的に閉じます。新しいwire/fixture整合とStrict gateは未完了です。
+
+### Aの実行Moduleと版移行
+
+Next実行ModuleのInterfaceは、source seal、analysis intent、明示runtime選択を受け、validated transport resultまたはtyped failureを返す一つの入口にします。Implementationがpackage bytesの保持、request作成、private staging、Node候補計測、policy、public spawn、bootstrap実測、bounded capture、wait/cleanupを所有します。callerへprepare/open/stage/launch/closeの順序を公開せず、Coreのsemantic検証/Artifact公開を吸収しません。将来のnative/container backend registryは作りません。
+
+pre-launch policyはabsolute Node候補の計測identity、保持したpackage資材identity、stable major >=22の適格条件、fixed old-space flag、run-private entrypoint、空cwd、明示env、継承FD/pipes/group/limitsを保持します。実Node versionは含めません。argvの構造は`[absolute_node, "--max-old-space-size=512", private_entrypoint]`です。run rootはprivateで、`runtime/`と空の`cwd/`を分離します。同じ保持bytesからheader version/hash/stagingを導出し、既存metadata resolverを呼んでから別lookupでresourceを読み直しません。
+
+同じNode processのfirst-party bootstrapが`process.versions.node`を観測し、非対応versionをTypeScript import/初期化前に拒否します。runtime制御結果とsemantic payloadを一つのclosed responseへ包み、二つのJSON/bannerや別version probeを使いません。bootstrap failure、protocol failure、unsupported version、semantic failureを別に扱い、semantic payloadが無いbranchでtarget-completenessや成功観測を生成しません。
+
+Pythonが渡すenvは`LANG=C.UTF-8`、`LC_ALL=C.UTF-8`、`TZ=UTC`だけです。Node内部で追加された環境状態と、親が渡すenvの観測を区別します。FD allowlist `[0,1,2]`は継承FDの規則であり、Nodeが生成する内部FDを禁止したという主張ではありません。timeout/cap/interruptではread-stop、raw buffer破棄、独立group停止、直接子wait、private資材cleanupを行います。確認できないcleanupはtyped failureです。DarwinのEPERMを一律成功へ変えず、未reap leaderを保持した公開OS APIの非生存確認候補をproduction受入れで検証します。reap後に古いPGIDへsignalしません。
+
+候補hash/statの観測可能なdriftは拒否しますが、候補hashを実行image hash/認証と呼びません。actual host path/PID/FDはhost-local observationだけが所有し、ephemeral pathをsemantic identityへ入れません。対応するclosed record、hash preimage、failure/provenance joinは移行gateで固定します。
+
+| surface | 新方式への移行方針 | 保持するもの |
+| --- | --- | --- |
+| process policy/observation | 新しいv2 identity。候補計測、事前version条件、実測version/起動条件、cleanup結果を分離。fixture/production識別を維持。 | 旧v1 schema/fixtureとreview履歴。verified-FDの偽装互換viewは作らない。 |
+| private response | v2 closed runtime-control/semantic union。unsupported/error branchはsemantic payload無し。 | frozen requestのsource/config/target/limits意味。request builderは実Node versionを必要としない。 |
+| compatibility/portable fingerprint | 新しいprofile/versionでtrust modelとcandidate identity/実versionの意味を固定。 | TypeScript 5.9.2、Unicode 15.0.0、semantic recognition/ID/props/relationのalgorithm versions。 |
+| runtime-bound provenance、domain/semantic public records | 依存するrecordを版移行し、旧v1と異なるrecordを旧identityで公開しない。正確なaffected-schema closureは次のcontract gateで固定。 | 未観測suffix、pre-response target proof無し、single decision/publicationとprivacy原則。 |
+| source seal/request-independent結果、Python/SQLAlchemy、root publication | 影響をschema/testで照合し、不要なmigrationを加えない。 | package-only permission、frozen bytes、既存domainの入力/出力、root manifestの所有権。 |
+
+これはmigration設計であり、新schema/referenceが出揃ったという主張ではありません。旧v1 chainへv2 recordを無理に投影して「current coverage」としません。詳細の閉じたwire/producer/validator/negative vectorsを整合したexact SHAが、production再開の入力です。
 
 ```plantuml
 @startuml
@@ -51,13 +75,13 @@ semantic rendererはdecisionだけを受け、publication finalizerは実際のc
 
 run-level terminal branchはpublication finalizerの前に一度だけ分岐します。project-rootのancestor/descendant overlapは`SourceProjectUsage`としてusage/exit 2、stdout空、Artifactなし、reader・decoder・finalizer・artifact readなしで終了します。source revision driftなどのintegrity violationは`SourceIntegrityFatal`としてfatal/exit 1、manifest/Artifactなし、Next catalog診断をstderrへ出します。捕捉済み`PublicationInterrupted`/`KeyboardInterrupt`はcore `CSV-INTERRUPT-001`を再構築してinterrupted/exit 130とし、付属diagnosticのmessage/path/domainを信頼しません。selectorは全4形（省略、manifest、semantic-json、PlantUML）で同じ分岐表を使い、terminal stdoutは空またはtyped unavailable/summaryのsealed bytesだけを返します。
 
-現在の整備対象はdata-only reference contractです。production adapter、OS process-level証明、Node runtimeの実測は未実施です。2026-09-24のユーザー指示は、依存/toolchain/processなど実装を阻む課題に対してcleanかつpush済みの固定SHAをChatGPT-Use Strict（GPT-5.6 Pro）で分析し、Artifact化してlocal authorityへ照合することを求めます。Strict分析はadvisoryであり、独立レビューと`I05-PLAN-008` gateを置き換えません。必要な検証と重要指摘ゼロを確認するまでimplementation readinessを確定しません。内部レビューと外部Strict分析・レビューの役割を混同しません。
+現在はA runtime契約への移行中です。production adapter、OS process-level認定は未完了です。非production Node実測は`artifacts/20261001t030614z-disc-issue8-a-launch-feasibility-evidence.md`へ分離し、製品availabilityの証拠にしません。依存/toolchain/process blockerの外部分析はclean/pushed exact-SHA ChatGPT-Use Strictのadvisoryとし、独立レビューと`I05-PLAN-008` gateを置き換えません。必要な検証と重要指摘ゼロを確認するまでimplementation readinessを確定しません。
 
 ## Canonical design index and historical evidence boundary (G10)
 
 ### 設計の選択規則
 
-実装者は、まず上の `Current v1 normative authority` の因果鎖を読み、次に下表の `I05-DES` とschema/validator/testの組を参照します。本文後半の `Round N` 節とIssue Artifactは、設計変更の経緯・反例・検証結果を保存する非normative evidenceです。そこにある旧API名、旧registry、旧schemaの例を現在の実装へコピーしません。現行v1の判断と履歴証拠が衝突した場合は、現行v1のsealed value、closed schema、reference validatorを優先し、履歴を上書きせずに新しいdecision/artifactを追加します。
+実装者は、まず上の `Current normative authority` とAの版移行を読み、次に下表の `I05-DES` とschema/validator/testの組を維持部分のbaselineとして参照します。runtime関連行は旧v1回帰証拠であり、Aのproduction readinessを満たしません。本文後半の `Round N` 節とIssue Artifactは履歴証拠です。accepted ADRだけを明示的なdecisionとして使い、その他の旧API/fixture/registryを現在のruntimeへコピーしません。
 
 ### authority owner map
 
@@ -92,7 +116,7 @@ checkout、caller-provided path/metadata、fixture、sidecar version manifestへ
 
 resolverはこのpackage resourceを一度だけ読み、その保持した同じ完全なbytes（version markerを含む）のSHA-256を `adapter.sha256` とします。`adapter.version`もそのbytesの先頭markerからのみ導出します。Python distribution version `0.1.0.dev0`、build recipe、external inventoryはこのentrypoint versionのauthorityにしません。resourceの欠落・非regular file・read失敗・不正headerはfail-closedです。
 
-この判断が確定するのはpre-launchのresource locator/version/content digestです。Node probe、policy materialization、実spawn、OS process observation、wheel/sdist収録、production availabilityは別々の後続証拠として扱い、resolver成功から推論しません。実際のlaunch observationは既存のverified-open/process identity契約に従い、測定したadapter content identityと実行対象の対応を別途証明します。
+この判断が確定するのはpre-launchのresource locator/version/content digestです。policy materialization、実spawn、OS process observation、wheel/sdist収録、production availabilityは別々の後続証拠として扱い、resolver成功から推論しません。2026-10-01以降のlaunchはAの新version契約を使います。保持資材のidentityとstagingを同じbytes ownerへ接続し、測定した候補をactual executable imageとして表現しません。
 
 ## 設計目標
 

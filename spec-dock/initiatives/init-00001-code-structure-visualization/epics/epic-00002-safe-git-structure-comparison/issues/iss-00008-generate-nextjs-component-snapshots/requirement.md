@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-09-24"
+最終更新: "2026-10-01"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -13,18 +13,29 @@ package_sequence_key: "ISSUE-05"
 
 詳細: [Requirement Guide](../../../../../../docs/authoring/requirement.md)
 
-## Current v1 normative authority
+## Current normative authority
 
-この節がIssue #8の現在の単一正本です。後続に現れる `Round N` の節は、検証履歴を保存するためのhistorical evidenceであり、実装の入力やfallback authorityではありません。現行の実装前契約は、既存のpublic schema、reference validator、fixtureの実行可能な対応だけで閉じます。`next-round23-authority-v1` のようなラウンド専用umbrella schemaは正本ではなく、使用しません。
+この節がIssue #8の現在の単一正本です。後続に現れる `Round N` の節は、検証履歴を保存するためのhistorical evidenceであり、実装の入力やfallback authorityではありません。維持部分のbaselineは既存public schema、reference validator、fixtureの対応で検証します。新runtimeの機械的closureは次の移行gateで固定します。`next-round23-authority-v1` のようなラウンド専用umbrella schemaは正本ではなく、使用しません。
+
+2026-10-01のA採択を、accepted ADR `artifacts/20261001t024645z-adr-issue8-trusted-toolchain-launch-model.md`と次節へ反映します。変更対象はruntimeのtrust/起動保証とそれに伴うversion migrationです。後続本文、旧process-v1文書/schema/fixtureのverified-FD・actual-image equality・起動前actual version・root literal entrypoint・2要素argvの規則は、新方式のproduction authorityとして使用しません。旧recordは履歴/回帰用に保持します。その他のfrozen source、semantic identity/認識/props/relation、独立検証/非公開/予算/selector契約は維持します。新runtime契約の機械的closureは別gateであり、採択だけでreadinessを宣言しません。
 
 因果鎖は frozen package bytes → `PackageApplicabilityMatrix` → source acquisition/config/source-plan/source-graph → trusted environment・process policy → private request → process observation → validated private response → semantic decision → final publication decision → `run-manifest/v1`、Next domain manifest、semantic JSON、PlantUML、stdout/stderr/exit です。全surfaceは同じimmutable decisionまたはfinal publication decisionを受け、別のrequest、config、status、measurement、bytesを再構成しません。
 
-現行v1で固定する判断は次のとおりです。
+### A: 利用者管理toolchainを信頼する静的解析
+
+- Python CLI/Git/ソース凍結/検証/公開と、first-party TypeScript Compiler APIによる意味解析を維持します。対象application、config JS、plugin、package script、対象node_modulesは実行・loadしません。
+- 初期対応はmacOS/Linux、Python 3.12以上、Next利用時だけ外部Nodeのstable major 22以上です。Nodeは利用者が明示的に選択・更新します。PATH自動探索、対象repository/shimからのruntime選択、Node同梱、自動取得、runtime npm/npx/buildは非対象です。固定TypeScript/compiled adapter/trusted declarations/licenseは本製品が同梱します。
+- 利用者のNode/Python、本製品package、OSを信頼します。対象repositoryからの意図しない実行・許可集合外read・偽造payload公開を防ぎ、有限の入力/時間/出力/old-space制限を設けます。任意hostile same-UID改変、未知runtime脆弱性への完全防御、hard RSS制限、強制container/VM隔離は約束しません。
+- 同じNode processで実versionを確認し、非対応versionでは意味解析を初期化しません。追加version probeや複数応答を標準へ追加しません。未観測の実version・実行image digest・target proof・成功statusを補完しません。
+- 非適用時はruntime選択・package runtime resource・Nodeを観測しません。適用時だけ明示runtimeを使い、起動/検証/capture/cleanup不成立はcatalog-owned typed failureとし、raw child stderrやpartial payloadを公開しません。
+- version migrationはDesignの移行表で明示し、旧fixture成功を新実経路の受入れに流用しません。両OSの実TypeScript→Python検証→CLI→JSON/PlantUML、unsupported version、未実行sentinel、許可外read拒否、drift、予算exact/+1、interrupt/cleanup、offline packageと既存domain不変性が完成条件です。
+
+現行のsource/semantic/publicationで固定する判断は次のとおりです。
 
 1. applicabilityは`package.json`の`dependencies`/`devDependencies`にある直接`next`だけを観測し、全non-applicableはNode/config/sourceを読まずrequest-independent `not_applicable`、mixedはapplicable rootだけを通します。有効な非空direct `next`が両tableにある場合も、値の一致・不一致を比較せずapplicableです。malformed package、または存在を確認したroot `package.json`の通常read I/O failureは専用`CSV-NEXT-APPLICABILITY-002`でfail-closedにします。missing packageは`CSV-NEXT-APPLICABILITY-001`、limit・integrity・path-safety failureとpackage判定後のsource read failureはそれぞれの既存stage/codeを維持します。
 2. configはBOM/comment/trailing commaを合成する閉じたJSONCとし、local `./...` extends、declaring config path、`files`/`include`の排他的membership、宣言場所相対の`baseUrl`/`paths`、exact-before-wildcardを同じresolverで決定します。`files`/`include`/`exclude`各値は、その値を宣言したconfig（extends先を含む）のディレクトリを解決基準とします。解決後にrepository-relative POSIX pathへ正規化し、selected project root内への包含を検証します。raw解決基準とcanonical表示形式は別の意味として扱います。
 3. source graphはfrozen bytesからprovableなresolved/open unionを導出します。type/value role、dynamic import、export-from、requireを保持し、不確実なedgeは安全なfrontierまたはbyte-span由来のopaque identityだけを公開します。
-4. processはpolicyとobserved launchを分離し、observationを唯一の測定authorityとします。macOS/Linuxの実装はNode実体、adapter、argv、cwd、env、stdio/FD、group、TOCTOUを相互拘束し、証明できなければunavailableです。
+4. processは事前の適格条件と起動後の実測を分離します。利用者が明示したtrusted Nodeとpackage資材を公開spawnで起動し、同じprocessのbootstrapで実versionを確認します。argv、private資材/空cwd、親が渡すenv、継承FD、pipes、group、予算、観測可能なdriftを拘束します。取得していないverified-FD/actual-image attestationは生成しません。検証/cleanupが確認できない場合はpayloadを公開しません。
 5. provenanceはrequest-independent not-applicable/failureとrequest-bound failure/successのclosed unionです。観測行はschema/versionと実値のSHA-256を持ち、失敗stage以後だけ`unobserved/null`になります。
 6. semantic statusを維持したまま、selected stdoutのexact/+1はfinal publicationだけで一度測定します。+1ではartifact descriptorを保持し、partial bytesを出さずtyped unavailableとします。
 7. Unicode 15.0.0 NFC profile、string export disposition、namespace import memberをversioned closed contractとして固定し、将来のUnicode/table・wheel/sdist変更は別compatibility migrationとします。
@@ -41,7 +52,7 @@ package_sequence_key: "ISSUE-05"
 
 後続の実装者・レビュー担当者は、次の順序で現在の契約を選択します。
 
-1. この文書の `Current v1 normative authority` と `観測可能な要件` を読む。
+1. この文書の `Current normative authority` と `観測可能な要件` を読む。runtimeについてはA採択とversion migrationを優先し、旧process-v1 fixtureをproduction可用性の証拠にしない。
 2. Requirement ID（`I05-REQ-001`〜`I05-REQ-007`）から、下表のschema、validator、fixture/testへ進む。
 3. schemaで表せない所有権・再計算・順序・digest・statusは、指定されたreference validator/testの実装を参照する。
 4. `Round N`見出し、過去Artifact、`historical_runtime_vector_registry` は履歴証拠としてのみ読み、現行の入力・fallback・既定値には使わない。

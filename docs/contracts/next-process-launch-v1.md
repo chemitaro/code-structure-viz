@@ -1,5 +1,9 @@
 # Next.js adapterの起動policyと観測
 
+## 2026-10-01の移行状態
+
+この文書は旧verified-FD方式のv1 recordを説明する履歴/回帰契約です。Issue #8のaccepted ADR `20261001t024645z-adr-issue8-trusted-toolchain-launch-model.md`とR/D/PのA節が、新production runtimeの正本です。以下のactual-image equality、起動前実version、root固定entrypoint、2要素argvを新方式へ流用しません。旧schema/fixtureは保存し、新process/transportと依存するcompatibility/provenance/public recordを明示的にversion migrationします。新closureとStrict gateは未完了であり、旧fixture passを製品可用性の証拠にしません。
+
 ## 境界と正本
 
 Issue #8 の実装前契約です。起動を許可するpolicyと実際に起きたことのobservationを別objectにします。
