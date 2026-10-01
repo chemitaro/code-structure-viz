@@ -1,0 +1,72 @@
+{
+  "schema": "code-structure-viz.next-process-launch-policy/v2",
+  "version": 2,
+  "producer": "reference",
+  "platform": "fixture",
+  "request_id": "1111111111111111111111111111111111111111111111111111111111111111",
+  "runtime_requirement": {
+    "schema": "code-structure-viz.next-node-runtime-requirement/v1",
+    "engine": "node",
+    "release": "stable",
+    "minimum_major": 22
+  },
+  "node_candidate": {
+    "absolute_path": "/opt/toolchain/node",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "adapter": {
+    "protocol": "code-structure-viz.next-adapter/v2",
+    "version": "0.1.0",
+    "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "entrypoint_member": "code_structure_viz/_next_runtime/next-adapter.mjs"
+  },
+  "execution_asset_set_id": "4444444444444444444444444444444444444444444444444444444444444444",
+  "typescript_identity": "typescript-5.9.2",
+  "trusted_environment_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+  "private_root": "/private/tmp/csv-next-reference",
+  "runtime_directory": "/private/tmp/csv-next-reference/runtime",
+  "argv": [
+    "/opt/toolchain/node",
+    "--max-old-space-size=512",
+    "/private/tmp/csv-next-reference/runtime/next-adapter.mjs"
+  ],
+  "shell": false,
+  "cwd": "/private/tmp/csv-next-reference/cwd",
+  "passed_environment": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+  "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
+  "fd_inheritance": {"close_fds": true, "allowed": [0, 1, 2]},
+  "process_group": {
+    "start_new_session": true,
+    "terminate_scope": "group",
+    "wait_direct_child": true
+  },
+  "limits": {
+    "max_entities": 500,
+    "max_files": 20000,
+    "max_file_bytes": 4194304,
+    "max_decoded_bytes": 67108864,
+    "max_encoded_stdin_bytes": 100663296,
+    "max_json_nesting": 64,
+    "max_json_string_bytes": 8388608,
+    "max_array_items": 100000,
+    "max_total_array_items": 100000,
+    "max_collection_items": 20000,
+    "max_model_records": 10000,
+    "max_stdout_bytes": 16777216,
+    "max_adapter_response_bytes": 16777216,
+    "max_selected_stdout_bytes": 16777216,
+    "max_stderr_bytes": 65536,
+    "max_adapter_stderr_capture_bytes": 65536,
+    "max_adapter_stdout_capture_bytes": 16777216,
+    "timeout_seconds": 60,
+    "v8_old_space_mib": 512,
+    "max_type_depth": 16,
+    "max_type_nodes_per_prop": 512,
+    "max_union_members": 64,
+    "max_intersection_members": 64,
+    "max_nested_properties": 256,
+    "max_signatures_per_component": 16,
+    "max_flow_visits": 10000,
+    "max_alias_edges": 64
+  }
+}

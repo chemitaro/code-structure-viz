@@ -31,6 +31,21 @@ package_sequence_key: "ISSUE-05"
 
 一度にproduction analyzer全体を書かず、一つのobservable behaviorをRed→Greenにします。runtimeの新recordを旧v1 verified-FD recordへ変換してgateを通すことはしません。reference 26件の旧runtime vectorsを新方式のcoverageとして数えず、維持するsource/semantic regressionと新runtime coverageを分けます。
 
+### A02の実行単位
+
+2026-10-01、clean/pushed `710eb49...`のGPT-5.6 Sol / Pro Strict advisoryとローカルref/hash照合を完了しました。採否と補正は`artifacts/20261001t040605z-disc-issue8-a-runtime-contract-analysis-adjudication.md`。これはA03のCode Review passではありません。
+
+| unit | 対象と出口 | 状態 |
+| --- | --- | --- |
+| `A02-1` 起動契約 | runtime requirement/execution assets/binding leaf、policy/observation v2。事前actual version無し、concrete/portable分離、closed records、旧強保証field拒否、owner joinsの正負tests | 初スライスのrequirement leaf/policy v2は25 focused tests GREEN。assets/binding/observationは未完了。production変更無し。 |
+| `A02-2` private wire/compatibility | request intent、single control/nullable semantic response、binding/exit/frame相互検証、retained owner由来のruntime/compatibility preimages | 未完了。 |
+| `A02-3` provenance/public refs | trusted manifest/descriptor、source-phase/actual observed slots、run/publication/domain/semantic/root/stdoutのv2 exact-ref closure。元助言のstdout-v1維持は採らない | 未完了。 |
+| `A02-4` gate入力 | 小さい独立v2 reference modules、known literal/mutations、v1不変性、各terminal selector/failure/publicationの全chain、全local品質gate、clean/pushed fixed SHA | 未完了。これが揃うまでA03/productionへ進めない。 |
+
+各unitは一つのpublic contract seamのtestを先に失敗させ、最小のschema/reference変更で同じtestを通します。旧巨大validatorを複製せず、source/semantic algorithmの回帰とv2 runtime laneを別々に維持します。typed failureとcleanupの未確認をsuccess fixtureで隠しません。
+
+policy初スライスは`docs/contracts/next-process-launch-v2.md`、requirement/policy schema、`tests/contracts/next_runtime_v2_validation.py`、`test_next_runtime_v2_contracts.py`、明示reference fixtureへ保存しました。closed schema欠落、argv/candidate不一致、private layout不一致のfocused REDを実行後、各最小変更で同じselectionをGREENにしました。shape hardeningと既存schema/doc-pointerを合わせた145 tests、Ruff/format/mypy154 files、SpecDock validateがpass。旧v1のsemantic/provenance/public chainは変更せず、この部分的policy sliceをA02全closureや実runtimeの認定に使いません。
+
 rollbackはA runtimeのproduction admissionを無効にしてNextをtyped unavailableへ戻し、Python/SQLAlchemyと保存済み旧recordを維持します。旧verified-FD名への偽装fallback、runtime取得、platform縮小は行いません。forward recoveryは主担当が新recordの対応closureとnegative vectorを修復し、task-scoped commit/push後にfresh exact-SHA gateを取り直します。target repositoryやpersistent user dataのmigrationはありません。
 
 各stepの外部reviewはユーザーが許可したGPT-5.6 Sol / Extra Highを基本とし、FinalにはGPT-5.6 Sol / Proを使えます。依頼モデル/推論値と実picker観測を区別します。ユーザーのサブエージェント禁止を守り、レビューも主担当がStrict wrapperへ直接依頼します。長時間jobは元のsession/logで静かに待ち、進捗確認のためにBrowser Useを使いません。

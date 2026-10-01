@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-process-launch-policy-v2",
+  "title": "CodeStructureViz Next public-spawn launch policy v2",
+  "description": "Closed host-local prelaunch conditions. Candidate measurement is not actual-image attestation. Cross-field joins are also required.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "version", "producer", "platform", "request_id", "runtime_requirement",
+    "node_candidate", "adapter", "execution_asset_set_id", "typescript_identity",
+    "trusted_environment_digest", "private_root", "runtime_directory", "argv", "shell",
+    "cwd", "passed_environment", "stdio", "fd_inheritance", "process_group", "limits"
+  ],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-process-launch-policy/v2"},
+    "version": {"const": 2},
+    "producer": {"enum": ["reference", "production"]},
+    "platform": {"enum": ["fixture", "darwin", "linux"]},
+    "request_id": {"$ref": "#/$defs/digest"},
+    "runtime_requirement": {"$ref": "urn:code-structure-viz:schema:next-node-runtime-requirement-v1"},
+    "node_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["absolute_path", "sha256"],
+      "properties": {
+        "absolute_path": {"$ref": "#/$defs/absolute_path"},
+        "sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "version", "sha256", "entrypoint_member"],
+      "properties": {
+        "protocol": {"const": "code-structure-viz.next-adapter/v2"},
+        "version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$(?![\\s\\S])"},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "entrypoint_member": {"const": "code_structure_viz/_next_runtime/next-adapter.mjs"}
+      }
+    },
+    "execution_asset_set_id": {"$ref": "#/$defs/digest"},
+    "typescript_identity": {"const": "typescript-5.9.2"},
+    "trusted_environment_digest": {"$ref": "#/$defs/digest"},
+    "private_root": {"$ref": "#/$defs/absolute_path"},
+    "runtime_directory": {"$ref": "#/$defs/absolute_path"},
+    "argv": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {"$ref": "#/$defs/absolute_path"},
+        {"const": "--max-old-space-size=512"},
+        {"$ref": "#/$defs/absolute_path"}
+      ],
+      "items": false
+    },
+    "shell": {"const": false},
+    "cwd": {"$ref": "#/$defs/absolute_path"},
+    "passed_environment": {"const": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"}},
+    "stdio": {"const": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"}},
+    "fd_inheritance": {"const": {"close_fds": true, "allowed": [0, 1, 2]}},
+    "process_group": {"const": {"start_new_session": true, "terminate_scope": "group", "wait_direct_child": true}},
+    "limits": {"$ref": "urn:code-structure-viz:schema:next-limits-v1"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"producer": {"const": "reference"}}},
+      "then": {"properties": {"platform": {"const": "fixture"}}},
+      "else": {"properties": {"platform": {"enum": ["darwin", "linux"]}}}
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$(?![\\s\\S])"},
+    "absolute_path": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 4096,
+      "pattern": "^/(?!/)(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\\\])(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\/$).+$"
+    }
+  }
+}

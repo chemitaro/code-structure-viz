@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-node-runtime-requirement-v1",
+  "title": "CodeStructureViz Next Node eligibility requirement v1",
+  "description": "Prelaunch intent, not an observed Node version or an executable attestation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "engine", "release", "minimum_major"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-node-runtime-requirement/v1"},
+    "engine": {"const": "node"},
+    "release": {"const": "stable"},
+    "minimum_major": {"const": 22}
+  }
+}

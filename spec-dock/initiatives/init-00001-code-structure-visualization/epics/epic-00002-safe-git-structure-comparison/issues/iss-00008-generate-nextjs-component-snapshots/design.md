@@ -42,6 +42,21 @@ Pythonが渡すenvは`LANG=C.UTF-8`、`LC_ALL=C.UTF-8`、`TZ=UTC`だけです。
 
 これはmigration設計であり、新schema/referenceが出揃ったという主張ではありません。旧v1 chainへv2 recordを無理に投影して「current coverage」としません。詳細の閉じたwire/producer/validator/negative vectorsを整合したexact SHAが、production再開の入力です。
 
+### A02の版移行closure（2026-10-01）
+
+exact SHA `710eb49a2a3143e31b8a91580700d16839d9070d`へのChatGPT Use Strict GPT-5.6 Sol / Proの助言を実schema/producerへ照合しました。原回答と採否/補正は`artifacts/20261001t040546z--a-runtime-contract-analysis-result.md`、`artifacts/20261001t040605z-disc-issue8-a-runtime-contract-analysis-adjudication.md`です。独立review certificateではありません。
+
+- process policy/observation、private request/response、compatibility、trusted environment manifest/descriptor、runtime provenance、run/publication decision、Next domain/semantic document、root manifest、generic semantic dispatcher、stdout resultをv2へ移行します。runtime requirement/execution assets/runtime bindingは新conceptのv1 leafです。旧derived `next-process-launch-v1`のv2互換viewは作りません。
+- entity/proof defs、source/config/path/applicability、run context、limits、generic run summaryはv1を保持します。semantic document/dispatcherの識別は`code-structure-viz.semantic/v2`、要素identity/algorithm versionsと宣言の意味profileは1です。document version変更とsemantic ID algorithm変更を混同しません。
+- request v2はruntime requirementというintentだけを持ち、実Node version/candidate identity/compatibilityを持ちません。response v2からchild-owned compatibilityを除き、同一processのcontrol観測とowner保持identityの後にPythonがruntime binding/compatibilityを作ります。transport successに含まれるsemantic modelは、Coreでcomplete/partial-safe/target failureへ判定します。controlled catastrophic semantic failureだけがpayload無しのchild failureです。
+- `stdout-result-v1`のpublication-v1 exact ref、generic `semantic-v1`のNext-v1 exact refにより、shapeの見た目が同じでも新chain用v2が必要です。root manifestの直接decision/publication refsから、runtime dependencyを再帰的に閉じます。旧schemaへadditive unionを足しません。
+- trusted v1 digestはfixture physical mappingを含む完全manifestのhashです。production package mappingを新manifest/descriptor identityと新preimageへ移行し、旧v1 hashを別preimageで再計算しません。宣言bytes/認証symbols/TS/Unicodeの意味は保持し、source/configに渡すopaque digestのowner joinを新requestで検証します。
+- concrete launch policyはhost-local path/argvを封じた事前条件です。portable projectionにはlogical member、content identity、runtime requirement/同一process version等だけを含め、private root/device/inode/PIDを除きます。candidate hashをactual-image attestationへ読み替えません。
+- 初期cleanupはpublic group signal＋direct-child waitを使い、normal exitをreapしてから古いgroupへsignalしません。first-party analyzerはdescendantをspawnしません。異常終了のleaderはgroup stopまで未reapとし、Darwin EPERM等の確認不能は`cleanup_unverified`でpayloadを抑止します。libprocはspike候補として保持し、必須backendやsecurity保証へ昇格しません。
+- source readerのphase-local evidence、Pythonによるrequest生成、childのrequest binding、検証済みcontrolを別に保持します。failure stageだけからsynthetic prefixを作らず、partial raw frameからversion/controlを補完しません。既観測prefixを後続cleanup failureで消さず、semantic admissionだけを抑止します。
+
+詳細record、digest preimage、producer/validator joins、正負vectorsは新contract docs/schema/reference laneで一つずつ閉じます。A02全体のclosureはまだ未完了で、legacy v1のpassを新runtimeへ引き継ぎません。
+
 ```plantuml
 @startuml
 title Current v1: single authority chain
