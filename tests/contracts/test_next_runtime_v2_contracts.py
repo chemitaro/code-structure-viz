@@ -1,5 +1,6 @@
 """A-runtime data-only contracts; no Node execution or product admission."""
 
+import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -9,7 +10,13 @@ import pytest
 from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 from referencing import Registry, Resource
 
-from tests.contracts.next_runtime_v2_validation import validate_process_launch_policy_v2
+from tests.contracts import next_runtime_v2_reference
+from tests.contracts.next_runtime_v2_validation import (
+    validate_execution_asset_identity_v1,
+    validate_execution_assets_v1,
+    validate_launch_policy_assets_v2,
+    validate_process_launch_policy_v2,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,6 +41,264 @@ def validate_schema(name: str, value: object) -> None:
 
 def test_prelaunch_policy_accepts_intent_without_actual_node_version() -> None:
     validate_schema("next-process-launch-policy-v2", load_fixture("launch-policy.json"))
+
+
+def test_execution_asset_identity_has_a_closed_portable_shape() -> None:
+    validate_schema("next-execution-assets-v1", load_fixture("execution-assets.json"))
+
+
+def test_retained_asset_bytes_produce_the_worked_identity_and_staging_content() -> None:
+    # Synthetic bytes, not a runnable compiler or a complete package profile.
+    members = {
+        "code_structure_viz/_next_runtime/typescript/typescript.cjs": (
+            "typescript_lib",
+            b"reference compiler\n",
+        ),
+        "code_structure_viz/_next_runtime/next-adapter.mjs": (
+            "adapter",
+            b"// CodeStructureViz-Adapter-Version: 0.1.0\n",
+        ),
+    }
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(members)
+    assert assets.descriptor() == load_fixture("execution-assets.json")
+    assert assets.staging_members() == (
+        (
+            "code_structure_viz/_next_runtime/next-adapter.mjs",
+            b"// CodeStructureViz-Adapter-Version: 0.1.0\n",
+        ),
+        (
+            "code_structure_viz/_next_runtime/typescript/typescript.cjs",
+            b"reference compiler\n",
+        ),
+    )
+
+
+def test_execution_asset_identity_rejects_a_wrong_self_digest() -> None:
+    descriptor = load_fixture("execution-assets.json")
+    validate_execution_asset_identity_v1(descriptor)
+    descriptor["asset_set_id"] = "0" * 64
+    with pytest.raises(ValueError, match="asset_set_id"):
+        validate_execution_asset_identity_v1(descriptor)
+
+
+def test_execution_asset_identity_rejects_reordered_members_even_with_a_matching_digest() -> None:
+    descriptor = load_fixture("execution-assets.json")
+    descriptor["members"].reverse()
+    preimage = json.dumps(
+        {key: value for key, value in descriptor.items() if key != "asset_set_id"},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    descriptor["asset_set_id"] = hashlib.sha256(preimage).hexdigest()
+    with pytest.raises(ValueError, match="order"):
+        validate_execution_asset_identity_v1(descriptor)
+
+
+def test_execution_asset_identity_rejects_duplicate_paths_with_different_metadata() -> None:
+    descriptor = load_fixture("execution-assets.json")
+    duplicate = deepcopy(descriptor["members"][0])
+    duplicate["sha256"] = "0" * 64
+    descriptor["members"].insert(1, duplicate)
+    preimage = json.dumps(
+        {key: value for key, value in descriptor.items() if key != "asset_set_id"},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    descriptor["asset_set_id"] = hashlib.sha256(preimage).hexdigest()
+    with pytest.raises(ValueError, match="duplicate"):
+        validate_execution_asset_identity_v1(descriptor)
+
+
+def test_execution_asset_identity_requires_its_entrypoint_with_the_adapter_role() -> None:
+    descriptor = load_fixture("execution-assets.json")
+    descriptor["members"][0]["role"] = "typescript_lib"
+    preimage = json.dumps(
+        {key: value for key, value in descriptor.items() if key != "asset_set_id"},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    descriptor["asset_set_id"] = hashlib.sha256(preimage).hexdigest()
+    with pytest.raises(ValueError, match="entrypoint"):
+        validate_execution_asset_identity_v1(descriptor)
+
+
+def test_retained_asset_owner_rejects_an_invalid_entrypoint_identity() -> None:
+    with pytest.raises(ValueError, match="entrypoint"):
+        next_runtime_v2_reference.retain_execution_assets_v1(
+            {"code_structure_viz/_next_runtime/other.mjs": ("adapter", b"other\n")}
+        )
+
+
+def test_asset_identity_and_staging_do_not_follow_later_caller_mutations() -> None:
+    path = "code_structure_viz/_next_runtime/next-adapter.mjs"
+    original = b"// CodeStructureViz-Adapter-Version: 0.1.0\n"
+    members = {path: ("adapter", original)}
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(members)
+    first = assets.descriptor()
+    members[path] = ("adapter", b"changed\n")
+    exposed = assets.descriptor()
+    exposed["members"][0]["sha256"] = "0" * 64
+    assert assets.descriptor() == first
+    assert assets.staging_members() == ((path, original),)
+
+
+def test_asset_admission_rejects_rehashed_metadata_that_disagrees_with_retained_bytes() -> None:
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(
+        {
+            "code_structure_viz/_next_runtime/next-adapter.mjs": (
+                "adapter",
+                b"// CodeStructureViz-Adapter-Version: 0.1.0\n",
+            )
+        }
+    )
+    descriptor = assets.descriptor()
+    validate_execution_assets_v1(descriptor, assets)
+    descriptor["members"][0]["sha256"] = "0" * 64
+    preimage = json.dumps(
+        {key: value for key, value in descriptor.items() if key != "asset_set_id"},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    descriptor["asset_set_id"] = hashlib.sha256(preimage).hexdigest()
+    validate_execution_asset_identity_v1(descriptor)
+    with pytest.raises(ValueError, match="retained bytes"):
+        validate_execution_assets_v1(descriptor, assets)
+
+
+def test_asset_retention_rejects_non_byte_content_instead_of_manufacturing_bytes() -> None:
+    with pytest.raises(TypeError, match="bytes"):
+        next_runtime_v2_reference.retain_execution_assets_v1(
+            {"code_structure_viz/_next_runtime/next-adapter.mjs": ("adapter", cast(bytes, 3))}
+        )
+
+
+def test_adapter_identity_is_derived_from_the_retained_entrypoint_header_and_bytes() -> None:
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(
+        {
+            "code_structure_viz/_next_runtime/next-adapter.mjs": (
+                "adapter",
+                b"// CodeStructureViz-Adapter-Version: 2.3.4\n",
+            )
+        }
+    )
+    assert assets.adapter_identity() == {
+        "protocol": "code-structure-viz.next-adapter/v2",
+        "version": "2.3.4",
+        "sha256": "9bfc66a39766ca565a16a6355df0bf2a14f61efd3bbe0f573468debb86b0e0df",
+        "entrypoint_member": "code_structure_viz/_next_runtime/next-adapter.mjs",
+    }
+
+
+def test_adapter_identity_rejects_a_second_version_marker_anywhere_in_retained_content() -> None:
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(
+        {
+            "code_structure_viz/_next_runtime/next-adapter.mjs": (
+                "adapter",
+                b"// CodeStructureViz-Adapter-Version: 0.1.0\n"
+                b"// CodeStructureViz-Adapter-Version: 2.3.4\n",
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="marker"):
+        assets.adapter_identity()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"\xef\xbb\xbf// CodeStructureViz-Adapter-Version: 0.1.0\n",
+        b"// CodeStructureViz-Adapter-Version: 0.1.0\r\n",
+        b"// CodeStructureViz-Adapter-Version: 00.1.0\n",
+        b"// CodeStructureViz-Adapter-Version: 0.1.0-rc.1\n",
+        b"// CodeStructureViz-Adapter-Version: 0.1.0+build\n",
+        b"// CodeStructureViz-Adapter-Version:  0.1.0\n",
+        b"// other\n// CodeStructureViz-Adapter-Version: 0.1.0\n",
+    ],
+)
+def test_adapter_identity_preserves_the_frozen_header_grammar(content: bytes) -> None:
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(
+        {"code_structure_viz/_next_runtime/next-adapter.mjs": ("adapter", content)}
+    )
+    with pytest.raises(ValueError, match="header"):
+        assets.adapter_identity()
+
+
+def test_policy_accepts_adapter_identity_derived_from_its_retained_asset_owner() -> None:
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(
+        {
+            "code_structure_viz/_next_runtime/next-adapter.mjs": (
+                "adapter",
+                b"// CodeStructureViz-Adapter-Version: 0.1.0\n",
+            )
+        }
+    )
+    policy = load_fixture("launch-policy.json")
+    policy["adapter"] = assets.adapter_identity()
+    policy["execution_asset_set_id"] = assets.descriptor()["asset_set_id"]
+    validate_process_launch_policy_v2(policy)
+
+
+def test_policy_asset_join_rejects_identity_not_derived_from_the_retained_owner() -> None:
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(
+        {
+            "code_structure_viz/_next_runtime/next-adapter.mjs": (
+                "adapter",
+                b"// CodeStructureViz-Adapter-Version: 0.1.0\n",
+            )
+        }
+    )
+    policy = load_fixture("launch-policy.json")
+    policy["adapter"] = assets.adapter_identity()
+    policy["execution_asset_set_id"] = assets.descriptor()["asset_set_id"]
+    validate_launch_policy_assets_v2(policy, assets)
+    policy["execution_asset_set_id"] = "0" * 64
+    with pytest.raises(ValueError, match="retained owner"):
+        validate_launch_policy_assets_v2(policy, assets)
+
+
+def test_policy_asset_join_rejects_a_free_adapter_version_even_if_the_hash_matches() -> None:
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(
+        {
+            "code_structure_viz/_next_runtime/next-adapter.mjs": (
+                "adapter",
+                b"// CodeStructureViz-Adapter-Version: 0.1.0\n",
+            )
+        }
+    )
+    policy = load_fixture("launch-policy.json")
+    policy["adapter"] = assets.adapter_identity()
+    policy["execution_asset_set_id"] = assets.descriptor()["asset_set_id"]
+    policy["adapter"]["version"] = "9.9.9"
+    with pytest.raises(ValueError, match="adapter identity"):
+        validate_launch_policy_assets_v2(policy, assets)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "code_structure_viz/_next_runtime/../other.mjs",
+        "code_structure_viz/_next_runtime/typescript/../../escape.mjs",
+        "code_structure_viz/_next_runtime/./other.mjs",
+        "code_structure_viz/_next_runtime//other.mjs",
+        "code_structure_viz/_next_runtime/other.mjs\n",
+        "code_structure_viz/_next_runtime/other\\name.mjs",
+        "/code_structure_viz/_next_runtime/other.mjs",
+        "other/entrypoint.mjs",
+    ],
+)
+def test_execution_asset_identity_rejects_unsafe_member_paths(path: str) -> None:
+    descriptor = load_fixture("execution-assets.json")
+    descriptor["members"][1]["package_path"] = path
+    with pytest.raises(ValidationError):
+        validate_execution_asset_identity_v1(descriptor)
+
+
+@pytest.mark.parametrize("field", ["absolute_path", "inode", "pid", "fd"])
+def test_execution_asset_identity_excludes_host_observation_fields(field: str) -> None:
+    descriptor = load_fixture("execution-assets.json")
+    descriptor["members"][0][field] = 42
+    with pytest.raises(ValidationError):
+        validate_execution_asset_identity_v1(descriptor)
 
 
 def test_policy_rejects_an_argv_executable_different_from_the_measured_candidate() -> None:
@@ -113,7 +378,12 @@ def test_policy_rejects_unsafe_absolute_path_aliases(path: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["next-node-runtime-requirement-v1", "next-process-launch-policy-v2"]
+    "name",
+    [
+        "next-node-runtime-requirement-v1",
+        "next-process-launch-policy-v2",
+        "next-execution-assets-v1",
+    ],
 )
 def test_new_policy_schemas_are_closed_valid_draft202012(name: str) -> None:
     schema = json.loads((ROOT / "schemas" / f"{name}.schema.json").read_text(encoding="utf-8"))

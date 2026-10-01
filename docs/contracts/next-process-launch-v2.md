@@ -21,6 +21,8 @@ Python・Node・インストールしたfirst-party package・OSは利用者管�
 
 concrete policyのdigestとportable projectionを分離します。portable runtime identityにprivate paths、device/inode、PID/PGID、FD、cleanup errnoを流しません。observation/runtime bindingのclosed fieldsとpreimageは後続A02 unitで固定します。
 
+保持資材のcontent leafとbyte ownerのjoinは[execution assets identity v1](next-execution-assets-v1.md)で固定します。policy shapeの検査と、retained ownerへのasset ID/adapter identity joinは別です。部分的なidentity joinを完全なruntime admissionと見なしません。
+
 ## lifecycle受入れ
 
 first-party analyzerはdescendantをspawnしません。normal exitはdirect childをwaitし、reap後に古いPGIDへsignalしません。異常時はunreaped leaderを保持してgroup TERM→bounded grace→KILL→direct child waitを行い、raw/partial buffersを破棄してprivate資材をcleanupします。

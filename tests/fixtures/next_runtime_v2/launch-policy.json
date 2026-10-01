@@ -17,10 +17,10 @@
   "adapter": {
     "protocol": "code-structure-viz.next-adapter/v2",
     "version": "0.1.0",
-    "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "sha256": "a0a769eddee8f677bcabbf0b1884c32c509c8b7ebccd9f41cf3473a5f67a57b4",
     "entrypoint_member": "code_structure_viz/_next_runtime/next-adapter.mjs"
   },
-  "execution_asset_set_id": "4444444444444444444444444444444444444444444444444444444444444444",
+  "execution_asset_set_id": "516ab8709db31afdb0b1906a14b9aff17d8106e6827674f3b453660ec0d9c856",
   "typescript_identity": "typescript-5.9.2",
   "trusted_environment_digest": "5555555555555555555555555555555555555555555555555555555555555555",
   "private_root": "/private/tmp/csv-next-reference",

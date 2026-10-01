@@ -57,6 +57,8 @@ exact SHA `710eb49a2a3143e31b8a91580700d16839d9070d`へのChatGPT Use Strict GPT
 
 詳細record、digest preimage、producer/validator joins、正負vectorsは新contract docs/schema/reference laneで一つずつ閉じます。A02全体のclosureはまだ未完了で、legacy v1のpassを新runtimeへ引き継ぎません。
 
+起動前policy/requirementとexecution assets content leafは、それぞれ`docs/contracts/next-process-launch-v2.md`、`docs/contracts/next-execution-assets-v1.md`と独立した小さいv2 reference laneへ具体化しました。content leafのself digest検証とretained bytesへのjoinを区別し、adapter header/version/hashとstaging用bytesは同じownerから導出します。synthetic member集合でlocked production profileの完全性を代用しません。runtime binding/observation/private wire/public closureは後続A02 unitのままです。
+
 ```plantuml
 @startuml
 title Current v1: single authority chain

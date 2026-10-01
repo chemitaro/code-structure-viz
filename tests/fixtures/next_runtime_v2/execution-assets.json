@@ -1,0 +1,19 @@
+{
+  "schema": "code-structure-viz.next-execution-assets/v1",
+  "entrypoint_member": "code_structure_viz/_next_runtime/next-adapter.mjs",
+  "members": [
+    {
+      "package_path": "code_structure_viz/_next_runtime/next-adapter.mjs",
+      "role": "adapter",
+      "size_bytes": 43,
+      "sha256": "a0a769eddee8f677bcabbf0b1884c32c509c8b7ebccd9f41cf3473a5f67a57b4"
+    },
+    {
+      "package_path": "code_structure_viz/_next_runtime/typescript/typescript.cjs",
+      "role": "typescript_lib",
+      "size_bytes": 19,
+      "sha256": "4b507a55c78e8cab287c0c8385ad7e3c72acabd93dc616d9fda9aa98883a17b6"
+    }
+  ],
+  "asset_set_id": "516ab8709db31afdb0b1906a14b9aff17d8106e6827674f3b453660ec0d9c856"
+}
