@@ -16,6 +16,7 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_execution_assets_v1,
     validate_launch_policy_assets_v2,
     validate_process_launch_policy_v2,
+    validate_runtime_binding_identity_v1,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,6 +46,97 @@ def test_prelaunch_policy_accepts_intent_without_actual_node_version() -> None:
 
 def test_execution_asset_identity_has_a_closed_portable_shape() -> None:
     validate_schema("next-execution-assets-v1", load_fixture("execution-assets.json"))
+
+
+def test_runtime_binding_identity_has_a_closed_supported_version_shape() -> None:
+    validate_schema("next-runtime-binding-v1", load_fixture("runtime-binding.json"))
+
+
+def test_runtime_binding_identity_derives_the_worked_portable_fingerprint() -> None:
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(
+        {
+            "code_structure_viz/_next_runtime/next-adapter.mjs": (
+                "adapter",
+                b"// CodeStructureViz-Adapter-Version: 0.1.0\n",
+            ),
+            "code_structure_viz/_next_runtime/typescript/typescript.cjs": (
+                "typescript_lib",
+                b"reference compiler\n",
+            ),
+        }
+    )
+    identity = next_runtime_v2_reference.runtime_binding_identity_v1(
+        load_fixture("launch-policy.json"), assets, node_version="22.10.0"
+    )
+    assert identity == load_fixture("runtime-binding.json")
+
+
+def test_runtime_binding_identity_rejects_a_wrong_fingerprint() -> None:
+    identity = load_fixture("runtime-binding.json")
+    validate_runtime_binding_identity_v1(identity)
+    identity["runtime_toolchain_fingerprint"] = "0" * 64
+    with pytest.raises(ValueError, match="fingerprint"):
+        validate_runtime_binding_identity_v1(identity)
+
+
+def test_runtime_binding_fingerprint_excludes_host_paths_request_and_limits() -> None:
+    assets = next_runtime_v2_reference.retain_execution_assets_v1(
+        {
+            "code_structure_viz/_next_runtime/next-adapter.mjs": (
+                "adapter",
+                b"// CodeStructureViz-Adapter-Version: 0.1.0\n",
+            ),
+            "code_structure_viz/_next_runtime/typescript/typescript.cjs": (
+                "typescript_lib",
+                b"reference compiler\n",
+            ),
+        }
+    )
+    policy = load_fixture("launch-policy.json")
+    policy["private_root"] = "/tmp/other-run"
+    policy["runtime_directory"] = "/tmp/other-run/runtime"
+    policy["cwd"] = "/tmp/other-run/cwd"
+    policy["argv"][2] = "/tmp/other-run/runtime/next-adapter.mjs"
+    policy["argv"][0] = "/opt/other/node"
+    policy["node_candidate"]["absolute_path"] = "/opt/other/node"
+    policy["request_id"] = "6" * 64
+    policy["limits"]["max_entities"] = 999
+    policy["producer"] = "production"
+    policy["platform"] = "linux"
+    assert next_runtime_v2_reference.runtime_binding_identity_v1(
+        policy, assets, node_version="22.10.0"
+    ) == load_fixture("runtime-binding.json")
+
+
+@pytest.mark.parametrize(
+    "version",
+    ["20.19.5", "21.0.0", "22.0.0-rc.1", "22.0.0+build", "022.0.0", "22.00.0", "22.0.0\n"],
+)
+def test_runtime_binding_identity_rejects_unsupported_or_noncanonical_versions(
+    version: str,
+) -> None:
+    identity = load_fixture("runtime-binding.json")
+    identity["node_observation"]["version"] = version
+    with pytest.raises(ValidationError):
+        validate_runtime_binding_identity_v1(identity)
+
+
+@pytest.mark.parametrize("source", ["node --version", "candidate-header", "PATH"])
+def test_runtime_binding_identity_rejects_a_different_version_observation_source(
+    source: str,
+) -> None:
+    identity = load_fixture("runtime-binding.json")
+    identity["node_observation"]["source"] = source
+    with pytest.raises(ValidationError):
+        validate_runtime_binding_identity_v1(identity)
+
+
+@pytest.mark.parametrize("field", ["absolute_path", "device", "inode", "pid", "fd"])
+def test_runtime_binding_identity_does_not_accept_host_fields(field: str) -> None:
+    identity = load_fixture("runtime-binding.json")
+    identity["node_candidate"][field] = 42
+    with pytest.raises(ValidationError):
+        validate_runtime_binding_identity_v1(identity)
 
 
 def test_retained_asset_bytes_produce_the_worked_identity_and_staging_content() -> None:
@@ -383,6 +475,8 @@ def test_policy_rejects_unsafe_absolute_path_aliases(path: str) -> None:
         "next-node-runtime-requirement-v1",
         "next-process-launch-policy-v2",
         "next-execution-assets-v1",
+        "next-runtime-binding-v1",
+        "next-process-launch-observation-v2",
     ],
 )
 def test_new_policy_schemas_are_closed_valid_draft202012(name: str) -> None:

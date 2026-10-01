@@ -1,0 +1,21 @@
+{
+  "schema": "code-structure-viz.next-runtime-binding/v1",
+  "runtime_binding_profile_id": "next-public-spawn-runtime-v1",
+  "node_candidate": {
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "node_observation": {
+    "version": "22.10.0",
+    "source": "process.versions.node"
+  },
+  "execution_asset_set_id": "516ab8709db31afdb0b1906a14b9aff17d8106e6827674f3b453660ec0d9c856",
+  "adapter": {
+    "protocol": "code-structure-viz.next-adapter/v2",
+    "version": "0.1.0",
+    "sha256": "a0a769eddee8f677bcabbf0b1884c32c509c8b7ebccd9f41cf3473a5f67a57b4",
+    "entrypoint_member": "code_structure_viz/_next_runtime/next-adapter.mjs"
+  },
+  "typescript_identity": "typescript-5.9.2",
+  "trusted_type_environment_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+  "runtime_toolchain_fingerprint": "152454270b4314f8f40a6c6902c9116689e3644945f9420d98c237872bcc09a1"
+}

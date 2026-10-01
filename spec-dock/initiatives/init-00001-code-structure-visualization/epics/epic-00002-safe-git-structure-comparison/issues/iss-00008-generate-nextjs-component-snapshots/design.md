@@ -57,7 +57,13 @@ exact SHA `710eb49a2a3143e31b8a91580700d16839d9070d`へのChatGPT Use Strict GPT
 
 詳細record、digest preimage、producer/validator joins、正負vectorsは新contract docs/schema/reference laneで一つずつ閉じます。A02全体のclosureはまだ未完了で、legacy v1のpassを新runtimeへ引き継ぎません。
 
-起動前policy/requirementとexecution assets content leafは、それぞれ`docs/contracts/next-process-launch-v2.md`、`docs/contracts/next-execution-assets-v1.md`と独立した小さいv2 reference laneへ具体化しました。content leafのself digest検証とretained bytesへのjoinを区別し、adapter header/version/hashとstaging用bytesは同じownerから導出します。synthetic member集合でlocked production profileの完全性を代用しません。runtime binding/observation/private wire/public closureは後続A02 unitのままです。
+起動前policy/requirementとexecution assets content leafは、それぞれ`docs/contracts/next-process-launch-v2.md`、`docs/contracts/next-execution-assets-v1.md`と独立した小さいv2 reference laneへ具体化しました。content leafのself digest検証とretained bytesへのjoinを区別し、adapter header/version/hashとstaging用bytesは同じownerから導出します。synthetic member集合でlocked production profileの完全性を代用しません。
+
+続くdata-only observation/bindingは`docs/contracts/next-process-observation-v2.md`、`docs/contracts/next-runtime-binding-v1.md`です。concrete policyの全object digestはopaque host pathをNFC変換せず、key-sort/compact UTF-8/LF無しで計算します。portable bindingはfixed ASCII profile、candidate hash、same-process stable version、asset ID、adapter protocol/version/hash、TS/trusted identityだけを同codecでhashし、host path/PID/request/limitsを除きます。source/semanticの固定Unicode 15.0.0 NFC codecは不変です。OS間のNode binary hash一致は保証しません。
+
+observation producerはreference evidenceのclosed inputからowner fields/policy digest/payload predicateを生成します。validatorはactual-spawn有無、全spawn parameters、PID/PGID、capture countersとcap+1、complete stdoutのcontrol、raw/canonical version/eligibility、request/adapter/exit、normal cleanup/drift、named failure evidence、raw buffer破棄を結合します。success-only bindingは検証済みdata observationからversionを取得し、同じretained ownerと全identityを比較します。後続failureでcontrol/version prefixを保持しても、failureからbinding/model/proofを生成しません。
+
+これらはデータの一貫性であり、実response bytes/SHA/control/countersへのjoinはA02-2、trusted descriptor/profile完全性はA02-3、実OS owner観測はA04の必須gateです。referenceのplaceholder SHAやpid、boolを実測扱いしません。private wire/compatibility/provenance/public closureは未完了です。
 
 ```plantuml
 @startuml

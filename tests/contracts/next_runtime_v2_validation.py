@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _validate_schema(name: str, value: object) -> None:
+def _validate_schema(name: str, value: object, fragment: str = "") -> None:
     registry = Registry()
     for path in (ROOT / "schemas").glob("*.schema.json"):
         schema = json.loads(path.read_text(encoding="utf-8"))
@@ -27,6 +28,8 @@ def _validate_schema(name: str, value: object) -> None:
         dict[str, Any],
         json.loads((ROOT / "schemas" / f"{name}.schema.json").read_text(encoding="utf-8")),
     )
+    if fragment:
+        target = {"$ref": target["$id"] + fragment}
     Draft202012Validator(target, registry=registry).validate(value)
 
 
@@ -88,3 +91,265 @@ def validate_launch_policy_assets_v2(value: dict[str, Any], owner: RetainedExecu
         raise ValueError("policy execution asset identity differs from its retained owner")
     if value["adapter"] != owner.adapter_identity():
         raise ValueError("policy adapter identity differs from its retained entrypoint")
+
+
+def validate_runtime_binding_identity_v1(value: dict[str, Any]) -> None:
+    """Validate portable binding identity, not same-process execution evidence."""
+
+    _validate_schema("next-runtime-binding-v1", value)
+    preimage = {
+        key: value[key]
+        for key in (
+            "runtime_binding_profile_id",
+            "node_candidate",
+            "node_observation",
+            "execution_asset_set_id",
+            "typescript_identity",
+            "trusted_type_environment_digest",
+        )
+    }
+    preimage["adapter"] = {key: value["adapter"][key] for key in ("protocol", "version", "sha256")}
+    encoded = json.dumps(
+        preimage, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if value["runtime_toolchain_fingerprint"] != hashlib.sha256(encoded).hexdigest():
+        raise ValueError("runtime binding fingerprint differs from its portable preimage")
+
+
+def validate_runtime_binding_observation_v1(
+    value: dict[str, Any],
+    policy: dict[str, Any],
+    owner: RetainedExecutionAssets,
+    observation: dict[str, Any],
+) -> None:
+    """Join data records; this still requires the separate raw-frame validation gate."""
+
+    validate_runtime_binding_identity_v1(value)
+    validate_launch_policy_assets_v2(policy, owner)
+    validate_process_observation_v2(observation, policy)
+    if not observation["transport_payload_admissible"]:
+        raise ValueError("runtime binding requires a successful transport observation")
+    runtime = observation["response"]["control"]["runtime"]
+    if value["node_observation"] != {
+        "version": runtime["version"],
+        "source": runtime["observation_source"],
+    }:
+        raise ValueError("runtime binding differs from its joined node observation")
+    expected = {
+        "node_candidate": {"sha256": policy["node_candidate"]["sha256"]},
+        "execution_asset_set_id": owner.descriptor()["asset_set_id"],
+        "adapter": owner.adapter_identity(),
+        "typescript_identity": policy["typescript_identity"],
+        "trusted_type_environment_digest": policy["trusted_environment_digest"],
+    }
+    if any(value[key] != item for key, item in expected.items()):
+        raise ValueError("runtime binding owner identity differs from its retained/measured input")
+
+
+def validate_process_observation_v2(value: dict[str, Any], policy: dict[str, Any]) -> None:
+    """Validate a data-only post-launch record; raw-frame joins are a separate gate."""
+
+    validate_process_launch_policy_v2(policy)
+    _validate_schema("next-process-launch-observation-v2", value)
+    encoded_policy = json.dumps(
+        policy, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if value["policy_digest"] != hashlib.sha256(encoded_policy).hexdigest() or any(
+        value[key] != policy[key] for key in ("producer", "platform", "request_id")
+    ):
+        raise ValueError("observed owner identity does not match its policy binding")
+    if value["spawn"] is not None and any(
+        observed != policy[name] for name, observed in value["spawn"]["parameters"].items()
+    ):
+        raise ValueError("observed spawn parameters differ from their sealed policy")
+    if value["spawn"] is not None and value["spawn"]["pid"] != value["spawn"]["pgid"]:
+        raise ValueError("observed process group is not the new session leader group")
+    if value["terminal_cause"] in {"stage_failed", "spawn_failed"} and value["spawn"] is not None:
+        raise ValueError("pre-spawn failure cannot include a successful spawn observation")
+    if value["spawn"] is None and any(
+        value[key] is not None for key in ("capture", "exit_code", "response")
+    ):
+        raise ValueError("capture, exit and control observations require an actual spawn")
+    if value["spawn"] is None and value["cleanup"]["direct_child_waited"]:
+        raise ValueError("unspawned observation cannot claim that a child was waited")
+    if value["spawn"] is None and (
+        value["cleanup"]["group_stop"] != "not_required" or value["cleanup"]["signals"]
+    ):
+        raise ValueError("unspawned observation cannot claim a process group cleanup")
+    if value["spawn"] is not None and value["cleanup"]["direct_child_waited"] is not (
+        value["exit_code"] is not None
+    ):
+        raise ValueError("direct child wait must agree with an observed exit status")
+    if value["capture"] is not None:
+        capture = value["capture"]
+        if any(
+            capture[actual] > capture[total]
+            for actual, total in (
+                ("stdin_sent_bytes", "stdin_bytes"),
+                ("stdout_retained_bytes", "stdout_bytes"),
+                ("stderr_retained_bytes", "stderr_bytes"),
+            )
+        ):
+            raise ValueError("capture counters claim more bytes than were observed or encoded")
+    if value["terminal_cause"] in {"stdout_limit", "stderr_limit"}:
+        stream = value["terminal_cause"].removesuffix("_limit")
+        if (
+            value["capture"] is None
+            or value["capture"][f"{stream}_bytes"]
+            != policy["limits"][f"max_adapter_{stream}_capture_bytes"] + 1
+        ):
+            raise ValueError("capture limit cause requires its actual cap measurement plus one")
+    if value["terminal_cause"] == "none" and value["response"] is None:
+        raise ValueError("normal terminal cause requires a validated control response")
+    if value["response"] is not None:
+        capture = value["capture"]
+        if (
+            capture is None
+            or not capture["stdout_eof"]
+            or not 0
+            < capture["stdout_bytes"]
+            <= policy["limits"]["max_adapter_stdout_capture_bytes"]
+        ):
+            raise ValueError("control observation requires complete stdout within its capture cap")
+        validate_response_control_v2(value["response"]["control"])
+        if value["response"]["control"]["adapter_version"] != policy["adapter"]["version"]:
+            raise ValueError("control adapter version differs from its retained policy identity")
+        binding = value["response"]["control"]["binding"]
+        if (
+            value["terminal_cause"] == "none"
+            and binding["state"] == "bound"
+            and binding["request_id"] != policy["request_id"]
+        ):
+            raise ValueError("normal control response has an unrelated request binding")
+    if value["terminal_cause"] == "none" and value["response"] is not None:
+        expected_exit = {
+            "success": 0,
+            "protocol_failure": 65,
+            "unsupported_runtime": 66,
+            "bootstrap_failure": 67,
+            "semantic_failure": 68,
+        }[value["response"]["control"]["result_kind"]]
+        if value["exit_code"] != expected_exit:
+            raise ValueError("normal control response and child exit code disagree")
+    if value["terminal_cause"] == "none" and not _cleanup_is_verified(value["cleanup"]):
+        raise ValueError("normal terminal cause cannot hide unverified cleanup")
+    if value["terminal_cause"] == "cleanup_unverified" and not (
+        value["cleanup"]["group_stop"] == "unverified"
+        or (value["spawn"] is not None and not value["cleanup"]["direct_child_waited"])
+        or any(
+            not value["cleanup"][key]
+            for key in ("pipes_closed", "candidate_closed", "private_root_removed")
+        )
+    ):
+        raise ValueError("cleanup cause requires an actually unverified cleanup condition")
+    if value["terminal_cause"] == "none" and (
+        value["cleanup"]["group_stop"] != "not_required" or value["cleanup"]["signals"]
+    ):
+        raise ValueError("normal exit does not terminate the first-party process group")
+    if value["terminal_cause"] == "none" and not _capture_is_complete(value["capture"]):
+        raise ValueError("normal terminal cause cannot hide incomplete capture")
+    if value["terminal_cause"] == "none" and any(
+        value[key] != "unchanged" for key in ("candidate_check", "assets_check")
+    ):
+        raise ValueError("normal terminal cause cannot omit successful observable drift checks")
+    if value["terminal_cause"] in {"candidate_drift", "assets_drift"}:
+        subject = value["terminal_cause"].removesuffix("_drift")
+        if value[f"{subject}_check"] != "drift":
+            raise ValueError("drift cause requires the corresponding observable drift result")
+    if (
+        value["terminal_cause"] != "none"
+        and value["capture"] is not None
+        and any(
+            value["capture"][key] != 0 for key in ("stdout_retained_bytes", "stderr_retained_bytes")
+        )
+    ):
+        raise ValueError("terminal transport failure must discard raw buffers")
+    if value["transport_payload_admissible"] is not process_payload_gate_v2(value):
+        raise ValueError("observed payload gate differs from the closed process conditions")
+
+
+def process_payload_gate_v2(value: dict[str, Any]) -> bool:
+    """Compute the data-only transport gate; not a raw-frame or semantic validator."""
+
+    _validate_schema("next-process-launch-observation-v2", value)
+    return bool(
+        value["terminal_cause"] == "none"
+        and value["spawn"] is not None
+        and value["response"] is not None
+        and value["response"]["control"]["result_kind"] == "success"
+        and value["exit_code"] == 0
+        and value["response"]["control"]["binding"]["state"] == "bound"
+        and value["response"]["control"]["binding"]["request_id"] == value["request_id"]
+        and value["response"]["control"]["runtime"] is not None
+        and value["response"]["control"]["runtime"]["eligibility"] == "supported"
+        and _cleanup_is_verified(value["cleanup"])
+        and value["cleanup"]["group_stop"] == "not_required"
+        and not value["cleanup"]["signals"]
+        and _capture_is_complete(value["capture"])
+        and value["candidate_check"] == "unchanged"
+        and value["assets_check"] == "unchanged"
+    )
+
+
+def validate_response_control_v2(value: dict[str, Any]) -> None:
+    """Validate the closed child control projection, not a complete wire frame."""
+
+    _validate_schema("next-process-launch-observation-v2", value, "#/$defs/response_control")
+    runtime = value["runtime"]
+    if runtime is not None:
+        raw = runtime["version_raw"]
+        canonical = (
+            raw
+            if re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", raw)
+            else None
+        )
+        if runtime["version"] != canonical:
+            raise ValueError("runtime version does not match its exact raw observation")
+        eligibility = (
+            "invalid"
+            if canonical is None
+            else ("supported" if int(canonical.split(".", 1)[0]) >= 22 else "unsupported")
+        )
+        if runtime["eligibility"] != eligibility:
+            raise ValueError("runtime eligibility differs from the stable-major-22 requirement")
+    if value["result_kind"] in {"success", "semantic_failure"} and (
+        value["binding"]["state"] != "bound"
+        or runtime is None
+        or runtime["eligibility"] != "supported"
+    ):
+        raise ValueError(f"{value['result_kind']} control requires a bound supported runtime")
+    if value["result_kind"] == "protocol_failure" and value["binding"]["state"] != "unbound":
+        raise ValueError("protocol_failure control must not echo an unvalidated request ID")
+    if value["result_kind"] == "unsupported_runtime" and (
+        value["binding"]["state"] != "bound"
+        or runtime is None
+        or runtime["eligibility"] not in {"invalid", "unsupported"}
+    ):
+        raise ValueError("unsupported_runtime control requires a bound ineligible runtime")
+
+
+def _cleanup_is_verified(cleanup: dict[str, Any]) -> bool:
+    return bool(
+        cleanup["group_stop"] != "unverified"
+        and all(
+            cleanup[key]
+            for key in (
+                "direct_child_waited",
+                "pipes_closed",
+                "candidate_closed",
+                "private_root_removed",
+            )
+        )
+    )
+
+
+def _capture_is_complete(capture: dict[str, Any] | None) -> bool:
+    return bool(
+        capture is not None
+        and capture["stdin_bytes"] == capture["stdin_sent_bytes"]
+        and capture["stdout_bytes"] > 0
+        and capture["stdout_eof"]
+        and capture["stderr_eof"]
+        and capture["stdout_bytes"] == capture["stdout_retained_bytes"]
+        and capture["stderr_bytes"] == capture["stderr_retained_bytes"]
+    )

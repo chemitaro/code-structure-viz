@@ -37,7 +37,7 @@ package_sequence_key: "ISSUE-05"
 
 | unit | 対象と出口 | 状態 |
 | --- | --- | --- |
-| `A02-1` 起動契約 | runtime requirement/execution assets/binding leaf、policy/observation v2。事前actual version無し、concrete/portable分離、closed records、旧強保証field拒否、owner joinsの正負tests | requirement/policyとexecution assetsの保持bytes/identity sliceはGREEN。binding/observationと全owner joinsは未完了。production変更無し。 |
+| `A02-1` 起動契約 | runtime requirement/execution assets/binding leaf、policy/observation v2。事前actual version無し、concrete/portable分離、closed records、旧強保証field拒否、owner joinsの正負tests | requirement/policy/assets保持bytes、binding/observationのdata-only相互検証はGREEN。raw-frame/全trusted owner joinはA02-2/3で閉じる必須条件。production変更無し。 |
 | `A02-2` private wire/compatibility | request intent、single control/nullable semantic response、binding/exit/frame相互検証、retained owner由来のruntime/compatibility preimages | 未完了。 |
 | `A02-3` provenance/public refs | trusted manifest/descriptor、source-phase/actual observed slots、run/publication/domain/semantic/root/stdoutのv2 exact-ref closure。元助言のstdout-v1維持は採らない | 未完了。 |
 | `A02-4` gate入力 | 小さい独立v2 reference modules、known literal/mutations、v1不変性、各terminal selector/failure/publicationの全chain、全local品質gate、clean/pushed fixed SHA | 未完了。これが揃うまでA03/productionへ進めない。 |
@@ -47,6 +47,8 @@ package_sequence_key: "ISSUE-05"
 policy初スライスは`docs/contracts/next-process-launch-v2.md`、requirement/policy schema、`tests/contracts/next_runtime_v2_validation.py`、`test_next_runtime_v2_contracts.py`、明示reference fixtureへ保存しました。closed schema欠落、argv/candidate不一致、private layout不一致のfocused REDを実行後、各最小変更で同じselectionをGREENにしました。shape hardeningと既存schema/doc-pointerを合わせた145 tests、Ruff/format/mypy154 files、SpecDock validateがpass。旧v1のsemantic/provenance/public chainは変更せず、この部分的policy sliceをA02全closureや実runtimeの認定に使いません。
 
 続くexecution assets sliceは、immutable保持bytesからdescriptor/header identity/staging contentを導出し、self digest、member order/duplicate/entrypoint role、再hashされた偽metadata、policyのfree asset ID/versionを拒否するfocused RED→GREENを追加しました。known literalのdigestは独立計算で固定し、synthetic compilerを製品資材として扱いません。詳細と検証範囲は`artifacts/20261001t045200z-disc-a-execution-assets-contract-slice.md`。これもA02/A03/productionの完了ではありません。
+
+observation/binding sliceはphase-nullability、spawn引数/policy、実exit/wait、capture exact/+1、閉じたchild control、正常cleanup/drift、first cause/後続cleanup結果、success-only bindingのversion/owner joinsを小さいreference laneで具体化しました。self-validな別version/候補/資材のbindingも元観測への不一致で拒否します。host-local pathはopaqueに保ち、portable hashとsource/semantic NFCを混同しません。evidenceと未完了joinは`artifacts/20261001t060157z-disc-a-runtime-observation-binding-contract-slice.md`へ分離します。data gateのboolだけでraw frameやproductionをadmitしません。
 
 rollbackはA runtimeのproduction admissionを無効にしてNextをtyped unavailableへ戻し、Python/SQLAlchemyと保存済み旧recordを維持します。旧verified-FD名への偽装fallback、runtime取得、platform縮小は行いません。forward recoveryは主担当が新recordの対応closureとnegative vectorを修復し、task-scoped commit/push後にfresh exact-SHA gateを取り直します。target repositoryやpersistent user dataのmigrationはありません。
 

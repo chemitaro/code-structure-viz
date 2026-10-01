@@ -4,10 +4,19 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
-from tests.contracts.next_runtime_v2_validation import validate_execution_asset_identity_v1
+from tests.contracts.next_runtime_v2_validation import (
+    process_payload_gate_v2,
+    validate_execution_asset_identity_v1,
+    validate_launch_policy_assets_v2,
+    validate_process_launch_policy_v2,
+    validate_process_observation_v2,
+    validate_runtime_binding_identity_v1,
+    validate_runtime_binding_observation_v1,
+)
 
 ENTRYPOINT_MEMBER = "code_structure_viz/_next_runtime/next-adapter.mjs"
 
@@ -77,3 +86,84 @@ def retain_execution_assets_v1(
     )
     validate_execution_asset_identity_v1(retained.descriptor())
     return retained
+
+
+def runtime_binding_identity_v1(
+    policy: dict[str, Any], assets: RetainedExecutionAssets, *, node_version: str
+) -> dict[str, Any]:
+    """Project reference identity; a supplied version is not process admission."""
+
+    validate_launch_policy_assets_v2(policy, assets)
+    adapter = assets.adapter_identity()
+    preimage: dict[str, Any] = {
+        "runtime_binding_profile_id": "next-public-spawn-runtime-v1",
+        "node_candidate": {"sha256": policy["node_candidate"]["sha256"]},
+        "node_observation": {"version": node_version, "source": "process.versions.node"},
+        "execution_asset_set_id": assets.descriptor()["asset_set_id"],
+        "adapter": {key: adapter[key] for key in ("protocol", "version", "sha256")},
+        "typescript_identity": policy["typescript_identity"],
+        "trusted_type_environment_digest": policy["trusted_environment_digest"],
+    }
+    encoded = json.dumps(
+        preimage, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    identity = {
+        "schema": "code-structure-viz.next-runtime-binding/v1",
+        **preimage,
+        "adapter": adapter,
+        "runtime_toolchain_fingerprint": hashlib.sha256(encoded).hexdigest(),
+    }
+    validate_runtime_binding_identity_v1(identity)
+    return identity
+
+
+def reference_process_observation_v2(
+    policy: dict[str, Any], evidence: dict[str, Any]
+) -> dict[str, Any]:
+    """Seal explicit reference evidence, never claim a real OS launch."""
+
+    validate_process_launch_policy_v2(policy)
+    if policy["producer"] != "reference":
+        raise ValueError("reference observation requires a reference policy")
+    if set(evidence) != {
+        "spawn",
+        "capture",
+        "exit_code",
+        "response",
+        "candidate_check",
+        "assets_check",
+        "terminal_cause",
+        "cleanup",
+    }:
+        raise ValueError("reference evidence fields differ from the closed owner input")
+    encoded_policy = json.dumps(
+        policy, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    record = {
+        "schema": "code-structure-viz.next-process-launch-observation/v2",
+        "version": 2,
+        "producer": "reference",
+        "platform": "fixture",
+        "request_id": policy["request_id"],
+        "policy_digest": hashlib.sha256(encoded_policy).hexdigest(),
+        **deepcopy(evidence),
+        "transport_payload_admissible": False,
+    }
+    record["transport_payload_admissible"] = process_payload_gate_v2(record)
+    validate_process_observation_v2(record, policy)
+    return record
+
+
+def runtime_binding_from_observation_v1(
+    policy: dict[str, Any], assets: RetainedExecutionAssets, observation: dict[str, Any]
+) -> dict[str, Any]:
+    """Join reference records; raw response bytes and OS evidence remain separate."""
+
+    validate_process_observation_v2(observation, policy)
+    if not observation["transport_payload_admissible"]:
+        raise ValueError("runtime binding requires a successful transport observation")
+    binding = runtime_binding_identity_v1(
+        policy, assets, node_version=observation["response"]["control"]["runtime"]["version"]
+    )
+    validate_runtime_binding_observation_v1(binding, policy, assets, observation)
+    return binding

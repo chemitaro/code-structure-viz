@@ -19,7 +19,7 @@ Python・Node・インストールしたfirst-party package・OSは利用者管�
 - shell false、pipes、passed envの3キー、close_fds true/継承allowlist 0/1/2、start_new_session、group stop、direct child wait、limits v1を封じます。passed envとNodeが内部生成したenv、継承FDとNode内部FDを混同しません。
 - JSON Schemaが閉じたshape/定数を検証し、reference/production ownerがpath containment、argv、request、retained identityとのcross-field joinsを追加検証します。shapeだけで新runtimeをadmitしません。
 
-concrete policyのdigestとportable projectionを分離します。portable runtime identityにprivate paths、device/inode、PID/PGID、FD、cleanup errnoを流しません。observation/runtime bindingのclosed fieldsとpreimageは後続A02 unitで固定します。
+concrete policyのdigestとportable projectionを分離します。portable runtime identityにprivate paths、device/inode、PID/PGID、FD、cleanup errnoを流しません。[observation v2](next-process-observation-v2.md)と[runtime binding v1](next-runtime-binding-v1.md)がdata-only fields/preimage/owner joinsを固定します。raw wireとtrusted profileの完全joinは後続A02 unitです。
 
 保持資材のcontent leafとbyte ownerのjoinは[execution assets identity v1](next-execution-assets-v1.md)で固定します。policy shapeの検査と、retained ownerへのasset ID/adapter identity joinは別です。部分的なidentity joinを完全なruntime admissionと見なしません。
 

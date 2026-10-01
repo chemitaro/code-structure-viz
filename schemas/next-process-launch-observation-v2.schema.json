@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-process-launch-observation-v2",
+  "title": "CodeStructureViz Next public-spawn process observation v2",
+  "description": "Closed host-local record. Reference fixtures are not OS evidence. The validator must join policy, capture, validated response bytes, exit, drift and cleanup; the transport gate is not semantic proof acceptance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "version", "producer", "platform", "request_id", "policy_digest",
+    "spawn", "capture", "exit_code", "response", "candidate_check", "assets_check",
+    "terminal_cause", "cleanup", "transport_payload_admissible"
+  ],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-process-launch-observation/v2"},
+    "version": {"const": 2},
+    "producer": {"enum": ["reference", "production"]},
+    "platform": {"enum": ["fixture", "darwin", "linux"]},
+    "request_id": {"$ref": "#/$defs/digest"},
+    "policy_digest": {"$ref": "#/$defs/digest"},
+    "spawn": {"oneOf": [{"$ref": "#/$defs/spawn"}, {"type": "null"}]},
+    "capture": {"oneOf": [{"$ref": "#/$defs/capture"}, {"type": "null"}]},
+    "exit_code": {"oneOf": [{"type": "integer", "minimum": -255, "maximum": 255}, {"type": "null"}]},
+    "response": {"oneOf": [{"$ref": "#/$defs/response_observation"}, {"type": "null"}]},
+    "candidate_check": {"enum": ["unobserved", "unchanged", "drift", "unverified"]},
+    "assets_check": {"enum": ["unobserved", "unchanged", "drift", "unverified"]},
+    "terminal_cause": {
+      "enum": [
+        "none", "stage_failed", "spawn_failed", "write_failed", "read_failed",
+        "stdout_limit", "stderr_limit", "timeout", "interrupted", "frame_invalid",
+        "response_invalid", "binding_mismatch", "exit_mismatch", "candidate_drift",
+        "assets_drift", "cleanup_unverified"
+      ]
+    },
+    "cleanup": {"$ref": "#/$defs/cleanup"},
+    "transport_payload_admissible": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"producer": {"const": "reference"}}},
+      "then": {"properties": {"platform": {"const": "fixture"}}},
+      "else": {"properties": {"platform": {"enum": ["darwin", "linux"]}}}
+    }
+  ],
+  "$defs": {
+    "digest": {"$ref": "urn:code-structure-viz:schema:next-execution-assets-v1#/$defs/digest"},
+    "spawn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primitive", "pid", "pgid", "parameters"],
+      "properties": {
+        "primitive": {"const": "subprocess.Popen"},
+        "pid": {"type": "integer", "minimum": 1},
+        "pgid": {"type": "integer", "minimum": 1},
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["argv", "shell", "cwd", "passed_environment", "stdio", "fd_inheritance", "process_group"],
+          "properties": {
+            "argv": {"$ref": "urn:code-structure-viz:schema:next-process-launch-policy-v2#/properties/argv"},
+            "shell": {"const": false},
+            "cwd": {"$ref": "urn:code-structure-viz:schema:next-process-launch-policy-v2#/properties/cwd"},
+            "passed_environment": {"$ref": "urn:code-structure-viz:schema:next-process-launch-policy-v2#/properties/passed_environment"},
+            "stdio": {"$ref": "urn:code-structure-viz:schema:next-process-launch-policy-v2#/properties/stdio"},
+            "fd_inheritance": {"$ref": "urn:code-structure-viz:schema:next-process-launch-policy-v2#/properties/fd_inheritance"},
+            "process_group": {"$ref": "urn:code-structure-viz:schema:next-process-launch-policy-v2#/properties/process_group"}
+          }
+        }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stdin_bytes", "stdin_sent_bytes", "stdout_bytes", "stdout_retained_bytes", "stderr_bytes", "stderr_retained_bytes", "stdout_eof", "stderr_eof"],
+      "properties": {
+        "stdin_bytes": {"type": "integer", "minimum": 0, "maximum": 100663296},
+        "stdin_sent_bytes": {"type": "integer", "minimum": 0, "maximum": 100663296},
+        "stdout_bytes": {"type": "integer", "minimum": 0, "maximum": 16777217},
+        "stdout_retained_bytes": {"type": "integer", "minimum": 0, "maximum": 16777216},
+        "stderr_bytes": {"type": "integer", "minimum": 0, "maximum": 65537},
+        "stderr_retained_bytes": {"type": "integer", "minimum": 0, "maximum": 65536},
+        "stdout_eof": {"type": "boolean"},
+        "stderr_eof": {"type": "boolean"}
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group_stop", "signals", "direct_child_waited", "pipes_closed", "candidate_closed", "private_root_removed"],
+      "properties": {
+        "group_stop": {"enum": ["not_required", "verified", "unverified"]},
+        "signals": {"enum": [[], ["TERM"], ["TERM", "KILL"]]},
+        "direct_child_waited": {"type": "boolean"},
+        "pipes_closed": {"type": "boolean"},
+        "candidate_closed": {"type": "boolean"},
+        "private_root_removed": {"type": "boolean"}
+      }
+    },
+    "binding": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["state", "request_id"],
+          "properties": {"state": {"const": "unbound"}, "request_id": {"type": "null"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["state", "request_id"],
+          "properties": {"state": {"const": "bound"}, "request_id": {"$ref": "#/$defs/digest"}}
+        }
+      ]
+    },
+    "node_runtime": {
+      "type": "object", "additionalProperties": false,
+      "required": ["engine", "version_raw", "version", "eligibility", "observation_source"],
+      "properties": {
+        "engine": {"const": "node"},
+        "version_raw": {"type": "string", "maxLength": 128},
+        "version": {
+          "oneOf": [
+            {"type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?![\\s\\S])", "maxLength": 128},
+            {"type": "null"}
+          ]
+        },
+        "eligibility": {"enum": ["supported", "unsupported", "invalid"]},
+        "observation_source": {"const": "process.versions.node"}
+      }
+    },
+    "response_control": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocol", "adapter_version", "binding", "runtime", "result_kind"],
+      "properties": {
+        "protocol": {"const": "code-structure-viz.next-adapter/v2"},
+        "adapter_version": {"$ref": "urn:code-structure-viz:schema:next-process-launch-policy-v2#/properties/adapter/properties/version"},
+        "binding": {"$ref": "#/$defs/binding"},
+        "runtime": {"oneOf": [{"$ref": "#/$defs/node_runtime"}, {"type": "null"}]},
+        "result_kind": {"enum": ["success", "protocol_failure", "unsupported_runtime", "bootstrap_failure", "semantic_failure"]}
+      }
+    },
+    "response_observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sha256", "control"],
+      "properties": {
+        "sha256": {"$ref": "#/$defs/digest"},
+        "control": {"$ref": "#/$defs/response_control"}
+      }
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-runtime-binding-v1",
+  "title": "CodeStructureViz portable Next public-spawn runtime binding v1",
+  "description": "Success-only identity joining a measured candidate and the same Node process version under a trusted-toolchain profile, not actual-image attestation. Admission also requires owner, response and process evidence joins.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "runtime_binding_profile_id", "node_candidate", "node_observation",
+    "execution_asset_set_id", "adapter", "typescript_identity",
+    "trusted_type_environment_digest", "runtime_toolchain_fingerprint"
+  ],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-runtime-binding/v1"},
+    "runtime_binding_profile_id": {"const": "next-public-spawn-runtime-v1"},
+    "node_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256"],
+      "properties": {"sha256": {"$ref": "#/$defs/digest"}}
+    },
+    "node_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "source"],
+      "properties": {
+        "version": {"$ref": "#/$defs/supported_node_version"},
+        "source": {"const": "process.versions.node"}
+      }
+    },
+    "execution_asset_set_id": {"$ref": "#/$defs/digest"},
+    "adapter": {"$ref": "urn:code-structure-viz:schema:next-process-launch-policy-v2#/properties/adapter"},
+    "typescript_identity": {"const": "typescript-5.9.2"},
+    "trusted_type_environment_digest": {"$ref": "#/$defs/digest"},
+    "runtime_toolchain_fingerprint": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"$ref": "urn:code-structure-viz:schema:next-execution-assets-v1#/$defs/digest"},
+    "supported_node_version": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(?:2[2-9]|[3-9][0-9]|[1-9][0-9]{2,})\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?![\\s\\S])"
+    }
+  }
+}

@@ -30,6 +30,8 @@ package_sequence_key: "ISSUE-05"
 - 非適用時はruntime選択・package runtime resource・Nodeを観測しません。適用時だけ明示runtimeを使い、起動/検証/capture/cleanup不成立はcatalog-owned typed failureとし、raw child stderrやpartial payloadを公開しません。
 - version migrationはDesignの移行表で明示し、旧fixture成功を新実経路の受入れに流用しません。両OSの実TypeScript→Python検証→CLI→JSON/PlantUML、unsupported version、未実行sentinel、許可外read拒否、drift、予算exact/+1、interrupt/cleanup、offline packageと既存domain不変性が完成条件です。
 
+A02のdata契約は`docs/contracts/next-process-launch-v2.md`、`next-execution-assets-v1.md`、`next-process-observation-v2.md`、`next-runtime-binding-v1.md`へ具体化しています。事前policy、same-process control観測、success-only portable bindingを分離します。後続cleanup失敗でも既検証control/versionを消さず、payload admissionとbinding生成を抑止します。metadata-only shape/fingerprintやreference fixtureをactual raw-frame/OS/trusted-profileの証拠と扱わず、完全joinは別gateで検証します。
+
 現行のsource/semantic/publicationで固定する判断は次のとおりです。
 
 1. applicabilityは`package.json`の`dependencies`/`devDependencies`にある直接`next`だけを観測し、全non-applicableはNode/config/sourceを読まずrequest-independent `not_applicable`、mixedはapplicable rootだけを通します。有効な非空direct `next`が両tableにある場合も、値の一致・不一致を比較せずapplicableです。malformed package、または存在を確認したroot `package.json`の通常read I/O failureは専用`CSV-NEXT-APPLICABILITY-002`でfail-closedにします。missing packageは`CSV-NEXT-APPLICABILITY-001`、limit・integrity・path-safety failureとpackage判定後のsource read failureはそれぞれの既存stage/codeを維持します。

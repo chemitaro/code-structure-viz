@@ -1,0 +1,61 @@
+{
+  "schema": "code-structure-viz.next-process-launch-observation/v2",
+  "version": 2,
+  "producer": "reference",
+  "platform": "fixture",
+  "request_id": "1111111111111111111111111111111111111111111111111111111111111111",
+  "policy_digest": "abead3e8d882e02139fdfd849988fb3518e4d8f8b2302022699796c53c026448",
+  "spawn": {
+    "primitive": "subprocess.Popen",
+    "pid": 1234,
+    "pgid": 1234,
+    "parameters": {
+      "argv": ["/opt/toolchain/node", "--max-old-space-size=512", "/private/tmp/csv-next-reference/runtime/next-adapter.mjs"],
+      "shell": false,
+      "cwd": "/private/tmp/csv-next-reference/cwd",
+      "passed_environment": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+      "stdio": {"stdin": "pipe", "stdout": "pipe", "stderr": "pipe"},
+      "fd_inheritance": {"close_fds": true, "allowed": [0, 1, 2]},
+      "process_group": {"start_new_session": true, "terminate_scope": "group", "wait_direct_child": true}
+    }
+  },
+  "capture": {
+    "stdin_bytes": 512,
+    "stdin_sent_bytes": 512,
+    "stdout_bytes": 1024,
+    "stdout_retained_bytes": 1024,
+    "stderr_bytes": 0,
+    "stderr_retained_bytes": 0,
+    "stdout_eof": true,
+    "stderr_eof": true
+  },
+  "exit_code": 0,
+  "response": {
+    "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "control": {
+      "protocol": "code-structure-viz.next-adapter/v2",
+      "adapter_version": "0.1.0",
+      "binding": {"state": "bound", "request_id": "1111111111111111111111111111111111111111111111111111111111111111"},
+      "runtime": {
+        "engine": "node",
+        "version_raw": "22.10.0",
+        "version": "22.10.0",
+        "eligibility": "supported",
+        "observation_source": "process.versions.node"
+      },
+      "result_kind": "success"
+    }
+  },
+  "candidate_check": "unchanged",
+  "assets_check": "unchanged",
+  "terminal_cause": "none",
+  "cleanup": {
+    "group_stop": "not_required",
+    "signals": [],
+    "direct_child_waited": true,
+    "pipes_closed": true,
+    "candidate_closed": true,
+    "private_root_removed": true
+  },
+  "transport_payload_admissible": true
+}
