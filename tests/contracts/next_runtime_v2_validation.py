@@ -12,8 +12,15 @@ from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from referencing import Registry, Resource
 
 from tests.contracts.next_reference_validation import bounded_decode_json
+from tests.contracts.next_trusted_profile_v1_reference import (
+    PROFILE_DECLARATIONS,
+    TRUSTED_PACKAGE_PREFIX,
+    TRUSTED_VIRTUAL_PREFIX,
+    trusted_profile_metadata_v1,
+)
 
 if TYPE_CHECKING:
+    from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitionSeal
     from tests.contracts.next_runtime_v2_reference import (
         RetainedExecutionAssets,
         RetainedResponseFrameV2,
@@ -71,6 +78,81 @@ def validate_execution_assets_v1(value: dict[str, Any], owner: RetainedExecution
         raise ValueError("execution asset metadata differs from its retained bytes")
 
 
+def validate_trusted_environment_manifest_shape_v2(value: dict[str, Any]) -> None:
+    """Closed manifest shape only, not profile, hash or retained-byte admission."""
+
+    _validate_schema("next-trusted-type-environment-v2", value)
+
+
+def validate_trusted_environment_manifest_v2(
+    value: dict[str, Any], owner: RetainedExecutionAssets
+) -> None:
+    """Join reference profile metadata to the one retained declaration owner."""
+
+    from tests.contracts.next_runtime_v2_reference import RetainedExecutionAssets
+
+    if type(owner) is not RetainedExecutionAssets:
+        raise TypeError("trusted metadata requires a retained execution asset owner")
+    validate_trusted_environment_manifest_shape_v2(value)
+    if any(value[key] != item for key, item in trusted_profile_metadata_v1().items()):
+        raise ValueError("manifest differs from the locked trusted metadata")
+    descriptor = owner.descriptor()
+    validate_execution_assets_v1(descriptor, owner)
+    members = {member["package_path"]: member for member in descriptor["members"]}
+    expected_files = [
+        {
+            "package_path": TRUSTED_PACKAGE_PREFIX + name,
+            "virtual_path": TRUSTED_VIRTUAL_PREFIX + name,
+            "size_bytes": size,
+            "sha256": sha,
+            "license_id": license_id,
+        }
+        for name, size, sha, license_id in PROFILE_DECLARATIONS
+    ]
+    if value["files"] != expected_files:
+        raise ValueError("manifest differs from the locked trusted declaration profile")
+    if {path for path, row in members.items() if row["role"] == "trusted_declaration"} != {
+        row["package_path"] for row in expected_files
+    }:
+        raise ValueError("retained assets differ from the locked declaration role set")
+    if any(
+        members[row["package_path"]]["size_bytes"] != row["size_bytes"]
+        or members[row["package_path"]]["sha256"] != row["sha256"]
+        for row in expected_files
+    ):
+        raise ValueError("manifest differs from its retained declaration bytes")
+    semantic_preimage = {
+        **{key: item for key, item in value["environment_descriptor"].items() if key != "sha256"},
+        **{
+            key: item
+            for key, item in value.items()
+            if key not in {"schema", "environment_descriptor", "files", "manifest_sha256"}
+        },
+        "files": [
+            {key: item for key, item in row.items() if key != "package_path"}
+            for row in value["files"]
+        ],
+    }
+    encoded = json.dumps(
+        semantic_preimage,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if value["environment_descriptor"]["sha256"] != hashlib.sha256(encoded).hexdigest():
+        raise ValueError("trusted environment digest differs from its logical profile preimage")
+    encoded = json.dumps(
+        {key: item for key, item in value.items() if key != "manifest_sha256"},
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if value["manifest_sha256"] != hashlib.sha256(encoded).hexdigest():
+        raise ValueError("trusted manifest digest differs from its package mapping preimage")
+
+
 def validate_process_launch_policy_v2(value: dict[str, Any]) -> None:
     """Validate the closed prelaunch policy and its candidate/argv join."""
 
@@ -96,6 +178,37 @@ def validate_launch_policy_assets_v2(value: dict[str, Any], owner: RetainedExecu
         raise ValueError("policy execution asset identity differs from its retained owner")
     if value["adapter"] != owner.adapter_identity():
         raise ValueError("policy adapter identity differs from its retained entrypoint")
+
+
+def validate_launch_policy_trusted_v2(
+    value: dict[str, Any], owner: RetainedExecutionAssets
+) -> None:
+    """Add the retained declaration-profile join, not real compiler admission."""
+
+    from tests.contracts.next_runtime_v2_reference import trusted_environment_manifest_v2
+
+    manifest = trusted_environment_manifest_v2(owner)
+    validate_launch_policy_assets_v2(value, owner)
+    if value["trusted_environment_digest"] != manifest["environment_descriptor"]["sha256"]:
+        raise ValueError("policy differs from its retained trusted environment")
+
+
+def validate_source_seal_trusted_v2(
+    seal: SourceAcquisitionSeal, owner: RetainedExecutionAssets
+) -> None:
+    """Join unchanged source-seal identity to read-only retained profile metadata."""
+
+    from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitionSeal
+    from tests.contracts.next_runtime_v2_reference import trusted_environment_manifest_v2
+
+    if type(seal) is not SourceAcquisitionSeal:
+        raise TypeError("trusted profile joins require an actual SourceAcquisitionSeal")
+    seal.__post_init__()
+    plan = seal.final_plan
+    _validate_schema("next-source-plan-v1", plan)
+    manifest = trusted_environment_manifest_v2(owner)
+    if plan["trusted_environment_digest"] != manifest["environment_descriptor"]["sha256"]:
+        raise ValueError("source seal differs from its retained trusted environment")
 
 
 def validate_runtime_binding_identity_v1(value: dict[str, Any]) -> None:

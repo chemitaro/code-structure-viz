@@ -478,6 +478,7 @@ def test_policy_rejects_unsafe_absolute_path_aliases(path: str) -> None:
         "next-runtime-binding-v1",
         "next-process-launch-observation-v2",
         "next-adapter-response-v2",
+        "next-trusted-type-environment-v2",
     ],
 )
 def test_new_policy_schemas_are_closed_valid_draft202012(name: str) -> None:

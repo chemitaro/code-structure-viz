@@ -21,7 +21,7 @@ roleは`adapter`、`typescript_lib`、`trusted_declaration`です。license/noti
 
 ## 同一bytes ownerと検証の二層
 
-referenceの`retain_execution_assets_v1`は既読のimmutable bytesを一つのsnapshotへ保持します。mutableなcaller mappingの後続変更、返したdescriptorの変更はownerへ影響しません。filenameからの後続再read、自由なcaller version/hash、byte以外からの暗黙変換は使いません。
+referenceの`retain_execution_assets_v1`は既読のimmutable bytesを一つのsnapshotへ保持します。通常constructorでcaller tupleをownerへ昇格させず、factoryだけが生成します。mutableなcaller mappingの後続変更、返したdescriptorの変更はownerへ影響しません。filenameからの後続再read、自由なcaller version/hash、byte以外からの暗黙変換は使いません。trusted profileのreadonly metadataとbyte joinは`next-trusted-type-environment-v2.md`を参照します。
 
 ownerの`descriptor()`、`adapter_identity()`、`staging_members()`は同じsnapshotから導出します。header versionはentrypointの先頭に一度だけ現れるASCII stable semver markerで、BOM/CRLF/重複/prerelease/build metadata等の旧採択済み拒否規則を保持します。protocolはpolicy schemaと同じ`code-structure-viz.next-adapter/v2`です。
 

@@ -17,16 +17,34 @@ from tests.contracts.next_runtime_v2_validation import (
     validate_response_frame_bytes_v2,
     validate_runtime_binding_identity_v1,
     validate_runtime_binding_observation_v1,
+    validate_trusted_environment_manifest_v2,
+)
+from tests.contracts.next_trusted_profile_v1_reference import (
+    PROFILE_DECLARATIONS,
+    TRUSTED_PACKAGE_PREFIX,
+    TRUSTED_VIRTUAL_PREFIX,
+    trusted_profile_metadata_v1,
 )
 
 ENTRYPOINT_MEMBER = "code_structure_viz/_next_runtime/next-adapter.mjs"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RetainedExecutionAssets:
     """One immutable byte snapshot for content identity and later staging."""
 
     _members: tuple[tuple[str, str, bytes], ...] = field(repr=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("execution assets are created by retain_execution_assets_v1")
+
+    @classmethod
+    def _from_retained_members(
+        cls, members: tuple[tuple[str, str, bytes], ...]
+    ) -> "RetainedExecutionAssets":
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "_members", members)
+        return instance
 
     def descriptor(self) -> dict[str, Any]:
         record: dict[str, Any] = {
@@ -79,7 +97,7 @@ def retain_execution_assets_v1(
     snapshot = tuple((path, role, content) for path, (role, content) in members.items())
     if any(not isinstance(content, bytes) for _path, _role, content in snapshot):
         raise TypeError("execution asset content must already be immutable bytes")
-    retained = RetainedExecutionAssets(
+    retained = RetainedExecutionAssets._from_retained_members(
         tuple(
             (path, role, bytes(content))
             for path, role, content in sorted(snapshot, key=lambda row: row[0].encode("utf-8"))
@@ -116,6 +134,64 @@ def runtime_binding_identity_v1(
     }
     validate_runtime_binding_identity_v1(identity)
     return identity
+
+
+def trusted_environment_manifest_v2(assets: RetainedExecutionAssets) -> dict[str, Any]:
+    """Read-only profile metadata from retained bytes; no resource relookup."""
+
+    if type(assets) is not RetainedExecutionAssets:
+        raise TypeError("trusted metadata requires a retained execution asset owner")
+    members = {member["package_path"]: member for member in assets.descriptor()["members"]}
+    if any(TRUSTED_PACKAGE_PREFIX + name not in members for name, *_rest in PROFILE_DECLARATIONS):
+        raise ValueError("retained bytes are missing a locked trusted declaration")
+    if {path for path, row in members.items() if row["role"] == "trusted_declaration"} != {
+        TRUSTED_PACKAGE_PREFIX + name for name, *_rest in PROFILE_DECLARATIONS
+    }:
+        raise ValueError("retained assets differ from the locked declaration role set")
+    if any(
+        members[TRUSTED_PACKAGE_PREFIX + name]["size_bytes"] != size
+        or members[TRUSTED_PACKAGE_PREFIX + name]["sha256"] != sha
+        for name, size, sha, _license in PROFILE_DECLARATIONS
+    ):
+        raise ValueError("retained bytes differ from the locked trusted declaration profile")
+    files = [
+        {
+            "package_path": TRUSTED_PACKAGE_PREFIX + name,
+            "virtual_path": TRUSTED_VIRTUAL_PREFIX + name,
+            "size_bytes": members[TRUSTED_PACKAGE_PREFIX + name]["size_bytes"],
+            "sha256": members[TRUSTED_PACKAGE_PREFIX + name]["sha256"],
+            "license_id": license_id,
+        }
+        for name, _size, _sha, license_id in PROFILE_DECLARATIONS
+    ]
+    descriptor = {
+        "schema": "code-structure-viz.next-trusted-types/v2",
+        "environment_version": "2",
+        "semantic_profile_id": "next-trusted-profile-v1",
+    }
+    metadata = trusted_profile_metadata_v1()
+    preimage = {
+        **descriptor,
+        **metadata,
+        "files": [
+            {key: value for key, value in row.items() if key != "package_path"} for row in files
+        ],
+    }
+    encoded = json.dumps(
+        preimage, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    manifest = {
+        "schema": "code-structure-viz.next-trusted-type-environment-manifest/v2",
+        "environment_descriptor": {**descriptor, "sha256": hashlib.sha256(encoded).hexdigest()},
+        **metadata,
+        "files": files,
+    }
+    encoded_manifest = json.dumps(
+        manifest, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    manifest["manifest_sha256"] = hashlib.sha256(encoded_manifest).hexdigest()
+    validate_trusted_environment_manifest_v2(manifest, assets)
+    return manifest
 
 
 def reference_process_observation_v2(

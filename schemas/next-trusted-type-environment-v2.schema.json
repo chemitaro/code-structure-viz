@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-trusted-type-environment-v2",
+  "title": "CodeStructureViz retained Next trusted environment manifest v2",
+  "description": "Logical declaration-profile identity and package mapping. Exact locked profile, both hash preimages and retained-byte joins require the owner validator; no actual runtime or shipping-license claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "environment_descriptor", "typescript_version", "identifier_unicode_table_digest", "license_inventory_digest", "files", "reserved_module_specifiers", "reserved_global_names", "certified_symbols", "anti_shadowing_witness", "manifest_sha256"],
+  "properties": {
+    "schema": {"const": "code-structure-viz.next-trusted-type-environment-manifest/v2"},
+    "environment_descriptor": {"$ref": "#/$defs/descriptor"},
+    "typescript_version": {"const": "5.9.2"},
+    "identifier_unicode_table_digest": {"$ref": "#/$defs/digest"},
+    "license_inventory_digest": {"$ref": "#/$defs/digest"},
+    "files": {"type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": {"$ref": "#/$defs/file"}},
+    "reserved_module_specifiers": {"$ref": "urn:code-structure-viz:schema:next-trusted-type-environment-v1#/properties/reserved_module_specifiers"},
+    "reserved_global_names": {"$ref": "urn:code-structure-viz:schema:next-trusted-type-environment-v1#/properties/reserved_global_names"},
+    "certified_symbols": {"$ref": "urn:code-structure-viz:schema:next-trusted-type-environment-v1#/properties/certified_symbols"},
+    "anti_shadowing_witness": {"$ref": "urn:code-structure-viz:schema:next-trusted-type-environment-v1#/properties/anti_shadowing_witness"},
+    "manifest_sha256": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"$ref": "urn:code-structure-viz:schema:next-execution-assets-v1#/$defs/digest"},
+    "descriptor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "environment_version", "semantic_profile_id", "sha256"],
+      "properties": {
+        "schema": {"const": "code-structure-viz.next-trusted-types/v2"},
+        "environment_version": {"const": "2"},
+        "semantic_profile_id": {"const": "next-trusted-profile-v1"},
+        "sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["package_path", "virtual_path", "size_bytes", "sha256", "license_id"],
+      "properties": {
+        "package_path": {"enum": ["code_structure_viz/_next_runtime/trusted/jsx-runtime.d.ts", "code_structure_viz/_next_runtime/trusted/lib.d.ts", "code_structure_viz/_next_runtime/trusted/next-dynamic.d.ts", "code_structure_viz/_next_runtime/trusted/react.d.ts"]},
+        "virtual_path": {"enum": ["/.code-structure-viz/trusted/v1/jsx-runtime.d.ts", "/.code-structure-viz/trusted/v1/lib.d.ts", "/.code-structure-viz/trusted/v1/next-dynamic.d.ts", "/.code-structure-viz/trusted/v1/react.d.ts"]},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "license_id": {"enum": ["MIT", "Apache-2.0"]}
+      }
+    }
+  }
+}

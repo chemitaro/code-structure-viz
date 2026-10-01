@@ -22,7 +22,7 @@ package_sequence_key: "ISSUE-05"
 
 ### Aの実行Moduleと版移行
 
-Next実行ModuleのInterfaceは、source seal、analysis intent、明示runtime選択を受け、validated transport resultまたはtyped failureを返す一つの入口にします。Implementationがpackage bytesの保持、request作成、private staging、Node候補計測、policy、public spawn、bootstrap実測、bounded capture、wait/cleanupを所有します。callerへprepare/open/stage/launch/closeの順序を公開せず、Coreのsemantic検証/Artifact公開を吸収しません。将来のnative/container backend registryは作りません。
+Next実行ModuleのInterfaceは、source seal、analysis intent、明示runtime選択を受け、validated transport resultまたはtyped failureを返す一つの実行入口にします。package-only適用permission成立後だけModuleを生成し、その内部でpackage資材を一度保持します。Coreに許す起動前inspectionは同じownerのreadonly trusted descriptorで、それをsource sealへ渡します。実行入口はそのownerを再利用し、seal後のresource再取得をしません。Implementationがrequest作成、private staging、Node候補計測、policy、public spawn、bootstrap実測、bounded capture、wait/cleanupを所有します。callerへprepare/open/stage/launch/closeの順序を公開せず、Coreのsemantic検証/Artifact公開を吸収しません。将来のnative/container backend registryは作りません。
 
 pre-launch policyはabsolute Node候補の計測identity、保持したpackage資材identity、stable major >=22の適格条件、fixed old-space flag、run-private entrypoint、空cwd、明示env、継承FD/pipes/group/limitsを保持します。実Node versionは含めません。argvの構造は`[absolute_node, "--max-old-space-size=512", private_entrypoint]`です。run rootはprivateで、`runtime/`と空の`cwd/`を分離します。同じ保持bytesからheader version/hash/stagingを導出し、既存metadata resolverを呼んでから別lookupでresourceを読み直しません。
 
@@ -66,6 +66,8 @@ observation producerはreference evidenceのclosed inputからowner fields/polic
 これらはデータの一貫性であり、実response bytes/SHA/control/countersへのjoinはA02-2、trusted descriptor/profile完全性はA02-3、実OS owner観測はA04の必須gateです。referenceのplaceholder SHAやpid、boolを実測扱いしません。private wire/compatibility/provenance/public closureは未完了です。
 
 A02-2のresponse初スライスは`docs/contracts/next-adapter-response-v2.md`です。rootはschema/control/nullable semantic payloadの一つのclosed JSON。runtime binding/compatibilityをchildから除き、既存要素/model/proof defsとwire非依存bounded JSON grammarだけを再利用します。immutable raw frame ownerを通常factoryで生成し、元bytesのSHA/control/observed stdout量をprocess recordへjoinします。success payload shapeとCore proof acceptanceを区別し、request bytes/owner/context/trusted/proof/compatibility joinsとpublic closureは未完了のままです。
+
+trusted manifest/descriptor v2は`docs/contracts/next-trusted-type-environment-v2.md`へ具体化しました。新descriptorのlogical profile preimageはfixed package pathを除き、新manifest preimageはdescriptor hashとfixed package mappingを含みます。宣言bytesと14 symbols、意味profile=1を維持し、旧v1 hash/preimageを改変しません。同じretained ownerの固定4 declaration/role/bytes、全metadata、両hashを検証し、実source-seal/v1のopaque digestとpolicyへjoinします。constructor/duck ownerや再hashされた偽profileを拒否します。起動前readonly descriptorは期待する宣言metadataであり、実Node/TS/child利用の観測ではありません。source-phase coordinator、request/stdin/response/proof、compatibility/provenance/public closureと実packageは後続gateです。
 
 ```plantuml
 @startuml
