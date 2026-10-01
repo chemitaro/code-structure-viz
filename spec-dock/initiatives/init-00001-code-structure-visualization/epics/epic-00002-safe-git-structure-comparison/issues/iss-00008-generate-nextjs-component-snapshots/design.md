@@ -81,17 +81,21 @@ runtime-result / provenanceの初スライスは`docs/contracts/next-provenance-
 
 Core failure closureは`docs/contracts/next-semantic-admission-v2.md`のtyped unionです。expected child payload invariantを専用errorからopaque rejectionへ閉じ、model/proof-validなrecord +1だけ実countを保持します。owner錯誤と無関係の内部errorを通常failureへ潰しません。same-runtime candidate/source/assetsにjoinしたCore rejectionは実control prefixを保持し、semantic/compatibility/model/budget suffixを未認定に保ちます。public known measurementとreader-owned source prefix・publication全refs、actual OS/TSは後続gateです。
 
+source-prefix限定Strict advisory（exact `e15033d6...`）を`artifacts/20261001t122734z--issue8-a-source-prefix-analysis.md`へ保存し、採否・未決判断を`artifacts/20261001t122836z-decision-candidate-a-source-prefix-asset-failure-adjudication.md`へ分離しました。Aの因果順に従い、source取得前に成立した同一ownerのexpected resourcesは早期prefixにも保持します。target packageの再利用は同じanchored sessionの一度読んだbytesに限り、最初のsignatureも最終drift checkへ含めます。phase-local reader traceとconfig/membership/selection/sealのengine-owned milestoneは別の証拠です。stage、phase、count、journalをcallerから注入しません。A02はreference-only契約整備であり、production façade/journalの接続・actual measurementはA03後のA04で行います。同梱資材の新availability/integrity mappingは未採択で、code/outcome/schemaへの反映を先行しません。
+
 ```plantuml
 @startuml
-title Current v1: single authority chain
+title Current A: single authority chain
 left to right direction
 component "Frozen package bytes\nPackageApplicabilityMatrix" as A
+component "Retained execution assets\nreadonly expected trusted descriptor" as E
 component "Frozen source seal\nconfig + graph" as S
 component "Provenance + actual validated request/response" as V
 component "Semantic decision" as D
 component "Final publication decision\nsealed bytes/measurements" as P
 component "domain / root / stdout / stderr / exit" as O
-A --> S
+A --> E
+E --> S
 S --> V
 V --> D
 D --> P
@@ -108,7 +112,7 @@ Membershipの`files`/`include`/`exclude`値は、各値を宣言したconfig fil
 
 target-completeness rowsはvalidated responseのtarget-resolution proofだけを表します。validated requestの後、response decode/validationなどvalidated semantic responseより前の段階で失敗しproofがない場合、要求targetはrequest/config/run identityに保持しますが、domainの`coverage.target_completeness`は空配列にします。この空配列は「target未指定」や「全targetがcomplete」を意味せず、resolution proofの行がないことを示します。response failureの既存diagnostic/statusを使い、個々のtargetがfailedであるかのようなrow/reasonや`CSV-NEXT-TARGET-001`を生成しません。validated response proofがある通常経路の一行一target・closed failure reasonは変更しません。
 
-`request_independent`はvalidated adapter requestの有無を示すdiscriminatorで、観測prefixの有無を代用しません。prefixはreader-owned acquisition phase/read evidenceから導出します。package preflightはapplicability、root config/local `extends`はapplicability+config、seal前のprogram/context failureはapplicability+config+実source-read identityを保持し、failure後のsuffixをunobserved/nullとします。`source_read` failureに実際の`SourceAcquisitionSeal`がある場合は、そのsealのapplicability/config/source/limits/source-plan prefixを保持し、provenanceの値digest、`NextPublicationContext`、run-decision context、public config、domain source/limitsへ同じ値として投影します。requestとNode/toolchain/trusted-environment/compatibility/process観測、semantic project/entity payload、target-resolution rowsはnullまたは空のままです。source-integrity failureはこのprovenance/publication経路へ入れずterminal fatal branchへ進みます。
+`request_independent`はvalidated adapter requestの有無を示すdiscriminatorで、観測prefixの有無を代用しません。prefixはreader-owned acquisition phase/read evidenceから導出します。package preflightはapplicability、root config/local `extends`はapplicability+実control prefix、seal前のprogram/context failureはapplicability+config+実source-read identityを保持します。適用permission後に完全なasset ownerが成立していれば、そのreadonly expected descriptorから`runtime_bundle`/`trusted_environment`をobservedとして保持します。actual Node/TS利用の観測とは区別し、非適用/package failure/資材保持未完了では両slotを生成しません。実際の取得完了sealを保持する後段だけ、そのapplicability/config/source/limits/source-plan値を同じownerでprovenance、`NextPublicationContext`、run-decision、public config、domainへ結びます。未導出limits/source-planと未作成request/Node/policy/process/version/control/compatibility/model/budget、semantic project/entity payload、target-resolution rowsはnullまたは空のままです。current production sealはcomplete-onlyで、early prefixからpartial-safeを認定しません。source-integrity failureはordinary provenance/publicationへ入れずterminal fatal branchへ進みます。旧v1 schema/fixtureの観測規則をこのv2 clarificationで書き換えません。
 
 semantic rendererはdecisionだけを受け、publication finalizerは実際のcandidate bytesとmeasurementを一度sealします。summary/root-manifest/artifact/typed-unavailableはそのsealed bytesを返すだけで再render/retryしません。selected copy overrunはsemantic statusを変えず、persisted descriptorを保持したpublication-incomplete/exit 3です。canonical JSONはsort_keys/NFC/UTF-8/LF、path-only rowsはNFC UTF-8 bytes、object rowsはcanonical JSON bytesです。
 

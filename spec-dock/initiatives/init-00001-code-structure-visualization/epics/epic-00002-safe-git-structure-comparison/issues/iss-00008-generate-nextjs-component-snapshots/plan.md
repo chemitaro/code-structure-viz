@@ -66,13 +66,16 @@ transport failure-prefix closureはnamed通常causesのcatalog/prefix、post-spa
 
 Core rejection closureはexpected payload violationと内部/owner errorを分け、実model-record +1のmeasurementとsame-runtime prefixを閉じます。新20 testsを含むCore/provenance selectionは88 passed（163.43s）。evidenceは`artifacts/20261001t114128z-disc-a-core-rejection-v2-contract-closure.md`。生成modelの正負はactual 10000/10001 recordsで検証し、不正proofをcount failureで隠しません。次はreader-owned prefix/readonly source-phaseとpublic measurement/exact refs、全A02 gateへ進みます。実TS・A03は未認定です。
 
+source-prefix限定Strict advisoryはexact `e15033d6...`でcompleted、元実行exit0です。原回答とlocal adjudicationを`artifacts/20261001t122734z--issue8-a-source-prefix-analysis.md`、`artifacts/20261001t122836z-decision-candidate-a-source-prefix-asset-failure-adjudication.md`へ保存しました。expected metadataを保持するclarificationだけをCurrent R/Dへ反映し、新asset diagnostic/outcomeは未採択のdecision-candidateとして分離します。重要な未決境界は通常I/Oをdomain unavailable、立証済みinstalled package violationをrun-level fatalへ分けるかです。回答前にcode/message/catalog/schemaへ新policyを実装しません。新code採択後も旧catalog v1を上書きせず、新chainのexact依存closureを検証します。source file/decoded total/countを実evidenceで区別し、既存仕様のdecoded total=`LIMIT-002/source_read`へ整合させる作業は未完了です。A02のreference journalをproduction実測と呼ばず、production source APIの改造はA03後のA04へ保持します。
+
 rollbackはA runtimeのproduction admissionを無効にしてNextをtyped unavailableへ戻し、Python/SQLAlchemyと保存済み旧recordを維持します。旧verified-FD名への偽装fallback、runtime取得、platform縮小は行いません。forward recoveryは主担当が新recordの対応closureとnegative vectorを修復し、task-scoped commit/push後にfresh exact-SHA gateを取り直します。target repositoryやpersistent user dataのmigrationはありません。
 
 各stepの外部reviewはユーザーが許可したGPT-5.6 Sol / Extra Highを基本とし、FinalにはGPT-5.6 Sol / Proを使えます。依頼モデル/推論値と実picker観測を区別します。ユーザーのサブエージェント禁止を守り、レビューも主担当がStrict wrapperへ直接依頼します。長時間jobは元のsession/logで静かに待ち、進捗確認のためにBrowser Useを使いません。
 
 ```text
-frozen package bytes
+frozen target package bytes
   -> applicability matrix (permission only)
+  -> retained execution assets + readonly expected trusted descriptor
   -> frozen control closure + source graph seal
   -> one provenance union + validated request/response
   -> semantic decision
