@@ -19,4 +19,6 @@ descriptorは`schema=code-structure-viz.next-semantic-compatibility/v3`、下記
 
 `compatibility_id=SHA256(CJ15(ten_key_preimage))`。descriptorのschemaとself IDをhashに含めません。source/request/targets/partition/status/model digest/host path/PIDを含めません。admissionルールを十番目のkeyで区別し、既存algorithm versionを新意味へ書き換えません。
 
+2026-10-02採択のowner-closed File/Module公開条件は、この未実装・未出荷admission profileに含めます。v3/profile/producer0.2.0の計画identityは維持し、旧v1/v2のidentity/hash/KATへ遡及適用しません。新partition/public model値とその新KATは修正後の公開集合で固定します。private wireの既存excluded enumはshape再利用であり、旧v2 certificateが新公開条件を証明するという意味ではありません。
+
 planned schemaは`schemas/next-compatibility-v3.schema.json`、URNは`urn:code-structure-viz:schema:next-compatibility-v3`です。全objectをclosedにし、変えないleafだけ既存exact refsを再利用します。typed same-owner Core/candidateから生成し、独立validatorでmetadata/binding/digestとpreimageを再導出します。旧v2 compatibilityをv3へcastしません。

@@ -19,6 +19,8 @@ reflected_to: ["../requirement.md", "../design.md", "../plan.md"]
 
 2026-10-02、ユーザーが取得inventoryとsafe semantic subsetを分離する推奨案を採択し、先に要件・設計・計画を修正/チェックしてから実装再開するよう指示しました。採択の記録であり、仕様レビューpass・実装完成の証拠ではありません。
 
+その後ユーザーが[owner-closed File/Module公開のA案](20261002t041350z-adr-issue8-owner-closed-file-module-publication.md)を採択しました。本ADRの取得所有権・元taint・Project二viewは維持し、program Fileのsafe公開条件はその補足ADRを優先します。「File自身がuntaintedなら全件公開」とは解釈しません。採択前candidateや初回review failの証拠は書き換えません。
+
 ## Context
 
 旧Core-v2は全request Fileをmodelへ要求します。一方、parse/read file rootは同じFile自身をmandatory taint seedに含め、safe modelはtainted recordを公開できません。診断encodeでは解消できず、model correspondenceとproof所有権の整合が必要です。再現と採択前候補は旧Artifactへ保存済みで、後からacceptedへ書き換えません。

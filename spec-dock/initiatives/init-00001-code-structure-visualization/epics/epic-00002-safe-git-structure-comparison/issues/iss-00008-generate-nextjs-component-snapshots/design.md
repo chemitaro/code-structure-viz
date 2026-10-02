@@ -124,7 +124,7 @@ run-level terminal branchはpublication finalizerの前に一度だけ分岐し�
 
 ### SI: Source inventory / safe subsetのtarget design
 
-accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`に基づき、**全取得inventoryは同じ親owner、公開modelは独立に立証したsafe subset**とします。旧File correspondence guardやFile seedを個別に緩和しません。詳細正本は[admission-v3](../../../../../../../docs/contracts/next-semantic-admission-v3.md)、[semantic-v3](../../../../../../../docs/contracts/next-semantic-v3.md)、[compatibility-v3](../../../../../../../docs/contracts/next-compatibility-v3.md)です。このSI節と三文書は、上記admission/public-v2・十三key fingerprint記述および旧Current indexの対応部分を新targetとして置換します。その他の旧baselineを全面的に捨てません。
+accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`とA案補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`に基づき、**全取得inventoryは同じ親owner、公開modelは独立に立証したowner-closed safe subset**とします。旧File correspondence guardやFile seedを個別に緩和しません。詳細正本は[admission-v3](../../../../../../../docs/contracts/next-semantic-admission-v3.md)、[semantic-v3](../../../../../../../docs/contracts/next-semantic-v3.md)、[compatibility-v3](../../../../../../../docs/contracts/next-compatibility-v3.md)です。このSI節と三文書は、上記admission/public-v2・十三key fingerprint記述および旧Current indexの対応部分を新targetとして置換します。その他の旧baselineを全面的に捨てません。
 
 | 所有者 / view | 保持内容と照合 |
 | --- | --- |
@@ -136,7 +136,11 @@ accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset
 
 proof source metadataは親から再構成し、childが正しい値を送った場合も`record`payloadを許しません。literal `record:null`はoptional-object schemaに違反します。Project proofは全取得membership、公開Projectはsafe membershipなので、同じIDでも全record一致を要求せず、`file_ids`以外の完全一致と正規filterを検証します。Project IDはroot、config digestはroot/source_roots/config_path/compiler_options、File IDはproject ID/pathのままです。
 
-File direct failure dispositionはvalidated parse/read rootへ結合し、他のtainted Fileはexcluded/tainted、安全Fileは必ず公開。File以外の既存selection-only exclusionとunsupported frontierは維持します。Projectはuntaintedで必ず公開し、全File除外時も空membershipです。full proofのcausal規則は維持し、File→Project逆edgeを新設しません。
+File direct failure dispositionはvalidated parse/read rootへ結合し、他のtainted Fileはexcluded/taintedです。untainted program Fileは、full inventory/taint/selectionから独立導出した正規owner Moduleも公開可能な場合だけ公開します。Moduleがfailure/taintで非公開ならFileはexcluded/failed、合法selection/unsupportedなら対応する既存reasonでexcludedです。これを偽File taintやFile自身のdirect failedへ変換しません。非program Fileはuntaintedなら必ず公開し、program Fileもowner-closed条件を満たせば必ず公開します。
+
+先にfull discovered baseの正規File→Module所有関係を検証し、次に公開可能Module集合を既存意味で独立導出し、そこからFile partitionとProject projectionを計算します。childがFile/Moduleを同時に省略したmodelや自由boolからeligible集合を作りません。Module欠落/重複や不正referenceを除外で隠しません。selected cardinality限定例外はtyped target unavailable専用で、available公開modelの一対一保証には転用しません。公開可能Module集合と提出public Modulesもexact equalityで照合します。
+
+File以外の既存selection-only exclusionとunsupported frontierは維持します。Projectはuntaintedで必ず公開し、全File除外時も空membershipです。full proofのcausal規則を維持し、Module→FileやFile→Projectの逆taint edgeは新設しません。source-safeとpublic eligibilityは別判定で、失敗ではない合法selectionのみをpartial-safeへ昇格/降格しません。
 
 partial-safeの公開は、同じseal-owned resolved/open source graphのlocality evidenceにも結合します。source-integrity driftとordinary reader failureを混ぜず、取得完了後の解析失敗をreader prefixの証明にしません。full mandatory seeds/causal/target/exportとlocality不成立をsafe subsetだけで回避しません。
 
@@ -150,13 +154,15 @@ title SI: acquired inventory and safe publication
 left to right direction
 rectangle "Same source seal / request v2\nall acquired Projects + Files" as S
 rectangle "Full proof view\nparent source records + semantic discovery\nmandatory seeds / causal / taint / locality" as F
+rectangle "Owner-closed publication eligibility\nvalidated Modules before File projection" as E
 rectangle "Proof-only File / semantic records\nfailed or excluded / privately retained" as X
 rectangle "Safe model\nProject.safe file_ids + safe Files\nclosed public references" as M
 rectangle "Core v3 / public v3\ncounts + partition identity\nsame immutable publication owner" as P
 S --> F
 F --> X
-F --> M
-S --> M : canonical projection only
+F --> E : full base / taint / selection
+E --> M : exact File partition / Project projection
+E --> X : untainted File with unavailable Module
 M --> P
 F --> P : validated counts / proof
 note bottom of X : File itself remains a mandatory seed; no public payload injection
@@ -166,7 +172,7 @@ note bottom of X : File itself remains a mandatory seed; no public payload injec
 | 対応 | authority | 現在のevidence |
 | --- | --- | --- |
 | admission/public/run/provenance v2 | historical reference、SI外の不変baseline | 既存referenceの限定pass。新SIではない。 |
-| SI-v3三契約 + Current R/D/P + ADR | accepted target | docs-only a4efdc3のSpec Review fail/P1一件。File/Module公開条件の追加判断待ち。schema/reference未実装。 |
+| SI-v3三契約 + Current R/D/P + ADR | accepted target | a4efdc3のSpec Review fail/P1一件を受け、A案owner-closed公開を明示採択・反映。同reviewer再認証待ち。schema/reference未実装。 |
 | 新schema/reference/全public closure | accepted target | A02後続TDD/gates、未認定。 |
 | actual TypeScript/OS/CLI/package | A runtimeとSI target | A03後のA04/A05、未認定。 |
 

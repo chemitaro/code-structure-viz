@@ -4,7 +4,7 @@
 
 ## Closed public record
 
-planned `schemas/next-semantic-v3.schema.json`は既存v2のexact root keysに**必須**`source_inventory_summary`を一つ追加します。`schema`は`code-structure-viz.semantic/v3`、compatibilityはv3 exact refに変更します。type/domain/document_kind/status/incomplete_kindと全entity/File/Project leafのshape/ID、source/request/coverage/diagnosticのshapeは維持します。Project.file_idsとFile集合は新admission profileのsafe viewです。取得membershipはpublic requestのseal-derived configに残り、model Projectsのsafe membershipと一致する必要はありません。
+planned `schemas/next-semantic-v3.schema.json`は既存v2のexact root keysに**必須**`source_inventory_summary`を一つ追加します。`schema`は`code-structure-viz.semantic/v3`、compatibilityはv3 exact refに変更します。type/domain/document_kind/status/incomplete_kindと全entity/File/Project leafのshape/ID、source/request/coverage/diagnosticのshapeは維持します。Project.file_idsとFile集合は新admission profileのowner-closed safe viewです。program FileはFile自身と正規Moduleの公開可能性を確認した場合だけ公開し、untaintedでもowner Moduleが合法的に非公開ならFileも非公開です。Fileに偽taintを付けず、公開program File→Module一件の保証を維持します。取得membershipはpublic requestのseal-derived configに残り、model Projectsのsafe membershipと一致する必要はありません。
 
 `source`は同じsealed SourceViewの観測identityと全SourceView file count。`request`は同じ親intent/config/source plan/targets/depth/limits。safe subsetからsource/requestを再構成しません。public refsはsafe集合内に閉じ、private proof/record/source bytes/base64、control、host paths/PID/raw stderrは出しません。既存公開coverageのsafe・excluded・failed countsは検証済みproofを投影し、新summaryだけをもう一つの正本にしません。
 
@@ -24,7 +24,7 @@ exact七keysのclosed objectです。全nested objectも次のexact keysだけ�
 | `records` | `proof_discovered`、`published`、`proof_only`、`accounted`：admissionの実record counts。 |
 | `published_entities` | `modules`、`components`、`total`：safe model実数。 |
 
-`acquired.files = safe.files + proof_only.failed_files + proof_only.excluded_files`、`records.accounted = records.published + records.proof_only = records.proof_discovered`（正常unique base）、`published_entities.total = modules+components`。schema shapeだけでこの等式やowner joinsを認定しません。summaryにproof-only paths/IDs/bytes/messagesを追加しません。public coverageの既存redacted/path/ref方針は変更しません。
+`acquired.files = safe.files + proof_only.failed_files + proof_only.excluded_files`、`records.accounted = records.published + records.proof_only = records.proof_discovered`（正常unique base）、`published_entities.total = modules+components`。`safe.files`は公開File実数で、F−Tの件数ではありません。`excluded_files`はFile自身のtaintと、owner Module原因のuntainted File除外の両方を含みます。Module原因だけのFileを`failed_files`や直接read/parse診断へ計上しません。schema shapeだけでこの等式やowner joinsを認定しません。summaryに新keyやproof-only paths/IDs/bytes/messagesを追加しません。public coverageの既存redacted/path/ref方針は変更しません。
 
 ## Hash / fingerprint
 

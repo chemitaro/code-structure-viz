@@ -20,7 +20,7 @@ package_sequence_key: "ISSUE-05"
 
 2026-10-02、ユーザーはsource inventoryとsafe subsetの先行整合方針を採択し、仕様修正/チェック後の実装再開を指示しました。下記SI計画をA02内のdiagnostic/stderr unitより前へ挿入します。旧candidateの「人間判断待ち」は当時の履歴で、現在のsource方針は採択済みです。別のASSET failure policyは未採択のままです。
 
-現在のgate evidence: docs-only checkpoint `a4efdc373a515801777c924a1d14675fda686955`のfresh独立Spec Reviewはvalid `fail`/P1一件。nonFile rootでuntainted Fileとtainted Moduleの公開条件が衝突し、専用findings分析も`design-decision-required`です。SI-02未通過なのでSI-03以降は開始しません。判断資料は`artifacts/20261002t011638z-03-decision-candidate-source-inventory-file-module-publication-decision.md`、同reviewerは`issue8-source-inventory-spec-review`。この追記は実行状態の証拠で、候補の採択や公開条件の変更ではありません。
+現在のgate evidence: docs-only checkpoint `a4efdc373a515801777c924a1d14675fda686955`のfresh独立Spec Reviewはvalid `fail`/P1一件。nonFile rootでuntainted Fileとtainted Moduleの公開条件が衝突し、専用findings分析は`design-decision-required`でした。2026-10-02にユーザーがA案owner-closed公開を採択したため、補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`とCurrent R/D/P・v3契約へ反映します。元candidateは採択前の履歴です。SI-02は同reviewer `issue8-source-inventory-spec-review`への修正SHA followup passまで未通過で、SI-03以降は開始しません。採択やlocal文書checkをreview passに読み替えません。
 
 ### A runtime移行の順序
 
@@ -109,14 +109,14 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 
 ### SIの実装再開順序と出口条件
 
-RequirementのSI-REQ-001〜007、DesignのSI節と三つの新v3契約、accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`を入力とします。ここで新設するAPI/schema/test pathsはplannedで、未実装passに数えません。上記diagnostic briefの「未採択」は当時の履歴です。File correspondence／proof source resolution／Project safe projectionを一緒に閉じ、guard一箇所の抑制やSOURCEへのrelabelで再開しません。
+RequirementのSI-REQ-001〜007、DesignのSI節と三つの新v3契約、accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`とA案補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`を入力とします。ここで新設するAPI/schema/test pathsはplannedで、未実装passに数えません。上記diagnostic briefとFile/Module候補の「未採択」は当時の履歴です。full File/Module base、独立Module eligibility、proof source resolution、exact File partition、Project safe projectionを一緒に閉じ、guard一箇所の抑制やSOURCEへのrelabelで再開しません。
 
 | unit | 作業と依存 | 出口 / 受入対応 |
 | --- | --- | --- |
-| SI-01 仕様checkpoint | Current R/D/P、accepted ADR、admission/public/compatibility-v3 docs、glossary。旧candidate/v1/v2/schema/reference/srcは維持。 | local文書検証、coherent docs-only commit/push。新adapter version0.2.0をtarget contractへ固定。 |
-| SI-02 仕様gate | SI-01のclean/pushed exact SHAをfresh独立ChatGPT Spec Review Strict、GPT-5.6 Sol/Proで検証。作成会話と分離。 | schema-valid `review_status=pass`。finding/重要coverage gapは専用分析、P0/P1のみ修復、同じobjectiveは記録済みreviewerへfollowup。P2/P3は情報のみで修復/backlog/re-review条件にしない。 |
-| SI-03 source/proof reference seam | SI-02後。planned `tests/contracts/next_source_inventory_v3_reference.py` / `_validation.py` / `test_next_source_inventory_v3.py`で、同じrequest-v2からProject/File discovery解決、exact partition、Project safe projection、count/partition fingerprintを一behaviorずつTDD。 | SI-P01/P02/P04/P05/P06のsource seam、SI-N01〜13。raw free requestをownerとして受理せず、source metadata/null注入、欠落/重複/任意除外を拒否。seam greenだけでCore admissionは認定しない。 |
-| SI-04 full Core reference | 新profile/adapter0.2.0 corpusを追加。full proof mandatory seeds/causal/typed taint、source graph/locality、target/export/selection、record/entity budgetを新v3 Coreへjoin。旧algorithmはwire非依存意味だけ再利用。 | same-owner `ValidatedSemanticDecisionV3` / rejection、SI-P01〜06と全SI-N、実10000/+1、actual frozen-input参考正例、独立KAT。旧v2 failure guard/KAT不変。 |
+| SI-01 仕様checkpoint | Current R/D/P、分離ADR＋owner-closed補足ADR、admission/public/compatibility-v3 docs、glossary。旧candidate/v1/v2/schema/reference/srcは維持。 | local文書検証、coherent docs-only commit/push。新adapter version0.2.0をtarget contractへ固定。 |
+| SI-02 仕様gate | SI-01のclean/pushed exact SHAを独立ChatGPT Spec Review Strict、GPT-5.6 Sol/Proで検証。初回はfresh/作成会話と分離、今回の同objective修復は記録済みreviewerへfollowup。 | schema-valid `review_status=pass`。finding/重要coverage gapは専用分析、P0/P1のみ修復。P2/P3は情報のみで修復/backlog/re-review条件にしない。 |
+| SI-03 source/proof reference seam | SI-02後。planned `tests/contracts/next_source_inventory_v3_reference.py` / `_validation.py` / `test_next_source_inventory_v3.py`で、同じrequest-v2からProject/File discovery解決、full-base Module ownerと独立eligibility、exact partition/reason、Project safe projection、count/partition fingerprintを一behaviorずつTDD。 | SI-P01/P02/P04/P05/P06/P07のsource seam、SI-N01〜13/N15。raw free requestをownerとして受理せず、source metadata/null注入、欠落/重複/任意除外、偽owner原因を拒否。seam greenだけでfull root/locality/Core admissionは認定しない。 |
+| SI-04 full Core reference | 新profile/adapter0.2.0 corpusを追加。full proof mandatory seeds/causal/typed taint、source graph/locality、target/export/selection、record/entity budgetを新v3 Coreへjoin。旧algorithmはwire非依存意味だけ再利用。 | same-owner `ValidatedSemanticDecisionV3` / rejection、SI-P01〜07と全SI-N、三nonFile root/selection/全File proof-only/独立targetの正負、実10000/+1、actual frozen-input参考正例、独立KAT。旧v2 failure guard/KAT不変。 |
 | SI-05 public/exact refs | Core green後。compatibility/public/dispatcher/provenance/run/candidates-v3と未作成domain/publication/root/stdout-v2をDesign closure表へ整合。 | 全ref/consumer census、summaryの実count/partition/hash、十key/十四key literal、same-Core JSON/PlantUML、native数値/別owner/privacy、既存Python/SQLAlchemy bytes不変。 |
 | SI-06 diagnostics復帰 | SI source/proofとpublic owners成立後、元catalog-owned diagnostic/stderr、final single publication ownerを閉じる。ASSET新policyは別判断で、未採択branchを実装しない。 | 正規parse/read root→Core/run→public診断。stderr64KiB inclusive/+1でpartial write0・stderr空・manifest用LIMIT-003一件、元capture/selected copyとの分離。 |
 | SI-07 全A02 / A03 | reader-prefix等の残りと新ASSET採否を解消して全A02 gate、その後元fixed pointから独立累積Code Review Strict。 | all required local tests、valid A03 pass。Spec Review/部分reference pass/旧passで代用しない。 |
