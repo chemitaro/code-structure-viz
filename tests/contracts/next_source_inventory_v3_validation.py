@@ -7,6 +7,7 @@ from typing import Any
 from tests.contracts.next_reference_validation import (
     COLLECTIONS,
     TAINT_ORDER_INDEX,
+    TAINT_ROOT_RULES,
     _assert_canonical,
     _causal_edge_is_allowed,
     _id_kind,
@@ -325,11 +326,22 @@ def source_owner_witness_kinds_v3(
             raise SourceInventoryInvalidErrorV3(
                 "model_proof", "owner cause root-origin edge must target its declared seed"
             )
+        if root is not None and edge["rule"] != TAINT_ROOT_RULES[root["kind"]]:
+            raise SourceInventoryInvalidErrorV3(
+                "model_proof", "owner cause root-origin rule must match the canonical root rule"
+            )
         if edge["record_id"] not in records or not _causal_edge_is_allowed(edge, records, roots):
             raise SourceInventoryInvalidErrorV3(
                 "proof_references", "owner cause edge must use closed references"
             )
         adjacency.setdefault(edge["source_id"], set()).add(edge["record_id"])
+    if any(
+        not set(root["record_ids"]) <= adjacency.get(root_id, set())
+        for root_id, root in roots.items()
+    ):
+        raise SourceInventoryInvalidErrorV3(
+            "model_proof", "owner cause root-origin witnesses must cover its declared seeds"
+        )
     witnessed = {root_id: {root["kind"]} for root_id, root in roots.items()}
     pending = deque(roots)
     while pending:

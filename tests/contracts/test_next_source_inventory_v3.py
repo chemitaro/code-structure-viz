@@ -27,6 +27,12 @@ from tests.contracts.test_next_request_frame_v2 import run_context
 from tests.contracts.test_next_semantic_candidate_v2 import candidate_for, update_model_digest
 from tests.contracts.test_next_trusted_environment_v2 import profile_members
 
+NONFILE_ROOT_RULES = {
+    "module_relation": "relation_dependency",
+    "export_binding": "incoming_reexport",
+    "boundary_derivation": "boundary_closure",
+}
+
 
 def inventory_inputs(
     tmp_path: Path,
@@ -382,7 +388,7 @@ def test_nonfile_module_failure_excludes_owner_file_without_faking_file_taint(
         {
             "source_id": "next:failure:" + "1" * 64,
             "record_id": module["id"],
-            "rule": "identity_dependency",
+            "rule": NONFILE_ROOT_RULES[kind],
         }
     ]
     refresh_wire(wire)
@@ -490,7 +496,7 @@ def test_owner_failure_cannot_be_forged_or_relabelled_as_file_taint(
             {
                 "source_id": "next:failure:" + "1" * 64,
                 "record_id": module["id"],
-                "rule": "identity_dependency",
+                "rule": "relation_dependency",
             }
         ]
     refresh_wire(wire)
@@ -574,7 +580,7 @@ def test_references_close_in_the_correct_public_or_private_view(tmp_path: Path, 
             {
                 "source_id": "next:failure:" + "1" * 64,
                 "record_id": module["id"],
-                "rule": "identity_dependency",
+                "rule": "relation_dependency",
             }
         ]
     payload["proof"]["discovered_records"].append(row)
@@ -969,7 +975,7 @@ def test_owner_cause_cannot_borrow_a_root_from_an_independent_module(
         {
             "source_id": "next:failure:" + "1" * 64,
             "record_id": module["id"],
-            "rule": "identity_dependency",
+            "rule": NONFILE_ROOT_RULES[kind],
         }
         for module in (modules if extra_root_edge else [witnessed])
     ]
@@ -1021,12 +1027,136 @@ def test_direct_file_failure_keeps_its_source_seed_edge_and_typed_taint(
         inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
 
 
+@pytest.mark.parametrize("kind", ["parse_file", "read_file"])
+def test_direct_file_seed_cannot_borrow_an_indirect_module_witness(
+    tmp_path: Path, kind: str
+) -> None:
+    seal, assets, request, policy, wire = inventory_inputs(tmp_path)
+    payload = wire["semantic_payload"]
+    file = next(row for row in request.record()["files"] if "program" in row["roles"])
+    module = payload["model"]["modules"][0]
+    exclude_record(wire, "modules", module["id"], reason="tainted", taints=[kind])
+    exclude_record(wire, "files", file["id"], reason="tainted", taints=[kind])
+    payload["proof"]["excluded"] = [
+        row for row in payload["proof"]["excluded"] if row["record_id"] != file["id"]
+    ]
+    payload["proof"]["failed"] = [{"collection": "files", "record_id": file["id"], "reason": kind}]
+    root_id = "next:failure:" + "2" * 64
+    payload["proof"]["failure_roots"] = [
+        {
+            "id": root_id,
+            "kind": kind,
+            "collection": "files",
+            "path_ref": file["path"],
+            "record_ids": sorted([file["id"], module["id"]]),
+        }
+    ]
+    payload["proof"]["causal_edges"] = [
+        {"source_id": root_id, "record_id": module["id"], "rule": "file_all_records"},
+        {"source_id": module["id"], "record_id": file["id"], "rule": "file_all_records"},
+    ]
+    refresh_wire(wire)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    with pytest.raises(ValueError, match="root-origin"):
+        inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+
+
 def test_discovery_object_order_is_canonical_not_adapter_iteration_order(tmp_path: Path) -> None:
     seal, assets, request, policy, wire = inventory_inputs(tmp_path)
     wire["semantic_payload"]["proof"]["discovered_records"].reverse()
     candidate = candidate_for(seal, assets, request, policy, wire)
     with pytest.raises(ValueError, match="model/proof"):
         inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+
+
+@pytest.mark.parametrize("kind", ["module_relation", "export_binding", "boundary_derivation"])
+def test_owner_root_rejects_a_noncanonical_rule_even_when_its_shape_is_allowed(
+    tmp_path: Path, kind: str
+) -> None:
+    seal, assets, request, policy, wire = inventory_inputs(tmp_path)
+    payload = wire["semantic_payload"]
+    file = next(row for row in request.record()["files"] if "program" in row["roles"])
+    module = payload["model"]["modules"][0]
+    exclude_record(wire, "modules", module["id"], reason="tainted", taints=[kind])
+    exclude_record(wire, "files", file["id"], reason="failed", taints=[])
+    root_id = "next:failure:" + "3" * 64
+    payload["proof"]["failure_roots"] = [
+        {
+            "id": root_id,
+            "kind": kind,
+            "collection": "modules",
+            "path_ref": module["path"],
+            "record_ids": [module["id"]],
+        }
+    ]
+    payload["proof"]["causal_edges"] = [
+        {"source_id": root_id, "record_id": module["id"], "rule": "identity_dependency"}
+    ]
+    refresh_wire(wire)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    with pytest.raises(ValueError, match="root-origin rule"):
+        inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+
+
+@pytest.mark.parametrize(
+    "kinds", [("parse_file", "read_file"), ("parse_file", "parse_file"), ("read_file", "read_file")]
+)
+@pytest.mark.parametrize("missing_edge", [None, 0, 1])
+def test_every_root_keeps_its_own_direct_file_seed_witness(
+    tmp_path: Path, kinds: tuple[str, str], missing_edge: int | None
+) -> None:
+    seal, assets, request, policy, wire = inventory_inputs(tmp_path)
+    payload = wire["semantic_payload"]
+    file = next(row for row in request.record()["files"] if "program" in row["roles"])
+    module = payload["model"]["modules"][0]
+    taints = sorted(set(kinds), key=["parse_file", "read_file"].index)
+    exclude_record(wire, "modules", module["id"], reason="tainted", taints=taints)
+    exclude_record(wire, "files", file["id"], reason="tainted", taints=taints)
+    proof = payload["proof"]
+    proof["excluded"] = [row for row in proof["excluded"] if row["record_id"] != file["id"]]
+    proof["failed"] = [{"collection": "files", "record_id": file["id"], "reason": taints[0]}]
+    proof["failure_roots"] = [
+        {
+            "id": "next:failure:" + f"{index + 1:064x}",
+            "kind": kind,
+            "collection": "files",
+            "path_ref": file["path"],
+            "record_ids": sorted([file["id"], module["id"]]),
+        }
+        for index, kind in enumerate(kinds)
+    ]
+    proof["causal_edges"] = [
+        {"source_id": root["id"], "record_id": record_id, "rule": "file_all_records"}
+        for index, root in enumerate(proof["failure_roots"])
+        for record_id in [file["id"], module["id"]]
+        if missing_edge != index or record_id != file["id"]
+    ]
+    refresh_wire(wire)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    if missing_edge is not None:
+        with pytest.raises(ValueError, match="root-origin"):
+            inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+        return
+    value = inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+    assert next(row for row in value.file_dispositions() if row.record_id == file["id"]) == (
+        inventory.FileDispositionV3(file["id"], "failed", taints[0])
+    )
+    assert value.counts() == inventory.SourceInventoryCountsV3(
+        acquired_projects=1,
+        acquired_files=4,
+        acquired_file_bytes=145,
+        proof_discovered=6,
+        published_records=4,
+        proof_only_records=2,
+        accounted_records=6,
+        published_modules=0,
+        published_components=0,
+        published_entities=0,
+    )
+    assert value.safe_projects()[0]["file_ids"] == sorted(
+        row["id"] for row in request.record()["files"] if row["id"] != file["id"]
+    )
+    inventory.validate_source_inventory_seam_v3(value)
 
 
 def test_wrong_private_record_kind_in_module_collection_is_a_bounded_rejection(
