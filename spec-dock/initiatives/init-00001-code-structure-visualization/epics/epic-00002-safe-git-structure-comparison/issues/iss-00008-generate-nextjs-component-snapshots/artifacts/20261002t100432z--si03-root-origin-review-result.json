@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "title": "[P1] type_nodeのModule参照がD/M閉包から漏れる",
+      "body": "`prop.type_node` に `scope=\"repository\"` の Module ID を持たせた場合、`_record_references()` は `prop` について `owner_id` しか返さないため、163–168行のD/M closureはそのModule referenceを検査しません。transport schemaはModule IDの存在までは検証せず、`recompute_record_id()` のprop identityにも`type_node`は含まれないため、proof-only recordから存在しないModuleを参照するcandidateや、public Propからproof-only Moduleを参照するcandidateをこのSI-03 seamが受理できます。これはadmission-v3のSI-N08と「private referencesはD、public referencesはMへ閉じる」という必須契約を破り、owner-closed safe subsetを未検証のまま通すため、再帰的なtype-node内Module参照を含む完全なrecord-reference列挙で両closureを検証し、private dangling/public-to-proof-onlyの負例を追加する必要があります。",
+      "confidence_score": 0.99,
+      "priority": 1,
+      "code_location": {
+        "repository_relative_path": "tests/contracts/next_source_inventory_v3_validation.py",
+        "line_range": {
+          "start": 163,
+          "end": 168
+        }
+      }
+    }
+  ],
+  "overall_correctness": "patch is incorrect",
+  "overall_explanation": "GitHub connectorで`chemitaro/code-structure-viz`の`iss-00008-generate-nextjs-component-snapshots`を直接取得し、branch tipがexpected SHA `b2a5fb2a89aa22a25e3b56e8b6f8905158b700f2`と完全一致することを確認しました。`ce0edaa8fe63e79523fe7ad1dcb4b0a39dc02dce..b2a5fb2a89aa22a25e3b56e8b6f8905158b700f2`はmerge-baseが`ce0edaa8...`、3 commits aheadであることも確認し、root `AGENTS.md`はdirect fetch 404後の同branch root listingでも不存在を確認しました。Current R/D/P、accepted ADR、v3 contracts、新規reference/validation/tests、および直接依存するrequest-v2/source seal/taint/reference helperを照合しました。same-owner source discovery、full-base File/Module cardinality、File partition、Project二view、actual counts/partition fingerprint、局所root-origin witnessの主要joinは意図したSI-03境界に沿っていますが、必須のprivate/public reference closureにP1の抜けがあるためpatch全体はcorrectとは判定できません。rangeで旧Python/SQLAlchemy実装・golden path自体に変更がないことはcompareで確認しましたが、外部reviewerとしてtestsは実行しておらず、repository内および添付メモのpass記録を実行結果として独立確認したとは扱っていません。gateはreview-methodのP0/P1規則に従っています。attachments-bundle",
+  "review_status": "fail",
+  "review_status_reason": "SI-03の必須negative SI-N08を破るP1が1件あります。公開またはprivate proof recordのネストしたrepository type referenceが現在のclosure helperから漏れ、owner-closed publication gateを迂回できるためfailです。",
+  "overall_confidence_score": 0.99
+}

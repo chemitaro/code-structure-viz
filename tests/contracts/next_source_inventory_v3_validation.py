@@ -150,6 +150,60 @@ def resolve_discovered_v3(candidate: ValidatedTransportCandidateV2) -> dict[str,
         ) from error
 
 
+def _type_node_repository_module_references_v3(node: dict[str, Any]) -> set[str]:
+    """Enumerate closure references only; full type semantics remain SI-04."""
+
+    if node["kind"] in {"primitive", "type_parameter", "redacted_literals", "opaque"}:
+        return set()
+    if node["kind"] == "reference":
+        references = {node["module"]} if node["scope"] == "repository" else set()
+        for child in node["type_arguments"]:
+            references.update(_type_node_repository_module_references_v3(child))
+        return references
+    if node["kind"] == "array":
+        return _type_node_repository_module_references_v3(node["element"])
+    if node["kind"] == "tuple":
+        children = [element["type"] for element in node["elements"]]
+        if node["rest"] is not None:
+            children.append(node["rest"])
+        references = set()
+        for child in children:
+            references.update(_type_node_repository_module_references_v3(child))
+        return references
+    if node["kind"] == "function":
+        children = [parameter["type"] for parameter in node["parameters"]]
+        if node["this_type"] is not None:
+            children.append(node["this_type"])
+        children.append(node["return_type"])
+        references = set()
+        for child in children:
+            references.update(_type_node_repository_module_references_v3(child))
+        return references
+    if node["kind"] in {"union", "intersection"}:
+        references = set()
+        for child in node["members"]:
+            references.update(_type_node_repository_module_references_v3(child))
+        return references
+    if node["kind"] == "object":
+        children = [prop["type"] for prop in node["properties"]]
+        children.extend(signature["value_type"] for signature in node["index_signatures"])
+        children.extend({"kind": "function", **signature} for signature in node["call_signatures"])
+        references = set()
+        for child in children:
+            references.update(_type_node_repository_module_references_v3(child))
+        return references
+    raise SourceInventoryInvalidErrorV3("proof_references", "unknown PropsTypeIR reference kind")
+
+
+def _record_closure_references_v3(record: dict[str, Any]) -> set[str]:
+    """Keep legacy taint dependencies separate from complete v3 reference closure."""
+
+    references = _record_references(record)
+    if record["kind"] == "prop":
+        references.update(_type_node_repository_module_references_v3(record["type_node"]))
+    return references
+
+
 def derive_source_projection_v3(
     candidate: ValidatedTransportCandidateV2,
 ) -> tuple[dict[str, Any], tuple[str, ...], tuple[tuple[str, str, str | None], ...]]:
@@ -160,10 +214,15 @@ def derive_source_projection_v3(
     owners = full_module_owners_v3(candidate)
     resolved = resolve_discovered_v3(candidate)
     public_ids = {row["id"] for name in COLLECTIONS for row in model[name]}
-    if any(not _record_references(row["record"]) <= resolved.keys() for row in resolved.values()):
+    if any(
+        not _record_closure_references_v3(row["record"]) <= resolved.keys()
+        for row in resolved.values()
+    ):
         raise SourceInventoryInvalidErrorV3("proof_references", "private reference must close in D")
     if any(
-        not _record_references(row) <= public_ids for name in COLLECTIONS for row in model[name]
+        not _record_closure_references_v3(row) <= public_ids
+        for name in COLLECTIONS
+        for row in model[name]
     ):
         raise SourceInventoryInvalidErrorV3("proof_references", "public reference must close in M")
     validate_dispositions_v3(candidate, resolved)

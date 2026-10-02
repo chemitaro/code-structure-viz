@@ -1,0 +1,8 @@
+{"admitted": true, "independent_revalidation": "passed", "nested_array": false, "prop_in_public": true, "scenario": "public_existing", "target_module_in_d": true, "target_module_in_m": true}
+{"admitted": true, "independent_revalidation": "passed", "nested_array": true, "prop_in_public": true, "scenario": "public_existing", "target_module_in_d": true, "target_module_in_m": true}
+{"admitted": true, "independent_revalidation": "passed", "nested_array": false, "prop_in_public": false, "scenario": "private_dangling", "target_module_in_d": false, "target_module_in_m": false}
+{"admitted": true, "independent_revalidation": "passed", "nested_array": true, "prop_in_public": false, "scenario": "private_dangling", "target_module_in_d": false, "target_module_in_m": false}
+{"admitted": true, "independent_revalidation": "passed", "nested_array": false, "prop_in_public": false, "scenario": "private_proof_only", "target_module_in_d": true, "target_module_in_m": false}
+{"admitted": true, "independent_revalidation": "passed", "nested_array": true, "prop_in_public": false, "scenario": "private_proof_only", "target_module_in_d": true, "target_module_in_m": false}
+{"admitted": true, "independent_revalidation": "passed", "nested_array": false, "prop_in_public": true, "scenario": "public_proof_only", "target_module_in_d": true, "target_module_in_m": false}
+{"admitted": true, "independent_revalidation": "passed", "nested_array": true, "prop_in_public": true, "scenario": "public_proof_only", "target_module_in_d": true, "target_module_in_m": false}

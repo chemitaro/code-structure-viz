@@ -33,6 +33,24 @@ NONFILE_ROOT_RULES = {
     "boundary_derivation": "boundary_closure",
 }
 
+TYPE_REFERENCE_POSITIONS = (
+    "flat",
+    "reference_type_argument",
+    "array_element",
+    "tuple_element",
+    "tuple_rest",
+    "function_this",
+    "function_parameter",
+    "function_return",
+    "union_member",
+    "intersection_member",
+    "object_property",
+    "object_index_value",
+    "object_call_this",
+    "object_call_parameter",
+    "object_call_return",
+)
+
 
 def inventory_inputs(
     tmp_path: Path,
@@ -181,6 +199,160 @@ def refresh_wire(wire: dict[str, Any]) -> None:
             key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")).encode("ascii")
         )
     update_model_digest(wire)
+
+
+def prop_reference_type_node(
+    position: str, target_module: str, public_module: str
+) -> dict[str, Any]:
+    reference = {
+        "kind": "reference",
+        "scope": "repository",
+        "module": target_module,
+        "exported_name": "Props",
+        "type_arguments": [],
+    }
+    if position == "flat":
+        return reference
+    if position == "reference_type_argument":
+        return {**reference, "module": public_module, "type_arguments": [reference]}
+    if position == "array_element":
+        return {"kind": "array", "element": reference, "readonly": False}
+    if position in {"tuple_element", "tuple_rest"}:
+        return {
+            "kind": "tuple",
+            "elements": [{"type": reference, "optional": False}]
+            if position == "tuple_element"
+            else [],
+            "rest": reference if position == "tuple_rest" else None,
+            "readonly": False,
+        }
+    if position in {"function_this", "function_parameter", "function_return"}:
+        return {
+            "kind": "function",
+            "type_parameter_count": 0,
+            "this_type": reference if position == "function_this" else None,
+            "parameters": (
+                [{"type": reference, "optional": False, "rest": False}]
+                if position == "function_parameter"
+                else []
+            ),
+            "return_type": reference
+            if position == "function_return"
+            else {"kind": "primitive", "name": "void"},
+        }
+    if position in {"union_member", "intersection_member"}:
+        return {
+            "kind": "union" if position == "union_member" else "intersection",
+            "members": sorted(
+                [reference, {"kind": "primitive", "name": "undefined"}],
+                key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")).encode(
+                    "ascii"
+                ),
+            ),
+        }
+    if position in {
+        "object_property",
+        "object_index_value",
+        "object_call_this",
+        "object_call_parameter",
+        "object_call_return",
+    }:
+        signature = {
+            "type_parameter_count": 0,
+            "this_type": reference if position == "object_call_this" else None,
+            "parameters": (
+                [{"type": reference, "optional": False, "rest": False}]
+                if position == "object_call_parameter"
+                else []
+            ),
+            "return_type": reference
+            if position == "object_call_return"
+            else {"kind": "primitive", "name": "void"},
+        }
+        return {
+            "kind": "object",
+            "properties": (
+                [{"name": "value", "type": reference, "optional": False, "readonly": False}]
+                if position == "object_property"
+                else []
+            ),
+            "index_signatures": (
+                [{"key_type": "string", "value_type": reference, "readonly": False}]
+                if position == "object_index_value"
+                else []
+            ),
+            "call_signatures": [signature] if position.startswith("object_call_") else [],
+        }
+    raise AssertionError(f"unknown fixture position: {position}")
+
+
+def prop_reference_inputs(
+    tmp_path: Path, view: str, position: str, *, type_node: dict[str, Any] | None = None
+) -> tuple[Any, ...]:
+    seal, assets, request, policy, wire = inventory_inputs(
+        tmp_path, extra_programs={"src/other.tsx": b"export const Other = () => null;"}
+    )
+    payload = wire["semantic_payload"]
+    model, proof = payload["model"], payload["proof"]
+    public_module = next(row for row in model["modules"] if row["path"] == "src/page.tsx")
+    other_module = next(row for row in model["modules"] if row["path"] == "src/other.tsx")
+    target_module = public_module["id"]
+    if view == "private_dangling":
+        target_module = "next:module:" + "f" * 64
+    elif view.endswith("proof_only"):
+        target_module = other_module["id"]
+    component = {
+        "kind": "component",
+        "module_id": public_module["id"],
+        "declaration_key": "Page",
+        "recognition_evidence": ["trusted_callable"],
+        "props_state": "known",
+    }
+    component["id"] = recompute_record_id(component)
+    prop = {
+        "kind": "prop",
+        "owner_id": component["id"],
+        "name": "p",
+        "type_node": (
+            prop_reference_type_node(position, target_module, public_module["id"])
+            if type_node is None
+            else type_node
+        ),
+        "optional": False,
+        "readonly": False,
+        "default_evidence": "none",
+    }
+    prop["id"] = recompute_record_id(prop)
+    model["components"], model["members"] = [component], [prop]
+    for collection, record in (("components", component), ("members", prop)):
+        proof["discovered_records"].append(
+            {"collection": collection, "record_id": record["id"], "taints": []}
+        )
+    if view.endswith("proof_only"):
+        other_file = next(
+            row for row in request.record()["files"] if row["path"] == "src/other.tsx"
+        )
+        exclude_record(
+            wire, "modules", other_module["id"], reason="tainted", taints=["module_relation"]
+        )
+        exclude_record(wire, "files", other_file["id"], reason="failed", taints=[])
+        root_id = "next:failure:" + "4" * 64
+        proof["failure_roots"] = [
+            {
+                "id": root_id,
+                "kind": "module_relation",
+                "collection": "modules",
+                "path_ref": other_module["path"],
+                "record_ids": [other_module["id"]],
+            }
+        ]
+        proof["causal_edges"] = [
+            {"source_id": root_id, "record_id": other_module["id"], "rule": "relation_dependency"}
+        ]
+    if view.startswith("private_"):
+        exclude_record(wire, "members", prop["id"], reason="not_selected", taints=[])
+    refresh_wire(wire)
+    return seal, assets, request, policy, wire
 
 
 def test_v3_reference_uses_0_2_0_retained_assets_without_relabeling_v2_kat(
@@ -588,6 +760,143 @@ def test_references_close_in_the_correct_public_or_private_view(tmp_path: Path, 
     candidate = candidate_for(seal, assets, request, policy, wire)
     with pytest.raises(ValueError, match="reference"):
         inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+
+
+@pytest.mark.parametrize(
+    "view", ["public_existing", "private_dangling", "private_proof_only", "public_proof_only"]
+)
+@pytest.mark.parametrize("position", TYPE_REFERENCE_POSITIONS)
+def test_prop_type_references_close_in_the_correct_view(
+    tmp_path: Path, view: str, position: str
+) -> None:
+    seal, assets, request, policy, wire = prop_reference_inputs(tmp_path, view, position)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    if view in {"private_dangling", "public_proof_only"}:
+        expected = (
+            "private reference must close in D"
+            if view == "private_dangling"
+            else "public reference must close in M"
+        )
+        with pytest.raises(ValueError, match=expected):
+            inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+    else:
+        value = inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+        inventory.validate_source_inventory_seam_v3(value)
+        assert value.counts().acquired_files == 5
+        assert value.counts().proof_discovered == 10
+        assert len(value.safe_files()) == (4 if view == "private_proof_only" else 5)
+
+
+@pytest.mark.parametrize(
+    "type_node",
+    [
+        pytest.param({"kind": "primitive", "name": "string"}, id="primitive"),
+        pytest.param({"kind": "redacted_literals", "base": "string", "count": 2}, id="redacted"),
+        pytest.param({"kind": "opaque", "reason": "any_open_world"}, id="opaque"),
+        pytest.param(
+            {
+                "kind": "function",
+                "type_parameter_count": 1,
+                "this_type": None,
+                "parameters": [],
+                "return_type": {"kind": "type_parameter", "ordinal": 0},
+            },
+            id="type_parameter",
+        ),
+    ],
+)
+def test_prop_reference_free_leaves_do_not_require_a_module(
+    tmp_path: Path, type_node: dict[str, Any]
+) -> None:
+    seal, assets, request, policy, wire = prop_reference_inputs(
+        tmp_path, "public_existing", "flat", type_node=type_node
+    )
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    value = inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+    inventory.validate_source_inventory_seam_v3(value)
+    assert value.counts().proof_discovered == 10
+    assert len(value.safe_files()) == 5
+
+
+@pytest.mark.parametrize("scope", ["external", "trusted"])
+@pytest.mark.parametrize("with_repository_argument", [False, True])
+@pytest.mark.parametrize(
+    "view", ["public_existing", "private_dangling", "private_proof_only", "public_proof_only"]
+)
+def test_external_and_trusted_types_keep_only_nested_repository_closure(
+    tmp_path: Path, scope: str, with_repository_argument: bool, view: str
+) -> None:
+    position = "reference_type_argument" if with_repository_argument else "flat"
+    seal, assets, request, policy, wire = prop_reference_inputs(tmp_path, view, position)
+    payload = wire["semantic_payload"]
+    props = payload["model"]["members"] or [
+        row["record"]
+        for row in payload["proof"]["discovered_records"]
+        if row["collection"] == "members"
+    ]
+    props[0]["type_node"].update(
+        scope=scope,
+        module="library" if scope == "external" else "react",
+        exported_name="Props" if scope == "external" else "ReactNode",
+    )
+    refresh_wire(wire)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    if with_repository_argument and view in {"private_dangling", "public_proof_only"}:
+        expected = (
+            "private reference must close in D"
+            if view == "private_dangling"
+            else "public reference must close in M"
+        )
+        with pytest.raises(ValueError, match=expected):
+            inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+    else:
+        value = inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+        inventory.validate_source_inventory_seam_v3(value)
+        assert value.counts().proof_discovered == 10
+        assert len(value.safe_files()) == (4 if view.endswith("proof_only") else 5)
+
+
+@pytest.mark.parametrize(
+    "view", ["public_existing", "private_dangling", "private_proof_only", "public_proof_only"]
+)
+def test_multiple_and_duplicate_type_references_require_every_module_in_the_same_view(
+    tmp_path: Path, view: str
+) -> None:
+    seal, assets, request, policy, wire = prop_reference_inputs(tmp_path, view, "flat")
+    payload = wire["semantic_payload"]
+    props = payload["model"]["members"] or [
+        row["record"]
+        for row in payload["proof"]["discovered_records"]
+        if row["collection"] == "members"
+    ]
+    reference = props[0]["type_node"]
+    module = next(row for row in payload["model"]["modules"] if row["path"] == "src/page.tsx")
+    safe_reference = {**reference, "module": module["id"]}
+    props[0]["type_node"] = {
+        "kind": "tuple",
+        "elements": [
+            {"type": safe_reference, "optional": False},
+            {"type": safe_reference, "optional": False},
+            {"type": {"kind": "array", "element": reference, "readonly": False}, "optional": False},
+        ],
+        "rest": None,
+        "readonly": False,
+    }
+    refresh_wire(wire)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    if view in {"private_dangling", "public_proof_only"}:
+        expected = (
+            "private reference must close in D"
+            if view == "private_dangling"
+            else "public reference must close in M"
+        )
+        with pytest.raises(ValueError, match=expected):
+            inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+    else:
+        value = inventory.retain_source_inventory_seam_v3(candidate, seal, assets)
+        inventory.validate_source_inventory_seam_v3(value)
+        assert value.counts().proof_discovered == 10
+        assert len(value.safe_files()) == (4 if view == "private_proof_only" else 5)
 
 
 @pytest.mark.parametrize("reason", ["not_selected", "target_excluded", "unsupported"])
