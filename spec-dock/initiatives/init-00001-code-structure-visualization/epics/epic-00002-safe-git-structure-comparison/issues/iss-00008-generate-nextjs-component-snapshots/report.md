@@ -22,6 +22,8 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Verification
 
+- SI-04残例外の実装助言: 中間4b50c81への同author Strict補足は元87437 exit0/21m29s。原1956行を全読しbyte-preserved import、今回model inherited/skipped/unverified・Extra High verifiedを区別。normal SI-03を緩めないvalidation-only view、source-only export slot、raw duplicate/unique Dの分離、no-payloadのみseam=Noneを既存仕様内の実装方法として採用しました。詳細は`artifacts/20261002t143402z-01-disc-si04-selected-cardinality-brief-adoption.md`。仕様意味変更・新step pass・local test追加実行・production認定ではありません。
+
 - SI-04中間実装: new三reference filesのみでnormal full CoreをTDDしました。full-D type/root/causal/taint/coverage、same-seal export、source graph/locality、target優先、actual record/entity budget、immutable decision/rejection/compatibility/独立validatorを接続。実10000/10001とentity500/501、独立safe target、selection-only/empty/全File proof-onlyを確認しました。selected cardinality専用経路と残acceptance/step Strict reviewは未完了です。詳細と最終selection結果は`artifacts/20261002t135356z-disc-si04-core-intermediate-reference-evidence.md`へ分離します。元base caf3832、旧source/schema/reference/依存/goldens、全SI-04/A02/A03/production/Finalの未認定境界は維持します。
 
 - SI-04実装準備: clean/pushed着手点caf3832からsame-author Implementation Brief Strictの初稿と修正版を完了（元49552/74264 exit0、19m53s/16m33s）、原1217/2588行を全読・現物照合しました。要求Sol/Extra High、今回model pickerはinherited/skipped/unverified、親のSol pickerだけverifiedで、今回Extra Highは両方verifiedです。旧export facadeの固定source corpus依存を除き、same-seal bytesからv3-localに導出する方針を採用。独立probeはsource7/ID16/syntax4の不一致0、source-derived reexport join/graph passで、first例は既存Designのstatic_import relationを補って17 recordsに訂正しました。raw二件/probe二件はbyte-preserved、日本語判断は`artifacts/20261002t121924z-02-disc-si04-full-core-brief-adoption.md`。TDD開始前で、Core/actual TS/OS/全A02/Strict step passの証拠ではありません。元unit baseと仕様の意味は維持します。

@@ -24,6 +24,8 @@ package_sequence_key: "ISSUE-05"
 
 ### A runtime移行の順序
 
+SI-04残selected cardinality経路はexact中間checkpoint4b50c81へのsame-author Strict補足briefを全読・現物照合し、normal source seamを変更しないvalidation-only view方式で具体化しました。採用境界と原回答は`artifacts/20261002t143402z-01-disc-si04-selected-cardinality-brief-adoption.md`。既存Current意味・元caf3832 base・SI-04出口条件は不変で、TDD/step reviewは未完了です。
+
 SI-04着手点はclean/pushed `caf38329826ae34f8e3cb330b83b97e0357b7dc5`で固定しました。同authorのStrict briefを訂正し、same-seal bytesに結合するv3-local export pipelineを全読・現物照合の上で採用しました。旧export facadeの固定corpus依存とfirst fixtureのreexport relation欠落を補正し、raw二件・独立probe・日本語採用資料を`artifacts/20261002t121924z-02-disc-si04-full-core-brief-adoption.md`に保存しています。これはTDD開始前の準備で、SI-04のpassではありません。仕様意味・旧reference・productionは変更せず、下記SI-04の出口条件を維持します。
 
 SI-04は中間実装中です。新三Core reference filesでnormal full proof/source-bound export/locality/target優先/actual record・entity cap/immutable decision・rejection/compatibility KATと独立再検証をTDDしました。正例は独立safe target、selection-only、complete-empty/非program File、全File proof-only、実10000/+1とentity500/+1を含みます。selected cardinalityの専用no-payload例外と残acceptanceは未実装で、SI-04 step reviewも未認定です。詳細は`artifacts/20261002t135356z-disc-si04-core-intermediate-reference-evidence.md`。この中間checkpointで元unit base、仕様意味、SI-05以降へのgateを変更しません。
