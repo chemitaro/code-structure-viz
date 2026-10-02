@@ -22,6 +22,8 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Verification
 
+- Owner-closed A案の仕様再認証: exact `bcae9548ef515e4a7662de1ad648171622c6a437`へのsame-reviewer Strict followupは10m49s/exit0、schema-valid `review_status=pass`、findings0。前回P1は閉鎖、SI-01/02は成立しました。原JSONをbyte-for-byte保存し、正本9文書と必要baselineのconnector再取得/全体評価を確認。要求モデルはGPT-5.6 Sol/Pro、followupのmodel pickerはskipped/verified=false、Pro pickerはverified=trueで、今回のモデル再選択確認を主張しません。来歴・hash・限定ローカルチェック・未認定範囲は`artifacts/20261002t044942z-disc-owner-closed-spec-review-pass.md`。新reference/製品実装/全A02/A03/Finalは未完了です。
+
 - Owner-closed A案の仕様修正checkpoint: 文書限定検査は9文書/20 local links、run=14・compatibility=10・summary=7・partition=3の閉じたkey集合、二つのaccepted ADRとCurrent R/D/Pの対応を確認しました。既存schema meta/closed限定selectionは33 passed（0.77s）、Current pointerは別selectionで1 passed（0.17s）。Ruff check/format（227 files）、SpecDock sync/validate（10 nodes）、diff-checkがpass。`34d457f...`からsrc/schema/tests/依存/旧goldensの変更はありません。実装・新v3 schema/semantic validator・PlantUML render・全pytest・actual TS/OSの認定ではなく、same-reviewer Spec Review Strictは未通過です。
 
 - Source inventory初回仕様gate（採択前の証拠）: exact `a4efdc373a515801777c924a1d14675fda686955`へのfresh ChatGPT Spec Review Strictは正常完了（19m34s/exit0）、JSON schema validですが`review_status=fail`、P1一件です。別会話のChatGPT Analyze Review Findings Strict（8m02s/exit0、全516行/11必須H1）は有効P1・`design-decision-required`。旧validatorの三nonFile rootでFile untainted/Module taintedと公開cardinality拒否を限定再現しました。両方GPT-5.6 Sol/Proのnative picker verified。exact SHAで34 schema/pointer testsと別2 baseline tests、文書checks、SpecDock10 nodesはpassですが、仕様pass/新v3/全pytest/actual TSの証拠ではありません。原回答・packet・再現コード・選択肢をArtifactへ保存しました。その後推奨のowner-closed投影をユーザーがA案として採択しました。採択は旧failをpassに変えず、修正候補のsame-reviewer再認証が必要です。
@@ -62,7 +64,7 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Residual Risks / Follow-ups
 
-- source inventoryとowner-closed A案は採択済みです。非File rootのP1へ仕様修正を反映しましたが、same-reviewer再認証は未通過です。補足accepted ADRは`artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`。元candidateは採択前の履歴として保持し、pass後にreferenceを再開します。旧748 testsのpassで新classを認定しません。
+- source inventoryとowner-closed A案は採択済みで、bcae954のsame-reviewer仕様再認証もpassです。次はSI-03 reference TDDですが、新class/新schemaは未実装です。補足accepted ADRは`artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`。元candidate/旧failは履歴として保持し、旧748 testsや仕様passを新class認定へ流用しません。
 - A-02の新version schema/reference/compatibility/provenance closure、A-03のfresh独立Strict、production TDD、両OS実CLI/offline package、Final Quality Gateが残っています。
 - 新asset failure policyはdecision-candidateのままです。採択前に実装せず、通常I/Oと立証済みpackage破損のdomain/run-level境界を固定してからsource prefix/public closureへ進みます。
 - Darwinの終了済みgroup確認は公開libproc APIを使った試作候補です。製品cleanupの全条件・全対応OS/architectureを認定したものではありません。

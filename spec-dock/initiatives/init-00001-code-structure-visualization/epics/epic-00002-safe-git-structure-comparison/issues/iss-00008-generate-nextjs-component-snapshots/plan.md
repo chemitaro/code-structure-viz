@@ -20,7 +20,7 @@ package_sequence_key: "ISSUE-05"
 
 2026-10-02、ユーザーはsource inventoryとsafe subsetの先行整合方針を採択し、仕様修正/チェック後の実装再開を指示しました。下記SI計画をA02内のdiagnostic/stderr unitより前へ挿入します。旧candidateの「人間判断待ち」は当時の履歴で、現在のsource方針は採択済みです。別のASSET failure policyは未採択のままです。
 
-現在のgate evidence: docs-only checkpoint `a4efdc373a515801777c924a1d14675fda686955`のfresh独立Spec Reviewはvalid `fail`/P1一件。nonFile rootでuntainted Fileとtainted Moduleの公開条件が衝突し、専用findings分析は`design-decision-required`でした。2026-10-02にユーザーがA案owner-closed公開を採択したため、補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`とCurrent R/D/P・v3契約へ反映します。元candidateは採択前の履歴です。SI-02は同reviewer `issue8-source-inventory-spec-review`への修正SHA followup passまで未通過で、SI-03以降は開始しません。採択やlocal文書checkをreview passに読み替えません。
+現在のgate evidence: 初回`a4efdc373a515801777c924a1d14675fda686955`はvalid fail/P1一件、専用findings分析はdesign-decision-requiredでした。人間採択A案の補足ADRとCurrent R/D/P・v3契約を`bcae9548ef515e4a7662de1ad648171622c6a437`へ反映し、同reviewerのStrict followupはschema-valid `review_status=pass`/findings0、前回P1閉鎖です。SI-01/02はこの仕様SHAで成立し、SI-03の実行可能briefとreference TDDへ進めます。来歴/実モデル観測限界は`artifacts/20261002t044942z-disc-owner-closed-spec-review-pass.md`。採択前candidate/旧failは履歴として保持。SI-03以降・全A02/累積A03/production/Finalは未認定です。
 
 ### A runtime移行の順序
 

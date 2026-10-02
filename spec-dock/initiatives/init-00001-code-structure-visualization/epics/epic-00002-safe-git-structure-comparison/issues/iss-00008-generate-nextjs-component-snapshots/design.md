@@ -172,7 +172,7 @@ note bottom of X : File itself remains a mandatory seed; no public payload injec
 | 対応 | authority | 現在のevidence |
 | --- | --- | --- |
 | admission/public/run/provenance v2 | historical reference、SI外の不変baseline | 既存referenceの限定pass。新SIではない。 |
-| SI-v3三契約 + Current R/D/P + ADR | accepted target | a4efdc3のSpec Review fail/P1一件を受け、A案owner-closed公開を明示採択・反映。同reviewer再認証待ち。schema/reference未実装。 |
+| SI-v3三契約 + Current R/D/P + ADR | accepted target | a4efdc3のP1後、人間採択Aを反映したbcae954はsame-reviewer Spec Review Strict pass/findings0。仕様gateのみ認定。schema/reference未実装。 |
 | 新schema/reference/全public closure | accepted target | A02後続TDD/gates、未認定。 |
 | actual TypeScript/OS/CLI/package | A runtimeとSI target | A03後のA04/A05、未認定。 |
 
