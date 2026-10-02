@@ -20,11 +20,11 @@ package_sequence_key: "ISSUE-05"
 
 2026-10-02、ユーザーはsource inventoryとsafe subsetの先行整合方針を採択し、仕様修正/チェック後の実装再開を指示しました。下記SI計画をA02内のdiagnostic/stderr unitより前へ挿入します。旧candidateの「人間判断待ち」は当時の履歴で、現在のsource方針は採択済みです。別のASSET failure policyは未採択のままです。
 
-現在のgate evidence: 初回`a4efdc373a515801777c924a1d14675fda686955`はvalid fail/P1一件、専用findings分析はdesign-decision-requiredでした。人間採択A案の補足ADRとCurrent R/D/P・v3契約を`bcae9548ef515e4a7662de1ad648171622c6a437`へ反映し、同reviewerのStrict followupはschema-valid `review_status=pass`/findings0、前回仕様P1閉鎖です。SI-01/02はこの仕様SHAで成立しました。SI-03のroot-origin局所修復後のexact `b2a5fb2a89aa22a25e3b56e8b6f8905158b700f2`に対するfresh Code Reviewはvalid fail/P1一件（Prop型内Module参照のD/M閉包漏れ）でした。同identityの専用分析に沿って既存SI-N08のv3-local閉包列挙をTDDで修復し、現在treeの関連selectionは412 passed（274.08s、large cases除外無し）、Ruff/format230・mypy188はpassです。元baseは`ce0edaa8fe63e79523fe7ad1dcb4b0a39dc02dce`を維持し、次は新candidate全体へのfresh独立step Code Reviewです。原実装は`artifacts/20261002t062856z-disc-si03-source-inventory-reference-seam.md`、最新の限定修復は`artifacts/20261002t102327z-disc-si03-type-reference-closure-remediation.md`、仕様再認証の来歴は`artifacts/20261002t044942z-disc-owner-closed-spec-review-pass.md`。採択前candidate/旧failは履歴として保持。SI-03のfresh Code Review・SI-04以降・全A02/累積A03/production/Finalは未認定です。
+現在のgate evidence: SI-01/02は人間採択A案を反映した`bcae9548ef515e4a7662de1ad648171622c6a437`のsame-reviewer仕様再認証passで成立しました。SI-03はroot-originと型参照D/M閉包の限定修復後、exact `23072c288fc203071c10bfe3305e6ec5d3b055fe`でrequired checksとfresh独立Code Review Strictがともにpass、findings0です。元base `ce0edaa8fe63e79523fe7ad1dcb4b0a39dc02dce`からの四commit累積rangeを評価し、GPT-5.6 Sol/Extra Highの両picker verified=trueを確認しました。同じSHAの六module412 passed（270.03s、large cases除外無し）、旧goldens/pointerの別selection17 passed、Ruff/format230・mypy188・SpecDock10・diff-checkもpassです。certificateは`artifacts/20261002t110447z-disc-si03-cumulative-code-review-pass.md`。初回仕様/コードfail・専用分析・修復は原履歴として保持します。次はSI-04のfull Core referenceです。SI-03 passはSI-04以降・全A02/累積A03/production/Finalの認定ではありません。
 
 ### A runtime移行の順序
 
-SI-03 step reviewの再開条件: 初回`d3cce1cb42b3c6a00d7a8d8d2b9ee4dbed2406d1`のsource-native P1と分類/履歴は`artifacts/20261002t072235z-disc-si03-root-origin-adjudication-and-remediation.md`に保持します。同identityの専用Strict分析は、提出されたrootの宣言seedとcanonical root-origin witnessの双方向joinを既存仕様内の局所修復と判定しました。File間接経路/正規でないroot-rule/別rootの証拠代用に続き、Prop型の全参照位置とprivate D/public Mの局所閉包も既存SI-N08内で検証します。full mandatory seed/causal/taint導出・型の意味検証はSI-04に保持し、Requirement/Design/accepted ADRの意味や旧helperは変更しません。latest evidenceは`artifacts/20261002t102327z-disc-si03-type-reference-closure-remediation.md`。元base ce0edaaから新candidate全体へのfresh current review passまでSI-04へ進みません。
+SI-03 step gateはexact23072c2で閉じました。宣言seed/canonical root-origin witnessの局所joinとProp型のprivate D/public M閉包は、元base ce0edaaからのfresh cumulative reviewでpassです。原source-native P1分類と修復履歴は`artifacts/20261002t072235z-disc-si03-root-origin-adjudication-and-remediation.md`、`artifacts/20261002t084121z-disc-si03-direct-root-seed-witness-remediation.md`、`artifacts/20261002t102327z-disc-si03-type-reference-closure-remediation.md`へ保持します。full mandatory seed/causal/taint導出・型の意味検証は次のSI-04で閉じ、Requirement/Design/accepted ADRや旧helperの意味は変えません。
 
 | 順序 / unit | 出口条件 | 次段階へ渡すもの |
 | --- | --- | --- |
@@ -111,7 +111,7 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 
 ### SIの実装再開順序と出口条件
 
-RequirementのSI-REQ-001〜007、DesignのSI節と三つの新v3契約、accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`とA案補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`を入力とします。SI-03のsource/proof reference三ファイルはlocal greenですが、後続Core/public API/schemaはplannedで、未実装passに数えません。上記diagnostic briefとFile/Module候補の「未採択」は当時の履歴です。full File/Module base、独立Module eligibility、proof source resolution、exact File partition、Project safe projectionを一緒に閉じ、guard一箇所の抑制やSOURCEへのrelabelで再開しません。
+RequirementのSI-REQ-001〜007、DesignのSI節と三つの新v3契約、accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`とA案補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`を入力とします。SI-03のsource/proof reference三ファイルはexact23072c2でlocal checks/Strict step reviewがpassしました。後続Core/public API/schemaはplannedで、未実装passに数えません。上記diagnostic briefとFile/Module候補の「未採択」は当時の履歴です。full File/Module base、独立Module eligibility、proof source resolution、exact File partition、Project safe projectionを一緒に閉じ、guard一箇所の抑制やSOURCEへのrelabelで再開しません。
 
 | unit | 作業と依存 | 出口 / 受入対応 |
 | --- | --- | --- |
