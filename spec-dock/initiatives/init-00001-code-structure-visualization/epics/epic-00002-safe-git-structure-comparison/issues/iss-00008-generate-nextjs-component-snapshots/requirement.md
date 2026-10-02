@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-10-01"
+最終更新: "2026-10-02"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -50,13 +50,37 @@ A02のdata契約は`docs/contracts/next-process-launch-v2.md`、`next-execution-
 
 2026-09-24のユーザー指示は、Issue #8の依存・toolchain・processなど実装を阻む課題について、cleanかつpush済みの固定SHAに対するChatGPT-Use Strict（GPT-5.6 Pro）で根本原因と推奨策を分析し、内容をArtifactへ保存したうえでcanonical authorityとsource/testへ照合することを求めます。この分析はadvisoryであり、独立レビューや`I05-PLAN-008`の実装readiness gateを置き換えません。現在の作業は引き続き実装前契約の整備であり、production adapter/Node実行は含みません。必要な検証と`P0=0 / P1=0 / review_status=pass`を確認するまで、I05-PLAN-002以降のproduction実装開始可能性は未確定です。過去のStrict結果は当時の証拠として保持します。
 
+### SI: 取得inventoryとsafe semantic subset（2026-10-02採択）
+
+ユーザーは先行source/proof整合の推奨案を採択し、**仕様修正と仕様チェックを先に完了してから実装再開**を指示しました。accepted ADRは`artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`です。旧candidateは未採択時点の履歴として保存します。A runtimeのtrust/対応OS/静的解析境界は維持し、新ASSET policyを同時採択しません。
+
+この節はFile全件model correspondenceとProject公開membershipという旧admission-v2の規則を置換するaccepted targetです。上記「source/semantic意味を維持」のbaselineと後続Current v1対応表のうち、この対応部分はSIを優先します。旧v1/v2 schema/reference/KATは改変せず、新admission/public-v3と区別します。現在のcodeが旧referenceを通過していることは、新仕様の実装・認定ではありません。
+
+| 要件 / 既存IDとの対応 | 観測可能な結果 |
+| --- | --- |
+| SI-REQ-001 / I05-REQ-002 | 完全な取得Project/Fileは一回の同じsource seal/requestが所有する。未取得bytes/hash、child自由metadata、再readによる別sourceを補完しない。 |
+| SI-REQ-002 / I05-REQ-001・003・005 | 全取得Fileはsafe published、direct failed、taint excludedの完全かつ排他的な集合になる。安全Fileの任意欠落、inventory外File、欠落/重複/偽metadataを拒否する。 |
+| SI-REQ-003 / I05-REQ-003・005 | File自身をmandatory seedから外さず、full inventoryでroot/causal/taint/locality/target/exportを独立検証する。公開recordと全公開referenceはsafe集合内へ閉じる。 |
+| SI-REQ-004 / I05-REQ-001・003 | 取得Project全membershipと公開Project safe membershipを区別する。全File除外Projectも空membershipで残し、複数Projectの安全側を不当に消さない。 |
+| SI-REQ-005 / I05-REQ-004・005 | acquisition count/bytes、proof discovery、published＋proof-only record count、published entitiesを別の実測値にする。非公開Fileもmodel-record予算から消えない。 |
+| SI-REQ-006 / I05-REQ-002・005・007 | 取得完了後の解析失敗とseal前のreader失敗を別段階にする。通常reader I/Oは既存unavailable分類、実integrity driftだけterminal fatal。early prefixをpartial-safeとしない。 |
+| SI-REQ-007 / I05-REQ-004・006 | 新admission profile/public世代は旧v1/v2から識別できる。ID/認識/props/relations/trusted declaration/Unicode意味、既存Python/SQLAlchemy bytesを維持する。 |
+
+SI-P01/P02: 同じ取得File Aのparse/post-acquisition read rootと、影響から独立と立証されたBがある正規入力では、A File自身とtainted recordは非公開proofに残り、Bと安全なcontrol/context Filesを公開し、Projectのsafe membershipとpartial-safe/exit3が一致する。Bが独立だと証明できないopen dependency等はSOURCE-003 unavailableとし、表面上のsafe subsetだけで公開しない。
+
+SI-P03: 明示targetに必要なFile/Moduleがfailed/excludedなら、完全proof検証後にTARGET-001 unavailable/no-artifact。SI-P04: 全Fileが合法proof-onlyでlocality成立かつtarget無しなら空membership Projectとpartial-safe。locality不成立またはselected target失敗は既存unavailable分類。SI-P05: failure無しcomplete-empty、safe非program File、既存selection-only exclusion/表現済みunsupported frontierのcomplete意味を維持。SI-P06: proof-only source rowsを含む実record10000/+1と、独立partition/count/hash再導出を検証する。
+
+個別負例は、取得File欠落/重複、偽path/roles/size/hash/config、proof source payload/null注入、mandatory seed/causal/taint省略、安全Fileの恣意除外、count/budget迂回、private dangling/public proof-only reference、selected failureのpartial-safe降格、false completeness、early prefix昇格、cross-project/Project欠落、nonprogram Module、locality偽造です。合法selection-only semantic exclusionを禁止する新要件ではありません。
+
+設計/具体的なwire・profile・hashは[admission v3](../../../../../../../docs/contracts/next-semantic-admission-v3.md)、[public semantic v3](../../../../../../../docs/contracts/next-semantic-v3.md)、[compatibility v3](../../../../../../../docs/contracts/next-compatibility-v3.md)へ委譲します。仕様checkpointはdocs-onlyです。Spec Review Strict passの後に新schema/reference TDD、全A02 closureと累積A03の後にproduction、A05でIssue全体を認定します。
+
 ## Canonical index and historical evidence boundary (G10)
 
 ### 正本の選択規則
 
 後続の実装者・レビュー担当者は、次の順序で現在の契約を選択します。
 
-1. この文書の `Current normative authority` と `観測可能な要件` を読む。runtimeについてはA採択とversion migrationを優先し、旧process-v1 fixtureをproduction可用性の証拠にしない。
+1. この文書の `Current normative authority` と `観測可能な要件` を読む。runtimeはA採択、source公開correspondenceはSI節を優先し、旧process-v1/admission-v2 fixtureを新契約の可用性証拠にしない。
 2. Requirement ID（`I05-REQ-001`〜`I05-REQ-007`）から、下表のschema、validator、fixture/testへ進む。
 3. schemaで表せない所有権・再計算・順序・digest・statusは、指定されたreference validator/testの実装を参照する。
 4. `Round N`見出し、過去Artifact、`historical_runtime_vector_registry` は履歴証拠としてのみ読み、現行の入力・fallback・既定値には使わない。

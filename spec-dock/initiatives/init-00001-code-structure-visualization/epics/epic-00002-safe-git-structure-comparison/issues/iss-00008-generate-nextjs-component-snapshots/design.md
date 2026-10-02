@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-10-01"
+最終更新: "2026-10-02"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -19,6 +19,8 @@ package_sequence_key: "ISSUE-05"
 ここが現在の唯一の設計正本です。本文後半の`Round N`節はhistorical evidence（非normative）であり、後続実装が別のauthorityとして参照してはなりません。維持するsource/semantic/publicationのv1 baselineは既存のpublic schema群、`tests/contracts/next_reference_validation.py`、それらを結ぶfixture/testです。runtime移行のclosureは次節の別gateです。ラウンド専用umbrella schemaはauthorityではありません。
 
 2026-10-01、Aをaccepted ADR `artifacts/20261001t024645z-adr-issue8-trusted-toolchain-launch-model.md`へ固定しました。runtimeの唯一のtarget designは次節です。旧process-v1のverified-FD/actual-image equality、起動前実version、root literal entrypoint、2要素argvは新productionのauthorityではありません。旧schema/validator/fixtureは同じidentityのまま改変せず履歴/回帰として保持します。source/semantic意味とpublicationのsingle-owner原則は維持し、runtimeに依存するcompatibility/provenance/public schemaの移行を明示的に閉じます。新しいwire/fixture整合とStrict gateは未完了です。
+
+2026-10-02の追加採択は下記SI節です。従来「source/semantic意味を維持」としたbaselineのうち、全Fileのmodel correspondenceとProject公開membershipを新profileで分離します。旧v1/v2の対応部分は維持回帰の資料で、新SI targetの代わりに使いません。ID/認識/props/relation意味、静的解析安全性、A runtimeは変更しません。
 
 ### Aの実行Moduleと版移行
 
@@ -119,6 +121,56 @@ semantic rendererはdecisionだけを受け、publication finalizerは実際のc
 run-level terminal branchはpublication finalizerの前に一度だけ分岐します。project-rootのancestor/descendant overlapは`SourceProjectUsage`としてusage/exit 2、stdout空、Artifactなし、reader・decoder・finalizer・artifact readなしで終了します。source revision driftなどのintegrity violationは`SourceIntegrityFatal`としてfatal/exit 1、manifest/Artifactなし、Next catalog診断をstderrへ出します。捕捉済み`PublicationInterrupted`/`KeyboardInterrupt`はcore `CSV-INTERRUPT-001`を再構築してinterrupted/exit 130とし、付属diagnosticのmessage/path/domainを信頼しません。selectorは全4形（省略、manifest、semantic-json、PlantUML）で同じ分岐表を使い、terminal stdoutは空またはtyped unavailable/summaryのsealed bytesだけを返します。
 
 現在はA runtime契約への移行中です。production adapter、OS process-level認定は未完了です。非production Node実測は`artifacts/20261001t030614z-disc-issue8-a-launch-feasibility-evidence.md`へ分離し、製品availabilityの証拠にしません。依存/toolchain/process blockerの外部分析はclean/pushed exact-SHA ChatGPT-Use Strictのadvisoryとし、独立レビューと`I05-PLAN-008` gateを置き換えません。必要な検証と重要指摘ゼロを確認するまでimplementation readinessを確定しません。
+
+### SI: Source inventory / safe subsetのtarget design
+
+accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`に基づき、**全取得inventoryは同じ親owner、公開modelは独立に立証したsafe subset**とします。旧File correspondence guardやFile seedを個別に緩和しません。詳細正本は[admission-v3](../../../../../../../docs/contracts/next-semantic-admission-v3.md)、[semantic-v3](../../../../../../../docs/contracts/next-semantic-v3.md)、[compatibility-v3](../../../../../../../docs/contracts/next-compatibility-v3.md)です。このSI節と三文書は、上記admission/public-v2・十三key fingerprint記述および旧Current indexの対応部分を新targetとして置換します。その他の旧baselineを全面的に捨てません。
+
+| 所有者 / view | 保持内容と照合 |
+| --- | --- |
+| 同じsource seal / request-v2 | 全取得Project/Fileとbytes/config/graph/membership。complete-only seal。 |
+| full proof view | Project/Fileの`record`keyを省略したdiscoveryをrequestから解決。その他semantic proof-only object、full roots/causal/taint/export/target/locality。 |
+| safe model | exact File partitionのsafe Files、取得Projectのsafe file_ids、公開可能なsemantic records。 |
+| immutable Core-v3 | same candidate/source/assets、完全proof、partition、counts、gate、compatibility-v3。public producerはavailable ownerだけを受ける。 |
+| public-v3 / final owner | closed取得/公開summary、十四key run fingerprint、結果partition fingerprint、same-Core JSON/PlantUML。公開refsはsafe集合へ閉じる。 |
+
+proof source metadataは親から再構成し、childが正しい値を送った場合も`record`payloadを許しません。literal `record:null`はoptional-object schemaに違反します。Project proofは全取得membership、公開Projectはsafe membershipなので、同じIDでも全record一致を要求せず、`file_ids`以外の完全一致と正規filterを検証します。Project IDはroot、config digestはroot/source_roots/config_path/compiler_options、File IDはproject ID/pathのままです。
+
+File direct failure dispositionはvalidated parse/read rootへ結合し、他のtainted Fileはexcluded/tainted、安全Fileは必ず公開。File以外の既存selection-only exclusionとunsupported frontierは維持します。Projectはuntaintedで必ず公開し、全File除外時も空membershipです。full proofのcausal規則は維持し、File→Project逆edgeを新設しません。
+
+partial-safeの公開は、同じseal-owned resolved/open source graphのlocality evidenceにも結合します。source-integrity driftとordinary reader failureを混ぜず、取得完了後の解析失敗をreader prefixの証明にしません。full mandatory seeds/causal/target/exportとlocality不成立をsafe subsetだけで回避しません。
+
+profileは`next-source-inventory-safe-subset-v1`、planned新adapter headerは`0.2.0`です。旧`0.1.0`producer/corpusと区別し、product package versionを変更する決定ではありません。private wire-v2/v1 record shapesは保持し、親側admission/public/provenance/runの新generationだけを版移行します。
+
+新public schema/compatibility/dispatcherはv3、Core ownerもv3。既存provenance/run/candidatesはv3 siblingsへ移し、未作成のdomain/publication/root/stdout-v2は新v3 leaf refsへ直接接続します。affected-schema closure、exact planned names、十key compatibility、十四key run、partition三key preimagesとclosed summaryは三契約文書の表で固定します。旧leaf schema/algorithm/profile/KATを意味の違う入力へ流用せず、schema shape再利用とcertificate再利用を区別します。
+
+```plantuml
+@startuml
+title SI: acquired inventory and safe publication
+left to right direction
+rectangle "Same source seal / request v2\nall acquired Projects + Files" as S
+rectangle "Full proof view\nparent source records + semantic discovery\nmandatory seeds / causal / taint / locality" as F
+rectangle "Proof-only File / semantic records\nfailed or excluded / privately retained" as X
+rectangle "Safe model\nProject.safe file_ids + safe Files\nclosed public references" as M
+rectangle "Core v3 / public v3\ncounts + partition identity\nsame immutable publication owner" as P
+S --> F
+F --> X
+F --> M
+S --> M : canonical projection only
+M --> P
+F --> P : validated counts / proof
+note bottom of X : File itself remains a mandatory seed; no public payload injection
+@enduml
+```
+
+| 対応 | authority | 現在のevidence |
+| --- | --- | --- |
+| admission/public/run/provenance v2 | historical reference、SI外の不変baseline | 既存referenceの限定pass。新SIではない。 |
+| SI-v3三契約 + Current R/D/P + ADR | accepted target | docs-only、Spec Review pending。schema/reference未実装。 |
+| 新schema/reference/全public closure | accepted target | A02後続TDD/gates、未認定。 |
+| actual TypeScript/OS/CLI/package | A runtimeとSI target | A03後のA04/A05、未認定。 |
+
+独立Spec Reviewは仕様の整合だけを判定します。旧admission-v2のreference正例も新SIの正例もactual compiler受入れの代わりになりません。
 
 ## Canonical design index and historical evidence boundary (G10)
 

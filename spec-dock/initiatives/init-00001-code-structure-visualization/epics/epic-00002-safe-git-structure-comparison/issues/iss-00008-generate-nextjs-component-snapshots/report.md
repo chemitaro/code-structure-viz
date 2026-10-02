@@ -18,7 +18,11 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 採択・実測checkpointは`710eb49a2a3143e31b8a91580700d16839d9070d`でcommit/push済みです。このexact SHAへGPT-5.6 Sol / Proのfresh ChatGPT Use Strict分析を完了し、同一SHAと実pickerのverified結果を確認しました。助言をローカルref/hashへ照合し、必要なstdout/generic semantic/trusted descriptorの版移行を補正しました。A02を小さい契約から進めていますが、A03独立コードレビューは未通過です。
 
+2026-10-02、source inventoryとsafe subset分離の方針をユーザーが採択しました。same-parent所有権/Project二view/File完全partition/予算/版移行をCurrent R/D/Pとaccepted ADRへ具体化し、旧候補は当時の履歴として残しました。exact f8d5c41へのfresh Use Strict GPT-5.6 Sol/Pro設計相談はexit0、両picker verified、全665行をlocal source/schemaへ照合して補正しました。現在はdocs-only仕様checkpointで、新schema/reference/productionは未実装、Spec Review Strictは未通過です。次は独立仕様gateを通し、その後reference TDDを再開します。ASSET新policyは別の未採択判断です。
+
 ## Verification
+
+- Source inventory仕様checkpoint: docs-only検査で7文書／14 links、run/compatibility/summary/partitionの閉じたkey集合を確認し、既存Current pointer＋既存schema meta/closed限定selectionは34 passed（0.68s、exit0）。Ruff check／format227 files、SpecDock sync/validate10 nodes、diff-checkがpass。新v3のschema／reference／実TypeScriptや全pytestの証拠ではなく、独立Spec Review Strictは未通過です。補正と範囲は`artifacts/20261002t001451z-disc-source-inventory-specification-adjudication.md`。
 
 - A02公開診断の準備調査: clean/pushed exact `987d0eb...`のsame-author Implementation Brief Strict元74210はexit0／11m28s／267行のdecision packageで、ready briefではありません。全File保持とparse/read rootのtaint除外が衝突するstatic claimsを実sourceへ照合し、診断用harness元12322はexit0。正常Core/run2 complete control、各parse/readの4入力（計8拒否）で`file_correspondence`／`proof_source_owner`／published-taint／mandatory seedの実拒否点を確認しました。別の正規16 missing-target ownerは64KiB／+1の独立JSONL literalへ到達し、request64141/64142 bytes、response129228/129230 bytes、JSONL65536/65537 bytes、hash `702dbbfd...`／`c9373a44...`を実測しました。これはinput reachabilityで、未実装diagnostic owner／stderr gate、actual child parse/read／OS write／全A02のpassではありません。source/proof意味の先行整合を推奨する未採択候補と再現コードを`artifacts/20261001t212340z-decision-candidate-a02-file-source-inventory-taint.md`へ保存。Requirement/Design/accepted ADR、schema/reference/production/依存/旧goldensは変更せず、人間判断を待ちます。新ASSET policyとは別の判断です。
 
@@ -52,7 +56,7 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Residual Risks / Follow-ups
 
-- parse/read file-rootの正規admissionと全File model correspondenceは未整合です。診断層の修正では解消できず、source inventory／safe subset／proof／Project membership／counts／public projectionの先行設計判断が必要です。decision-candidateは未採択で、既存748 testsのpassでこのclassを認定しません。
+- parse/read file-rootと全File model correspondenceの旧referenceは未整合です。分離方針の人間判断は採択済みで新target仕様へ具体化しましたが、独立Spec Review、新schema/reference/full proof/public refsの実装は未完了です。旧748 testsのpassで新classを認定しません。
 - A-02の新version schema/reference/compatibility/provenance closure、A-03のfresh独立Strict、production TDD、両OS実CLI/offline package、Final Quality Gateが残っています。
 - 新asset failure policyはdecision-candidateのままです。採択前に実装せず、通常I/Oと立証済みpackage破損のdomain/run-level境界を固定してからsource prefix/public closureへ進みます。
 - Darwinの終了済みgroup確認は公開libproc APIを使った試作候補です。製品cleanupの全条件・全対応OS/architectureを認定したものではありません。
