@@ -18,9 +18,13 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 採択・実測checkpointは`710eb49a2a3143e31b8a91580700d16839d9070d`でcommit/push済みです。このexact SHAへGPT-5.6 Sol / Proのfresh ChatGPT Use Strict分析を完了し、同一SHAと実pickerのverified結果を確認しました。助言をローカルref/hashへ照合し、必要なstdout/generic semantic/trusted descriptorの版移行を補正しました。A02を小さい契約から進めていますが、A03独立コードレビューは未通過です。
 
-2026-10-02、source inventoryとsafe subset分離の方針をユーザーが採択しました。same-parent所有権/Project二view/File完全partition/予算/版移行をCurrent R/D/Pとaccepted ADRへ具体化し、旧候補は当時の履歴として残しました。exact f8d5c41へのfresh Use Strict GPT-5.6 Sol/Pro設計相談はexit0、両picker verified、全665行をlocal source/schemaへ照合して補正しました。仕様a4efdc3の独立Spec Reviewはfail/P1一件でした。続いてユーザーがowner-closed公開のA案を明示採択し、補足ADR/Current R/D/P/v3契約へ反映しました。新schema/reference/productionは未実装で、same-reviewer再認証pass後だけreference TDDへ進みます。ASSET新policyは別の未採択判断です。
+2026-10-02、source inventoryとsafe subset分離の方針をユーザーが採択しました。same-parent所有権/Project二view/File完全partition/予算/版移行をCurrent R/D/Pとaccepted ADRへ具体化し、旧候補は当時の履歴として残しました。exact f8d5c41へのfresh Use Strict GPT-5.6 Sol/Pro設計相談はexit0、両picker verified、全665行をlocal source/schemaへ照合して補正しました。仕様a4efdc3の独立Spec Reviewはfail/P1一件でした。続いてユーザーがowner-closed公開のA案を明示採択し、補足ADR/Current R/D/P/v3契約へ反映しました。bcae954でsame-reviewer再認証pass後、SI-03のsource/proof reference seamをTDDで実装し、関連309 testsがpassしました。次はfresh step Code Reviewで、full Core/新public schema/productionは未完了です。ASSET新policyは別の未採択判断です。
 
 ## Verification
+
+- SI-03 source/proof reference seam: exact `ce0edaa8fe63e79523fe7ad1dcb4b0a39dc02dce`のfresh Implementation Brief Strict（17m20s/exit0、GPT-5.6 Sol/Extra Highの両picker verified）全802行をローカル照合し、三つの新reference/validation/testファイルを追加しました。same retained owners、full source discovery/Module owner、owner-closed File完全partition、Project二view、実counts/partition literal/独立再検証をTDDで確認。最終六module selectionは309 passed（211.70s、exit0、実10000/10001 record count等のlarge cases除外無し）、Ruff check/format230 files・mypy188 sourcesはpassです。初回1 failed/308 passedは二重disposition fixtureが重複canonical guardで先に拒否されたtest期待の整合で、guardを緩めずfocused 5 passed後に同じselectionを再実行しました。raw brief、狭い最初のTDD checkpoint、全unit evidenceはそれぞれ別Artifactに保存。詳細は`artifacts/20261002t062856z-disc-si03-source-inventory-reference-seam.md`。元unit baseはce0edaaのまま、Code Reviewは未完了です。source-owner cause witnessは局所joinで、full mandatory proof/taint fixed point/locality/target/export/budget routing/実TS/Core/public/全A02/A03の認定ではありません。旧source/schema/reference/fixtures/依存/goldensを変更していません。
+
+- SI-03文書checkpoint: 旧Python/SQLAlchemy16 goldens＋Current pointer1の別selectionは17 passed（9.94s、exit0）。SpecDock sync（既存active維持）/validate10 nodes、diff-checkはpass。brief原回答WB/Artifactの`cmp`一致とSHA256を確認しました。309 selectionと重複件数を合算せず、全pytest/全A02/A03認定へ拡張しません。
 
 - Owner-closed A案の仕様再認証: exact `bcae9548ef515e4a7662de1ad648171622c6a437`へのsame-reviewer Strict followupは10m49s/exit0、schema-valid `review_status=pass`、findings0。前回P1は閉鎖、SI-01/02は成立しました。原JSONをbyte-for-byte保存し、正本9文書と必要baselineのconnector再取得/全体評価を確認。要求モデルはGPT-5.6 Sol/Pro、followupのmodel pickerはskipped/verified=false、Pro pickerはverified=trueで、今回のモデル再選択確認を主張しません。来歴・hash・限定ローカルチェック・未認定範囲は`artifacts/20261002t044942z-disc-owner-closed-spec-review-pass.md`。新reference/製品実装/全A02/A03/Finalは未完了です。
 
@@ -64,7 +68,7 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Residual Risks / Follow-ups
 
-- source inventoryとowner-closed A案は採択済みで、bcae954のsame-reviewer仕様再認証もpassです。次はSI-03 reference TDDですが、新class/新schemaは未実装です。補足accepted ADRは`artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`。元candidate/旧failは履歴として保持し、旧748 testsや仕様passを新class認定へ流用しません。
+- source inventoryとowner-closed A案は採択済みで、bcae954のsame-reviewer仕様再認証もpassです。SI-03 source/proof reference seamはlocal green、fresh step Code Reviewは未完了です。full Core/新public schemaはSI-04以降です。補足accepted ADRは`artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`。元candidate/旧failは履歴として保持し、旧748 testsや仕様passを新class認定へ流用しません。
 - A-02の新version schema/reference/compatibility/provenance closure、A-03のfresh独立Strict、production TDD、両OS実CLI/offline package、Final Quality Gateが残っています。
 - 新asset failure policyはdecision-candidateのままです。採択前に実装せず、通常I/Oと立証済みpackage破損のdomain/run-level境界を固定してからsource prefix/public closureへ進みます。
 - Darwinの終了済みgroup確認は公開libproc APIを使った試作候補です。製品cleanupの全条件・全対応OS/architectureを認定したものではありません。

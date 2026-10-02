@@ -20,7 +20,7 @@ package_sequence_key: "ISSUE-05"
 
 2026-10-02、ユーザーはsource inventoryとsafe subsetの先行整合方針を採択し、仕様修正/チェック後の実装再開を指示しました。下記SI計画をA02内のdiagnostic/stderr unitより前へ挿入します。旧candidateの「人間判断待ち」は当時の履歴で、現在のsource方針は採択済みです。別のASSET failure policyは未採択のままです。
 
-現在のgate evidence: 初回`a4efdc373a515801777c924a1d14675fda686955`はvalid fail/P1一件、専用findings分析はdesign-decision-requiredでした。人間採択A案の補足ADRとCurrent R/D/P・v3契約を`bcae9548ef515e4a7662de1ad648171622c6a437`へ反映し、同reviewerのStrict followupはschema-valid `review_status=pass`/findings0、前回P1閉鎖です。SI-01/02はこの仕様SHAで成立し、SI-03の実行可能briefとreference TDDへ進めます。来歴/実モデル観測限界は`artifacts/20261002t044942z-disc-owner-closed-spec-review-pass.md`。採択前candidate/旧failは履歴として保持。SI-03以降・全A02/累積A03/production/Finalは未認定です。
+現在のgate evidence: 初回`a4efdc373a515801777c924a1d14675fda686955`はvalid fail/P1一件、専用findings分析はdesign-decision-requiredでした。人間採択A案の補足ADRとCurrent R/D/P・v3契約を`bcae9548ef515e4a7662de1ad648171622c6a437`へ反映し、同reviewerのStrict followupはschema-valid `review_status=pass`/findings0、前回P1閉鎖です。SI-01/02はこの仕様SHAで成立し、SI-03のfresh Strict briefを全文照合してsource/proof reference seamをTDDで実装しました。最終関連selectionは309 passed（211.70s、large cases除外無し）、Ruff/format230・mypy188はpassです。SI-03の元baseは`ce0edaa8fe63e79523fe7ad1dcb4b0a39dc02dce`のまま、次はfresh独立step Code Reviewです。実装の限定範囲と初回失敗の扱いは`artifacts/20261002t062856z-disc-si03-source-inventory-reference-seam.md`、仕様再認証の来歴/実モデル観測限界は`artifacts/20261002t044942z-disc-owner-closed-spec-review-pass.md`。採択前candidate/旧failは履歴として保持。SI-03のCode Review・SI-04以降・全A02/累積A03/production/Finalは未認定です。
 
 ### A runtime移行の順序
 
@@ -109,7 +109,7 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 
 ### SIの実装再開順序と出口条件
 
-RequirementのSI-REQ-001〜007、DesignのSI節と三つの新v3契約、accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`とA案補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`を入力とします。ここで新設するAPI/schema/test pathsはplannedで、未実装passに数えません。上記diagnostic briefとFile/Module候補の「未採択」は当時の履歴です。full File/Module base、独立Module eligibility、proof source resolution、exact File partition、Project safe projectionを一緒に閉じ、guard一箇所の抑制やSOURCEへのrelabelで再開しません。
+RequirementのSI-REQ-001〜007、DesignのSI節と三つの新v3契約、accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`とA案補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`を入力とします。SI-03のsource/proof reference三ファイルはlocal greenですが、後続Core/public API/schemaはplannedで、未実装passに数えません。上記diagnostic briefとFile/Module候補の「未採択」は当時の履歴です。full File/Module base、独立Module eligibility、proof source resolution、exact File partition、Project safe projectionを一緒に閉じ、guard一箇所の抑制やSOURCEへのrelabelで再開しません。
 
 | unit | 作業と依存 | 出口 / 受入対応 |
 | --- | --- | --- |
