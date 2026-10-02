@@ -48,7 +48,7 @@ class ValidatedSemanticDecisionV3:
     _candidate: ValidatedTransportCandidateV2 = field(repr=False)
     _seal: SourceAcquisitionSeal = field(repr=False)
     _assets: RetainedExecutionAssets = field(repr=False)
-    _source_inventory: ValidatedSourceInventorySeamV3 = field(repr=False)
+    _source_inventory: ValidatedSourceInventorySeamV3 | None = field(repr=False)
     _gate_bytes: bytes = field(repr=False)
     _locality_bytes: bytes = field(repr=False)
     _compatibility_bytes: bytes = field(repr=False)
@@ -70,7 +70,7 @@ class ValidatedSemanticDecisionV3:
     def execution_assets(self) -> RetainedExecutionAssets:
         return self._assets
 
-    def source_inventory_seam(self) -> ValidatedSourceInventorySeamV3:
+    def source_inventory_seam(self) -> ValidatedSourceInventorySeamV3 | None:
         return self._source_inventory
 
     def gate(self) -> dict[str, Any]:

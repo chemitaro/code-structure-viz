@@ -1,5 +1,6 @@
 """Full-Core reference corpus; no actual TypeScript/process/CLI certification."""
 
+from copy import deepcopy
 from importlib import import_module
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -207,6 +208,7 @@ def core_inputs_v3(
     *,
     sources: dict[str, bytes] | None = None,
     targets: list[str] | None = None,
+    project_roots: tuple[str, ...] = (".",),
 ) -> tuple[
     SourceAcquisitionSeal,
     runtime.RetainedExecutionAssets,
@@ -243,7 +245,7 @@ def core_inputs_v3(
         max_total_bytes=64 * 1024 * 1024,
     )
     seal = seal_source_acquisition(
-        SourceDiscoveryIntent((".",)), reader, trusted_environment_digest=trusted["sha256"]
+        SourceDiscoveryIntent(project_roots), reader, trusted_environment_digest=trusted["sha256"]
     )
     assert type(seal) is SourceAcquisitionSeal
     request = runtime.build_request_frame_v2(
@@ -1213,3 +1215,666 @@ def test_v3_core_entity_budget_measures_actual_frozen_programs_not_private_modul
     assert decision.gate()["original_outcome"] == "partial_safe"
     assert decision.gate()["payload_available"] is (entities == 500)
     assert decision.gate()["diagnostic_code"] == (None if entities == 500 else "CSV-NEXT-LIMIT-005")
+
+
+def omit_selected_button_module_v3(wire: dict[str, Any], *, keep_component: bool = False) -> None:
+    """Worked missing-owner corpus; incoming source remains acquired and unknown."""
+
+    payload = wire["semantic_payload"]
+    removed = {
+        MODULE_IDS["src/button.tsx"],
+        FACT_IDS["src/button.tsx"],
+        BUTTON_ID,
+        BUTTON_EXPORT_ID,
+        PRIMARY_EXPORT_ID,
+        REEXPORT_RELATION_ID,
+    }
+    if keep_component:
+        removed.remove(BUTTON_ID)
+    for name in COLLECTIONS:
+        payload["model"][name] = [row for row in payload["model"][name] if row["id"] not in removed]
+    payload["proof"]["discovered_records"] = [
+        row for row in payload["proof"]["discovered_records"] if row["record_id"] not in removed
+    ]
+    payload["proof"]["export_observations"] = [
+        row
+        for row in payload["proof"]["export_observations"]
+        if row["owner_module_id"] != MODULE_IDS["src/button.tsx"]
+    ]
+    for row in (
+        payload["proof"]["export_observations"] + payload["proof"]["export_reexport_witness"]
+    ):
+        if row["owner_module_id"] == MODULE_IDS["src/index.ts"]:
+            row.update(
+                resolution="unknown",
+                component_id=None,
+                target_declaration_id=None,
+                resolved_source_module_id=None,
+            )
+            if "component_id" in row and "diagnostic" in row:
+                del row["component_id"]
+    payload["proof"]["export_resolution_witness"] = []
+    target = {
+        "target_key": "path:src/button.tsx",
+        "status": "failed",
+        "record_ids": [],
+        "reason": "component_only" if keep_component else "missing",
+    }
+    payload["proof"]["target_resolutions"] = [target]
+    payload["model"]["coverage"]["target_completeness"] = [dict(target)]
+    refresh_wire(wire)
+
+
+def test_v3_core_selected_missing_module_routes_after_full_exception_proof(tmp_path: Path) -> None:
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, targets=["path:src/button.tsx"])
+    omit_selected_button_module_v3(wire)
+    assert len(wire["semantic_payload"]["proof"]["discovered_records"]) == 11
+    assert {str(file.path): file.sha256 for file in seal.source_view.files} == SOURCE_HASHES
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    assert decision.transport_candidate() is candidate
+    assert decision.source_seal() is seal
+    assert decision.execution_assets() is assets
+    assert decision.source_inventory_seam() is None
+    assert decision.gate()["diagnostic_code"] == "CSV-NEXT-TARGET-001"
+    assert decision.gate()["target_failures"] == [
+        {"target_key": "path:src/button.tsx", "reason": "missing"}
+    ]
+    assert decision.gate()["payload_available"] is False
+    assert decision.measurements() == {"model_records": None, "entity_budget": None}
+
+
+def test_v3_core_selected_component_only_routes_after_full_exception_proof(tmp_path: Path) -> None:
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, targets=["path:src/button.tsx"])
+    omit_selected_button_module_v3(wire, keep_component=True)
+    assert len(wire["semantic_payload"]["proof"]["discovered_records"]) == 12
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    assert decision.source_inventory_seam() is None
+    assert decision.gate()["diagnostic_code"] == "CSV-NEXT-TARGET-001"
+    assert decision.gate()["target_failures"] == [
+        {"target_key": "path:src/button.tsx", "reason": "component_only"}
+    ]
+    assert decision.measurements() == {"model_records": None, "entity_budget": None}
+    assert candidate.semantic_payload()["model"]["members"] == []
+
+
+def duplicate_selected_button_module_v3(wire: dict[str, Any]) -> None:
+    """Two identical raw occurrences, one semantic discovery and no fake owner."""
+
+    payload = wire["semantic_payload"]
+    modules = payload["model"]["modules"]
+    modules.append(deepcopy(next(row for row in modules if row["path"] == "src/button.tsx")))
+    modules.sort(key=lambda row: row["id"])
+    target = {
+        "target_key": "path:src/button.tsx",
+        "status": "failed",
+        "record_ids": [],
+        "reason": "duplicate",
+    }
+    payload["proof"]["target_resolutions"] = [target]
+    payload["model"]["coverage"]["target_completeness"] = [dict(target)]
+    refresh_wire(wire)
+    # Raw occurrence accounting is not the unique proof census.
+    payload["model"]["coverage"]["counts"]["discovered"] += 1
+    payload["model_digest"] = digest(payload["model"])
+
+
+def test_v3_core_selected_identical_duplicate_routes_after_full_exception_proof(
+    tmp_path: Path,
+) -> None:
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, targets=["path:src/button.tsx"])
+    duplicate_selected_button_module_v3(wire)
+    payload = wire["semantic_payload"]
+    assert len(payload["model"]["modules"]) == 4
+    assert len(payload["proof"]["discovered_records"]) == 17
+    assert payload["model"]["coverage"]["counts"]["published"] == 18
+    assert payload["model"]["coverage"]["counts"]["discovered"] == 18
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    raw_before = candidate.semantic_payload()
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    assert decision.transport_candidate() is candidate
+    assert decision.source_seal() is seal
+    assert decision.execution_assets() is assets
+    assert decision.source_inventory_seam() is None
+    assert decision.gate()["diagnostic_code"] == "CSV-NEXT-TARGET-001"
+    assert decision.gate()["target_failures"] == [
+        {"target_key": "path:src/button.tsx", "reason": "duplicate"}
+    ]
+    assert decision.gate()["payload_available"] is False
+    assert decision.measurements() == {"model_records": None, "entity_budget": None}
+    assert candidate.semantic_payload() == raw_before
+
+
+def append_literal_safe_target_v3(
+    wire: dict[str, Any], request: runtime.RetainedRequestFrameV2, path: str
+) -> None:
+    file_id = next(row["id"] for row in request.record()["files"] if row["path"] == path)
+    row = {
+        "target_key": f"path:{path}",
+        "status": "resolved",
+        "record_ids": sorted([file_id, MODULE_IDS[path]]),
+    }
+    wire["semantic_payload"]["proof"]["target_resolutions"].append(row)
+    wire["semantic_payload"]["model"]["coverage"]["target_completeness"].append(
+        {**row, "status": "complete"}
+    )
+    refresh_wire(wire)
+
+
+def test_v3_core_default_selection_preserves_missing_and_independent_safe_targets(
+    tmp_path: Path,
+) -> None:
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path)
+    assert request.record()["targets"] == []
+    omit_selected_button_module_v3(wire)
+    append_literal_safe_target_v3(wire, request, "src/index.ts")
+    append_literal_safe_target_v3(wire, request, "src/value.ts")
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    assert decision.gate()["target_failures"] == [
+        {"target_key": "path:src/button.tsx", "reason": "missing"}
+    ]
+    assert len(candidate.semantic_payload()["proof"]["target_resolutions"]) == 3
+    assert decision.gate()["diagnostic_code"] == "CSV-NEXT-TARGET-001"
+    assert decision.source_inventory_seam() is None
+
+
+def apply_cardinality_fixture_v3(wire: dict[str, Any], kind: str) -> None:
+    if kind == "duplicate":
+        duplicate_selected_button_module_v3(wire)
+    else:
+        omit_selected_button_module_v3(wire, keep_component=kind == "component_only")
+
+
+def refresh_cardinality_fixture_v3(wire: dict[str, Any], kind: str) -> None:
+    refresh_wire(wire)
+    if kind == "duplicate":
+        wire["semantic_payload"]["model"]["coverage"]["counts"]["discovered"] += 1
+        wire["semantic_payload"]["model_digest"] = digest(wire["semantic_payload"]["model"])
+
+
+@pytest.mark.parametrize("kind", ["missing", "component_only", "duplicate"])
+def test_v3_core_mixed_cardinality_targets_keep_literal_safe_resolution(
+    tmp_path: Path, kind: str
+) -> None:
+    targets = ["path:src/button.tsx", "path:src/index.ts"]
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, targets=targets)
+    apply_cardinality_fixture_v3(wire, kind)
+    append_literal_safe_target_v3(wire, request, "src/index.ts")
+    refresh_cardinality_fixture_v3(wire, kind)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    assert decision.gate()["target_failures"] == [
+        {"target_key": "path:src/button.tsx", "reason": kind}
+    ]
+    rows = candidate.semantic_payload()["proof"]["target_resolutions"]
+    assert rows[1]["status"] == "resolved" and len(rows[1]["record_ids"]) == 2
+    validation.validate_semantic_decision_v3(decision)
+    original_gate = decision.gate()
+    decision.gate()["target_failures"][0]["reason"] = "out_of_scope"
+    decision.measurements()["model_records"] = {"accounted": 0}
+    assert decision.gate() == original_gate
+    assert decision.measurements() == {"model_records": None, "entity_budget": None}
+
+
+@pytest.mark.parametrize("kind", ["missing", "component_only", "duplicate"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "source_discovery_omission",
+        "source_record_injection",
+        "semantic_discovery_duplicate",
+        "unrelated_file_exclusion",
+        "dangling_record",
+        "incoming_witness",
+        "wrong_target_reason",
+        "raw_module_count",
+    ],
+)
+def test_v3_core_cardinality_is_not_an_exemption_from_full_proof(
+    tmp_path: Path, kind: str, mutation: str
+) -> None:
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, targets=["path:src/button.tsx"])
+    apply_cardinality_fixture_v3(wire, kind)
+    payload = wire["semantic_payload"]
+    model, proof = payload["model"], payload["proof"]
+    file = next(row for row in request.record()["files"] if row["path"] == "src/index.ts")
+    if mutation == "source_discovery_omission":
+        proof["discovered_records"] = [
+            row for row in proof["discovered_records"] if row["record_id"] != file["id"]
+        ]
+    elif mutation == "source_record_injection":
+        row = next(row for row in proof["discovered_records"] if row["record_id"] == file["id"])
+        row["record"] = {key: value for key, value in file.items() if key != "content_base64"}
+    elif mutation == "semantic_discovery_duplicate":
+        proof["discovered_records"].append(
+            deepcopy(
+                next(row for row in proof["discovered_records"] if row["collection"] == "modules")
+            )
+        )
+    elif mutation == "unrelated_file_exclusion":
+        exclude_record(wire, "files", file["id"], reason="not_selected", taints=[])
+    elif mutation == "dangling_record":
+        record = next(
+            row for row in model["facts"] if row["owner_id"] == MODULE_IDS["src/index.ts"]
+        )
+        old_id = record["id"]
+        record["owner_id"] = "next:module:" + "f" * 64
+        record["id"] = recompute_record_id(record)
+        next(row for row in proof["discovered_records"] if row["record_id"] == old_id)[
+            "record_id"
+        ] = record["id"]
+        model["facts"].sort(key=lambda row: row["id"])
+    elif mutation == "incoming_witness":
+        proof["export_reexport_witness"][0]["syntax_identity"] = (
+            "export:src/index.ts:9:26:reexport:Secondary"
+        )
+    elif mutation == "wrong_target_reason":
+        proof["target_resolutions"][0]["reason"] = "out_of_scope"
+        model["coverage"]["target_completeness"][0]["reason"] = "out_of_scope"
+    refresh_cardinality_fixture_v3(wire, kind)
+    if mutation == "raw_module_count":
+        model["coverage"]["counts"]["modules"] += 1
+        payload["model_digest"] = digest(model)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    rejection = core.inspect_semantic_candidate_v3(candidate, seal, assets)
+    assert type(rejection) is core.RejectedSemanticDecisionV3
+    assert rejection.failure()["diagnostic_code"] == "CSV-NEXT-PROTOCOL-001"
+    assert rejection.failure()["model_records"] is None
+    validation.validate_rejected_semantic_decision_v3(rejection)
+
+
+@pytest.mark.parametrize("mutation", ["not_selected", "contradictory"])
+def test_v3_core_does_not_generalize_duplicate_exception(tmp_path: Path, mutation: str) -> None:
+    targets = ["path:src/index.ts"] if mutation == "not_selected" else ["path:src/button.tsx"]
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, targets=targets)
+    duplicate_selected_button_module_v3(wire)
+    payload = wire["semantic_payload"]
+    if mutation == "not_selected":
+        payload["proof"]["target_resolutions"] = []
+        payload["model"]["coverage"]["target_completeness"] = []
+        append_literal_safe_target_v3(wire, request, "src/index.ts")
+    else:
+        next(row for row in payload["model"]["modules"] if row["path"] == "src/button.tsx")[
+            "client_entry"
+        ] = True
+    refresh_cardinality_fixture_v3(wire, "duplicate")
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    rejection = core.inspect_semantic_candidate_v3(candidate, seal, assets)
+    assert type(rejection) is core.RejectedSemanticDecisionV3
+    assert rejection.failure()["diagnostic_code"] == "CSV-NEXT-PROTOCOL-001"
+
+
+@pytest.mark.parametrize("kind", ["component_only", "duplicate"])
+def test_v3_core_default_selection_also_preserves_other_cardinality_failures(
+    tmp_path: Path, kind: str
+) -> None:
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path)
+    apply_cardinality_fixture_v3(wire, kind)
+    append_literal_safe_target_v3(wire, request, "src/index.ts")
+    append_literal_safe_target_v3(wire, request, "src/value.ts")
+    refresh_cardinality_fixture_v3(wire, kind)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    assert decision.gate()["target_failures"] == [
+        {"target_key": "path:src/button.tsx", "reason": kind}
+    ]
+    assert len(candidate.semantic_payload()["proof"]["target_resolutions"]) == 3
+    assert decision.source_inventory_seam() is None
+
+
+@pytest.mark.parametrize("mode", ["over_limit", "invalid_proof", "proven_target"])
+def test_v3_core_actual_record_limit_preserves_proof_and_target_precedence(
+    tmp_path: Path, mode: str
+) -> None:
+    targets = ["path:src/value.ts"] if mode == "proven_target" else []
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, targets=targets)
+    exclude_value_module_with_root_v3(wire, request, "module_relation")
+    add_literal_reference_props_v3(wire, 10_001 - 17)
+    payload = wire["semantic_payload"]
+    if mode == "invalid_proof":
+        payload["proof"]["causal_edges"].pop()
+    elif mode == "proven_target":
+        row = {
+            "target_key": "path:src/value.ts",
+            "status": "failed",
+            "record_ids": [],
+            "reason": "selected_taint",
+        }
+        payload["proof"]["target_resolutions"] = [row]
+        payload["model"]["coverage"]["target_completeness"] = [dict(row)]
+    refresh_wire(wire)
+    assert len(payload["proof"]["discovered_records"]) == 10_001
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    result = core.inspect_semantic_candidate_v3(candidate, seal, assets)
+    if mode == "proven_target":
+        assert type(result) is core.ValidatedSemanticDecisionV3
+        assert result.gate()["diagnostic_code"] == "CSV-NEXT-TARGET-001"
+        assert result.gate()["target_failures"] == [
+            {"target_key": "path:src/value.ts", "reason": "selected_taint"}
+        ]
+        # The Module exists in private D: it is not a selected missing-owner exception.
+        assert result.source_inventory_seam() is not None
+        assert result.measurements() == {"model_records": None, "entity_budget": None}
+        validation.validate_semantic_decision_v3(result)
+    else:
+        assert type(result) is core.RejectedSemanticDecisionV3
+        if mode == "over_limit":
+            assert result.failure() == {
+                "stage": "model_validation",
+                "diagnostic_code": "CSV-NEXT-LIMIT-005",
+                "reason": "max_model_records",
+                "model_records": 10_001,
+            }
+        else:
+            assert result.failure()["diagnostic_code"] == "CSV-NEXT-PROTOCOL-001"
+            assert result.failure()["model_records"] is None
+        validation.validate_rejected_semantic_decision_v3(result)
+
+
+def simple_multiple_projects_fixture_v3(tmp_path: Path, *, selected: bool) -> tuple[Any, ...]:
+    sources = {
+        root + suffix: content
+        for root in ("apps/a", "apps/b")
+        for suffix, content in (
+            ("/package.json", b'{"dependencies":{"next":"15"}}'),
+            ("/tsconfig.json", b'{"include":["src/**/*"]}'),
+            ("/src/value.ts", b"const marker = 1;\n"),
+            ("/src/global.d.ts", b"declare interface Window { marker: string; }\n"),
+        )
+    }
+    seal, assets, request, policy, wire = core_inputs_v3(
+        tmp_path,
+        sources=sources,
+        project_roots=("apps/a", "apps/b"),
+        targets=["path:apps/b/src/value.ts"] if selected else [],
+    )
+    payload = wire["semantic_payload"]
+    model, proof = payload["model"], payload["proof"]
+    for name in ("modules", "components", "members", "relations", "facts"):
+        model[name] = []
+    for file in request.record()["files"]:
+        if "program" not in file["roles"]:
+            continue
+        module = {
+            "kind": "module",
+            "project_id": file["project_id"],
+            "path": file["path"],
+            "router_context": "none",
+            "client_entry": False,
+            "derived_roles": [],
+        }
+        module["id"] = recompute_record_id(module)
+        fact = {"kind": "router_context", "owner_id": module["id"], "value": "none"}
+        fact["id"] = recompute_record_id(fact)
+        model["modules"].append(module)
+        model["facts"].append(fact)
+    for name in COLLECTIONS:
+        model[name].sort(key=lambda row: row["id"])
+    original = {row["id"]: deepcopy(row) for name in COLLECTIONS for row in model[name]}
+    model["diagnostics"] = []
+    model["coverage"]["non_component_value_export_count"] = 0
+    proof.update(
+        discovered_records=[
+            {"collection": name, "record_id": row["id"], "taints": []}
+            for name in COLLECTIONS
+            for row in model[name]
+        ],
+        export_observations=[],
+        export_resolution_witness=[],
+        export_reexport_witness=[],
+    )
+    for index, file in enumerate(request.record()["files"]):
+        if file["project_id"] != request.record()["projects"][0]["id"]:
+            continue
+        owned = [file["id"]]
+        modules = [row for row in model["modules"] if row["path"] == file["path"]]
+        if modules:
+            owned.append(modules[0]["id"])
+            fact = next(row for row in model["facts"] if row["owner_id"] == modules[0]["id"])
+            owned.append(fact["id"])
+            exclude_record(
+                wire, "modules", modules[0]["id"], reason="tainted", taints=["parse_file"]
+            )
+            exclude_record(wire, "facts", fact["id"], reason="tainted", taints=["parse_file"])
+        exclude_record(wire, "files", file["id"], reason="tainted", taints=["parse_file"])
+        proof["excluded"] = [row for row in proof["excluded"] if row["record_id"] != file["id"]]
+        proof["failed"].append(
+            {"collection": "files", "record_id": file["id"], "reason": "parse_file"}
+        )
+        proof["failure_roots"].append(
+            {
+                "id": "next:failure:" + f"{index + 1:064x}",
+                "collection": "files",
+                "kind": "parse_file",
+                "path_ref": file["path"],
+                "record_ids": sorted(owned),
+            }
+        )
+    full: dict[str, dict[str, dict[str, Any]]] = {name: {} for name in COLLECTIONS}
+    for row in proof["discovered_records"]:
+        full[row["collection"]][row["record_id"]] = {**row, "record": original[row["record_id"]]}
+    proof["causal_edges"] = derive_required_causal_edges(proof, full)
+    model["coverage"]["failed_files"] = sorted(
+        [
+            {"path": file["path"], "reason": "parse_file"}
+            for file in request.record()["files"]
+            if file["project_id"] == request.record()["projects"][0]["id"]
+        ],
+        key=lambda row: row["path"],
+    )
+    if selected:
+        file = next(
+            row for row in request.record()["files"] if row["path"] == "apps/b/src/value.ts"
+        )
+        module = next(row for row in model["modules"] if row["path"] == file["path"])
+        target = {
+            "target_key": "path:apps/b/src/value.ts",
+            "status": "resolved",
+            "record_ids": sorted([file["id"], module["id"]]),
+        }
+        proof["target_resolutions"] = [target]
+        model["coverage"]["target_completeness"] = [{**target, "status": "complete"}]
+    refresh_wire(wire)
+    return seal, assets, request, policy, wire
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_v3_core_empty_project_membership_never_erases_an_independent_safe_project(
+    tmp_path: Path, selected: bool
+) -> None:
+    seal, assets, request, policy, wire = simple_multiple_projects_fixture_v3(
+        tmp_path, selected=selected
+    )
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    projects = {row["root"]: row for row in decision.source_inventory_seam().safe_projects()}
+    assert set(projects) == {"apps/a", "apps/b"}
+    assert projects["apps/a"]["file_ids"] == []
+    assert projects["apps/b"]["file_ids"] == request.record()["projects"][1]["file_ids"]
+    assert decision.gate()["outcome"] == "partial_safe"
+    assert decision.gate()["payload_available"] is True
+    assert decision.measurements() == {
+        "model_records": {"published": 8, "proof_only": 6, "accounted": 14, "limit": 10_000},
+        "entity_budget": {"actual": 1, "limit": 500},
+    }
+    assert decision.locality()["affected_paths"] == sorted(
+        file["path"] for file in request.record()["files"] if file["path"].startswith("apps/a/")
+    )
+    validation.validate_semantic_decision_v3(decision)
+
+
+@pytest.mark.parametrize("mode", ["represented", "missing_count", "missing_diagnostic"])
+def test_v3_core_unsupported_owner_needs_a_represented_frontier_not_a_failure(
+    tmp_path: Path, mode: str
+) -> None:
+    sources = {
+        **SOURCE_BYTES,
+        "src/index.ts": SOURCE_BYTES["src/index.ts"] + b'import("./not-found");\n',
+        "src/value.ts": b"const value = 1;\n",
+    }
+    seal, assets, request, policy, wire = core_inputs_v3(
+        tmp_path, sources=sources, targets=["path:src/button.tsx"]
+    )
+    payload = wire["semantic_payload"]
+    model, proof = payload["model"], payload["proof"]
+    file = next(row for row in request.record()["files"] if row["path"] == "src/value.ts")
+    exclude_record(wire, "modules", MODULE_IDS["src/value.ts"], reason="unsupported", taints=[])
+    exclude_record(wire, "facts", FACT_IDS["src/value.ts"], reason="unsupported", taints=[])
+    exclude_record(wire, "files", file["id"], reason="unsupported", taints=[])
+    proof["export_observations"] = [
+        row for row in proof["export_observations"] if row["owner_file_path"] != "src/value.ts"
+    ]
+    relation = {
+        "kind": "literal_dynamic_import",
+        "source_id": MODULE_IDS["src/index.ts"],
+        "target": {
+            "kind": "unresolved",
+            "target_kind": "unresolved_relative",
+            "safe_specifier": "unknown",
+            "exported_name": None,
+        },
+        "role": "value",
+        "reexport": False,
+        "boundary_effect": "none",
+    }
+    relation["id"] = recompute_record_id(relation)
+    model["relations"].append(relation)
+    model["relations"].sort(key=lambda row: row["id"])
+    proof["discovered_records"].append(
+        {"collection": "relations", "record_id": relation["id"], "taints": []}
+    )
+    model["coverage"]["unknown_relation_count"] = 0 if mode == "missing_count" else 1
+    model["coverage"]["non_component_value_export_count"] = 0
+    if mode == "missing_diagnostic":
+        model["diagnostics"] = []
+    select_literal_button_target_v3(wire, request)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    result = core.inspect_semantic_candidate_v3(candidate, seal, assets)
+    assert proof["failure_roots"] == []
+    assert all(row["taints"] == [] for row in proof["discovered_records"])
+    assert seal.final_plan["source_graph"]["open_edges"]
+    if mode == "represented":
+        assert type(result) is core.ValidatedSemanticDecisionV3
+        assert result.gate()["outcome"] == "complete"
+        assert result.gate()["payload_available"] is True
+        assert result.measurements() == {
+            "model_records": {"published": 15, "proof_only": 3, "accounted": 18, "limit": 10_000},
+            "entity_budget": {"actual": 3, "limit": 500},
+        }
+        assert (
+            next(
+                row
+                for row in result.source_inventory_seam().file_dispositions()
+                if row.record_id == file["id"]
+            ).reason
+            == "unsupported"
+        )
+        validation.validate_semantic_decision_v3(result)
+    else:
+        assert type(result) is core.RejectedSemanticDecisionV3
+        assert result.failure()["diagnostic_code"] == "CSV-NEXT-PROTOCOL-001"
+        validation.validate_rejected_semantic_decision_v3(result)
+
+
+@pytest.mark.parametrize("mode", ["proven", "file_seed", "causal_edge", "file_taint", "root_kind"])
+def test_v3_core_missing_target_keeps_full_unrelated_file_root_proof(
+    tmp_path: Path, mode: str
+) -> None:
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, targets=["path:src/button.tsx"])
+    omit_selected_button_module_v3(wire)
+    file_id = exclude_value_module_with_root_v3(wire, request, "parse_file")
+    proof = wire["semantic_payload"]["proof"]
+    if mode == "file_seed":
+        proof["failure_roots"][0]["record_ids"].remove(file_id)
+        proof["causal_edges"] = [
+            row for row in proof["causal_edges"] if row["record_id"] != file_id
+        ]
+    elif mode == "causal_edge":
+        proof["causal_edges"].pop()
+    elif mode == "file_taint":
+        next(row for row in proof["discovered_records"] if row["record_id"] == file_id)[
+            "taints"
+        ] = []
+    elif mode == "root_kind":
+        proof["failure_roots"][0]["kind"] = "read_file"
+    refresh_wire(wire)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    result = core.inspect_semantic_candidate_v3(candidate, seal, assets)
+    if mode == "proven":
+        assert type(result) is core.ValidatedSemanticDecisionV3
+        assert result.gate()["target_failures"] == [
+            {"target_key": "path:src/button.tsx", "reason": "missing"}
+        ]
+        assert result.locality()["affected_paths"] == ["src/value.ts"]
+        assert result.source_inventory_seam() is None
+        validation.validate_semantic_decision_v3(result)
+    else:
+        assert type(result) is core.RejectedSemanticDecisionV3
+        assert result.failure()["diagnostic_code"] == "CSV-NEXT-PROTOCOL-001"
+        validation.validate_rejected_semantic_decision_v3(result)
+
+
+def test_v3_core_component_only_does_not_exempt_props_repository_references(
+    tmp_path: Path,
+) -> None:
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, targets=["path:src/button.tsx"])
+    omit_selected_button_module_v3(wire, keep_component=True)
+    add_literal_reference_props_v3(wire, 1)
+    model = wire["semantic_payload"]["model"]
+    next(row for row in model["members"] if row["kind"] == "prop")["type_node"] = {
+        "kind": "reference",
+        "scope": "repository",
+        "module": MODULE_IDS["src/button.tsx"],
+        "exported_name": "Props",
+        "type_arguments": [],
+    }
+    refresh_wire(wire)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    rejection = core.inspect_semantic_candidate_v3(candidate, seal, assets)
+    assert type(rejection) is core.RejectedSemanticDecisionV3
+    assert rejection.failure()["diagnostic_code"] == "CSV-NEXT-PROTOCOL-001"
+
+
+def test_v3_core_wrong_private_module_kind_is_a_bounded_rejection_not_a_classifier_error(
+    tmp_path: Path,
+) -> None:
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path)
+    exclude_value_module_with_root_v3(wire, request, "module_relation")
+    proof = wire["semantic_payload"]["proof"]
+    module = next(
+        row for row in proof["discovered_records"] if row["record_id"] == MODULE_IDS["src/value.ts"]
+    )
+    fact = next(
+        row for row in proof["discovered_records"] if row["record_id"] == FACT_IDS["src/value.ts"]
+    )
+    module["record"] = deepcopy(fact["record"])
+    refresh_wire(wire)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    rejection = core.inspect_semantic_candidate_v3(candidate, seal, assets)
+    assert type(rejection) is core.RejectedSemanticDecisionV3
+    assert rejection.failure()["diagnostic_code"] == "CSV-NEXT-PROTOCOL-001"
+    assert rejection.failure()["model_records"] is None
+    validation.validate_rejected_semantic_decision_v3(rejection)

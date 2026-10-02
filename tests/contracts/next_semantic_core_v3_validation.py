@@ -9,10 +9,15 @@ from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitio
 from code_structure_viz.semantic.canonical_json import encode_canonical_json
 from tests.contracts.next_reference_validation import (
     COLLECTIONS,
+    TAINT_ORDER_INDEX,
     ModelRecordLimitError,
     NextTargetCompletenessFailure,
+    _assert_canonical,
+    _deduplicated_model_for_base_validation,
     _derived_taint_fixed_point,
     _export_tokens,
+    _id_kind,
+    _is_program_file,
     _opaque_reason_counts,
     _record_references,
     _reexport_join_key,
@@ -20,7 +25,10 @@ from tests.contracts.next_reference_validation import (
     _scan_export_file,
     _string_export_resolution,
     _target_contains_export,
+    _target_duplicate_module_exceptions,
+    _target_missing_module_exceptions,
     _terminal_export_source_path,
+    _validate_model_collections,
     canonical_json_bytes,
     canonical_run_context,
     derive_pre_budget_outcome,
@@ -34,6 +42,7 @@ from tests.contracts.next_reference_validation import (
     resolve_target_resolutions,
     response_model_record_counts,
     string_export_target_resolutions,
+    target_completeness_failure,
     target_failure_decision,
     target_failure_from_proof,
     validate_model,
@@ -51,8 +60,10 @@ from tests.contracts.next_source_inventory_v3_reference import (
 )
 from tests.contracts.next_source_inventory_v3_validation import (
     SourceInventoryInvalidErrorV3,
+    _record_closure_references_v3,
     full_module_owners_v3,
     resolve_discovered_v3,
+    source_owner_witness_kinds_v3,
     validate_public_source_metadata_v3,
     validate_source_record_payloads_v3,
 )
@@ -84,6 +95,313 @@ class SemanticCandidateInvalidErrorV3(ValueError):
             raise ValueError("unknown v3 semantic invariant reason")
         super().__init__(reason)
         self.reason = reason
+
+
+@dataclass(frozen=True, slots=True)
+class _CoreValidationViewV3:
+    """Internal data only; never a candidate, Module, or available source certificate."""
+
+    resolved: dict[str, dict[str, Any]]
+    missing_module_keys: frozenset[tuple[str, str]]
+    source_paths: tuple[str, ...]
+    component_only_module_ids: frozenset[str]
+    model: dict[str, Any]
+    cardinality_failure: NextTargetCompletenessFailure
+    removed_duplicates: int
+
+
+def _selected_cardinality_view_v3(
+    candidate: ValidatedTransportCandidateV2,
+) -> _CoreValidationViewV3 | None:
+    request = candidate.request_frame().record()
+    payload = candidate.semantic_payload()
+    raw_model = payload["model"]
+    if payload["model_digest"] != digest(raw_model):
+        raise SemanticCandidateInvalidErrorV3("model_proof")
+    # Classify real raw semantic occurrences plus proof-only records. Sources
+    # always come from the retained parent, never the child's public projection.
+    classification = {
+        name: list(request[name] if name in {"projects", "files"} else raw_model[name])
+        for name in COLLECTIONS
+    }
+    for row in payload["proof"]["discovered_records"]:
+        name = row["collection"]
+        if name not in {"projects", "files"} and "record" in row:
+            if name == "modules" and row["record"]["kind"] != "module":
+                raise SemanticCandidateInvalidErrorV3("proof_module_owner")
+            classification[name].append(row["record"])
+    failure = target_completeness_failure(classification, request["targets"])
+    missing, component_only = _target_missing_module_exceptions(
+        classification, request["targets"], failure
+    )
+    duplicates = _target_duplicate_module_exceptions(classification, request["targets"], failure)
+    if not missing and not duplicates:
+        return None
+    assert failure is not None
+    model = _deduplicated_model_for_base_validation(raw_model, duplicates)
+    removed = len(raw_model["modules"]) - len(model["modules"])
+    resolved = (
+        _resolve_exception_discovery_v3(candidate, model)
+        if removed
+        else resolve_discovered_v3(candidate)
+    )
+    return _CoreValidationViewV3(
+        resolved,
+        frozenset(missing),
+        tuple(file["path"] for file in request["files"] if _is_program_file(file)),
+        frozenset(component_only),
+        model,
+        failure,
+        removed,
+    )
+
+
+def _resolve_exception_discovery_v3(
+    candidate: ValidatedTransportCandidateV2, model: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """Join a unique D against a deduplicated data view, not a fake candidate."""
+
+    request = candidate.request_frame().record()
+    payload = candidate.semantic_payload()
+    try:
+        for name in COLLECTIONS:
+            ids = [row["id"] for row in payload["model"][name]]
+            assert ids == sorted(ids)
+        public = _validate_model_collections(model)
+        for rows in payload["proof"].values():
+            _assert_canonical(rows)
+        sources = {
+            name: {
+                row["id"]: {key: value for key, value in row.items() if key != "content_base64"}
+                for row in request[name]
+            }
+            for name in ("projects", "files")
+        }
+        resolved: dict[str, dict[str, Any]] = {}
+        for row in payload["proof"]["discovered_records"]:
+            name, record_id = row["collection"], row["record_id"]
+            assert record_id not in resolved
+            assert _id_kind(record_id) == name.removesuffix("s")
+            if name in sources:
+                record = sources[name][record_id]
+            elif record_id in public[name]:
+                assert "record" not in row
+                record = public[name][record_id]
+            else:
+                record = row["record"]
+            assert record["id"] == record_id == recompute_record_id(record)
+            assert row["taints"] == sorted(row["taints"], key=TAINT_ORDER_INDEX.__getitem__)
+            resolved[record_id] = {**row, "record": record}
+        assert all(
+            record_id in resolved and resolved[record_id]["collection"] == name
+            for name in COLLECTIONS
+            for record_id in public[name]
+        )
+        return resolved
+    except (AssertionError, KeyError, TypeError) as error:
+        raise SemanticCandidateInvalidErrorV3("model_proof") from error
+
+
+def _resolved_for_view_v3(
+    candidate: ValidatedTransportCandidateV2, view: _CoreValidationViewV3 | None
+) -> dict[str, dict[str, Any]]:
+    return resolve_discovered_v3(candidate) if view is None else view.resolved
+
+
+def _validate_exception_dispositions_v3(
+    model: dict[str, Any], proof: dict[str, Any], resolved: dict[str, dict[str, Any]]
+) -> None:
+    actual: dict[str, list[tuple[str, str | None]]] = {record_id: [] for record_id in resolved}
+    for name in COLLECTIONS:
+        for record in model[name]:
+            actual[record["id"]].append(("published", None))
+    for state in ("excluded", "failed"):
+        for row in proof[state]:
+            source = resolved.get(row["record_id"])
+            if source is None or source["collection"] != row["collection"]:
+                raise SemanticCandidateInvalidErrorV3("model_proof")
+            actual[row["record_id"]].append((state, row["reason"]))
+    for record_id, row in resolved.items():
+        if len(actual[record_id]) != 1:
+            raise SemanticCandidateInvalidErrorV3("model_proof")
+        state, reason = actual[record_id][0]
+        taints = row["taints"]
+        if row["collection"] == "projects" and (taints or state != "published"):
+            raise SemanticCandidateInvalidErrorV3("project_correspondence")
+        if (
+            (state == "published" and taints)
+            or (state == "failed" and reason not in taints)
+            or (
+                state == "excluded"
+                and (
+                    (reason == "tainted" and not taints)
+                    or (reason == "failed" and not taints and row["collection"] != "files")
+                    or (taints and reason not in {"tainted", "failed"})
+                )
+            )
+        ):
+            raise SemanticCandidateInvalidErrorV3("model_proof")
+
+
+def _validate_exception_source_view_v3(
+    candidate: ValidatedTransportCandidateV2, view: _CoreValidationViewV3
+) -> None:
+    """Keep unrelated owner-closed partition rules without minting a normal seam."""
+
+    request = candidate.request_frame().record()
+    raw_model, proof = candidate.semantic_payload()["model"], candidate.semantic_payload()["proof"]
+    model = view.model
+    resolved = view.resolved
+    expected_counts = {name: len(raw_model[name]) for name in COLLECTIONS}
+    expected_counts.update(
+        discovered=len(resolved) + view.removed_duplicates,
+        published=sum(len(raw_model[name]) for name in COLLECTIONS),
+        excluded=len(proof["excluded"]),
+        failed=len(proof["failed"]),
+        internal_entities=len(raw_model["modules"]) + len(raw_model["components"]),
+    )
+    if raw_model["coverage"]["counts"] != expected_counts:
+        raise SemanticCandidateInvalidErrorV3("model_proof")
+    public_ids = {row["id"] for name in COLLECTIONS for row in model[name]}
+
+    def closure_references(record: dict[str, Any]) -> set[str]:
+        references = _record_closure_references_v3(record)
+        if record["kind"] == "component" and record["module_id"] in view.component_only_module_ids:
+            # Only Component ownership may name this exact selected gap.
+            # Props repository references and every other record stay closed.
+            references.discard(record["module_id"])
+        return references
+
+    if any(
+        not closure_references(row["record"]) <= resolved.keys() for row in resolved.values()
+    ) or any(
+        not closure_references(row) <= public_ids for name in COLLECTIONS for row in model[name]
+    ):
+        raise SemanticCandidateInvalidErrorV3("proof_references")
+    _validate_exception_dispositions_v3(model, proof, resolved)
+    program = {
+        (file["project_id"], file["path"]): file
+        for file in request["files"]
+        if _is_program_file(file)
+    }
+    module_rows = [row for row in resolved.values() if row["collection"] == "modules"]
+    owners = {
+        (row["record"]["project_id"], row["record"]["path"]): row["record"] for row in module_rows
+    }
+    if len(owners) != len(module_rows) or set(owners) != program.keys() - view.missing_module_keys:
+        raise SemanticCandidateInvalidErrorV3("proof_module_owner")
+    direct_roots: dict[str, set[str]] = {}
+    files_by_path = {file["path"]: file for file in request["files"]}
+    for root in proof["failure_roots"]:
+        if root["kind"] not in {"parse_file", "read_file"}:
+            continue
+        file = files_by_path.get(root["path_ref"])
+        if (
+            root["collection"] != "files"
+            or file is None
+            or file["id"] not in root["record_ids"]
+            or root["kind"] not in resolved[file["id"]]["taints"]
+        ):
+            raise SemanticCandidateInvalidErrorV3("model_proof")
+        direct_roots.setdefault(file["id"], set()).add(root["kind"])
+    witnessed = source_owner_witness_kinds_v3(proof, resolved)
+    for file in request["files"]:
+        if not set(resolved[file["id"]]["taints"]) <= direct_roots.get(file["id"], set()):
+            raise SemanticCandidateInvalidErrorV3("source_inventory_partition")
+        if not set(resolved[file["id"]]["taints"]) <= witnessed.get(file["id"], set()):
+            raise SemanticCandidateInvalidErrorV3("model_proof")
+    for module in owners.values():
+        if not set(resolved[module["id"]]["taints"]) <= witnessed.get(module["id"], set()):
+            raise SemanticCandidateInvalidErrorV3("source_inventory_partition")
+    selected_ids = {
+        record_id for row in proof["target_resolutions"] for record_id in row["record_ids"]
+    }
+    module_reasons = {}
+    for item in proof["excluded"]:
+        if item["collection"] != "modules" or item["reason"] not in {
+            "not_selected",
+            "target_excluded",
+            "unsupported",
+        }:
+            continue
+        module = resolved[item["record_id"]]["record"]
+        reason = item["reason"]
+        if reason == "unsupported":
+            unknown = sum(
+                row.get("target", {}).get("kind") == "unresolved" for row in model["relations"]
+            )
+            if (
+                not unknown
+                or model["coverage"]["unknown_relation_count"] != unknown
+                or not any(
+                    row["code"] == "CSV-NEXT-UNSUPPORTED-001"
+                    and row["outcome"] == "complete"
+                    and (row["symbol_ref"] == module["id"] or row["path_ref"] == module["path"])
+                    for row in model["diagnostics"]
+                )
+            ):
+                raise SemanticCandidateInvalidErrorV3("source_inventory_partition")
+        elif (
+            not request["targets"]
+            or module["id"] in selected_ids
+            or any(
+                target == "path:."
+                or module["path"] == target.removeprefix("path:")
+                or module["path"].startswith(target.removeprefix("path:").rstrip("/") + "/")
+                for target in request["targets"]
+            )
+        ):
+            raise SemanticCandidateInvalidErrorV3("source_inventory_partition")
+        module_reasons[module["id"]] = reason
+    eligible = {
+        module["id"]
+        for key, module in owners.items()
+        if not resolved[program[key]["id"]]["taints"]
+        and not resolved[module["id"]]["taints"]
+        and module["id"] not in module_reasons
+    }
+    if {row["id"] for row in model["modules"]} != eligible:
+        raise SemanticCandidateInvalidErrorV3("source_inventory_partition")
+    dispositions = []
+    for file in request["files"]:
+        file_id = file["id"]
+        module = owners.get((file["project_id"], file["path"]))
+        if file_id in direct_roots:
+            state, reason = "failed", min(direct_roots[file_id], key=TAINT_ORDER_INDEX.__getitem__)
+        elif resolved[file_id]["taints"]:
+            state, reason = "excluded", "tainted"
+        elif module is not None and module["id"] not in eligible:
+            state = "excluded"
+            reason = "failed" if resolved[module["id"]]["taints"] else module_reasons[module["id"]]
+        else:
+            state, reason = "published", None
+        dispositions.append((file_id, state, reason))
+    actual = [(row["id"], "published", None) for row in model["files"]]
+    actual.extend(
+        (row["record_id"], state, row["reason"])
+        for state in ("excluded", "failed")
+        for row in proof[state]
+        if row["collection"] == "files"
+    )
+    safe = {record_id for record_id, state, _reason in dispositions if state == "published"}
+    expected_files = [
+        {key: value for key, value in file.items() if key != "content_base64"}
+        for file in sorted(request["files"], key=lambda row: row["id"])
+        if file["id"] in safe
+    ]
+    expected_projects = [
+        {
+            **project,
+            "file_ids": [record_id for record_id in project["file_ids"] if record_id in safe],
+        }
+        for project in sorted(request["projects"], key=lambda row: row["id"])
+    ]
+    if sorted(actual) != sorted(dispositions) or canonical_json_bytes(
+        model["files"]
+    ) != canonical_json_bytes(expected_files):
+        raise SemanticCandidateInvalidErrorV3("source_inventory_partition")
+    if canonical_json_bytes(model["projects"]) != canonical_json_bytes(expected_projects):
+        raise SemanticCandidateInvalidErrorV3("project_correspondence")
 
 
 def validate_compatibility_descriptor_v3(
@@ -119,10 +437,12 @@ def validate_compatibility_descriptor_v3(
         raise ValueError("compatibility differs from its retained profile/runtime binding")
 
 
-def validate_full_taint_proof_v3(candidate: ValidatedTransportCandidateV2) -> None:
+def validate_full_taint_proof_v3(
+    candidate: ValidatedTransportCandidateV2, view: _CoreValidationViewV3 | None = None
+) -> None:
     """Preserve mandatory roots/causal rules and the exact typed fixed point."""
 
-    resolved = resolve_discovered_v3(candidate)
+    resolved = _resolved_for_view_v3(candidate, view)
     discovered: dict[str, dict[str, dict[str, Any]]] = {name: {} for name in COLLECTIONS}
     for record_id, row in resolved.items():
         discovered[row["collection"]][record_id] = row
@@ -132,9 +452,11 @@ def validate_full_taint_proof_v3(candidate: ValidatedTransportCandidateV2) -> No
         raise SemanticCandidateInvalidErrorV3("model_proof") from error
 
 
-def validate_proof_coverage_v3(candidate: ValidatedTransportCandidateV2) -> None:
+def validate_proof_coverage_v3(
+    candidate: ValidatedTransportCandidateV2, view: _CoreValidationViewV3 | None = None
+) -> None:
     payload = candidate.semantic_payload()
-    resolved = resolve_discovered_v3(candidate)
+    resolved = _resolved_for_view_v3(candidate, view)
     tainted = {record_id for record_id, row in resolved.items() if row["taints"]}
     expected = {
         "affected_ids": sorted(tainted),
@@ -179,11 +501,13 @@ def validate_proof_coverage_v3(candidate: ValidatedTransportCandidateV2) -> None
         raise SemanticCandidateInvalidErrorV3("model_proof")
 
 
-def validate_full_model_semantics_v3(candidate: ValidatedTransportCandidateV2) -> None:
+def validate_full_model_semantics_v3(
+    candidate: ValidatedTransportCandidateV2, view: _CoreValidationViewV3 | None = None
+) -> None:
     """Apply unchanged record/Props grammar to acquired and proof-only records."""
 
-    resolved = resolve_discovered_v3(candidate)
-    public_model = candidate.semantic_payload()["model"]
+    resolved = _resolved_for_view_v3(candidate, view)
+    public_model = candidate.semantic_payload()["model"] if view is None else view.model
     full_model = {
         **public_model,
         **{
@@ -215,19 +539,30 @@ def validate_full_model_semantics_v3(candidate: ValidatedTransportCandidateV2) -
         validate_model(
             full_model,
             max_model_records=candidate.request_frame().record()["limits"]["max_total_array_items"],
+            allowed_missing_module_keys=set(view.missing_module_keys) if view is not None else None,
+            allowed_missing_module_ids=set(view.component_only_module_ids)
+            if view is not None
+            else None,
         )
     except AssertionError as error:
         raise SemanticCandidateInvalidErrorV3("model_proof") from error
 
 
 def validate_export_syntax_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> None:
     """Full-D syntax comes only from the same retained frozen source bytes."""
 
-    resolved = resolve_discovered_v3(candidate)
+    resolved = _resolved_for_view_v3(candidate, view)
     content_by_path = {str(file.path): file.content for file in seal.source_view.files}
     expected = []
+    if view is not None:
+        # Source-only slots have no semantic owner/observation. They still enter
+        # the source-derived reexport graph below and can never be skipped there.
+        for path in view.source_paths:
+            _scan_export_file(path, content_by_path[path])
     for row in resolved.values():
         if row["collection"] != "modules":
             continue
@@ -287,11 +622,13 @@ def _primitive_const_v3(name: str, content: bytes) -> bool:
 
 
 def derive_reexport_witnesses_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> list[dict[str, Any]]:
     """Recompute a graph from full-D declarations and same-seal syntax only."""
 
-    resolved = resolve_discovered_v3(candidate)
+    resolved = _resolved_for_view_v3(candidate, view)
     modules = {
         row["record"]["path"]: row["record"]
         for row in resolved.values()
@@ -303,11 +640,13 @@ def derive_reexport_witnesses_v3(
         if row["collection"] == "components"
     }
     content_by_path = {str(file.path): file.content for file in seal.source_view.files}
+    paths = view.source_paths if view is not None else tuple(modules)
     syntax_rows = [
-        syntax for path in modules for syntax in _scan_export_file(path, content_by_path[path])
+        syntax for path in paths for syntax in _scan_export_file(path, content_by_path[path])
     ]
     direct_tables = []
-    for path, module in modules.items():
+    for path in paths:
+        module = modules.get(path)
         exports = []
         for syntax in syntax_rows:
             if (
@@ -317,13 +656,17 @@ def derive_reexport_witnesses_v3(
             ):
                 continue
             declaration_key = syntax["imported_name"] or syntax["exported_name"]
-            component = components.get((module["id"], declaration_key))
+            component = (
+                components.get((module["id"], declaration_key)) if module is not None else None
+            )
             if syntax["role"] == "type":
                 resolution, target = "type", None
             elif component is not None:
                 resolution, target = "component", component["declaration_key"]
             elif _primitive_const_v3(declaration_key, content_by_path[path]):
                 resolution, target = "value", None
+            elif module is None:
+                resolution, target = "unknown", None
             else:
                 raise SemanticCandidateInvalidErrorV3("model_proof")
             exports.append(
@@ -355,6 +698,8 @@ def derive_reexport_witnesses_v3(
     graph = recompute_export_graph_case({"modules": direct_tables, "edges": raw_edges})
     expected = []
     for witness in graph["witnesses"]:
+        if witness["owner_file_path"] not in modules:
+            continue
         syntax = syntax_by_key[_reexport_join_key(witness)]
         source_module = modules.get(_terminal_export_source_path(witness, graph))
         component = (
@@ -387,21 +732,25 @@ def derive_reexport_witnesses_v3(
 
 
 def validate_export_reexports_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> None:
-    expected = derive_reexport_witnesses_v3(candidate, seal)
+    expected = derive_reexport_witnesses_v3(candidate, seal, view)
     observed = candidate.semantic_payload()["proof"]["export_reexport_witness"]
     if observed != expected:
         raise SemanticCandidateInvalidErrorV3("model_proof")
 
 
 def validate_reexport_observations_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> None:
-    witnesses = derive_reexport_witnesses_v3(candidate, seal)
+    witnesses = derive_reexport_witnesses_v3(candidate, seal, view)
     modules = {
         row["record"]["path"]: row["record"]
-        for row in resolve_discovered_v3(candidate).values()
+        for row in _resolved_for_view_v3(candidate, view).values()
         if row["collection"] == "modules"
     }
     content_by_path = {str(file.path): file.content for file in seal.source_view.files}
@@ -452,9 +801,11 @@ def validate_reexport_observations_v3(
 
 
 def validate_direct_export_observations_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> None:
-    resolved = resolve_discovered_v3(candidate)
+    resolved = _resolved_for_view_v3(candidate, view)
     components = {
         (row["record"]["module_id"], row["record"]["declaration_key"]): row["record"]
         for row in resolved.values()
@@ -500,9 +851,11 @@ def validate_direct_export_observations_v3(
 
 
 def derive_string_export_observations_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> list[dict[str, Any]]:
-    resolved = resolve_discovered_v3(candidate)
+    resolved = _resolved_for_view_v3(candidate, view)
     components = [row["record"] for row in resolved.values() if row["collection"] == "components"]
     content_by_path = {str(file.path): file.content for file in seal.source_view.files}
     targets = candidate.request_frame().record()["targets"]
@@ -540,26 +893,30 @@ def derive_string_export_observations_v3(
 
 
 def validate_string_export_observations_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> None:
     observed = [
         row
         for row in candidate.semantic_payload()["proof"]["export_observations"]
         if row["syntax_kind"] == "string_export"
     ]
-    if observed != derive_string_export_observations_v3(candidate, seal):
+    if observed != derive_string_export_observations_v3(candidate, seal, view):
         raise SemanticCandidateInvalidErrorV3("model_proof")
 
 
 def derive_public_export_bindings_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> list[dict[str, Any]]:
     """Project only source-derived component exports with both public owners."""
 
     payload = candidate.semantic_payload()
     public_modules = {row["id"] for row in payload["model"]["modules"]}
     public_components = {row["id"] for row in payload["model"]["components"]}
-    resolved = resolve_discovered_v3(candidate)
+    resolved = _resolved_for_view_v3(candidate, view)
     components = {
         (row["record"]["module_id"], row["record"]["declaration_key"]): row["record"]
         for row in resolved.values()
@@ -597,7 +954,7 @@ def derive_public_export_bindings_v3(
             )
             if syntax["role"] == "value" and component is not None:
                 add_binding(module["id"], syntax["exported_name"], component["id"], reexport=False)
-    for witness in derive_reexport_witnesses_v3(candidate, seal):
+    for witness in derive_reexport_witnesses_v3(candidate, seal, view):
         if witness["resolution"] == "component":
             add_binding(
                 witness["owner_module_id"],
@@ -609,9 +966,11 @@ def derive_public_export_bindings_v3(
 
 
 def validate_public_export_bindings_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> None:
-    expected = derive_public_export_bindings_v3(candidate, seal)
+    expected = derive_public_export_bindings_v3(candidate, seal, view)
     payload = candidate.semantic_payload()
     observed = [row for row in payload["model"]["members"] if row["kind"] == "export_binding"]
     witnesses = sorted(
@@ -630,7 +989,9 @@ def validate_public_export_bindings_v3(
 
 
 def validate_public_export_coverage_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> None:
     """Count the exactly revalidated evidence on the public owner surface."""
 
@@ -643,7 +1004,7 @@ def validate_public_export_coverage_v3(
         and (not row["reexport"] or row["syntax_kind"] == "string_export")
     ] + [
         row
-        for row in derive_reexport_witnesses_v3(candidate, seal)
+        for row in derive_reexport_witnesses_v3(candidate, seal, view)
         if row["owner_module_id"] in public_modules
     ]
     expected = {
@@ -657,11 +1018,13 @@ def validate_public_export_coverage_v3(
 
 
 def validate_string_export_diagnostics_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> None:
     model = candidate.semantic_payload()["model"]
     public_modules = {row["id"] for row in model["modules"]}
-    observations = derive_string_export_observations_v3(candidate, seal)
+    observations = derive_string_export_observations_v3(candidate, seal, view)
     string_owners = {row["owner_module_id"] for row in observations}
     expected = expected_string_export_diagnostics(
         [row for row in observations if row["owner_module_id"] in public_modules]
@@ -676,7 +1039,9 @@ def validate_string_export_diagnostics_v3(
 
 
 def derive_post_acquisition_locality_v3(
-    candidate: ValidatedTransportCandidateV2, seal: SourceAcquisitionSeal
+    candidate: ValidatedTransportCandidateV2,
+    seal: SourceAcquisitionSeal,
+    view: _CoreValidationViewV3 | None = None,
 ) -> dict[str, Any]:
     """Use the complete production seal, never a synthetic acquisition ledger."""
 
@@ -722,7 +1087,7 @@ def derive_post_acquisition_locality_v3(
     ]
     affected: set[str] = set()
     reverse_affected: set[str] = set()
-    resolved = resolve_discovered_v3(candidate)
+    resolved = _resolved_for_view_v3(candidate, view)
     module_rows = {
         row["record"]["path"]: row for row in resolved.values() if row["collection"] == "modules"
     }
@@ -773,9 +1138,10 @@ def derive_post_acquisition_locality_v3(
 
 def validate_target_proof_v3(
     candidate: ValidatedTransportCandidateV2,
+    view: _CoreValidationViewV3 | None = None,
 ) -> NextTargetCompletenessFailure | None:
     payload = candidate.semantic_payload()
-    resolved = resolve_discovered_v3(candidate)
+    resolved = _resolved_for_view_v3(candidate, view)
     full_model = {
         name: sorted(
             [row["record"] for row in resolved.values() if row["collection"] == name],
@@ -784,14 +1150,42 @@ def validate_target_proof_v3(
         for name in COLLECTIONS
     }
     public_ids = {row["id"] for name in COLLECTIONS for row in payload["model"][name]}
+    targets = candidate.request_frame().record()["targets"]
+    if view is not None:
+        targets = targets or [
+            f"path:{file['path']}" for file in full_model["files"] if _is_program_file(file)
+        ]
+        # The old aggregate preflight leaves safe rows empty when another
+        # target has a cardinality failure. Resolve each independent target.
+        resolutions = [
+            row
+            for target in targets
+            for row in resolve_target_resolutions(
+                [target], full_model, unavailable_record_ids=resolved.keys() - public_ids
+            )
+        ]
+    else:
+        resolutions = resolve_target_resolutions(
+            targets, full_model, unavailable_record_ids=resolved.keys() - public_ids
+        )
     expected = string_export_target_resolutions(
-        resolve_target_resolutions(
-            candidate.request_frame().record()["targets"],
-            full_model,
-            unavailable_record_ids=resolved.keys() - public_ids,
-        ),
+        resolutions,
         payload["proof"]["export_observations"],
     )
+    if view is not None:
+        failures = {row["target_key"]: row["reason"] for row in view.cardinality_failure.failures}
+        expected = [
+            {
+                "target_key": row["target_key"],
+                "status": "failed",
+                "record_ids": [],
+                "reason": failures[row["target_key"]],
+            }
+            if row["target_key"] in failures
+            else row
+            for row in expected
+        ]
+        expected.sort(key=canonical_json_bytes)
     coverage = [
         {**row, "status": "complete" if row["status"] == "resolved" else "failed"}
         for row in expected
@@ -806,7 +1200,7 @@ def validate_target_proof_v3(
 
 @dataclass(frozen=True, slots=True)
 class CoreValidationResultV3:
-    source_inventory: ValidatedSourceInventorySeamV3
+    source_inventory: ValidatedSourceInventorySeamV3 | None
     gate: dict[str, Any]
     locality: dict[str, Any]
     measurements: dict[str, Any]
@@ -841,33 +1235,45 @@ def _validate_semantic_candidate_v3(
         raise ValueError("Core v3 requires retained producer version 0.2.0")
     validate_source_record_payloads_v3(candidate)
     validate_public_source_metadata_v3(candidate)
-    full_module_owners_v3(candidate)
-    validate_full_model_semantics_v3(candidate)
-    validate_full_taint_proof_v3(candidate)
-    validate_proof_coverage_v3(candidate)
-    validate_export_syntax_v3(candidate, seal)
-    validate_export_reexports_v3(candidate, seal)
-    validate_reexport_observations_v3(candidate, seal)
-    validate_direct_export_observations_v3(candidate, seal)
-    validate_string_export_observations_v3(candidate, seal)
-    validate_public_export_bindings_v3(candidate, seal)
-    validate_public_export_coverage_v3(candidate, seal)
-    validate_string_export_diagnostics_v3(candidate, seal)
+    view = _selected_cardinality_view_v3(candidate)
+    if view is None:
+        full_module_owners_v3(candidate)
+    validate_full_model_semantics_v3(candidate, view)
+    validate_full_taint_proof_v3(candidate, view)
+    validate_proof_coverage_v3(candidate, view)
+    validate_export_syntax_v3(candidate, seal, view)
+    validate_export_reexports_v3(candidate, seal, view)
+    validate_reexport_observations_v3(candidate, seal, view)
+    validate_direct_export_observations_v3(candidate, seal, view)
+    validate_string_export_observations_v3(candidate, seal, view)
+    validate_public_export_bindings_v3(candidate, seal, view)
+    validate_public_export_coverage_v3(candidate, seal, view)
+    validate_string_export_diagnostics_v3(candidate, seal, view)
     payload = candidate.semantic_payload()
     try:
         actual = validate_model(
-            payload["model"],
+            payload["model"] if view is None else view.model,
             max_model_records=candidate.request_frame().record()["limits"]["max_total_array_items"],
+            allowed_missing_module_keys=set(view.missing_module_keys) if view is not None else None,
+            allowed_missing_module_ids=set(view.component_only_module_ids)
+            if view is not None
+            else None,
         )
         outcome = derive_pre_budget_outcome(payload["proof"], payload["model"])
     except AssertionError as error:
         raise SemanticCandidateInvalidErrorV3("model_proof") from error
-    locality = derive_post_acquisition_locality_v3(candidate, seal)
+    locality = derive_post_acquisition_locality_v3(candidate, seal, view)
     context = canonical_run_context(**payload["run_context"])
-    target_failure = validate_target_proof_v3(candidate)
+    target_failure = validate_target_proof_v3(candidate, view)
     # Mint the normal seam only after the full proof/export/target/locality base.
     # Its cardinality/partition rules are unchanged and are not target exceptions.
-    seam = retain_source_inventory_seam_v3(candidate, seal, assets)
+    if view is not None:
+        _validate_exception_source_view_v3(candidate, view)
+        if target_failure is None:
+            raise SemanticCandidateInvalidErrorV3("model_proof")
+        seam = None
+    else:
+        seam = retain_source_inventory_seam_v3(candidate, seal, assets)
     if target_failure is not None:
         return CoreValidationResultV3(
             seam,
@@ -945,13 +1351,19 @@ def validate_semantic_decision_v3(decision: "ValidatedSemanticDecisionV3") -> No
     ):
         raise ValueError("Core gate/locality differs from its retained owners")
     seam = decision.source_inventory_seam()
-    validate_source_inventory_seam_v3(seam)
-    if (
-        seam.transport_candidate() is not decision.transport_candidate()
-        or seam.source_seal() is not decision.source_seal()
-        or seam.execution_assets() is not decision.execution_assets()
-    ):
-        raise ValueError("Core source inventory differs from its retained owners")
+    if expected.source_inventory is None:
+        if seam is not None:
+            raise ValueError("exceptional Core cannot retain an available source inventory")
+    else:
+        if seam is None:
+            raise ValueError("normal Core requires its retained source inventory")
+        validate_source_inventory_seam_v3(seam)
+        if (
+            seam.transport_candidate() is not decision.transport_candidate()
+            or seam.source_seal() is not decision.source_seal()
+            or seam.execution_assets() is not decision.execution_assets()
+        ):
+            raise ValueError("Core source inventory differs from its retained owners")
     validate_compatibility_descriptor_v3(
         decision.compatibility_descriptor(), decision.transport_candidate()
     )
