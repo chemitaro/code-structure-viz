@@ -26,6 +26,8 @@ package_sequence_key: "ISSUE-05"
 
 SI-04着手点はclean/pushed `caf38329826ae34f8e3cb330b83b97e0357b7dc5`で固定しました。同authorのStrict briefを訂正し、same-seal bytesに結合するv3-local export pipelineを全読・現物照合の上で採用しました。旧export facadeの固定corpus依存とfirst fixtureのreexport relation欠落を補正し、raw二件・独立probe・日本語採用資料を`artifacts/20261002t121924z-02-disc-si04-full-core-brief-adoption.md`に保存しています。これはTDD開始前の準備で、SI-04のpassではありません。仕様意味・旧reference・productionは変更せず、下記SI-04の出口条件を維持します。
 
+SI-04は中間実装中です。新三Core reference filesでnormal full proof/source-bound export/locality/target優先/actual record・entity cap/immutable decision・rejection/compatibility KATと独立再検証をTDDしました。正例は独立safe target、selection-only、complete-empty/非program File、全File proof-only、実10000/+1とentity500/+1を含みます。selected cardinalityの専用no-payload例外と残acceptanceは未実装で、SI-04 step reviewも未認定です。詳細は`artifacts/20261002t135356z-disc-si04-core-intermediate-reference-evidence.md`。この中間checkpointで元unit base、仕様意味、SI-05以降へのgateを変更しません。
+
 SI-03 step gateはexact23072c2で閉じました。宣言seed/canonical root-origin witnessの局所joinとProp型のprivate D/public M閉包は、元base ce0edaaからのfresh cumulative reviewでpassです。原source-native P1分類と修復履歴は`artifacts/20261002t072235z-disc-si03-root-origin-adjudication-and-remediation.md`、`artifacts/20261002t084121z-disc-si03-direct-root-seed-witness-remediation.md`、`artifacts/20261002t102327z-disc-si03-type-reference-closure-remediation.md`へ保持します。full mandatory seed/causal/taint導出・型の意味検証は次のSI-04で閉じ、Requirement/Design/accepted ADRや旧helperの意味は変えません。
 
 | 順序 / unit | 出口条件 | 次段階へ渡すもの |
