@@ -22,6 +22,8 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Verification
 
+- SI-03初回Code Review/限定修復: exact `d3cce1cb42b3c6a00d7a8d8d2b9ee4dbed2406d1`のfresh ChatGPT Code Review Strict（12m35s、GPT-5.6 Sol/Extra High両picker verified、元87543 exit10）はschema-valid fail/P1一件でした。専用Analyze Review Findings Strict（9m26s、別analyst session/conversation、GPT-5.6 Sol/Pro両picker verified、元76123 exit0）全431行/11必須H1を照合し、in-scope実装不具合と判定。root-origin targetがdeclared seeds外なら拒否する5行を追加し、三nonFile kindsのexact bypassはfirst Red3 failed/3 passed→same selection6 passed（3.64s）です。修復後の同じ六module selectionは314 passed（213.43s、large cases除外無し）、旧goldens/Current pointerは別selection17 passed（7.32s）。Ruff check/format230、mypy188 sourcesはpassです。原JSON/packet/probeはbyte-for-byte、分析原bytesはgzipでArtifactへ保存しました。分析の可読Markdownだけ六行の末尾spacesを除去し、両digestと原bytes一致を記録しています。旧「無関係root借用拒否」の一般的closure主張を新evidenceでsupersedeしました。隣接direct File迂回はparse/readとも受理を測定しただけで、追加規則やclosureは未認定。詳細は`artifacts/20261002t072235z-disc-si03-root-origin-adjudication-and-remediation.md`。同analystの境界再照合とfresh Code Review passまでSI-04へ移行しません。
+
 - SI-03 source/proof reference seam: exact `ce0edaa8fe63e79523fe7ad1dcb4b0a39dc02dce`のfresh Implementation Brief Strict（17m20s/exit0、GPT-5.6 Sol/Extra Highの両picker verified）全802行をローカル照合し、三つの新reference/validation/testファイルを追加しました。same retained owners、full source discovery/Module owner、owner-closed File完全partition、Project二view、実counts/partition literal/独立再検証をTDDで確認。最終六module selectionは309 passed（211.70s、exit0、実10000/10001 record count等のlarge cases除外無し）、Ruff check/format230 files・mypy188 sourcesはpassです。初回1 failed/308 passedは二重disposition fixtureが重複canonical guardで先に拒否されたtest期待の整合で、guardを緩めずfocused 5 passed後に同じselectionを再実行しました。raw brief、狭い最初のTDD checkpoint、全unit evidenceはそれぞれ別Artifactに保存。詳細は`artifacts/20261002t062856z-disc-si03-source-inventory-reference-seam.md`。元unit baseはce0edaaのまま、Code Reviewは未完了です。source-owner cause witnessは局所joinで、full mandatory proof/taint fixed point/locality/target/export/budget routing/実TS/Core/public/全A02/A03の認定ではありません。旧source/schema/reference/fixtures/依存/goldensを変更していません。
 
 - SI-03文書checkpoint: 旧Python/SQLAlchemy16 goldens＋Current pointer1の別selectionは17 passed（9.94s、exit0）。SpecDock sync（既存active維持）/validate10 nodes、diff-checkはpass。brief原回答WB/Artifactの`cmp`一致とSHA256を確認しました。309 selectionと重複件数を合算せず、全pytest/全A02/A03認定へ拡張しません。
@@ -68,7 +70,7 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Residual Risks / Follow-ups
 
-- source inventoryとowner-closed A案は採択済みで、bcae954のsame-reviewer仕様再認証もpassです。SI-03 source/proof reference seamはlocal green、fresh step Code Reviewは未完了です。full Core/新public schemaはSI-04以降です。補足accepted ADRは`artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`。元candidate/旧failは履歴として保持し、旧748 testsや仕様passを新class認定へ流用しません。
+- source inventoryとowner-closed A案は採択済みで、bcae954のsame-reviewer仕様再認証もpassです。SI-03初回step reviewはP1/fail、root-originの一意な局所修復はfocused greenですが、direct File隣接経路の境界判定とfresh review passが残ります。full Core/新public schemaはSI-04以降です。補足accepted ADRは`artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`。元candidate/旧failは履歴として保持し、旧748 testsや仕様passを新class認定へ流用しません。
 - A-02の新version schema/reference/compatibility/provenance closure、A-03のfresh独立Strict、production TDD、両OS実CLI/offline package、Final Quality Gateが残っています。
 - 新asset failure policyはdecision-candidateのままです。採択前に実装せず、通常I/Oと立証済みpackage破損のdomain/run-level境界を固定してからsource prefix/public closureへ進みます。
 - Darwinの終了済みgroup確認は公開libproc APIを使った試作候補です。製品cleanupの全条件・全対応OS/architectureを認定したものではありません。

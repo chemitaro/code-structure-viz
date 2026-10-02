@@ -941,7 +941,11 @@ def test_empty_project_projection_does_not_erase_another_project_inventory(
     inventory.validate_source_inventory_seam_v3(value)
 
 
-def test_owner_cause_cannot_borrow_a_root_from_an_independent_module(tmp_path: Path) -> None:
+@pytest.mark.parametrize("kind", ["module_relation", "export_binding", "boundary_derivation"])
+@pytest.mark.parametrize("extra_root_edge", [False, True])
+def test_owner_cause_cannot_borrow_a_root_from_an_independent_module(
+    tmp_path: Path, kind: str, extra_root_edge: bool
+) -> None:
     seal, assets, request, policy, wire = inventory_inputs(
         tmp_path, extra_programs={"src/other.tsx": b"export const Other = () => null;"}
     )
@@ -949,14 +953,14 @@ def test_owner_cause_cannot_borrow_a_root_from_an_independent_module(tmp_path: P
     modules = list(payload["model"]["modules"])
     for module in modules:
         file = next(row for row in request.record()["files"] if row["path"] == module["path"])
-        exclude_record(wire, "modules", module["id"], reason="tainted", taints=["module_relation"])
+        exclude_record(wire, "modules", module["id"], reason="tainted", taints=[kind])
         exclude_record(wire, "files", file["id"], reason="failed", taints=[])
     witnessed = modules[0]
     payload["proof"]["failure_roots"] = [
         {
             "id": "next:failure:" + "1" * 64,
             "collection": "modules",
-            "kind": "module_relation",
+            "kind": kind,
             "path_ref": witnessed["path"],
             "record_ids": [witnessed["id"]],
         }
@@ -964,9 +968,10 @@ def test_owner_cause_cannot_borrow_a_root_from_an_independent_module(tmp_path: P
     payload["proof"]["causal_edges"] = [
         {
             "source_id": "next:failure:" + "1" * 64,
-            "record_id": witnessed["id"],
+            "record_id": module["id"],
             "rule": "identity_dependency",
         }
+        for module in (modules if extra_root_edge else [witnessed])
     ]
     refresh_wire(wire)
     candidate = candidate_for(seal, assets, request, policy, wire)

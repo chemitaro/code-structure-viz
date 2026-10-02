@@ -1,0 +1,4 @@
+{"admitted": false, "detail": "owner cause requires matching retained failure roots", "extra_root_edge": false}
+{"admitted": false, "detail": "owner cause root-origin edge must target its declared seed", "extra_root_edge": true}
+{"actual_file_disposition": "failed", "admitted": true, "declared_file_seed": true, "direct_file_bypass": "parse_file", "direct_root_file_edge": false, "independent_revalidation": "passed"}
+{"actual_file_disposition": "failed", "admitted": true, "declared_file_seed": true, "direct_file_bypass": "read_file", "direct_root_file_edge": false, "independent_revalidation": "passed"}

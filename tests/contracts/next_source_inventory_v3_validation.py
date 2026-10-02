@@ -320,6 +320,11 @@ def source_owner_witness_kinds_v3(
         )
     adjacency: dict[str, set[str]] = {}
     for edge in proof["causal_edges"]:
+        root = roots.get(edge["source_id"])
+        if root is not None and edge["record_id"] not in root["record_ids"]:
+            raise SourceInventoryInvalidErrorV3(
+                "model_proof", "owner cause root-origin edge must target its declared seed"
+            )
         if edge["record_id"] not in records or not _causal_edge_is_allowed(edge, records, roots):
             raise SourceInventoryInvalidErrorV3(
                 "proof_references", "owner cause edge must use closed references"
