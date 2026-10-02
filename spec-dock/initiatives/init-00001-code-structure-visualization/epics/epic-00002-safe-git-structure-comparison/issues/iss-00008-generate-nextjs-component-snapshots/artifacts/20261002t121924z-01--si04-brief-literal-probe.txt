@@ -1,0 +1,31 @@
+{
+  "source_literals_checked": 7,
+  "source_mismatches": [],
+  "identity_literals_checked": 16,
+  "identity_mismatches": [],
+  "syntax_literals_checked": 4,
+  "syntax_mismatches": [],
+  "raw_reexport_join_and_graph": "pass",
+  "required_reexport_relation_literal": "next:relation:4be44776badbed873e1ed93a50e33c8c248fb7a9dec5b75a9a78191df7efc03d",
+  "required_relation_preimage": {
+    "kind": "static_import",
+    "version": 1,
+    "identity": {
+      "kind": "static_import",
+      "source_id": "next:module:024a4e0cf9fee9411a055c04c95ff34b0909e69f80b3f4a9dff0cec438c9e4c3",
+      "target": {
+        "kind": "internal",
+        "module_id": "next:module:4130a3bcc0554a01d2f7111d613cdf150e6e3104575fe6a46ee5b057c6414b7d"
+      },
+      "role": "value",
+      "reexport": true,
+      "boundary_effect": "none"
+    }
+  },
+  "corrected_full_positive_counts": {
+    "relations": 1,
+    "published": 17,
+    "discovered": 17,
+    "internal_entities": 4
+  }
+}
