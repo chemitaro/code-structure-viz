@@ -20,6 +20,8 @@ package_sequence_key: "ISSUE-05"
 
 2026-10-02、ユーザーはsource inventoryとsafe subsetの先行整合方針を採択し、仕様修正/チェック後の実装再開を指示しました。下記SI計画をA02内のdiagnostic/stderr unitより前へ挿入します。旧candidateの「人間判断待ち」は当時の履歴で、現在のsource方針は採択済みです。別のASSET failure policyは未採択のままです。
 
+現在のgate evidence: docs-only checkpoint `a4efdc373a515801777c924a1d14675fda686955`のfresh独立Spec Reviewはvalid `fail`/P1一件。nonFile rootでuntainted Fileとtainted Moduleの公開条件が衝突し、専用findings分析も`design-decision-required`です。SI-02未通過なのでSI-03以降は開始しません。判断資料は`artifacts/20261002t011638z-03-decision-candidate-source-inventory-file-module-publication-decision.md`、同reviewerは`issue8-source-inventory-spec-review`。この追記は実行状態の証拠で、候補の採択や公開条件の変更ではありません。
+
 ### A runtime移行の順序
 
 | 順序 / unit | 出口条件 | 次段階へ渡すもの |

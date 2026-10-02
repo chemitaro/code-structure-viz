@@ -18,9 +18,13 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 採択・実測checkpointは`710eb49a2a3143e31b8a91580700d16839d9070d`でcommit/push済みです。このexact SHAへGPT-5.6 Sol / Proのfresh ChatGPT Use Strict分析を完了し、同一SHAと実pickerのverified結果を確認しました。助言をローカルref/hashへ照合し、必要なstdout/generic semantic/trusted descriptorの版移行を補正しました。A02を小さい契約から進めていますが、A03独立コードレビューは未通過です。
 
-2026-10-02、source inventoryとsafe subset分離の方針をユーザーが採択しました。same-parent所有権/Project二view/File完全partition/予算/版移行をCurrent R/D/Pとaccepted ADRへ具体化し、旧候補は当時の履歴として残しました。exact f8d5c41へのfresh Use Strict GPT-5.6 Sol/Pro設計相談はexit0、両picker verified、全665行をlocal source/schemaへ照合して補正しました。現在はdocs-only仕様checkpointで、新schema/reference/productionは未実装、Spec Review Strictは未通過です。次は独立仕様gateを通し、その後reference TDDを再開します。ASSET新policyは別の未採択判断です。
+2026-10-02、source inventoryとsafe subset分離の方針をユーザーが採択しました。same-parent所有権/Project二view/File完全partition/予算/版移行をCurrent R/D/Pとaccepted ADRへ具体化し、旧候補は当時の履歴として残しました。exact f8d5c41へのfresh Use Strict GPT-5.6 Sol/Pro設計相談はexit0、両picker verified、全665行をlocal source/schemaへ照合して補正しました。仕様はa4efdc3へcommit/push済みですが、独立Spec Reviewはfail/P1一件で、File/Module公開条件の追加判断が必要です。docs-only段階で新schema/reference/productionは未実装です。候補の採択とsame-reviewer pass後だけreference TDDへ進みます。ASSET新policyは別の未採択判断です。
 
 ## Verification
+
+- Source inventory独立仕様gate: exact `a4efdc373a515801777c924a1d14675fda686955`へのfresh ChatGPT Spec Review Strictは正常完了（19m34s/exit0）、JSON schema validですが`review_status=fail`、P1一件です。別会話のChatGPT Analyze Review Findings Strict（8m02s/exit0、全516行/11必須H1）は有効P1・`design-decision-required`。旧validatorの三nonFile rootでFile untainted/Module taintedと公開cardinality拒否を限定再現しました。両方GPT-5.6 Sol/Proのnative picker verified。exact SHAで34 schema/pointer testsと別2 baseline tests、文書checks、SpecDock10 nodesはpassですが、仕様pass/新v3/全pytest/actual TSの証拠ではありません。原回答・packet・再現コード・選択肢をArtifactへ保存しました。推奨はowner-closed File/Module公開投影で未採択です。SI-03/製品実装は再開していません。
+
+- Review証拠保存checkpointのdocs-only検証: Current pointer/既存schema限定selection34 passed（0.67s）、文書7/links14/closed keys、Ruff/format227 files、SpecDock sync/validate10 nodes、diff-checkがpass。review JSON/analyst原回答はWBとbyte-for-byte同一で、status記録と未採択candidateのみ追加し、正本の公開条件/src/schema/tests/依存/旧goldensは変更していません。
 
 - Source inventory仕様checkpoint: docs-only検査で7文書／14 links、run/compatibility/summary/partitionの閉じたkey集合を確認し、既存Current pointer＋既存schema meta/closed限定selectionは34 passed（0.68s、exit0）。Ruff check／format227 files、SpecDock sync/validate10 nodes、diff-checkがpass。新v3のschema／reference／実TypeScriptや全pytestの証拠ではなく、独立Spec Review Strictは未通過です。補正と範囲は`artifacts/20261002t001451z-disc-source-inventory-specification-adjudication.md`。
 
@@ -56,7 +60,7 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Residual Risks / Follow-ups
 
-- parse/read file-rootと全File model correspondenceの旧referenceは未整合です。分離方針の人間判断は採択済みで新target仕様へ具体化しましたが、独立Spec Review、新schema/reference/full proof/public refsの実装は未完了です。旧748 testsのpassで新classを認定しません。
+- source inventory分離方針は採択済みですが、新targetの非File root/Module taintと公開File→Module保証が衝突し、独立Spec ReviewのP1一件はopenです。owner-closed投影の推奨は`artifacts/20261002t011638z-03-decision-candidate-source-inventory-file-module-publication-decision.md`へ未採択candidateとして保存しました。追加の公開条件判断とsame-reviewer pass後にreferenceを再開します。旧748 testsのpassで新classを認定しません。
 - A-02の新version schema/reference/compatibility/provenance closure、A-03のfresh独立Strict、production TDD、両OS実CLI/offline package、Final Quality Gateが残っています。
 - 新asset failure policyはdecision-candidateのままです。採択前に実装せず、通常I/Oと立証済みpackage破損のdomain/run-level境界を固定してからsource prefix/public closureへ進みます。
 - Darwinの終了済みgroup確認は公開libproc APIを使った試作候補です。製品cleanupの全条件・全対応OS/architectureを認定したものではありません。

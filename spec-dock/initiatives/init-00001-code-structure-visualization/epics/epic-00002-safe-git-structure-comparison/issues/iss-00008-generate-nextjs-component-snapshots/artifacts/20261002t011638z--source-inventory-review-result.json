@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "title": "[P1] 非File rootでsafe Fileと必須Moduleの投影が分離する",
+      "body": "docs/contracts/next-semantic-admission-v3.mdは「Fileのexact partition」でF_safe=F−Tの全件公開を要求し、「Full-inventory proofとlocality」でv1のclosed root/edge・taint固定点を維持しつつ、public Moduleはsafe Fileに対応し公開program Fileには必ずModuleがあるという基礎規則も維持しています。しかし委譲先v1 referenceのmandatory seed／causal derivationでは、module_relation、export_binding、boundary_derivation等の正当な非File rootがModuleをtaintしても、Moduleから所有Fileへの逆向きtaintは導出されません。target無しまたは別のsafe targetでこのrootが生じると、FileはT外なので公開必須、対応ModuleはT内なのでproof-only必須となり、exact partitionとFile→Module基礎規則を同時に満たすnominal candidateが存在しません。Current DesignのSI節も「full proofのcausal規則は維持」「安全Fileは必ず公開」として同じ不整合を固定しており、plan.mdのSI-04が要求する全root／causal受入れを実装・検証できません。",
+      "confidence_score": 0.97,
+      "priority": 1,
+      "artifact_location": {
+        "repository_relative_path": "docs/contracts/next-semantic-admission-v3.md",
+        "section_or_line": "「Fileのexact partition」「Full-inventory proofとlocality」"
+      }
+    }
+  ],
+  "review_scope_summary": "GitHub connectorでchemitaro/code-structure-vizのiss-00008-generate-nextjs-component-snapshots tipがa4efdc373a515801777c924a1d14675fda686955と完全一致することを確認し、そのcommitだけを対象にCONTEXT.md、Current requirement/design/plan、accepted ADR、admission-v3・semantic-v3・compatibility-v3を全体横断で評価しました。解釈に必要な最小baselineとして旧admission/semantic/compatibility契約、関連schema、source-plan/config、現行referenceのroot/causal/model correspondenceだけを照合し、未実装v3 schema/reference/runtimeや未実行testを成立済みとは扱っていません。添付review-methodの全体一巡・反証・漏れ確認の手順を適用しました。 attachments-bundle",
+  "review_status": "fail",
+  "review_status_reason": "維持対象の正当な非File semantic rootに対し、safe Fileの全件公開とtainted Moduleの非公開、公開program File→Module基礎規則を同時に満たせないP1が1件あるためfailです。その他の取得inventory／公開safe subset、Project二view、source row省略、exact partition、counts/hash/exact-ref migration、pre-seal failure境界、A02→A03順序は確認範囲では整合していました。",
+  "overall_confidence_score": 0.96
+}

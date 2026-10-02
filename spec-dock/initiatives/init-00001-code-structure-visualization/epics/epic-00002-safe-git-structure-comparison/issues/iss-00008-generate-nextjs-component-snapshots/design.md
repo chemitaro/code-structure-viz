@@ -166,7 +166,7 @@ note bottom of X : File itself remains a mandatory seed; no public payload injec
 | 対応 | authority | 現在のevidence |
 | --- | --- | --- |
 | admission/public/run/provenance v2 | historical reference、SI外の不変baseline | 既存referenceの限定pass。新SIではない。 |
-| SI-v3三契約 + Current R/D/P + ADR | accepted target | docs-only、Spec Review pending。schema/reference未実装。 |
+| SI-v3三契約 + Current R/D/P + ADR | accepted target | docs-only a4efdc3のSpec Review fail/P1一件。File/Module公開条件の追加判断待ち。schema/reference未実装。 |
 | 新schema/reference/全public closure | accepted target | A02後続TDD/gates、未認定。 |
 | actual TypeScript/OS/CLI/package | A runtimeとSI target | A03後のA04/A05、未認定。 |
 
