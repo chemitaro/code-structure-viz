@@ -24,9 +24,11 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 現在はSI-05 public/exact-ref referenceもexact `6d52ff7949d64e747235eef870631cd8cc29b273`で認定済みです。同じclean候補の全ローカル品質gateと元base2efb54cからのfresh独立Strict Reviewがpass、findings0です。初回P1のID欠落主張は完全JSONと専用Pro分析で反証し、codeを変更せず新fresh reviewで認定しました。認定範囲・原指摘/分析/再レビューは`artifacts/20261003t073304z-04-disc-si05-public-exact-ref-cumulative-certification.md`。次はSI-06 diagnostic/stderr/final-ownerで、actual TypeScript/OS/CLI/package、reader prefix、全A02/A03/Final/Issueは未完了です。
 
-SI-06では原author briefを同会話で回収し、独立指摘分析とactual-owner probeでpaired-null captureの公開schema表現欠落を確認しました。現v2の限定訂正か後継版かの人間判断を必要とし、実装ブリーフは未採用、code/schema/受入テストは未変更です。推奨と互換性・再開条件は`artifacts/20261003t085617z-decision-candidate-si06-capture-observation-contract.md`。応答情報の保持に関する第二の懸念は、解析結果と公開処理結果を分ける既存仕様内の説明訂正で解消可能です。
+SI-06では原author briefを同会話で回収し、独立指摘分析とactual-owner probeでpaired-null captureの公開schema表現欠落を確認しました。2026-10-03にユーザーが現v2限定訂正を明示採択したため、`artifacts/20261003t142223z-adr-si06-capture-observation-current-v2.md`とCurrent R/D/P/public semantic-v3へ先行反映しました。旧判断候補は採択前の履歴として保持します。code/schema/受入テストは未変更で、新Spec Review/改訂brief/SI-06 gateは未通過です。応答情報の保持に関する第二の懸念は、解析結果と公開処理結果を分ける既存仕様内の説明訂正です。
 
 ## Verification
+
+- SI-06限定訂正の先行docs checks（新schema/ownerのpassではない）: HEAD4107b81＋六pathの文書候補で、10 normative documents/29 local links/accepted ADRと反映先、run14/summary7/compatibility10/partition3のkey集合、code/schema/tests/依存不変を確認。既存schema selection133 passed（4.17s、元78980 exit0）、Current pointer別selection1 passed（0.13s）、Ruff check/format249、mypy207、SpecDock sync/validate10 nodes、diff-checkがpass。物理publication-v2のobject必須は意図して未訂正で、all-contract/full pytest・新Spec Review・SI-06受入れは未実行です。
 
 - SI-06 admission（実装passではない）: clean/pushed exactaf6fへのread-only probe69095 exit0、stage_failedのcapture未観測／両nullとpublication measurementのnull拒否を確認。原brief95388 exit1は同Blue会話44154 exit0で全2251 LFと最終行を回収・照合し、stale旧回答を不採用のまま保持しました。fresh別Analyze Review Findings Strict98849 exit0の全906行／exact11 H1を照合、Sol/Proの両UI picker verified、backendは未attestedです。F1は契約判断未決、F2は説明訂正、P severity/formal review_statusは発行していません。原回答／complete packetのlossless gzip、可読版、probe、lineage／recoveryを十generic Artifactsへbyte-preserved importし、原bytes/hash一致を確認。code/schema/受入テスト、新Spec Review、SI-06 unit/全Issue認定の証拠ではありません。
 
@@ -106,7 +108,7 @@ SI-06では原author briefを同会話で回収し、独立指摘分析とactual
 
 ## Residual Risks / Follow-ups
 
-- SI-06 paired-null captureのpublic-contract採択が未決です。現v2限定訂正を推奨しますが、外部・永続consumerの互換性は未確認で、既存v2不変が必要なら後継版を選びます。正本反映とSpec Review Strict後にのみfinal-ownerを再開し、0埋め・branch除外・lower owner変更で回避しません。判断候補は上記Artifact、元af6f base／ASSET未採択／既存P2 report-only／production未認定を維持します。
+- SI-06 paired-null captureの現v2限定訂正は採択済みです。先行仕様checksと同objective Spec Review Strict pass後だけschema/final-ownerを再開します。外部/永続consumerのv2不変要求が判明したら切替を止めて再判断し、未更新consumerへ新null recordを送らず、0埋め/branch除外/lower owner変更で回避しません。元af6f base、ASSET未採択、既存P2 report-only、production/全Issue未認定を維持します。
 
 - source inventory/owner-closed A案は採択済みで、bcae954の仕様、exact23072c2のSI-03、exactd6bbbcfのSI-04、exact6d52ff7のSI-05はそれぞれの範囲だけpassです。次はSI-06 diagnostic/stderr/final-ownerで、reader prefixとproductionを含む全consumer closureは未認定です。P2 availabilityの過剰fail-closedリスクとcompound実行未実証はSI-04 certificateへ保持し、自動修復条件にしません。元candidate/旧failは履歴として残し、旧748 testsや仕様passを後続認定へ流用しません。
 - A-02の新version schema/reference/compatibility/provenance closure、A-03のfresh独立Strict、production TDD、両OS実CLI/offline package、Final Quality Gateが残っています。

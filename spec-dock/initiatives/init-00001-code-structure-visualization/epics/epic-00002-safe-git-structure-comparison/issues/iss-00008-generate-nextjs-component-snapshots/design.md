@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-10-02"
+最終更新: "2026-10-03"
 依存: ["requirement.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -177,6 +177,34 @@ note bottom of X : File itself remains a mandatory seed; no public payload injec
 | actual TypeScript/OS/CLI/package | A runtimeとSI target | A03後のA04/A05、未認定。 |
 
 独立Spec Reviewは仕様の整合だけを判定します。旧admission-v2のreference正例も新SIの正例もactual compiler受入れの代わりになりません。
+
+### SI-06: publication-v2のcapture表現と公開結果の独立軸
+
+2026-10-03の[accepted ADR](artifacts/20261003t142223z-adr-si06-capture-observation-current-v2.md)が、現publication-v2のcapture二fieldだけを訂正するtargetです。これは新final ownerを実装する前の仕様です。現在の物理schemaのobject必須との既知差分は、Spec Review後のSI-06 TDDで解消し、それまでは新schema passを主張しません。
+
+同じ`RetainedRequestBoundPublicationCandidatesV3`の保持captureから、final ownerの`measurements.adapter_stdout`/`adapter_stderr`を導出します。受理する組はnull/nullまたはobject/objectだけです。前者は両capture未観測、後者は両capture観測済みで、数値0も実測です。片側nullや同じownerのcapture有無との不一致を拒否します。未観測にはallowed/count/EOF/overflowの値を作りません。
+
+既存closed計測objectの`allowed`、`measured_bytes`、`retained_bytes`とnative整数/実値の意味を維持します。観測済みの値は元candidatesのcaptured/retained/limitへ結合し、再capture・自由計測入力・coercion・別owner/cached recordで置換しません。`public_stderr`と`selected_stdout`は従来どおり実測objectです。schemaはnullable pairのshape、独立validatorはsame-owner有無/値/実bytesを検証します。
+
+| 実状態 | final adapter計測pair | 判定 |
+| --- | --- | --- |
+| 元captureなし | null / null | 未観測。これだけではpublication overflowではない。 |
+| 元captureあり、実数0 | object / object | 観測済み0。未観測とは区別。 |
+| 元captureあり、実数がconfigured cap超過 | object / object | 実overflow。既存公開failure処理。 |
+| 片側null、または元capture有無/値との不一致 | 不正 | schema/独立owner検証で拒否。 |
+
+semantic/run outcomeとpublication outcomeは別の軸です。既存baselineから保持するresponse/outcome条件は次のとおりで、新たなsemantic分類は追加しません。
+
+| 元run/Coreと公開境界 | publication / response / artifact |
+| --- | --- |
+| validated CoreによるSOURCE-003/TARGET/EXPORT/entity-budget unavailable、公開処理成功 | `published`/exit3。同じcandidates由来の検証済みresponse linkを保持でき、semantic artifactsは空。 |
+| rejected Core/runtime-only failure、公開処理成功 | `published`/exit3。responseを補完せずnull、semantic artifactsは空。 |
+| actual capture overflowまたはfinal public-stderr overflow | `payload_unavailable`/exit3。response=null、artifacts空。 |
+| selected-copy overflow、final stderrは収まる | `selected_artifact_unavailable`/exit3。元semantic status、候補descriptorと適格なresponse linkを保持。 |
+
+stderr overflowはselected failureより後でも最終公開failureを優先します。public stderrは追加診断を含む最終候補を一度encode/測定し、64KiB/+1でpartial write0、stderr空、manifest用LIMIT-003一件を維持します。selected-copyは元候補の16MiB exact/+1を一度測定し、置換後stdout bytes/descriptorと元pre-copy measurementを分離して再測定しません。raw child stderr、private proof/bytes/pathを公開しません。
+
+`schema=code-structure-viz.next-publication-decision/v2`、version2、既存URN/exact refs、outer keys/hash preimagesは維持します。旧v1、旧admission/public/runtime-v2 leaf、lower owner、ASSET policyは変更しません。訂正済みschema/producer/validator/vectorsを同時に切り替え、旧object-only consumerへ新null recordを送らず、rollbackも同じ集合で行います。外部/永続consumerのv2不変要件が判明したら切替を止めて再判断します。旧SI-05 certificateは原SHAの履歴であり、このcapture契約だけを新candidateの証拠でsupersedeします。
 
 ## Canonical design index and historical evidence boundary (G10)
 

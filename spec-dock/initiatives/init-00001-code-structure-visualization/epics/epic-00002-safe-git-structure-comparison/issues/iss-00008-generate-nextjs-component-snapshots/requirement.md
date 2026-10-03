@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-10-02"
+最終更新: "2026-10-03"
 親: ["epic-00002", "init-00001"]
 ---
 
@@ -65,6 +65,7 @@ A02のdata契約は`docs/contracts/next-process-launch-v2.md`、`next-execution-
 | SI-REQ-005 / I05-REQ-004・005 | acquisition count/bytes、proof discovery、published＋proof-only record count、published entitiesを別の実測値にする。非公開Fileもmodel-record予算から消えない。 |
 | SI-REQ-006 / I05-REQ-002・005・007 | 取得完了後の解析失敗とseal前のreader失敗を別段階にする。通常reader I/Oは既存unavailable分類、実integrity driftだけterminal fatal。early prefixをpartial-safeとしない。 |
 | SI-REQ-007 / I05-REQ-004・006 | 新admission profile/public世代は旧v1/v2から識別できる。ID/認識/props/relations/trusted declaration/Unicode意味、既存Python/SQLAlchemy bytesを維持する。 |
+| SI-REQ-008 / I05-REQ-004・005・007 | 起動前失敗を含む同じownerの未観測captureを両null、観測済み0を実測objectとして区別して公開する。現publication-v2への限定訂正だけを採択し、片側null、0埋め、架空overflow、branch除外で正常なfailureを隠さない。 |
 
 SI-P01/P02: 同じ取得File Aのparse/post-acquisition read rootと、影響から独立と立証されたBがある正規入力では、A File自身とtainted recordは非公開proofに残り、Bと安全なcontrol/context Filesを公開し、Projectのsafe membershipとpartial-safe/exit3が一致する。Bが独立だと証明できないopen dependency等はSOURCE-003 unavailableとし、表面上のsafe subsetだけで公開しない。
 
@@ -75,6 +76,18 @@ SI-P07: `module_relation`/`export_binding`/`boundary_derivation`の正規nonFile
 個別負例は、取得File欠落/重複、偽path/roles/size/hash/config、proof source payload/null注入、mandatory seed/causal/taint省略、公開可能Fileの恣意除外、count/budget迂回、private dangling/public proof-only reference、selected failureのpartial-safe降格、false completeness、early prefix昇格、cross-project/Project欠落、nonprogram Module、locality偽造に加え、untainted Fileのowner原因の偽造/欠落、Module欠落/重複を両者の省略で隠すこと、偽File taint/direct failureの注入です。合法selection-only semantic exclusionを禁止する新要件ではありません。
 
 設計/具体的なwire・profile・hashは[admission v3](../../../../../../../docs/contracts/next-semantic-admission-v3.md)、[public semantic v3](../../../../../../../docs/contracts/next-semantic-v3.md)、[compatibility v3](../../../../../../../docs/contracts/next-compatibility-v3.md)へ委譲します。仕様checkpointはdocs-onlyです。Spec Review Strict passの後に新schema/reference TDD、全A02 closureと累積A03の後にproduction、A05でIssue全体を認定します。
+
+### SI-06: 未観測captureの現v2限定訂正（2026-10-03採択）
+
+ユーザーは「現v2への限定訂正を採用します。タスク再開して下さい」と明示しました。[accepted ADR](artifacts/20261003t142223z-adr-si06-capture-observation-current-v2.md)に基づき、同じcandidates-v3がcaptureを保持していない場合だけ、publication-v2のadapter stdout/stderr計測を両方nullとします。観測済みは従来の計測objectで、0 bytesも観測済みです。public stderr/selected stdoutの計測は実測objectのままです。未観測をfalse/0/overflowで補完せず、正規stage failureの公開coverageを維持します。
+
+これは上記の旧v1/v2不変宣言に対する**現publication-v2のcapture二fieldだけの例外**です。既存schema identity/version/URN/outer exact refs、lower owner、semantic意味、予算/一回計測、diagnostic catalog、旧leaf/旧KAT、Python/SQLAlchemyは変更しません。新ASSET policyを同時採択しません。
+
+SI-P08: 正規stage failureの両nullと、実capture済み0の両objectは、ともに同じownerから正直に公開できる。nullだけを公開失敗/overflowの根拠にせず、元のstage/code/semantic outcomeを保持する。SI-N16: 片側null、capture有無と不一致のnull/object、未観測のzero-fill、public stderr/selected stdoutのnull、別ownerの値を拒否する。shape通過だけではowner/実測の受入れにならない。
+
+既存object/object recordは訂正後もvalidですが、旧object-only consumerは新null recordを拒否します。schema/producer/validatorを同じcandidateで切り替え、未更新consumerへの新record送信を承認しません。外部/永続consumerの不存在は未確認です。既存v2不変が必要と判明した場合は切替を止め、同時更新または後継版を再判断します。
+
+原SI-05 passは当時のSHA/scopeとして保持し、訂正後契約の証明にしません。先行仕様チェックとSpec Review Strict pass後にSI-06を再開し、新candidateで両null/観測済み0/負例、responseとpublication outcomeの独立軸、configured stderr/selected-copy exact/+1、全必須gateを証明します。
 
 ## Canonical index and historical evidence boundary (G10)
 

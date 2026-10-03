@@ -38,7 +38,7 @@ semantic bytesはCJ15＋末尾LF一つ、同じCore ownerから一度保持。�
 
 ## Exact-ref migration closure
 
-次はSI-05で追加したpaths/URN suffixです。十schemaとbounded public/exact-ref referencesはexact 6d52ff7で認定済みですが、outer四schemaのshape/ref通過をfinal-owner・finalizer・productionの成功証拠に数えず、既存schemaを上書きしません。以下の「未作成」は採択時点の呼称です。
+次はSI-05で追加したpaths/URN suffixです。十schemaとbounded public/exact-ref referencesはexact 6d52ff7で認定済みですが、outer四schemaのshape/ref通過をfinal-owner・finalizer・productionの成功証拠に数えません。旧schemaの維持宣言に対して、後述の2026-10-03採択だけが現publication-v2のcapture二fieldを限定訂正します。以下の「未作成」は採択時点の呼称です。
 
 | owner / planned target | 変更と接続先 |
 | --- | --- |
@@ -49,7 +49,7 @@ semantic bytesはCJ15＋末尾LF一つ、同じCore ownerから一度保持。�
 | `next-run-decision-v3` | provenance-v3 exact ref、新Core-v3、十四key fingerprint。五branch categories/context/receipt/count優先順を維持。validated Core unavailable groupに、正しいproofだが同じsealのlocality不成立というSOURCE-003/source_readを加え、target/exportと同様にcompatibility/fingerprintは保持、entity budget実測はnull。旧run2 ownerをcastしない。 |
 | `next-publication-candidates-v3` | run-decision-v3 exact ref、同じCoreのsemantic-v3/PlantUML、versionless artifact descriptorとcapture計測意味を維持。 |
 | 未作成 `next-domain-manifest-v2` | legacy domain-v1に代わる新chainを直接compatibility-v3/provenance-v3/十四key familyへ接続。新しくv2を作るが旧v1は不変。 |
-| 未作成 `next-publication-decision-v2` | run-v3、candidate-v3を同じfinal immutable ownerへjoin。selected copy exact/+1、artifact descriptors保持、partial write0を維持。 |
+| 未作成 `next-publication-decision-v2` | run-v3、candidate-v3を同じfinal immutable ownerへjoin。未観測captureは両null、観測済みは両計測object。selected copy exact/+1、artifact descriptors保持、partial write0を維持。 |
 | 未作成 `run-manifest-v2` | Next domain/publication新exact refs。Python/SQLAlchemy v1枝と既存root所有権を維持。 |
 | 未作成 `stdout-result-v2` | 新publication-v2 exact refからsummary/manifest/selected/typed unavailable/exit/stderrを一度投影。 |
 
@@ -58,3 +58,13 @@ semantic bytesはCJ15＋末尾LF一つ、同じCore ownerから一度保持。�
 **維持集合**: source/config/path/limits/run-context/applicability-v1、execution-assets/runtime-binding-v1、trusted manifest/descriptor-v2、process policy/observation-v2、private request/response-v2とcontrol、v1 entity/ID/recognition/export/props/relation/boundary/Unicode profiles。new adapter header0.2.0によるasset/request/control hashの新corpusと、旧0.1.0 KAT保存を分けます。runtime raw receipt/transport ownerを新public証明に昇格しません。
 
 これはaffected-schema closureの契約です。SI-05の十schema・public/run/candidatesのreference ownerと独立validatorを追加し、outer四schemaはclosed literal/ref vectorsで検証します。publication-v2の必須`candidates`はcandidate-v3 exact ref、domain-v2の必須`schema`は新wire identity、trusted environmentはv2 descriptor leafです。domain/run/publicationの別tree間の実owner join、catalog-owned stderrと一回のfinal copyはSI-06以降で検証します。schema-only vectorの仮seal値はその認定ではありません。A03前に全consumerをcensusし、空placeholder schemaやadditive fallback union、旧文書へのdowngradeでは閉じません。
+
+## Final publication capture observation — 現v2限定訂正
+
+2026-10-03の[accepted ADR](../../spec-dock/initiatives/init-00001-code-structure-visualization/epics/epic-00002-safe-git-structure-comparison/issues/iss-00008-generate-nextjs-component-snapshots/artifacts/20261003t142223z-adr-si06-capture-observation-current-v2.md)により、`next-publication-decision-v2.measurements.adapter_stdout`と`adapter_stderr`をnullable pairへ限定訂正します。wire identity/version2/URN、outer exact refs/keys、旧measurement objectのshape/意味を維持し、新version/fallback unionを追加しません。
+
+同じcandidates-v3がcaptureを保持しない場合だけnull/null、保持する場合はobject/objectです。nullは未観測、objectの0は実capture済み0です。片側null、元ownerのcapture有無/実値との不一致、未観測zero-fill、再capture、free値の注入を拒否します。`public_stderr`/`selected_stdout`は実測objectのままです。元stage/code/semantic outcomeを保持し、capture未観測だけをpublication overflowへ変えません。schemaのpair制約と独立owner/実bytes検証を分離します。
+
+解析がunavailableでも結果を正しく公開できればpublicationは`published`/exit3です。validated Core unavailableで同じcandidateに適格なresponse linkがあれば保持し、rejected Core/runtime-onlyからresponseを補完しません。actual capture/final-stderr overflowでpublication自体が`payload_unavailable`になればresponse=null/artifacts空です。selected-copy overflowは元semantic status/descriptorを維持し、後続stderr failureは最終公開failureを優先します。pre-copy実測と置換stdoutは別で、再測定しません。
+
+物理schemaへの反映とfinal ownerは先行Spec Review後のSI-06 TDD/gatesで証明します。既存object/object recordは新schemaでもvalidですが、旧object-only validatorは新null recordを拒否します。schema/producer/validator/vectorsを同時切替/rollbackし、未更新consumerへ新null recordを送らず、外部/永続consumerのv2不変要求が判明したら切替を止めて再判断します。旧SI-05 certificateの原bytes/passを保持し、訂正後capture契約に流用しません。下位runtime/Core/run/candidates、旧leaf/旧KAT、既存domains、別ASSET policyは変更しません。
