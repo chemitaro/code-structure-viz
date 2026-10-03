@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="ja" data-plantuml-status="pending" data-plantuml-contract="2">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Issue #8：失敗時の指紋とroot manifestの判断資料</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: #f3f6fb;
+      --surface: #ffffff;
+      --text: #182230;
+      --muted: #536273;
+      --border: #d8e0ea;
+      --accent: #175cd3;
+      --success: #067647;
+      --success-bg: #ecfdf3;
+      --error: #b42318;
+      --error-bg: #fef3f2;
+      --code-bg: #101828;
+      --code-text: #f2f4f7;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+      line-height: 1.75;
+    }
+
+    main {
+      width: min(100% - 24px, 960px);
+      margin: 0 auto;
+      padding: max(24px, env(safe-area-inset-top)) 0 max(48px, env(safe-area-inset-bottom));
+    }
+
+    header, section {
+      margin-top: 20px;
+      padding: 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 6px 24px rgb(16 24 40 / 8%);
+    }
+
+    header { margin-top: 0; }
+    h1, h2 { line-height: 1.4; }
+    h1 { margin: 0 0 12px; font-size: clamp(1.6rem, 5vw, 2.25rem); }
+    h2 { margin: 0 0 8px; font-size: clamp(1.2rem, 4vw, 1.5rem); }
+    p { margin: 8px 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .plantuml-status {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: var(--success-bg);
+      color: var(--success);
+      font-weight: 700;
+    }
+
+    .plantuml-status.error { background: var(--error-bg); color: var(--error); }
+    .plantuml-diagram {
+      position: relative;
+      min-height: 160px;
+      margin-top: 14px;
+      padding: 14px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #ffffff;
+      color: #182230;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .plantuml-diagram[data-zoom-ready="true"] { cursor: zoom-in; }
+    .plantuml-diagram[data-zoom-ready="true"]:focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    .diagram-zoom-hint {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--accent);
+      box-shadow: 0 2px 8px rgb(16 24 40 / 14%);
+      font-size: 0.78rem;
+      font-weight: 700;
+      pointer-events: none;
+    }
+
+    .plantuml-diagram svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 0 auto;
+    }
+
+    details { margin-top: 12px; }
+    summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+    pre {
+      margin: 10px 0 0;
+      padding: 14px;
+      overflow-x: auto;
+      border-radius: 10px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-size: 0.8rem;
+      line-height: 1.55;
+      white-space: pre;
+    }
+
+    .muted { color: var(--muted); }
+    .table-wrap { overflow-x: auto; margin: 16px 0; }
+    table { width: 100%; border-collapse: collapse; min-width: 560px; }
+    th, td { padding: 12px; border: 1px solid var(--border); vertical-align: top; text-align: left; }
+    th { background: var(--background); }
+    td code { overflow-wrap: anywhere; }
+    a { color: var(--accent); }
+    li { margin: 8px 0; }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    body.diagram-zoom-open { overflow: hidden; }
+
+    .diagram-zoom-dialog[hidden] { display: none !important; }
+    .diagram-zoom-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+      background: rgb(3 10 21 / 78%);
+    }
+
+    .diagram-zoom-panel {
+      display: flex;
+      flex-direction: column;
+      width: min(1800px, 100%);
+      height: min(1200px, 100%);
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+    }
+
+    .diagram-zoom-header {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      margin: 0;
+      padding: 6px 8px;
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      border-radius: 0;
+      background: var(--surface);
+      box-shadow: none;
+    }
+
+    .diagram-zoom-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .diagram-zoom-controls button {
+      display: inline-grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .diagram-zoom-controls button svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentcolor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .diagram-zoom-controls button:hover,
+    .diagram-zoom-controls button:focus-visible {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .diagram-zoom-controls button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .diagram-zoom-level {
+      min-width: 3.5rem;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+
+    #diagram-zoom-reset {
+      width: auto;
+      min-width: 58px;
+      padding-inline: 8px;
+    }
+
+    .diagram-zoom-viewport {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      background: #ffffff;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .diagram-zoom-canvas {
+      width: max-content;
+      min-width: 100%;
+      min-height: 100%;
+      padding: 24px;
+    }
+
+    .diagram-zoom-canvas svg {
+      display: block;
+      max-width: none;
+      height: auto;
+      margin: 0;
+    }
+
+    @media (max-width: 640px) {
+      .diagram-zoom-dialog { padding: 0; }
+      .diagram-zoom-panel { border-radius: 0; }
+      .diagram-zoom-canvas { padding: 16px; }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #0c111d;
+        --surface: #161b26;
+        --text: #f5f7fa;
+        --muted: #b9c2cf;
+        --border: #333b48;
+        --success-bg: #053321;
+        --error-bg: #55160c;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="muted">Issue #8 · SI-06 · 2026-10-04 · 未採択の判断資料</p>
+      <h1>失敗時の「指紋なし」を、manifestでどう表すか</h1>
+      <p>Next.js解析の公開契約を整える途中で、未認定の解析結果を正しく表す仕様と、全体manifestの必須項目に不整合が見つかりました。何が完成済みか、何が不足しているか、どの変更を判断する必要があるかを説明します。</p>
+      <p><strong>第一候補は、Next枝に限定して現v2のroot指紋にnullを認める案です。</strong>ただし、外部・永続利用者へ現v2不変を保証していないことと、利用者を同時切替できることが条件です。保証がある場合は新root世代へ分離します。</p>
+      <p>この資料は提案です。新仕様の採択、コードレビュー合格、実装完了を意味しません。</p>
+      <div id="plantuml-status" class="plantuml-status" role="status" aria-live="polite">図を読み込んでいます。</div>
+    </header>
+
+    <section>
+      <h2>1. 今できていること・まだできていないこと</h2>
+      <p>Pythonがユーザー向けの入口と公開処理を担い、将来のTypeScript製解析部との境界を、参照実装とテストで具体化しています。「参照実装」とはデータの所有権や検証方法を実行可能にしたものです。製品のcompilerや実OS実行が完成したという意味ではありません。</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>範囲</th><th>状態と証拠</th></tr></thead>
+        <tbody>
+          <tr><td>取得一覧、安全subset、public exact refs</td><td>先行SI-03〜05の固定SHAで、それぞれの必須チェックと独立レビューを認定済みです。後続の認定には流用しません。</td></tr>
+          <tr><td>今回のcapture二field、公開診断、artifact-selectorの最終公開owner</td><td><code>fca99a9</code>にコミット・プッシュ済み。capture未観測と観測済み0を分離し、stderr 64KiB／stdout 16MiBの実参照owner exact/+1、型・foreign owner・公開privacyのfocused検証がpassしました。</td></tr>
+          <tr><td>summary／manifest／domain／rootの最終公開</td><td>Current ownerは未完了です。rootの指紋と親設定の選択元を推測で補わず、追加設計を先に確認しています。</td></tr>
+          <tr><td>SI-06全体・製品・Issue</td><td>全selector、all-contract／full pytest、fresh独立Code Review、製品TypeScript／OS／CLI／package、Final Quality Gateは未完了です。</td></tr>
+        </tbody>
+      </table></div>
+      <p>大規模selected-copyの同じGreen実行は2 passed／2887.68秒で完了しました。48分かかったこと自体は失敗ではありません。小規模selectionと件数を合算せず、部分passを全体の合格に置き換えません。</p>
+    </section>
+
+    <section>
+      <h2>2. 「指紋」は何を示す値か</h2>
+      <p>fingerprintは、決められた入力をcanonical JSONにしてSHA-256で識別する値です。ただし、何を入力にするかによって意味が変わります。同じ64文字のdigestでも、別の指紋を代入してよいわけではありません。</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>値</th><th>識別するもの</th><th>証明しないこと</th></tr></thead>
+        <tbody>
+          <tr><td>source fingerprint</td><td>同じSourceView／sealが読んだ入力集合</td><td>Node実行や解析成功</td></tr>
+          <tr><td>Nextのsemantic run fingerprint</td><td>同じrequestとmatching transport／Coreの14-key family</td><td>complete成功。Core rejectedでもnonnullになり得ます</td></tr>
+          <tr><td>既存generic run-fingerprint/v1</td><td>Python／SQLAlchemyのsource・request・config等の七key</td><td>Nextの14-key familyとの同一性</td></tr>
+          <tr><td>publication seal／measurement digest</td><td>最終公開recordと実bytes／計測の整合性</td><td>semantic admissionやcompiler使用成功</td></tr>
+        </tbody>
+      </table></div>
+      <p>transportは、同じrequestに対応する応答を検証する境界です。Coreは、その応答をsourceや意味モデルへ照合し、受理または拒否する検証部です。これらのmatching ownerが無い場合、Nextのsemantic指紋は<strong>nullが正しい</strong>と現行仕様が定めています。</p>
+      <details><summary>正本の14キーを確認する</summary>
+        <pre>source_view_fingerprint, source_plan_digest, domain_config_digest,
+projects, targets, formats, stdout_selector, limits,
+node_version, typescript_version, adapter_version, protocol,
+trusted_environment_digest, semantic_admission_profile_id</pre>
+      </details>
+      <p><code>typescript_version=5.9.2</code>はlocked expected metadataです。実際にcompilerをimport／useした独立証明ではありません。PID、host path、capture、結果count、response bodyを新たにhashへ加えません。</p>
+    </section>
+
+    <section>
+      <h2>3. 不整合はどこにあるか</h2>
+      <p>起動準備で失敗した場合、解析結果は未認定でも、失敗の説明自体は公開できます。現行domainは指紋nullを認めます。snapshot requestは指紋fieldの省略を認めます。一方、全体を束ねるroot manifestは指紋を必須stringとしています。</p>
+      <script type="text/plain" class="plantuml-source" id="source-root-join" data-target="diagram-root-join">
+@startuml
+title 未認定nullと各公開契約の関係
+top to bottom direction
+skinparam shadowing false
+component "同じrun3のsemantic指紋\nmatching Coreあり：digest\nmatching Coreなし：null" as Run
+component "domain manifestのschema\ndigest または null" as Domain
+component "snapshot requestのschema\n指紋はoptional digest" as Request
+component "root manifestの現schema\n指紋は必須nonnull string" as Root
+Run --> Domain : 同じ値を投影できる
+Run --> Request : digestなら記載\nnullならfield省略の設計
+Run -[#b42318]-> Root : 旧joinのままnullをコピーすると拒否
+note bottom of Root
+新root ownerは未実装。
+schemaとowner契約を先に整合させる。
+end note
+@enduml
+      </script>
+      <div id="diagram-root-join" class="plantuml-diagram">契約の対応図を描画しています。</div>
+      <details><summary>編集可能なPlantUMLソース</summary><pre data-source-copy="source-root-join"></pre></details>
+      <p>限定probeでは、実stage_failed request／runtime／run／candidatesから旧同値joinのrun blockだけを作ると、root schemaは指紋のNoneだけをstring違反として拒否しました。<strong>新root実装全体が壊れているというテストではありません。</strong>rootを実装する前に露呈した契約差分です。</p>
+      <p>generic七keyを失敗時だけ代入すると、成功時と失敗時で同じfieldの意味が変わります。publication hashやゼロdigestを代入しても、未認定を認定済みに見せることになります。どちらも採用しません。</p>
+    </section>
+
+    <section>
+      <h2>4. nullは「失敗一般」でも「0 byte」でもない</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>具体例</th><th>capture</th><th>semantic指紋</th><th>解釈</th></tr></thead>
+        <tbody>
+          <tr><td>起動準備stage_failed</td><td>null／null</td><td>null</td><td>両captureも解析familyも未観測です。失敗説明は公開可能です。</td></tr>
+          <tr><td>timeoutで実0 byteを観測</td><td>object／object、実測0</td><td>null</td><td>観測は行いましたがmatching Coreはありません。</td></tr>
+          <tr><td>matching transportからCore rejected</td><td>観測済みobject／object</td><td>digest</td><td>familyを識別できますが、解析payloadは不採用です。</td></tr>
+          <tr><td>validated TARGET等unavailable</td><td>観測済みobject／object</td><td>digest</td><td>同じ認定familyの中でpayloadを公開できません。</td></tr>
+          <tr><td>complete／partial_safe</td><td>観測済みobject／object</td><td>digest</td><td>completeはexit0、partial_safeはexit3です。</td></tr>
+        </tbody>
+      </table></div>
+      <p>captureとsemanticの意味は別ですが、任意の組合せを許すわけではありません。Current success／Coreをcapture未観測へ結ぶ正例は、下位ownerの不変条件に反するため作りません。</p>
+      <p>最終stderrやcaptureがoverflowした場合は、解析の成否とは別にpublication自体がfailureとなります。元runの指紋を保持し、公開responseはnull、artifactsは空にします。</p>
+    </section>
+
+    <section>
+      <h2>5. 指紋だけ直しても、親設定の証拠が残る</h2>
+      <p>rootは「設定値」と「その値をどこから選んだか」の両方を求めます。たとえば同じdepth=1でも、builtin defaultで選ばれた場合とCLIで指定された場合は違います。値だけを見て由来を復元できません。</p>
+      <p>Current <code>RetainedNextAnalysisContextV2</code>はresolved intent、run context、domain config、source seal／assetsを保持します。しかし、rootの七field <code>value_sources</code>すべての選択元を受け取る入力はありません。sealの<code>config_resolution</code>はTypeScript設定の宣言元で、CLI設定の選択元とは別です。</p>
+      <p><code>config.source</code>はbuiltin／repository／explicitです。各<code>value_sources</code>にはcliもあります。goldenのbuiltin metadataを新ownerの観測としてコピーしたり、budget_sourceだけを全limitsの由来へ広げたりしません。</p>
+      <p>採択後のDesignで、親設定解決時に値とoriginを一緒に保持するbounded reference ownerとsame request／contextへのjoinを具体化します。下位runtime／Core／run／candidatesのhashや意味は変えず、final ownerの追加input責務を仕様レビューへ含めます。製品CLIの実観測認定とは区別します。</p>
+    </section>
+
+    <section>
+      <h2>6. 選択肢と第一候補</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>案</th><th>利点</th><th>負担・条件</th></tr></thead>
+        <tbody>
+          <tr><td><strong>A：現v2のNext枝限定nullable訂正</strong></td><td>14-keyの意味・正常digestを維持し、新hash／field／URNを増やしません。pre-productionの小さい訂正に向きます。</td><td>旧nonnull validatorはnullを拒否します。外部不変保証が無く、schema／producer／validator／利用者を同時切替できることが条件です。非Next枝はnonnullを維持します。</td></tr>
+          <tr><td><strong>B：新root世代</strong></td><td>旧contractとconsumerの不変保証を保ち、新nullを版で識別できます。</td><td>schema／URN／dispatcher／reader／vectorsの最小affected closureが増えます。既存保存物を新意味へ読み替えません。</td></tr>
+          <tr><td>C：generic request指紋へ分離</td><td>Core前でもnonnull入力identityが必要なら合理的です。</td><td>新preimage、origin owner、consumer joinの意味を採択する必要があります。今回は最小修正を超えます。</td></tr>
+          <tr><td>D：manifest抑止、失敗専用hash、ゼロdigest</td><td>表面上のschema違反を避けられます。</td><td>通常failure公開やsemantic nullの正直な表現を壊すため不採用です。</td></tr>
+        </tbody>
+      </table></div>
+      <p><strong>Aを第一候補にする理由：</strong>Current root ownerは未実装で、新参照契約の認定前です。意味の不足は指紋nullを正直に投影すれば解消でき、新しい入力identityを作る必要はありません。外部consumerの不変義務があるなら、この小ささより互換性を優先してBを選びます。</p>
+      <p>ローカルのidentity文字列censusではschema、tests、Issue artifactsにhitし、src／docsのproduction v2 writerは見つかりませんでした。ただし動的loader、過去配布物、repository外利用者の完全調査ではありません。sdistはschemas／docsを含むため、外部利用者無しとは断定していません。</p>
+      <p>ここで確認したいのは「rootにも現v2の限定訂正を適用するか、新世代へ分離するか」です。すでに採択済みのadapter capture二field訂正を、別のroot変更への承認に読み替えません。</p>
+    </section>
+
+    <section>
+      <h2>7. 外部分析をどう扱ったか</h2>
+      <p>ChatGPT Use Strictをfresh実行し、GPT-5.6 Sol／Proの両UI picker verifiedを確認しました。元exec87072は20分27秒でterminal0です。回答はGitHubの対象branch／full SHA一致を宣言し、tree SHAもローカル一致しました。backend identityやmachine-readable connector attestationはありません。</p>
+      <p>原回答778行を全読しました。nullとrootの不整合、generic fallback禁止、origin捏造禁止は現物へ照合しました。一方、原回答の14キー列挙は正本と不一致だったため<strong>不採用</strong>です。未観測capture＋Coreありの正例提案、config.sourceとvalue_sourcesの混同も訂正しました。</p>
+      <p>外部の新version推奨は、互換性リスクの考察として残しました。例示されたDB／index／cacheは実在が確認された利用者ではありません。旧writerへ戻せばnullを表現できるとも限りません。新世代を作る場合も、rollbackはNext新writerの停止と旧recordの保存を基本にし、dummy digestへ変換しません。</p>
+      <p>これはCode ReviewやSpec Reviewの合格ではありません。外部回答を実行可能briefや採択ADRへ自動昇格していません。原回答とlogは改変せずgzipでArtifactへ保存し、採否は別のMarkdownへ残しました。</p>
+    </section>
+
+    <section>
+      <h2>8. 採択後の進め方と確認方法</h2>
+      <ol>
+        <li>A／Bと不変提供義務の条件を人間が判断します。</li>
+        <li>accepted ADRとCurrent Requirement／Design／Planを先に訂正し、rootのnull predicate、request field省略、非Next枝不変、origin ownerとinput責務を閉じます。</li>
+        <li>文書・refs・links・SpecDockを検証し、clean／pushed exact SHAの独立Spec Review Strictがpassしてからroot実装を開始します。</li>
+        <li>schema、same-owner producer、独立validator、cross-document literalをテスト先行で実装します。null＋任意hash、Coreあり＋null、foreign owner、origin捏造、再sealした偽cache、native数値、privacyを拒否します。</li>
+        <li>whole SI-06を閉じてから、全selectorと実64KiB／16MiB exact/+1を含むall-contract／full pytest、statics／docs、fresh独立Code Reviewを同じ候補で実行します。</li>
+      </ol>
+      <p>再開時は、後続AIがこのdraftだけでroot変更を実装しないことを確認します。元SI-06累積baseを維持し、旧SI-05 pass、部分selection、今回の分析を全体認定へ置き換えません。サブエージェントと監視用UI操作は使いません。</p>
+      <p>図は編集可能なPlantUMLをHTML内に保持し、ブラウザ内で描画します。外部レンダラーへ図ソースを送りません。初回描画にはバージョン固定CDNへのインターネット接続が必要です。</p>
+      <p>同じIssueのartifactsにある後続AI向けの詳細Markdownには、現物のpath、正しい14キー、原回答の採否、変更順序と禁止事項を残しています。このHTMLは単独で理解できる資料です。tailnet公開対象はこのHTML一件だけで、raw/logや作業ディレクトリは公開しません。</p>
+      <p class="muted">分析対象：fca99a91c11f33de5199e67996be1be671e10298。新root仕様は未採択です。</p>
+    </section>
+  </main>
+
+  <div id="diagram-zoom-dialog" class="diagram-zoom-dialog" hidden>
+    <section class="diagram-zoom-panel"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="diagram-zoom-title">
+      <h2 id="diagram-zoom-title" class="visually-hidden">図を拡大表示</h2>
+      <header class="diagram-zoom-header">
+        <div class="diagram-zoom-controls" aria-label="図の拡大率を操作する">
+          <button type="button" id="diagram-zoom-out" aria-label="図を縮小する" title="縮小">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>
+          </button>
+          <button type="button" id="diagram-zoom-reset" aria-label="100%に戻す" title="100%に戻す">
+            <span id="diagram-zoom-level" class="diagram-zoom-level" aria-live="polite">100%</span>
+          </button>
+          <button type="button" id="diagram-zoom-in" aria-label="図を拡大する" title="拡大">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+          </button>
+          <button type="button" id="diagram-zoom-close" aria-label="拡大表示を閉じる" title="閉じる">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+          </button>
+        </div>
+      </header>
+      <div id="diagram-zoom-viewport" class="diagram-zoom-viewport" tabindex="0">
+        <div id="diagram-zoom-canvas" class="diagram-zoom-canvas"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const sources = [...document.querySelectorAll(".plantuml-source")];
+      const status = document.getElementById("plantuml-status");
+
+      window.__plantumlDocumentState = {
+        expected: sources.length,
+        rendered: 0,
+        errors: [],
+        completed: false
+      };
+
+      window.__plantumlFail = message => {
+        const state = window.__plantumlDocumentState;
+        state.errors.push(String(message));
+        state.completed = true;
+        document.documentElement.dataset.plantumlStatus = "error";
+        status.className = "plantuml-status error";
+        status.textContent = `図の描画に失敗しました: ${message}`;
+      };
+
+      for (const output of document.querySelectorAll("[data-source-copy]")) {
+        const source = document.getElementById(output.dataset.sourceCopy);
+        if (source) output.textContent = source.textContent.trim();
+      }
+
+      document.documentElement.dataset.plantumlStatus = "running";
+    })();
+  </script>
+
+  <script
+    src="https://unpkg.com/@plantuml/core@1.2026.6/viz-global.js"
+    onerror="window.__plantumlFail('viz-global.jsを読み込めませんでした。')"></script>
+
+  <script type="module">
+    const state = window.__plantumlDocumentState;
+    const status = document.getElementById("plantuml-status");
+    const zoomDialog = document.getElementById("diagram-zoom-dialog");
+    const zoomTitle = document.getElementById("diagram-zoom-title");
+    const zoomViewport = document.getElementById("diagram-zoom-viewport");
+    const zoomCanvas = document.getElementById("diagram-zoom-canvas");
+    const zoomLevelOutput = document.getElementById("diagram-zoom-level");
+    const zoomOutButton = document.getElementById("diagram-zoom-out");
+    const zoomInButton = document.getElementById("diagram-zoom-in");
+    const zoomResetButton = document.getElementById("diagram-zoom-reset");
+    const zoomCloseButton = document.getElementById("diagram-zoom-close");
+    let zoomLevel = 1;
+    let zoomBaseWidth = 0;
+    let zoomedSvg = null;
+    let zoomReturnFocus = null;
+
+    const diagramTitle = sourceElement => {
+      const titleLine = sourceElement.textContent.match(/^\s*title\s+(.+)$/m);
+      return titleLine?.[1]?.trim() || "図を拡大表示";
+    };
+
+    const applyDiagramZoom = () => {
+      if (!zoomedSvg || zoomBaseWidth <= 0) return;
+      zoomedSvg.style.width = `${Math.round(zoomBaseWidth * zoomLevel)}px`;
+      zoomedSvg.style.height = "auto";
+      zoomLevelOutput.value = `${Math.round(zoomLevel * 100)}%`;
+      zoomLevelOutput.textContent = zoomLevelOutput.value;
+      zoomResetButton.setAttribute("aria-label", `100%に戻す（現在${zoomLevelOutput.value}）`);
+      zoomOutButton.disabled = zoomLevel <= 0.5;
+      zoomInButton.disabled = zoomLevel >= 3;
+    };
+
+    const setDiagramZoom = nextLevel => {
+      zoomLevel = Math.min(3, Math.max(0.5, nextLevel));
+      applyDiagramZoom();
+    };
+
+    const closeDiagramZoom = () => {
+      if (zoomDialog.hidden) return;
+      zoomDialog.hidden = true;
+      document.body.classList.remove("diagram-zoom-open");
+      zoomCanvas.replaceChildren();
+      zoomedSvg = null;
+      zoomBaseWidth = 0;
+      zoomReturnFocus?.focus();
+      zoomReturnFocus = null;
+    };
+
+    const openDiagramZoom = (target, sourceElement) => {
+      const sourceSvg = target.querySelector("svg");
+      if (!sourceSvg) return;
+
+      zoomReturnFocus = target;
+      zoomedSvg = sourceSvg.cloneNode(true);
+      zoomedSvg.removeAttribute("height");
+      zoomedSvg.style.maxWidth = "none";
+      const viewBoxWidth = zoomedSvg.viewBox?.baseVal?.width || 0;
+      const declaredWidth = Number.parseFloat(zoomedSvg.getAttribute("width")) || 0;
+      zoomBaseWidth = Math.max(viewBoxWidth, declaredWidth, sourceSvg.getBoundingClientRect().width);
+      zoomLevel = 1;
+      zoomTitle.textContent = diagramTitle(sourceElement);
+      zoomCanvas.replaceChildren(zoomedSvg);
+      zoomDialog.hidden = false;
+      document.body.classList.add("diagram-zoom-open");
+      zoomViewport.scrollTo({ top: 0, left: 0 });
+      applyDiagramZoom();
+      zoomCloseButton.focus();
+    };
+
+    const prepareDiagramZoom = (target, sourceElement) => {
+      target.dataset.zoomReady = "true";
+      target.tabIndex = 0;
+      target.setAttribute("role", "button");
+      target.setAttribute("aria-label", `${diagramTitle(sourceElement)}を拡大表示する`);
+      const hint = document.createElement("span");
+      hint.className = "diagram-zoom-hint";
+      hint.textContent = "クリックして拡大";
+      hint.setAttribute("aria-hidden", "true");
+      target.append(hint);
+      target.addEventListener("click", () => openDiagramZoom(target, sourceElement));
+      target.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openDiagramZoom(target, sourceElement);
+        }
+      });
+    };
+
+    const focusableZoomElements = () => [...zoomDialog.querySelectorAll(
+      'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    )].filter(element => !element.hidden && element.getClientRects().length > 0);
+
+    zoomOutButton.addEventListener("click", () => setDiagramZoom(zoomLevel - 0.25));
+    zoomInButton.addEventListener("click", () => setDiagramZoom(zoomLevel + 0.25));
+    zoomResetButton.addEventListener("click", () => setDiagramZoom(1));
+    zoomCloseButton.addEventListener("click", closeDiagramZoom);
+    zoomDialog.addEventListener("click", event => {
+      if (event.target === zoomDialog) closeDiagramZoom();
+    });
+    document.addEventListener("keydown", event => {
+      if (zoomDialog.hidden) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDiagramZoom();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = focusableZoomElements();
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && (document.activeElement === first || !zoomDialog.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !zoomDialog.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+
+    try {
+      const { renderToString } = await import(
+        "https://unpkg.com/@plantuml/core@1.2026.6/plantuml.js"
+      );
+
+      const renderDiagram = lines => new Promise((resolve, reject) => {
+        renderToString(
+          lines,
+          svg => resolve(svg),
+          message => reject(new Error(message))
+        );
+      });
+
+      const normalizeDiagnosticText = value => String(value ?? "").replace(/\s+/g, " ").trim();
+
+      const inspectRenderedSvg = svgMarkup => {
+        const parsed = new DOMParser().parseFromString(svgMarkup, "image/svg+xml");
+        const root = parsed.documentElement;
+        if (!root || root.localName.toLowerCase() === "parsererror" || parsed.querySelector("parsererror")) {
+          throw new Error("PlantUMLが不正なSVGを返しました。");
+        }
+        if (root.localName.toLowerCase() !== "svg") {
+          throw new Error("PlantUMLの描画結果がSVGではありません。");
+        }
+
+        const fullText = normalizeDiagnosticText(root.textContent);
+        const diagramType = root.getAttribute("data-diagram-type")?.toLowerCase() ?? "";
+        const hasKnownErrorText = /Syntax Error\?|An error has occurred/i.test(fullText);
+        const hasDiagnosticStructure = /PlantUML version\b/i.test(fullText)
+          && /\[From [^\]]*\(line \d+\)\s*\]/i.test(fullText)
+          && /@startuml/i.test(fullText);
+
+        if (diagramType === "error" || hasKnownErrorText || hasDiagnosticStructure) {
+          const diagnosticLines = [...root.querySelectorAll("text")]
+            .filter(element => {
+              const presentation = [
+                element.getAttribute("fill"),
+                element.getAttribute("style"),
+                element.getAttribute("text-decoration")
+              ].filter(Boolean).join(" ").toLowerCase().replace(/\s+/g, "");
+              return /(?:fill:)?(?:#ff0000|#f00|red|rgb\(255,0,0\))/.test(presentation)
+                || presentation.includes("wavy");
+            })
+            .map(element => normalizeDiagnosticText(element.textContent))
+            .filter(Boolean);
+          const reason = [...new Set(diagnosticLines)].join(" / ").slice(0, 500)
+            || (hasKnownErrorText
+              ? fullText.match(/Syntax Error\?|An error has occurred/i)?.[0]
+              : "PlantUMLの診断画面が返されました。");
+          throw new Error(`PlantUMLの診断SVGが検出されました: ${reason}`);
+        }
+
+        return root;
+      };
+
+      for (const sourceElement of document.querySelectorAll(".plantuml-source")) {
+        const target = document.getElementById(sourceElement.dataset.target);
+        if (!target) {
+          state.errors.push(`${sourceElement.id}: 描画先がありません。`);
+          continue;
+        }
+
+        try {
+          const lines = sourceElement.textContent.trim().split(/\r?\n/);
+          const svgMarkup = await renderDiagram(lines);
+          const svg = inspectRenderedSvg(svgMarkup);
+          target.replaceChildren(document.importNode(svg, true));
+          prepareDiagramZoom(target, sourceElement);
+          target.dataset.plantumlStatus = "success";
+          state.rendered += 1;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          state.errors.push(`${sourceElement.id}: ${message}`);
+          target.dataset.plantumlStatus = "error";
+          target.textContent = `この図の描画に失敗しました: ${message}`;
+        }
+      }
+
+      state.completed = true;
+      if (state.rendered === state.expected && state.errors.length === 0) {
+        document.documentElement.dataset.plantumlStatus = "success";
+        status.textContent = `図を${state.rendered}件すべて描画できました。`;
+      } else {
+        document.documentElement.dataset.plantumlStatus = "error";
+        status.className = "plantuml-status error";
+        status.textContent = `図を${state.rendered}件描画し、${state.errors.length}件のエラーが発生しました。`;
+      }
+    } catch (error) {
+      window.__plantumlFail(error instanceof Error ? error.message : String(error));
+    }
+  </script>
+</body>
+</html>

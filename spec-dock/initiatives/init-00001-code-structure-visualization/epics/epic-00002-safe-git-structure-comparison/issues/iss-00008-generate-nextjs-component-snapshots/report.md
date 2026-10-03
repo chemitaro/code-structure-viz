@@ -28,6 +28,8 @@ SI-06では原author briefを同会話で回収し、独立指摘分析とactual
 
 ## Verification
 
+- SI-06 root/config契約の独立advisory: clean/pushed exact `fca99a91c11f33de5199e67996be1be671e10298`へfresh Use Strict / GPT-5.6 Sol / Pro、元87072はterminal0 / 20m27s、model/thinking両UI picker verifiedです。原778行とtranscript/logを照合し、null対root必須digestは確認、誤14-key列挙・到達不能capture/Core正例等は不採用です。raw/logはlossless gzip、lineageと採否・A/B条件は[判断候補](artifacts/20261003t195656z-decision-candidate-si06-root-fingerprint-and-config-origin.md)へ保存しました。人間向けHTMLは1/1 PlantUML描画、zoom/keyboard/focus gateがpassです。新root仕様の採択、Spec/Code Review、全SI-06のpassではありません。
+
 - SI-06実装中のfocused証拠: schema family24 pass、新diagnostic11 pass/170.59s、final owner小規模15 pass/2 deselected/356.55s（元80158）。別実行のconfigured16MiB exact/+1のRed元82296は1 pass/1意図したfail/2266.06s、actual候補と独立literal一致後の未実装guardを確認しました。最小Green実装後の同selection元16805は2 pass/2887.68sで完了し、元measurement/descriptorと置換stdoutの分離を確認しました。追加known-answer、再seal済みnative/cache、同値foreign owner、null/zero、partial-safe公開privacyの各focused selectionもpassです。full suite/Strict認定の代わりではなく、件数を合算しません。元59716のactual stage/run-block schema probeはfingerprint null対root必須stringの限定差分だけを確認し、新root ownerの失敗や新hash採択とは扱いません。原script/JSON記録をopaque import後にcmp/SHA確認し、詳細は上記中間Artifactに分離しました。
 
 - SI-06限定訂正の仕様gate: clean/pushed exact26d3ce1へ同objective/同reviewerのStrict followup59720、native `issue8-si06-capture-spec-review`がexit0（9m00s）。原JSON全体・duplicate keyなし・installed output schema適合を確認し、valid pass/findings0/confidence0.91を採用。要求Sol/Pro、actual modelはinherited/skipped/unverifiedfresh、ProだけUI verified。raw JSON/logのopaque byte-preserved importと証明境界は`artifacts/20261003t145358z-01-disc-si06-capture-spec-review-pass.md`。testsはreviewer未実行で、physical schema差分・final owner・SI-06コード/production/Final/Issueのpassではありません。

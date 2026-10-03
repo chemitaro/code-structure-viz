@@ -24,6 +24,8 @@ package_sequence_key: "ISSUE-05"
 
 ### A runtime移行の順序
 
+SI-06の中間実装は`fca99a91c11f33de5199e67996be1be671e10298`へcommit/push済みです。同exact SHAのfresh ChatGPT Use Strict / Sol / Pro分析はterminal0で両UI picker verified、原778行を全読しました。semantic null対root必須digestと親設定originの未完了境界を現物へ照合し、外部の誤14-key列挙等は不採用にしました。原回答/log/lineageと人間向けHTML、未採択の選択肢は[判断候補](artifacts/20261003t195656z-decision-candidate-si06-root-fingerprint-and-config-origin.md)へ保存しました。rootの現v2 nullable訂正／新世代／origin owner追加は未採択で、現capture二field採択へ拡張しません。既存の正本→Spec Review→TDD順序、元SI-06 base、後続未認定境界は不変です。
+
 SI-05の元baseはclean/pushed `2efb54c370ac05ac4da0d9b0bfe717a13b62380c`のまま固定し、exact `6d52ff7949d64e747235eef870631cd8cc29b273`で十closed schemasのexact-ref closureとsame-Core public referencesの必須checks/fresh累積reviewがpassしました。認定・初回指摘の独立反証・原証跡と限界は`artifacts/20261003t073304z-04-disc-si05-public-exact-ref-cumulative-certification.md`。author briefの採用履歴は`artifacts/20261003t015026z-02-disc-si05-public-exact-refs-brief-adoption.md`です。旧schema/KAT、report-only P2、未採択ASSET、SI-06の実行可能finalizer、productionは変更しません。
 
 現在のSI gate: **SI-05 public/exact-ref referenceはexact `6d52ff7949d64e747235eef870631cd8cc29b273`で認定済み**です。同じclean SHAのall-contract1995、full3064/既存Linux専用1 skip、全statics/docs checksと元2efb54cからのfresh独立Code Review Strictがpass、findings0です。次はSI-06 diagnostic/stderr/final-ownerで、reader prefix/全A02/A03/production/Final/Issueは未認定です。証拠は`artifacts/20261003t073304z-04-disc-si05-public-exact-ref-cumulative-certification.md`。先行SI-04 full Coreのexact `d6bbbcf337ee4008d5925a6294a9065ca167a0e2`認定とreport-only P2は`artifacts/20261003t010147z-03-disc-si04-cumulative-core-review-pass.md`の範囲のまま維持します。以下のfail/未認定段階は当時の履歴です。
