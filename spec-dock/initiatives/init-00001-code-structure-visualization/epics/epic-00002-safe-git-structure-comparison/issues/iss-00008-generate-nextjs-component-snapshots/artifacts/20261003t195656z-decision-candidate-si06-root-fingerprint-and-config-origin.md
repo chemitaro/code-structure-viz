@@ -4,7 +4,7 @@ ID: "20261003t195656z-decision-candidate"
 タイトル: "SI-06 root指紋の未認定表現と親設定の証拠"
 状態: "draft"
 作成者: "iwasawayuuta"
-最終更新: "2026-10-03"
+最終更新: "2026-10-04"
 親: ["iss-00008"]
 template: "decision-candidate"
 authority: "draft"
@@ -103,6 +103,16 @@ root configは値だけでなく、設定の選択元も必須です。
 | D：Core無しのmanifest抑止、失敗専用hash、ゼロdigest | schema conflictを避ける／別値を入れる | 表面上は小さい | 通常failure公開やsemantic null契約を壊すため不採用 |
 
 本件ではCurrent root ownerがまだ未実装で、new rootは認定前の参照契約です。ローカルのidentity文字列censusはschema、tests、Issue artifactsにhitし、src/docsのproduction v2 writerは見つかりませんでした。ただし動的loader、過去配布物、repository外利用者を完全に調べた証明ではありません。sdistはschemas/docsを含む構成なので、外部consumerが無いとも断言できません。
+
+### 2026-10-04の公開状況追加確認
+
+GitHub REST APIとlocal historyを読み取り専用で確認しました。対象branchのHEADは `23bb33f097498b3e83b0d1c0628249e66bdb6fc6` です。
+
+- [GitHub releases](https://api.github.com/repos/chemitaro/code-structure-viz/releases)と[tags](https://api.github.com/repos/chemitaro/code-structure-viz/tags)はいずれも0件でした。公開repositoryのdefault branchはmainです。
+- [mainの再帰tree](https://api.github.com/repos/chemitaro/code-structure-viz/git/trees/main?recursive=1)は `truncated=false`、main SHAは `f9e9c4ae845aab8c846807a7f7395acd407bb5f5` で、`run-manifest-v2`を含むpathは0件でした。mainに限定した当該schemaのcommit historyも0件です。
+- local `git log --reverse -- schemas/run-manifest-v2.schema.json` の初回追加は、このIssueのSI-05 commit `6d52ff7949d64e747235eef870631cd8cc29b273` です。既存mainで配布済みのroot形式を置換する変更だという根拠は見つかりませんでした。
+
+この結果は、開発中の現v2を訂正するA案をさらに支持します。ただしGitHub以外の配布、公開branchからの直接利用、個別の不変保証の有無まで証明したものではありません。変更を止めている確定事項は、Current RequirementのSI-06節とaccepted capture ADRが、現時点の例外をadapter capture二fieldに限定していることです。この追加確認だけでrootの訂正を採択済みに変更しません。元のA/B判断候補と実装前の仕様gateを維持します。
 
 したがって、外部回答の「新versionが必須」という一般論をそのまま実装せず、**不変提供義務の有無**を判断条件にします。Aでも破壊的影響がゼロになるわけではなく、旧object/non-null validatorの同時切替は必要です。外部義務があるならAを選びません。
 
