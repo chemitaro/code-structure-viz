@@ -3,7 +3,7 @@
 ID: "iss-00008"
 タイトル: "Generate Nextjs Component Snapshots"
 関連GitHub: ["#8"]
-最終更新: "2026-10-03"
+最終更新: "2026-10-04"
 依存: ["requirement.md", "design.md", "plan.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -24,9 +24,11 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 現在はSI-05 public/exact-ref referenceもexact `6d52ff7949d64e747235eef870631cd8cc29b273`で認定済みです。同じclean候補の全ローカル品質gateと元base2efb54cからのfresh独立Strict Reviewがpass、findings0です。初回P1のID欠落主張は完全JSONと専用Pro分析で反証し、codeを変更せず新fresh reviewで認定しました。認定範囲・原指摘/分析/再レビューは`artifacts/20261003t073304z-04-disc-si05-public-exact-ref-cumulative-certification.md`。次はSI-06 diagnostic/stderr/final-ownerで、actual TypeScript/OS/CLI/package、reader prefix、全A02/A03/Final/Issueは未完了です。
 
-SI-06では原author briefを同会話で回収し、独立指摘分析とactual-owner probeでpaired-null captureの公開schema表現欠落を確認しました。2026-10-03にユーザーが現v2限定訂正を明示採択したため、`artifacts/20261003t142223z-adr-si06-capture-observation-current-v2.md`とCurrent R/D/P/public semantic-v3へ先行反映しました。旧判断候補は採択前の履歴として保持します。code/schema/受入テストは未変更で、新Spec Review/改訂brief/SI-06 gateは未通過です。応答情報の保持に関する第二の懸念は、解析結果と公開処理結果を分ける既存仕様内の説明訂正です。
+SI-06では原author briefを同会話で回収し、独立指摘分析とactual-owner probeでpaired-null captureの公開schema表現欠落を確認しました。2026-10-03にユーザーが現v2限定訂正を明示採択したため、`artifacts/20261003t142223z-adr-si06-capture-observation-current-v2.md`とCurrent R/D/P/public semantic-v3へ先行反映しました。旧判断候補は採択前の履歴として保持します。exact26d3ce1の同reviewer Spec Reviewはpass/findings0となり、仕様gateを通過しました。code/schema/受入テストは未変更で、改訂brief/SI-06実装gateは未通過です。応答情報の保持に関する第二の懸念は、解析結果と公開処理結果を分ける既存仕様内の説明訂正です。
 
 ## Verification
+
+- SI-06限定訂正の仕様gate: clean/pushed exact26d3ce1へ同objective/同reviewerのStrict followup59720、native `issue8-si06-capture-spec-review`がexit0（9m00s）。原JSON全体・duplicate keyなし・installed output schema適合を確認し、valid pass/findings0/confidence0.91を採用。要求Sol/Pro、actual modelはinherited/skipped/unverifiedfresh、ProだけUI verified。raw JSON/logのopaque byte-preserved importと証明境界は`artifacts/20261003t145358z-01-disc-si06-capture-spec-review-pass.md`。testsはreviewer未実行で、physical schema差分・final owner・SI-06コード/production/Final/Issueのpassではありません。
 
 - SI-06限定訂正の先行docs checks（新schema/ownerのpassではない）: HEAD4107b81＋六pathの文書候補で、10 normative documents/29 local links/accepted ADRと反映先、run14/summary7/compatibility10/partition3のkey集合、code/schema/tests/依存不変を確認。既存schema selection133 passed（4.17s、元78980 exit0）、Current pointer別selection1 passed（0.13s）、Ruff check/format249、mypy207、SpecDock sync/validate10 nodes、diff-checkがpass。物理publication-v2のobject必須は意図して未訂正で、all-contract/full pytest・新Spec Review・SI-06受入れは未実行です。
 
@@ -108,7 +110,7 @@ SI-06では原author briefを同会話で回収し、独立指摘分析とactual
 
 ## Residual Risks / Follow-ups
 
-- SI-06 paired-null captureの現v2限定訂正は採択済みです。先行仕様checksと同objective Spec Review Strict pass後だけschema/final-ownerを再開します。外部/永続consumerのv2不変要求が判明したら切替を止めて再判断し、未更新consumerへ新null recordを送らず、0埋め/branch除外/lower owner変更で回避しません。元af6f base、ASSET未採択、既存P2 report-only、production/全Issue未認定を維持します。
+- SI-06 paired-null captureの現v2限定訂正は採択済みで、先行仕様checksとexact26d3ce1の同objective Spec Review Strictがpassしました。改訂brief後だけschema/final-ownerのTDDを再開します。外部/永続consumerのv2不変要求が判明したら切替を止めて再判断し、未更新consumerへ新null recordを送らず、0埋め/branch除外/lower owner変更で回避しません。元af6f base、ASSET未採択、既存P2 report-only、production/全Issue未認定を維持します。
 
 - source inventory/owner-closed A案は採択済みで、bcae954の仕様、exact23072c2のSI-03、exactd6bbbcfのSI-04、exact6d52ff7のSI-05はそれぞれの範囲だけpassです。次はSI-06 diagnostic/stderr/final-ownerで、reader prefixとproductionを含む全consumer closureは未認定です。P2 availabilityの過剰fail-closedリスクとcompound実行未実証はSI-04 certificateへ保持し、自動修復条件にしません。元candidate/旧failは履歴として残し、旧748 testsや仕様passを後続認定へ流用しません。
 - A-02の新version schema/reference/compatibility/provenance closure、A-03のfresh独立Strict、production TDD、両OS実CLI/offline package、Final Quality Gateが残っています。

@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-10-03"
+最終更新: "2026-10-04"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -147,6 +147,8 @@ RequirementのSI-REQ-001〜008、DesignのSI節と三つの新v3契約、accepte
 SI-01のdirect checksは、SpecDock sync/validate、Current pointers、追加Markdownリンク/契約用語/closed field counts/preimage key census、diff-check、旧v1/v2 code/schema/fixtures不変です。新schemaはSI-03〜05のtest-first単位で追加するため、SI-01で新schema `$ref`や新referenceがpassしたとは表記しません。SI-03以降の各単位ではfocused Red→Green、該当schema/旧reference regression、Ruff/format/mypy、独立literal/ref censusを実行し、全A02 gateは既存all-contract/full pytest、SpecDock、pinned PlantUML等の全required checksです。
 
 #### SI-06限定訂正の先行仕様gateと実装順序
+
+進捗証拠: 先行docs checkpoint `26d3ce1e9f68a25ca60e0f55827bd539d952e56f`の同objective/同reviewer Spec Review Strictは、原session59720 exit0、valid `review_status=pass`/findings0です。詳細は`artifacts/20261003t145358z-01-disc-si06-capture-spec-review-pass.md`。これは下記1/2の仕様gateだけで、改訂brief・schema/final-owner実装・新受入れ・元af6fからの累積Code Reviewは未完了です。手順/accepted meaningは変更しません。
 
 1. **SI-01再訪（docs-only）**: 採択済みSI-REQ-008/Design/Plan/public semantic-v3/ADRを整合。schema/producer/validator/source/旧KAT/依存はまだ変更しない。新links/accepted fields/用語/closed key不変を直接確認し、既存schema selection、Current pointer、Ruff/format/mypy、SpecDock sync/validate、diff-checkを実行して通常checkpoint/pushする。これはTDD Redや新schema passではない。
 2. **SI-02再訪**: 同じ`iss-00008 / source-inventory-safe-subset-specification / R-D-P and required contract closure`の記録済みレビュアー`issue8-source-inventory-spec-review`へ、clean/pushed exact spec SHAでSpec Review Strict / Sol / Proのfollowup。今回の採択を含む選択仕様全体を再評価する。valid passまでSI-06 code/schemaを変更しない。findings/重要gapは専用分析、P2/P3はreport-only。
