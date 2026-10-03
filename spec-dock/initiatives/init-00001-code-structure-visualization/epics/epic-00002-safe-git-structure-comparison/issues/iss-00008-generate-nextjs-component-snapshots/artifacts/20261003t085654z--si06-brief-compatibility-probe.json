@@ -1,0 +1,29 @@
+{
+  "probe_scope": "actual existing request-bound stage failure and schema fragments only",
+  "runtime_result_kind": "transport_failure",
+  "run_outcome": "payload_unavailable",
+  "provenance_stage": "node_spawn",
+  "failure_code": "CSV-NEXT-NODE-002",
+  "runtime_capture": null,
+  "candidate_capture_measurements": {
+    "adapter_stderr": null,
+    "adapter_stdout": null
+  },
+  "publication_measurement_accepts_null": false,
+  "publication_measurement_accepts_zero_object": true,
+  "unavailable_branch_nonnull_response_errors": [
+    {
+      "path": [
+        "response"
+      ],
+      "message": "{'request_id': '0000000000000000000000000000000000000000000000000000000000000000'} is not of type 'null'"
+    }
+  ],
+  "limits": {
+    "max_adapter_stdout_capture_bytes": 16777216,
+    "max_adapter_stderr_capture_bytes": 65536,
+    "max_stderr_bytes": 65536,
+    "max_selected_stdout_bytes": 16777216
+  },
+  "no_si06_code_or_certificate": true
+}

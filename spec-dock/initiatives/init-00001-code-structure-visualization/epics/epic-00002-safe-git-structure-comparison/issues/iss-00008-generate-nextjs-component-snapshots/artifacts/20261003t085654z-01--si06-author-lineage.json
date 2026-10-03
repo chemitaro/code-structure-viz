@@ -1,0 +1,22 @@
+{
+  "identity": "issue8-source-inventory-owner-closed-author",
+  "native_session": "issue8-si06-final-publicatio",
+  "conversation_id": "6abf39d9-bdc0-83ee-96f7-79bde716eb7f",
+  "parent_native_session": "issue8-si05-public-exact-refs",
+  "last_verified_sha": "af6f5d33f9487a33dabf2ddfe41df85b3d8267fb",
+  "author_model_requested": "gpt-5.6-sol",
+  "author_effort_requested": "extra-high",
+  "author_model_fresh_verified": false,
+  "selection_status": "inherited-skipped",
+  "effort_log_observation": "Extra High already selected",
+  "raw_brief_sha256": "89874d1617df851ada743baf716a6c32b835ca59b2773cf09a813d066ef8ad8f",
+  "original_wrapper_exec": 95388,
+  "original_wrapper_exit": 1,
+  "recovery_exec": 44154,
+  "recovery_exit": 0,
+  "submission_message_id": "15d62a67-e470-4644-b850-9a3e35108600",
+  "final_exact_prompt_pair_verified": true,
+  "final_completed_at": "2026-10-03T08:16:37.813Z",
+  "brief_adoption": "pending-independent-admission-analysis",
+  "code_certificate": null
+}

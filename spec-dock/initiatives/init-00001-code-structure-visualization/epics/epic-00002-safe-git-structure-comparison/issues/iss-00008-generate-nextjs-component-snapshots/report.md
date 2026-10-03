@@ -24,7 +24,11 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 現在はSI-05 public/exact-ref referenceもexact `6d52ff7949d64e747235eef870631cd8cc29b273`で認定済みです。同じclean候補の全ローカル品質gateと元base2efb54cからのfresh独立Strict Reviewがpass、findings0です。初回P1のID欠落主張は完全JSONと専用Pro分析で反証し、codeを変更せず新fresh reviewで認定しました。認定範囲・原指摘/分析/再レビューは`artifacts/20261003t073304z-04-disc-si05-public-exact-ref-cumulative-certification.md`。次はSI-06 diagnostic/stderr/final-ownerで、actual TypeScript/OS/CLI/package、reader prefix、全A02/A03/Final/Issueは未完了です。
 
+SI-06では原author briefを同会話で回収し、独立指摘分析とactual-owner probeでpaired-null captureの公開schema表現欠落を確認しました。現v2の限定訂正か後継版かの人間判断を必要とし、実装ブリーフは未採用、code/schema/受入テストは未変更です。推奨と互換性・再開条件は`artifacts/20261003t085617z-decision-candidate-si06-capture-observation-contract.md`。応答情報の保持に関する第二の懸念は、解析結果と公開処理結果を分ける既存仕様内の説明訂正で解消可能です。
+
 ## Verification
+
+- SI-06 admission（実装passではない）: clean/pushed exactaf6fへのread-only probe69095 exit0、stage_failedのcapture未観測／両nullとpublication measurementのnull拒否を確認。原brief95388 exit1は同Blue会話44154 exit0で全2251 LFと最終行を回収・照合し、stale旧回答を不採用のまま保持しました。fresh別Analyze Review Findings Strict98849 exit0の全906行／exact11 H1を照合、Sol/Proの両UI picker verified、backendは未attestedです。F1は契約判断未決、F2は説明訂正、P severity/formal review_statusは発行していません。原回答／complete packetのlossless gzip、可読版、probe、lineage／recoveryを十generic Artifactsへbyte-preserved importし、原bytes/hash一致を確認。code/schema/受入テスト、新Spec Review、SI-06 unit/全Issue認定の証拠ではありません。
 
 - SI-05累積gate: exact6d52の元serial48020 exit0、before/afterとreview後のfull candidate snapshot一致。all-contract1995 passed3472.79s、full pytest3064 passed/1 skipped3309.09s、全Ruff・format249・mypy207・SpecDock10/diff-checkがpassし、large cases除外無し。唯一のskipはDarwin上の既存Linux専用Unicode testで、named probeも1 skipped、Linux passではありません。初回review39905 exit10/P1一件を原JSONとして保持し、別analyst62768 Sol/Pro（両picker verified、293行/11 H1）で完全objectのroot IDを照合しました。コード修復無しのfinding-rebuttal後、fresh review17455 Sol/Extra High（両picker verified）がexit0/valid pass/findings0です。外部reviewerはtests未実行。原bytes import・raw gzip/read-viewと全command/log hashesは`artifacts/20261003t073304z-04-disc-si05-public-exact-ref-cumulative-certification.md`。元unit base2efb54cと後続未認定境界を維持し、selectionを合算しません。
 
@@ -101,6 +105,8 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 - `710eb49...`では`src`、schemas、`pyproject.toml`、`uv.lock`の差分は無し。続くA02初スライスは新schema/reference/docsだけで、旧v1 schemaとproduction `src`/依存/lockfileを変更していません。実機コードは非production evidenceだけで、既存の製品実装を新runtimeへ接続していません。
 
 ## Residual Risks / Follow-ups
+
+- SI-06 paired-null captureのpublic-contract採択が未決です。現v2限定訂正を推奨しますが、外部・永続consumerの互換性は未確認で、既存v2不変が必要なら後継版を選びます。正本反映とSpec Review Strict後にのみfinal-ownerを再開し、0埋め・branch除外・lower owner変更で回避しません。判断候補は上記Artifact、元af6f base／ASSET未採択／既存P2 report-only／production未認定を維持します。
 
 - source inventory/owner-closed A案は採択済みで、bcae954の仕様、exact23072c2のSI-03、exactd6bbbcfのSI-04、exact6d52ff7のSI-05はそれぞれの範囲だけpassです。次はSI-06 diagnostic/stderr/final-ownerで、reader prefixとproductionを含む全consumer closureは未認定です。P2 availabilityの過剰fail-closedリスクとcompound実行未実証はSI-04 certificateへ保持し、自動修復条件にしません。元candidate/旧failは履歴として残し、旧748 testsや仕様passを後続認定へ流用しません。
 - A-02の新version schema/reference/compatibility/provenance closure、A-03のfresh独立Strict、production TDD、両OS実CLI/offline package、Final Quality Gateが残っています。
