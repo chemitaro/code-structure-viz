@@ -1878,3 +1878,130 @@ def test_v3_core_wrong_private_module_kind_is_a_bounded_rejection_not_a_classifi
     assert rejection.failure()["diagnostic_code"] == "CSV-NEXT-PROTOCOL-001"
     assert rejection.failure()["model_records"] is None
     validation.validate_rejected_semantic_decision_v3(rejection)
+
+
+@pytest.mark.parametrize("kind", ["parse_file", "read_file"])
+def test_v3_core_cannot_publish_a_context_file_in_the_reverse_failure_closure(
+    tmp_path: Path, kind: str
+) -> None:
+    sources = {
+        **SOURCE_BYTES,
+        "src/global.d.ts": b'import { value } from "./value";\n' + SOURCE_BYTES["src/global.d.ts"],
+    }
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, sources=sources)
+    exclude_value_module_with_root_v3(wire, request, kind)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    graph = seal.final_plan["source_graph"]
+    paths = {row["id"]: row["path"] for row in graph["nodes"]}
+    assert ("src/global.d.ts", "src/value.ts") in {
+        (paths[row["source"]], paths[row["target"]]) for row in graph["edges"]
+    }
+    assert graph["open_edges"] == [] and seal.source_view.failures == ()
+    context = next(row for row in request.record()["files"] if row["path"] == "src/global.d.ts")
+    discovery = next(
+        row
+        for row in candidate.semantic_payload()["proof"]["discovered_records"]
+        if row["record_id"] == context["id"]
+    )
+    assert context["roles"] == ["context"] and discovery["taints"] == []
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    assert decision.locality()["reverse_affected_paths"] == ["src/global.d.ts", "src/value.ts"]
+    assert decision.locality()["localized"] is False
+    assert decision.locality()["target_tainted"] is False
+    assert decision.gate()["diagnostic_code"] == "CSV-NEXT-SOURCE-003"
+    assert decision.gate()["payload_available"] is False
+    assert decision.gate()["artifact_paths"] == []
+    # Publication eligibility is unchanged; no context Module or File taint is invented.
+    seam = decision.source_inventory_seam()
+    assert seam is not None
+    assert "src/global.d.ts" in {row["path"] for row in seam.safe_files()}
+    assert "src/global.d.ts" not in {
+        row["path"] for row in candidate.semantic_payload()["model"]["modules"]
+    }
+    validation.validate_semantic_decision_v3(decision)
+
+
+@pytest.mark.parametrize("relationship", ["forward_only", "transitive_reverse"])
+def test_v3_core_context_safety_depends_on_reverse_not_forward_reachability(
+    tmp_path: Path, relationship: str
+) -> None:
+    sources = dict(SOURCE_BYTES)
+    if relationship == "forward_only":
+        sources["src/value.ts"] += b'import "./global";\n'
+        expected_reverse = ["src/value.ts"]
+    else:
+        sources["src/bridge.d.ts"] = b'import "./value";\n'
+        sources["src/global.d.ts"] = b'import "./bridge";\n' + SOURCE_BYTES["src/global.d.ts"]
+        expected_reverse = ["src/bridge.d.ts", "src/global.d.ts", "src/value.ts"]
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, sources=sources)
+    exclude_value_module_with_root_v3(wire, request, "parse_file")
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    available = relationship == "forward_only"
+    assert decision.locality()["reverse_affected_paths"] == expected_reverse
+    assert "src/global.d.ts" in decision.locality()["affected_paths"]
+    assert decision.locality()["localized"] is available
+    assert decision.gate()["payload_available"] is available
+    assert decision.gate()["diagnostic_code"] == (None if available else "CSV-NEXT-SOURCE-003")
+    if available:
+        assert decision.gate()["outcome"] == "partial_safe"
+    validation.validate_semantic_decision_v3(decision)
+
+
+@pytest.mark.parametrize("context_failed", [False, True])
+def test_v3_core_multiple_roots_use_the_actual_public_file_projection(
+    tmp_path: Path, context_failed: bool
+) -> None:
+    sources = {
+        **SOURCE_BYTES,
+        "src/global.d.ts": b'import "./value";\n' + SOURCE_BYTES["src/global.d.ts"],
+    }
+    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, sources=sources)
+    exclude_value_module_with_root_v3(wire, request, "parse_file")
+    payload = wire["semantic_payload"]
+    proof = payload["proof"]
+    failed_path = "src/global.d.ts" if context_failed else "package.json"
+    file = next(row for row in request.record()["files"] if row["path"] == failed_path)
+    exclude_record(wire, "files", file["id"], reason="tainted", taints=["read_file"])
+    proof["excluded"] = [row for row in proof["excluded"] if row["record_id"] != file["id"]]
+    proof["failed"].append({"collection": "files", "record_id": file["id"], "reason": "read_file"})
+    root_id = "next:failure:" + "2" * 64
+    proof["failure_roots"].append(
+        {
+            "id": root_id,
+            "collection": "files",
+            "kind": "read_file",
+            "path_ref": failed_path,
+            "record_ids": [file["id"]],
+        }
+    )
+    proof["causal_edges"].append(
+        {"source_id": root_id, "record_id": file["id"], "rule": "file_all_records"}
+    )
+    payload["model"]["coverage"]["failed_files"] = sorted(
+        [
+            {"path": failed_path, "reason": "read_file"},
+            {"path": "src/value.ts", "reason": "parse_file"},
+        ],
+        key=lambda row: row["path"],
+    )
+    refresh_wire(wire)
+    candidate = candidate_for(seal, assets, request, policy, wire)
+    core = import_module("tests.contracts.next_semantic_core_v3_reference")
+    validation = import_module("tests.contracts.next_semantic_core_v3_validation")
+    decision = core.decide_semantic_candidate_v3(candidate, seal, assets)
+    assert len(proof["failure_roots"]) == 2
+    assert decision.locality()["localized"] is context_failed
+    assert decision.gate()["payload_available"] is context_failed
+    assert decision.gate()["diagnostic_code"] == (None if context_failed else "CSV-NEXT-SOURCE-003")
+    seam = decision.source_inventory_seam()
+    assert seam is not None
+    assert ("src/global.d.ts" in {row["path"] for row in seam.safe_files()}) is not context_failed
+    assert {row["path"] for row in seam.safe_files()} >= {"src/button.tsx", "src/index.ts"}
+    if context_failed:
+        assert decision.gate()["outcome"] == "partial_safe"
+    validation.validate_semantic_decision_v3(decision)

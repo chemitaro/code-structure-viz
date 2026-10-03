@@ -3,7 +3,7 @@
 ID: "iss-00008"
 タイトル: "Generate Nextjs Component Snapshots"
 関連GitHub: ["#8"]
-最終更新: "2026-10-02"
+最終更新: "2026-10-03"
 依存: ["requirement.md", "design.md", "plan.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -22,7 +22,11 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Verification
 
+- SI-04 locality P1候補: exact58864bfの初回全unit Code Reviewは元84957 exit10、valid fail/P1一件/P2一件、Sol/Extra Highの両picker verifiedでした。別analystの指摘分析Strictは元51481 exit0、Sol/Proの両picker verified、全409行/11 H1をローカルへ照合。実same-seal context逆importのparse/readを再現し、P1だけを公開Fileと全root逆closureの残存交差でSOURCE-003へ閉じました。意図したRed2 failed（1.69s）→同じ二例Green2 passed（2.02s）、control selection9 passed（7.88s）とfocused Ruff/format/diffがpass。P2はreport-only、open-edge predicate/taint/Module/partition/仕様意味は不変です。原review/分析/probe四観測と判断は`artifacts/20261003t001847z-02-disc-si04-locality-p1-adjudication-and-remediation.md`。新checkpoint exact HEADの全必須aggregateと元caf3832からのfresh累積レビューはまだ未実施です。SI-04/以降/production/全Issueのpassではありません。
+
 - SI-04 full Core候補: 選択されたmissing / component-only / byte-identical duplicateを完全proof検証後のTARGET-001/no-payloadへ接続しました。通常SI-03・元caf3832 base・仕様意味は不変です。raw duplicateとunique Dを区別し、source-only syntaxをincoming reexport graphから落とさず、default/mixed targetsの安全側IDsを維持。最後のprivate Module kindによるclassifier KeyErrorもpublic inspectionでRed→bounded rejectionのGreenを確認しました。最終Coreは101 passed（254.33s、actual large cases除外無し）、旧五module278 passed（385.93s）、共有algorithm52 passed / 637 deselected（54.38s）、schema/goldens139 passed（12.33s）。全Ruff/format233・mypy191・SpecDock10・Current pointer1・diff-checkもpassです。fresh step Strict Reviewはまだ未認定です。実装・コマンド・SI-P/N対応と限界は`artifacts/20261002t152812z-disc-si04-full-core-acceptance.md`へ分離し、selectionを合算しません。actual TS / OS / CLI / package / 全A02/A03 / Final / Issue完了の証拠ではありません。
+
+上記101/278/52/139等は58864bf修復前の履歴で、新候補のaggregate結果ではありません。レビューfailとその後のP1修復証拠は先頭へ分離しています。
 
 - SI-04残例外の実装助言: 中間4b50c81への同author Strict補足は元87437 exit0/21m29s。原1956行を全読しbyte-preserved import、今回model inherited/skipped/unverified・Extra High verifiedを区別。normal SI-03を緩めないvalidation-only view、source-only export slot、raw duplicate/unique Dの分離、no-payloadのみseam=Noneを既存仕様内の実装方法として採用しました。詳細は`artifacts/20261002t143402z-01-disc-si04-selected-cardinality-brief-adoption.md`。仕様意味変更・新step pass・local test追加実行・production認定ではありません。
 

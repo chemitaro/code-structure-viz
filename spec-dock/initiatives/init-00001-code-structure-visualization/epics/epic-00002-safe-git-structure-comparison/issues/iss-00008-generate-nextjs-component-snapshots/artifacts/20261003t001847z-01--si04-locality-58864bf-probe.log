@@ -1,0 +1,274 @@
+{
+  "candidate_sha": "58864bf0223e35c6cf31ca09b0d9040954e3d9cc",
+  "purpose": "current-behavior falsification; no tracked file or canonical meaning changed",
+  "observations": [
+    {
+      "case": "independent_context_control",
+      "root_kind": "parse_file",
+      "actual_source_owner": "SourceAcquisitionSeal",
+      "acquisition_failures": [],
+      "graph_edges": [
+        [
+          "src/index.ts",
+          "src/button.tsx"
+        ]
+      ],
+      "graph_open_edges": [],
+      "context_roles": [
+        "context"
+      ],
+      "context_taints": [],
+      "safe_files": [
+        "package.json",
+        "src/button.tsx",
+        "src/global.d.ts",
+        "src/index.ts",
+        "tsconfig.json"
+      ],
+      "locality": {
+        "affected_paths": [
+          "src/value.ts"
+        ],
+        "localized": true,
+        "reverse_affected_paths": [
+          "src/value.ts"
+        ],
+        "source_graph_digest": "1e23a16f0ac8232b3578174cff6bba4f5b711f4a902d4f5b06a530a1def35b41",
+        "source_seal_id": "feb8b75a9c6a34348e5130fa8a98579ecc1c6c8a66a62a9d06cebea6699cfd2f",
+        "target_tainted": false
+      },
+      "gate": {
+        "actual": 3,
+        "allowed": true,
+        "artifact_paths": [
+          "next.snapshot.semantic.json"
+        ],
+        "budget_requested": null,
+        "budget_source": "builtin",
+        "diagnostic_code": null,
+        "original_outcome": "partial_safe",
+        "outcome": "partial_safe",
+        "payload_available": true,
+        "requested_formats": [
+          "semantic-json"
+        ],
+        "resolved": 500,
+        "run_context": {
+          "budget_requested": null,
+          "budget_resolved": 500,
+          "budget_source": "builtin",
+          "requested_formats": [
+            "semantic-json"
+          ],
+          "stdout_selector": null
+        },
+        "stdout_selector": null
+      },
+      "independent_validator": "accepted"
+    },
+    {
+      "case": "context_reverse_importer",
+      "root_kind": "parse_file",
+      "actual_source_owner": "SourceAcquisitionSeal",
+      "acquisition_failures": [],
+      "graph_edges": [
+        [
+          "src/global.d.ts",
+          "src/value.ts"
+        ],
+        [
+          "src/index.ts",
+          "src/button.tsx"
+        ]
+      ],
+      "graph_open_edges": [],
+      "context_roles": [
+        "context"
+      ],
+      "context_taints": [],
+      "safe_files": [
+        "package.json",
+        "src/button.tsx",
+        "src/global.d.ts",
+        "src/index.ts",
+        "tsconfig.json"
+      ],
+      "locality": {
+        "affected_paths": [
+          "src/global.d.ts",
+          "src/value.ts"
+        ],
+        "localized": true,
+        "reverse_affected_paths": [
+          "src/global.d.ts",
+          "src/value.ts"
+        ],
+        "source_graph_digest": "6010f140adbe81694b1c57c5435497e48151ce7cf0cdb3adf0472f0837630549",
+        "source_seal_id": "b7c4c34170b52921db9d8065df296e86b4f2b8861c7721480ef8af0d836f3bf4",
+        "target_tainted": false
+      },
+      "gate": {
+        "actual": 3,
+        "allowed": true,
+        "artifact_paths": [
+          "next.snapshot.semantic.json"
+        ],
+        "budget_requested": null,
+        "budget_source": "builtin",
+        "diagnostic_code": null,
+        "original_outcome": "partial_safe",
+        "outcome": "partial_safe",
+        "payload_available": true,
+        "requested_formats": [
+          "semantic-json"
+        ],
+        "resolved": 500,
+        "run_context": {
+          "budget_requested": null,
+          "budget_resolved": 500,
+          "budget_source": "builtin",
+          "requested_formats": [
+            "semantic-json"
+          ],
+          "stdout_selector": null
+        },
+        "stdout_selector": null
+      },
+      "independent_validator": "accepted"
+    },
+    {
+      "case": "independent_context_control",
+      "root_kind": "read_file",
+      "actual_source_owner": "SourceAcquisitionSeal",
+      "acquisition_failures": [],
+      "graph_edges": [
+        [
+          "src/index.ts",
+          "src/button.tsx"
+        ]
+      ],
+      "graph_open_edges": [],
+      "context_roles": [
+        "context"
+      ],
+      "context_taints": [],
+      "safe_files": [
+        "package.json",
+        "src/button.tsx",
+        "src/global.d.ts",
+        "src/index.ts",
+        "tsconfig.json"
+      ],
+      "locality": {
+        "affected_paths": [
+          "src/value.ts"
+        ],
+        "localized": true,
+        "reverse_affected_paths": [
+          "src/value.ts"
+        ],
+        "source_graph_digest": "1e23a16f0ac8232b3578174cff6bba4f5b711f4a902d4f5b06a530a1def35b41",
+        "source_seal_id": "feb8b75a9c6a34348e5130fa8a98579ecc1c6c8a66a62a9d06cebea6699cfd2f",
+        "target_tainted": false
+      },
+      "gate": {
+        "actual": 3,
+        "allowed": true,
+        "artifact_paths": [
+          "next.snapshot.semantic.json"
+        ],
+        "budget_requested": null,
+        "budget_source": "builtin",
+        "diagnostic_code": null,
+        "original_outcome": "partial_safe",
+        "outcome": "partial_safe",
+        "payload_available": true,
+        "requested_formats": [
+          "semantic-json"
+        ],
+        "resolved": 500,
+        "run_context": {
+          "budget_requested": null,
+          "budget_resolved": 500,
+          "budget_source": "builtin",
+          "requested_formats": [
+            "semantic-json"
+          ],
+          "stdout_selector": null
+        },
+        "stdout_selector": null
+      },
+      "independent_validator": "accepted"
+    },
+    {
+      "case": "context_reverse_importer",
+      "root_kind": "read_file",
+      "actual_source_owner": "SourceAcquisitionSeal",
+      "acquisition_failures": [],
+      "graph_edges": [
+        [
+          "src/global.d.ts",
+          "src/value.ts"
+        ],
+        [
+          "src/index.ts",
+          "src/button.tsx"
+        ]
+      ],
+      "graph_open_edges": [],
+      "context_roles": [
+        "context"
+      ],
+      "context_taints": [],
+      "safe_files": [
+        "package.json",
+        "src/button.tsx",
+        "src/global.d.ts",
+        "src/index.ts",
+        "tsconfig.json"
+      ],
+      "locality": {
+        "affected_paths": [
+          "src/global.d.ts",
+          "src/value.ts"
+        ],
+        "localized": true,
+        "reverse_affected_paths": [
+          "src/global.d.ts",
+          "src/value.ts"
+        ],
+        "source_graph_digest": "6010f140adbe81694b1c57c5435497e48151ce7cf0cdb3adf0472f0837630549",
+        "source_seal_id": "b7c4c34170b52921db9d8065df296e86b4f2b8861c7721480ef8af0d836f3bf4",
+        "target_tainted": false
+      },
+      "gate": {
+        "actual": 3,
+        "allowed": true,
+        "artifact_paths": [
+          "next.snapshot.semantic.json"
+        ],
+        "budget_requested": null,
+        "budget_source": "builtin",
+        "diagnostic_code": null,
+        "original_outcome": "partial_safe",
+        "outcome": "partial_safe",
+        "payload_available": true,
+        "requested_formats": [
+          "semantic-json"
+        ],
+        "resolved": 500,
+        "run_context": {
+          "budget_requested": null,
+          "budget_resolved": 500,
+          "budget_source": "builtin",
+          "requested_formats": [
+            "semantic-json"
+          ],
+          "stdout_selector": null
+        },
+        "stdout_selector": null
+      },
+      "independent_validator": "accepted"
+    }
+  ]
+}

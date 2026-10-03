@@ -5,7 +5,7 @@ ID: "iss-00008"
 関連GitHub: ["#8"]
 package_sequence_key: "ISSUE-05"
 状態: "draft"
-最終更新: "2026-10-02"
+最終更新: "2026-10-03"
 依存: ["requirement.md", "design.md"]
 親: ["epic-00002", "init-00001"]
 ---
@@ -24,7 +24,11 @@ package_sequence_key: "ISSUE-05"
 
 ### A runtime移行の順序
 
+SI-04初回累積Code Reviewはexact `58864bf0223e35c6cf31ca09b0d9040954e3d9cc`でvalid fail（P1一件/P2一件）でした。別のAnalyze Review Findings Strict / Sol / Proを全読・現物照合し、非program reverse importerが公開Fileに残るP1だけを既存authority内で限定修復しました。first Red二例→Green二例、関連control九例がpassです。File taint/Module/partitionと通常open-edge predicateは不変、P2はreport-onlyです。原回答・probe・判断・検証限界は`artifacts/20261003t001847z-02-disc-si04-locality-p1-adjudication-and-remediation.md`へ保存しました。修正後checkpointのexact HEADで全必須selectionを実行し、元caf3832からのfresh独立累積review passまでSI-04未認定/SI-05禁止を維持します。これは進捗更新だけで、受入正本の意味・元base・実装scopeを変更しません。
+
 SI-04 full Core候補はselected missing / component-only / byte-identical duplicateの専用no-payload経路までTDDしました。通常SI-03 source seamと旧referenceは不変で、全取得source / unique D / raw duplicate counts、full proof / IR / exports / source graph / locality / targetを同じ実ownerから検証します。default/mixed targets、例外複合負例、実10001でのproof/target/limit優先、二Projectの片方空membership、represented unsupported frontierの保護チェックも追加しました。最終Core全101件と旧五module278件、共有algorithm52件、schema/goldens139件、全Ruff/format233・mypy191・SpecDock10・Current pointer・diff-checkは各元jobでpassです。selectionを合算しません。実装とSI-P/Nの受入対応は`artifacts/20261002t152812z-disc-si04-full-core-acceptance.md`。元caf3832 base・仕様意味・出口条件は不変です。元baseからのfresh独立step Review passまではSI-04未認定で、SI-05へは進みません。
+
+上段の101/278/52/139等は58864bf修復前の履歴です。新P1候補のaggregate passへ読み替えません。
 
 補足実装briefの採用履歴: exact中間checkpoint4b50c81へのsame-author Strict補足を全読・現物照合し、normal source seamを変更しないvalidation-only view方式で具体化しました。採用境界と原回答は`artifacts/20261002t143402z-01-disc-si04-selected-cardinality-brief-adoption.md`。これ自体はTDD/step reviewのpassではありません。
 

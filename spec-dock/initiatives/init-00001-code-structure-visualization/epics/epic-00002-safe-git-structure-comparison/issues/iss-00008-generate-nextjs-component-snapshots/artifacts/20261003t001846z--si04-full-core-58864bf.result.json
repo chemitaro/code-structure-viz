@@ -1,0 +1,35 @@
+{
+  "findings": [
+    {
+      "title": "[P1] 非programの逆importerをlocalized扱いしない",
+      "body": "`src/value.ts` が正規の `parse_file` / `read_file` root で、同じsealの `src/global.d.ts` のようなcontext Fileがresolved edgeでそのFileをimportする場合、reverse closureにはcontext Fileが入りますが、この判定は `module_rows` に存在するpathしか検査しないため非program importerを見落とします。record-level taint規則では非program Fileへ逆taintを追加できないため、SI-03 partitionはそのcontext Fileをpublishedに残し、target/open-edge条件がなければ後続で `localized=True` となって `partial_safe` payloadを許可します。これは保持すべき `SourceFailureLedger` のfailure closureとSI-P01/SI-N14のsafe control/context条件を破り、failure closure内のFileをavailable safe projectionへ残します。reverse closureとpublic File projectionを照合し、合法なpartition規則で除外できない非program reverse importerが残る場合はFile taintを捏造せず `CSV-NEXT-SOURCE-003` へ閉じる必要があります。",
+      "confidence_score": 0.98,
+      "priority": 1,
+      "code_location": {
+        "repository_relative_path": "tests/contracts/next_semantic_core_v3_validation.py",
+        "line_range": {
+          "start": 1102,
+          "end": 1105
+        }
+      }
+    },
+    {
+      "title": "[P2] 逆importerの通常open edgeだけでSOURCE-003にしない",
+      "body": "failed File Aのreverse importer Cが正しくtaint/excludeされていても、Cに別の通常unresolved static-import open edgeがあると、`affected` がforward closureとreverse closureのunionなのでこの条件がそのopen edgeを拾い `localized=False` にします。保持対象の `SourceFailureLedger` は通常open edgeをfailed Fileからのforward reachability上で評価し、reverse-only importerのopen edgeはそれだけではnonlocalにせず、`module_plane` だけをglobalに扱うため、この実装は契約上partial-safeな独立Bまで `CSV-NEXT-SOURCE-003` に落とすavailability regressionです。forward reachabilityとreverse failure closureを分離し、通常open edgeはforward側だけで判定しつつ `module_plane` のglobal fail-closed規則は維持する必要があります。",
+      "confidence_score": 0.96,
+      "priority": 2,
+      "code_location": {
+        "repository_relative_path": "tests/contracts/next_semantic_core_v3_validation.py",
+        "line_range": {
+          "start": 1125,
+          "end": 1128
+        }
+      }
+    }
+  ],
+  "overall_correctness": "patch is incorrect",
+  "overall_explanation": "GitHub connectorで `chemitaro/code-structure-viz` の `iss-00008-generate-nextjs-component-snapshots` tipが `58864bf0223e35c6cf31ca09b0d9040954e3d9cc` と完全一致することを確認し、fixed point/merge-base `caf38329826ae34f8e3cb330b83b97e0357b7dc5` からHEADまでの4 commit累積差分を対象に確認しました。verified treeには `AGENTS.md` は存在しませんでした。Current Requirement/Design/Plan、accepted ADR、v3 contracts、SI-03 seam、retained runtime owners、source acquisition/graph、追加Core/validator/corpusを照合した結果、selected missing/component-only/byte-identical duplicateのno-payload経路、full proofからTARGETを先に確定する順序、実record/entity capの分離、same-owner decision再検証は概ね契約に整合しています。一方、post-acquisition localityの移植が保持対象のSourceFailureLedgerのforward/reverse closure意味と一致せず、P1のsafe-subset違反があるためSI-04出口条件は満たしません。repositoryに記録されたローカルtest/lint/type-check結果は証拠として照合しましたが、このレビュー自身ではtestを実行していません。SI-05、production TypeScript、OS process、CLI、publication、全Issue gateは対象外として評価していません。",
+  "review_status": "fail",
+  "review_status_reason": "SI-04の必須source locality/failure-closure契約に対し、reverse-reached非program Fileをsafe projectionへ残したままavailableと判定できるP1欠陥があります。加えてreverse-only importerの通常open edgeを過剰にnonlocal扱いするP2 regressionがあります。",
+  "overall_confidence_score": 0.97
+}

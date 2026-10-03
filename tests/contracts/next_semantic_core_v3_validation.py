@@ -1126,13 +1126,19 @@ def derive_post_acquisition_locality_v3(
         edge["source"] in affected or edge["syntax_kind"] == "module_plane"
         for edge in graph["open_edges"]
     )
+    public_file_paths = {row["path"] for row in candidate.semantic_payload()["model"]["files"]}
+    # Eligibility alone does not prove independence. A nonprogram importer
+    # cannot gain fake Module/File taint to leave the legal source partition.
+    reverse_publication_conflict = any(
+        nodes[node_id]["path"] in public_file_paths for node_id in reverse_affected
+    )
     return {
         "source_seal_id": seal.seal_id,
         "source_graph_digest": graph["graph_digest"],
         "affected_paths": affected_paths,
         "reverse_affected_paths": sorted(nodes[node_id]["path"] for node_id in reverse_affected),
         "target_tainted": target_tainted,
-        "localized": not (target_tainted or open_dependency),
+        "localized": not (target_tainted or open_dependency or reverse_publication_conflict),
     }
 
 
