@@ -209,6 +209,9 @@ def core_inputs_v3(
     sources: dict[str, bytes] | None = None,
     targets: list[str] | None = None,
     project_roots: tuple[str, ...] = (".",),
+    max_entities: int = 500,
+    requested_formats: list[str] | None = None,
+    stdout_selector: str | None = None,
 ) -> tuple[
     SourceAcquisitionSeal,
     runtime.RetainedExecutionAssets,
@@ -245,13 +248,36 @@ def core_inputs_v3(
         max_total_bytes=64 * 1024 * 1024,
     )
     seal = seal_source_acquisition(
-        SourceDiscoveryIntent(project_roots), reader, trusted_environment_digest=trusted["sha256"]
+        SourceDiscoveryIntent(project_roots),
+        reader,
+        trusted_environment_digest=trusted["sha256"],
+        max_entities=max_entities,
     )
     assert type(seal) is SourceAcquisitionSeal
     request = runtime.build_request_frame_v2(
         seal,
         assets,
-        analysis_context_fixture_v2(seal, assets, targets=targets or [], run_context=run_context()),
+        analysis_context_fixture_v2(
+            seal,
+            assets,
+            targets=targets or [],
+            run_context={
+                **run_context(),
+                **(
+                    {}
+                    if max_entities == 500
+                    else {
+                        "budget_requested": max_entities,
+                        "budget_resolved": max_entities,
+                        "budget_source": "cli",
+                    }
+                ),
+                "requested_formats": ["semantic-json"]
+                if requested_formats is None
+                else requested_formats,
+                "stdout_selector": stdout_selector,
+            },
+        ),
     )
     policy = policy_fixture()
     policy.update(

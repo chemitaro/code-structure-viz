@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-publication-candidates-v3",
+  "title": "Request-bound retained publication candidates v3 (not final publication)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "run_decision",
+    "artifacts",
+    "capture_measurements"
+  ],
+  "properties": {
+    "schema": {
+      "const": "code-structure-viz.next-publication-candidates/v3"
+    },
+    "version": {
+      "const": 3
+    },
+    "run_decision": {
+      "$ref": "urn:code-structure-viz:schema:next-run-decision-v3"
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 2,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/json_artifact"
+          },
+          {
+            "$ref": "#/$defs/plantuml_artifact"
+          }
+        ]
+      }
+    },
+    "capture_measurements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapter_stdout",
+        "adapter_stderr"
+      ],
+      "properties": {
+        "adapter_stdout": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/stdout_capture"
+            }
+          ]
+        },
+        "adapter_stderr": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/stderr_capture"
+            }
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "adapter_stdout": {
+              "type": "null"
+            },
+            "adapter_stderr": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "adapter_stdout": {
+              "$ref": "#/$defs/stdout_capture"
+            },
+            "adapter_stderr": {
+              "$ref": "#/$defs/stderr_capture"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "run_decision": {
+            "properties": {
+              "payload_available": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "maxItems": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "capture_measurements": {
+            "properties": {
+              "adapter_stdout": {
+                "$ref": "#/$defs/stdout_capture"
+              },
+              "adapter_stderr": {
+                "$ref": "#/$defs/stderr_capture"
+              }
+            }
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "run_decision": {
+                "properties": {
+                  "context": {
+                    "properties": {
+                      "run_context": {
+                        "properties": {
+                          "requested_formats": {
+                            "const": [
+                              "semantic-json"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "artifacts": {
+                "$ref": "#/$defs/json_only_artifacts"
+              }
+            }
+          },
+          {
+            "properties": {
+              "run_decision": {
+                "properties": {
+                  "context": {
+                    "properties": {
+                      "run_context": {
+                        "properties": {
+                          "requested_formats": {
+                            "const": [
+                              "plantuml"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "artifacts": {
+                "$ref": "#/$defs/plantuml_only_artifacts"
+              }
+            }
+          },
+          {
+            "properties": {
+              "run_decision": {
+                "properties": {
+                  "context": {
+                    "properties": {
+                      "run_context": {
+                        "properties": {
+                          "requested_formats": {
+                            "const": [
+                              "semantic-json",
+                              "plantuml"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "artifacts": {
+                "$ref": "#/$defs/both_artifacts"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "json_only_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/json_artifact"
+        }
+      ],
+      "items": false
+    },
+    "plantuml_only_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/plantuml_artifact"
+        }
+      ],
+      "items": false
+    },
+    "both_artifacts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/json_artifact"
+        },
+        {
+          "$ref": "#/$defs/plantuml_artifact"
+        }
+      ],
+      "items": false
+    },
+    "json_artifact": {
+      "allOf": [
+        {
+          "$ref": "urn:code-structure-viz:schema:next-publication-decision-v1#/$defs/artifact_descriptor"
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "next.snapshot.semantic.json"
+            },
+            "domain": {
+              "const": "next"
+            },
+            "format": {
+              "const": "semantic-json"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        }
+      ]
+    },
+    "plantuml_artifact": {
+      "allOf": [
+        {
+          "$ref": "urn:code-structure-viz:schema:next-publication-decision-v1#/$defs/artifact_descriptor"
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "next.snapshot.puml"
+            },
+            "domain": {
+              "const": "next"
+            },
+            "format": {
+              "const": "plantuml"
+            },
+            "media_type": {
+              "const": "text/vnd.plantuml; charset=utf-8"
+            }
+          }
+        }
+      ]
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_bytes",
+        "capture_retained_bytes",
+        "eof",
+        "limit_bytes"
+      ],
+      "properties": {
+        "captured_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "capture_retained_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eof": {
+          "type": "boolean"
+        },
+        "limit_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "stdout_capture": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/capture"
+        },
+        {
+          "properties": {
+            "limit_bytes": {
+              "const": 16777216
+            }
+          }
+        }
+      ]
+    },
+    "stderr_capture": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/capture"
+        },
+        {
+          "properties": {
+            "limit_bytes": {
+              "const": 65536
+            }
+          }
+        }
+      ]
+    }
+  }
+}

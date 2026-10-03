@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-compatibility-v3",
+  "title": "CodeStructureViz parent-owned Next semantic compatibility v3",
+  "description": "Source-inventory safe-subset admission joined to retained runtime binding; not actual-image attestation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "semantic_schema",
+    "identity_versions",
+    "algorithm_versions",
+    "semantic_profile_id",
+    "unicode_profile",
+    "runtime_binding_profile_id",
+    "typescript_identity",
+    "trusted_type_environment_digest",
+    "portable_toolchain_fingerprint",
+    "semantic_admission_profile_id",
+    "compatibility_id"
+  ],
+  "properties": {
+    "schema": {
+      "const": "code-structure-viz.next-semantic-compatibility/v3"
+    },
+    "semantic_schema": {
+      "const": "code-structure-viz.semantic/v3"
+    },
+    "identity_versions": {
+      "$ref": "urn:code-structure-viz:schema:next-compatibility-v1#/$defs/identity_versions"
+    },
+    "algorithm_versions": {
+      "$ref": "urn:code-structure-viz:schema:next-compatibility-v1#/$defs/algorithm_versions"
+    },
+    "semantic_profile_id": {
+      "const": "next-trusted-profile-v1"
+    },
+    "unicode_profile": {
+      "$ref": "urn:code-structure-viz:schema:next-compatibility-v1#/$defs/unicode_profile"
+    },
+    "runtime_binding_profile_id": {
+      "const": "next-public-spawn-runtime-v1"
+    },
+    "typescript_identity": {
+      "const": "typescript-5.9.2"
+    },
+    "trusted_type_environment_digest": {
+      "$ref": "urn:code-structure-viz:schema:next-execution-assets-v1#/$defs/digest"
+    },
+    "portable_toolchain_fingerprint": {
+      "$ref": "urn:code-structure-viz:schema:next-execution-assets-v1#/$defs/digest"
+    },
+    "compatibility_id": {
+      "$ref": "urn:code-structure-viz:schema:next-execution-assets-v1#/$defs/digest"
+    },
+    "semantic_admission_profile_id": {
+      "const": "next-source-inventory-safe-subset-v1"
+    }
+  }
+}

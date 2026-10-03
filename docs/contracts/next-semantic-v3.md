@@ -1,6 +1,6 @@
 # Next.js public semantic v3 — accepted target
 
-公開する安全subsetと取得一覧を混同しない新document世代です。[admission v3](next-semantic-admission-v3.md)と[compatibility v3](next-compatibility-v3.md)に依存します。schema/reference/actual productionは未実装です。旧[semantic v2](next-semantic-v2.md)のpassやKATは新仕様のpassではありません。
+公開する安全subsetと取得一覧を混同しない新document世代です。[admission v3](next-semantic-admission-v3.md)と[compatibility v3](next-compatibility-v3.md)に依存します。2026-10-03にSI-05のschema/reference候補を追加しましたが、必須aggregateと独立step reviewは未認定です。actual productionは未実装です。旧[semantic v2](next-semantic-v2.md)のpassやKATは新仕様のpassではありません。
 
 ## Closed public record
 
@@ -38,7 +38,7 @@ semantic bytesはCJ15＋末尾LF一つ、同じCore ownerから一度保持。�
 
 ## Exact-ref migration closure
 
-次は実装時に追加するplanned paths/URN suffixです。未作成のschemaを成功証拠に数えず、既存schemaを上書きしません。
+次はSI-05で追加するpaths/URN suffixです。十schemaは物理候補として追加済みですが、schema shape/refの通過だけをowner・finalizer・productionの成功証拠に数えず、既存schemaを上書きしません。以下の「未作成」は採択時点の呼称です。
 
 | owner / planned target | 変更と接続先 |
 | --- | --- |
@@ -57,4 +57,4 @@ semantic bytesはCJ15＋末尾LF一つ、同じCore ownerから一度保持。�
 
 **維持集合**: source/config/path/limits/run-context/applicability-v1、execution-assets/runtime-binding-v1、trusted manifest/descriptor-v2、process policy/observation-v2、private request/response-v2とcontrol、v1 entity/ID/recognition/export/props/relation/boundary/Unicode profiles。new adapter header0.2.0によるasset/request/control hashの新corpusと、旧0.1.0 KAT保存を分けます。runtime raw receipt/transport ownerを新public証明に昇格しません。
 
-これはaffected-schema closureの計画です。物理schemaとproducer/validator/fixture/全selectorの機械的closureはA02後続TDDで検証し、A03前に全consumerをcensusします。空placeholder schemaやadditive fallback union、旧文書へのdowngradeでは閉じません。
+これはaffected-schema closureの契約です。SI-05の十schema・public/run/candidatesのreference ownerと独立validatorを追加し、outer四schemaはclosed literal/ref vectorsで検証します。publication-v2の必須`candidates`はcandidate-v3 exact ref、domain-v2の必須`schema`は新wire identity、trusted environmentはv2 descriptor leafです。domain/run/publicationの別tree間の実owner join、catalog-owned stderrと一回のfinal copyはSI-06以降で検証します。schema-only vectorの仮seal値はその認定ではありません。A03前に全consumerをcensusし、空placeholder schemaやadditive fallback union、旧文書へのdowngradeでは閉じません。

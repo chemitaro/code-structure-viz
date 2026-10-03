@@ -1,0 +1,3755 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeStructureViz run manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "schema",
+    "tool",
+    "contracts",
+    "adapters",
+    "command",
+    "request",
+    "config",
+    "run",
+    "domains",
+    "artifacts",
+    "diagnostics"
+  ],
+  "properties": {
+    "type": {
+      "const": "run_manifest"
+    },
+    "schema": {
+      "const": "code-structure-viz.run-manifest/v2"
+    },
+    "tool": {
+      "$ref": "#/$defs/tool"
+    },
+    "contracts": {
+      "$ref": "#/$defs/contracts"
+    },
+    "adapters": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/adapter"
+      }
+    },
+    "command": {
+      "$ref": "#/$defs/command"
+    },
+    "request_independent": {
+      "type": "boolean"
+    },
+    "request": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/request"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "next_request": {
+      "oneOf": [
+        {
+          "$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/snapshot_request"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "next_config": {
+      "$ref": "urn:code-structure-viz:schema:next-config-v1"
+    },
+    "next_decision": {
+      "$ref": "urn:code-structure-viz:schema:next-run-decision-v3"
+    },
+    "next_publication": {
+      "$ref": "urn:code-structure-viz:schema:next-publication-decision-v2"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "comparison": {
+      "$ref": "#/$defs/comparison"
+    },
+    "sources": {
+      "$ref": "#/$defs/sources"
+    },
+    "semantic_sides": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "before",
+        "after"
+      ],
+      "properties": {
+        "before": {
+          "$ref": "#/$defs/semantic_side"
+        },
+        "after": {
+          "$ref": "#/$defs/semantic_side"
+        }
+      }
+    },
+    "file_change_set": {
+      "$ref": "#/$defs/file_change_set"
+    },
+    "changed_path_budget": {
+      "$ref": "#/$defs/changed_path_budget"
+    },
+    "config": {
+      "$ref": "#/$defs/config"
+    },
+    "run": {
+      "$ref": "#/$defs/run"
+    },
+    "domains": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/domain"
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "command": {
+          "properties": {
+            "name": {
+              "const": "snapshot"
+            },
+            "domain": {
+              "const": "next"
+            }
+          }
+        },
+        "run": {
+          "properties": {
+            "status": {
+              "const": "incomplete"
+            },
+            "exit_code": {
+              "const": 3
+            }
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {
+                  "const": "not_applicable"
+                },
+                "payload_available": {
+                  "const": false
+                },
+                "artifact_paths": {
+                  "maxItems": 0
+                }
+              }
+            }
+          ]
+        },
+        "artifacts": {
+          "maxItems": 0
+        },
+        "diagnostics": {
+          "contains": {
+            "required": [
+              "code",
+              "scope"
+            ],
+            "properties": {
+              "code": {
+                "const": "CSV-NEXT-LIMIT-003"
+              },
+              "scope": {
+                "const": "publication"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "run": {
+          "properties": {
+            "status": {
+              "const": "complete"
+            },
+            "exit_code": {
+              "const": 0
+            }
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {
+                  "const": "complete"
+                },
+                "payload_available": {
+                  "const": true
+                },
+                "artifact_paths": {
+                  "minItems": 1
+                }
+              }
+            }
+          ]
+        },
+        "artifacts": {
+          "minItems": 1
+        }
+      }
+    },
+    {
+      "properties": {
+        "run": {
+          "properties": {
+            "status": {
+              "const": "incomplete"
+            },
+            "exit_code": {
+              "const": 3
+            }
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {
+                  "const": "complete"
+                },
+                "payload_available": {
+                  "const": true
+                },
+                "artifact_paths": {
+                  "minItems": 1
+                }
+              }
+            }
+          ]
+        },
+        "artifacts": {
+          "minItems": 1
+        }
+      }
+    },
+    {
+      "properties": {
+        "run": {
+          "properties": {
+            "status": {
+              "const": "not_applicable"
+            },
+            "exit_code": {
+              "const": 0
+            }
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {
+                  "const": "not_applicable"
+                },
+                "payload_available": {
+                  "const": false
+                },
+                "artifact_paths": {
+                  "maxItems": 0
+                }
+              }
+            }
+          ]
+        },
+        "artifacts": {
+          "maxItems": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "run": {
+          "properties": {
+            "status": {
+              "const": "incomplete"
+            },
+            "exit_code": {
+              "const": 3
+            }
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {
+                  "const": "incomplete"
+                },
+                "incomplete_kind": {
+                  "const": "partial_safe"
+                },
+                "payload_available": {
+                  "const": true
+                },
+                "artifact_paths": {
+                  "minItems": 1
+                }
+              }
+            }
+          ]
+        },
+        "artifacts": {
+          "minItems": 1
+        }
+      }
+    },
+    {
+      "properties": {
+        "run": {
+          "properties": {
+            "status": {
+              "const": "incomplete"
+            },
+            "exit_code": {
+              "const": 3
+            }
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {
+                  "const": "incomplete"
+                },
+                "incomplete_kind": {
+                  "const": "payload_unavailable"
+                },
+                "payload_available": {
+                  "const": false
+                },
+                "artifact_paths": {
+                  "maxItems": 0
+                }
+              }
+            }
+          ]
+        },
+        "artifacts": {
+          "maxItems": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "command": {
+          "properties": {
+            "name": {
+              "const": "diff"
+            }
+          }
+        },
+        "run": {
+          "properties": {
+            "status": {
+              "const": "incomplete"
+            },
+            "exit_code": {
+              "const": 3
+            }
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {
+                  "const": "incomplete"
+                },
+                "incomplete_kind": {
+                  "const": "payload_unavailable"
+                },
+                "payload_available": {
+                  "const": false
+                },
+                "artifact_paths": {
+                  "maxItems": 0
+                }
+              }
+            }
+          ]
+        },
+        "artifacts": {
+          "minItems": 1,
+          "maxItems": 1,
+          "contains": {
+            "type": "object",
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "const": "file-changes.json"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "command": {
+          "properties": {
+            "name": {
+              "const": "diff"
+            }
+          }
+        },
+        "run": {
+          "properties": {
+            "status": {
+              "const": "not_applicable"
+            },
+            "exit_code": {
+              "const": 0
+            }
+          }
+        },
+        "domains": {
+          "prefixItems": [
+            {
+              "properties": {
+                "status": {
+                  "const": "not_applicable"
+                },
+                "payload_available": {
+                  "const": false
+                },
+                "artifact_paths": {
+                  "maxItems": 0
+                }
+              }
+            }
+          ]
+        },
+        "artifacts": {
+          "minItems": 1
+        }
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "name": {
+                "const": "snapshot"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "source"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "name": {
+                "const": "diff"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "comparison",
+          "sources",
+          "semantic_sides",
+          "file_change_set",
+          "changed_path_budget"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "domain": {
+                "const": "python"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "contracts": {
+            "properties": {
+              "plantuml": {
+                "const": "code-structure-viz.plantuml/python/v1"
+              }
+            }
+          },
+          "adapters": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "domain": {
+                    "const": "python"
+                  },
+                  "name": {
+                    "const": "python-ast"
+                  }
+                }
+              }
+            ]
+          },
+          "domains": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "domain": {
+                    "const": "python"
+                  }
+                }
+              }
+            ]
+          },
+          "semantic_sides": {
+            "properties": {
+              "before": {
+                "properties": {
+                  "domain": {
+                    "const": "python"
+                  }
+                }
+              },
+              "after": {
+                "properties": {
+                  "domain": {
+                    "const": "python"
+                  }
+                }
+              }
+            }
+          },
+          "artifacts": {
+            "items": {
+              "properties": {
+                "domain": {
+                  "const": "python"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "request_independent": {
+            "const": true
+          },
+          "command": {
+            "properties": {
+              "name": {
+                "const": "snapshot"
+              },
+              "domain": {
+                "const": "next"
+              }
+            }
+          }
+        },
+        "required": [
+          "request_independent",
+          "command"
+        ]
+      },
+      "then": {
+        "required": [
+          "request_independent",
+          "source",
+          "next_request",
+          "next_config"
+        ],
+        "properties": {
+          "request": {
+            "type": "null"
+          },
+          "next_request": {
+            "type": "null"
+          },
+          "next_config": {
+            "$ref": "urn:code-structure-viz:schema:next-config-v1"
+          },
+          "run": {
+            "oneOf": [
+              {
+                "properties": {
+                  "status": {
+                    "const": "incomplete"
+                  },
+                  "exit_code": {
+                    "const": 3
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "status": {
+                    "const": "not_applicable"
+                  },
+                  "exit_code": {
+                    "const": 0
+                  }
+                }
+              }
+            ]
+          },
+          "domains": {
+            "prefixItems": [
+              {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "request_independent": {
+                        "const": true
+                      },
+                      "status": {
+                        "const": "incomplete"
+                      },
+                      "incomplete_kind": {
+                        "const": "payload_unavailable"
+                      },
+                      "payload_available": {
+                        "const": false
+                      },
+                      "artifact_paths": {
+                        "maxItems": 0
+                      }
+                    },
+                    "required": [
+                      "request_independent",
+                      "incomplete_kind"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "request_independent": {
+                        "const": true
+                      },
+                      "status": {
+                        "const": "not_applicable"
+                      },
+                      "payload_available": {
+                        "const": false
+                      },
+                      "artifact_paths": {
+                        "maxItems": 0
+                      }
+                    },
+                    "required": [
+                      "request_independent"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "artifacts": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "domain": {
+                "const": "sqlalchemy"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "contracts": {
+            "properties": {
+              "plantuml": {
+                "const": "code-structure-viz.plantuml/sqlalchemy/v2"
+              }
+            }
+          },
+          "adapters": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "domain": {
+                    "const": "sqlalchemy"
+                  },
+                  "name": {
+                    "const": "sqlalchemy-ast"
+                  }
+                }
+              }
+            ]
+          },
+          "domains": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "domain": {
+                    "const": "sqlalchemy"
+                  }
+                }
+              }
+            ]
+          },
+          "semantic_sides": {
+            "properties": {
+              "before": {
+                "properties": {
+                  "domain": {
+                    "const": "sqlalchemy"
+                  }
+                }
+              },
+              "after": {
+                "properties": {
+                  "domain": {
+                    "const": "sqlalchemy"
+                  }
+                }
+              }
+            }
+          },
+          "artifacts": {
+            "items": {
+              "properties": {
+                "domain": {
+                  "const": "sqlalchemy"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "domain": {
+                "const": "next"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "request_independent"
+        ],
+        "properties": {
+          "contracts": {
+            "properties": {
+              "plantuml": {
+                "const": "code-structure-viz.plantuml/next/v1"
+              }
+            }
+          },
+          "adapters": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "domain": {
+                    "const": "next"
+                  },
+                  "name": {
+                    "const": "next-typescript"
+                  }
+                }
+              }
+            ]
+          },
+          "domains": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "domain": {
+                    "const": "next"
+                  }
+                }
+              }
+            ]
+          },
+          "artifacts": {
+            "items": {
+              "properties": {
+                "domain": {
+                  "const": "next"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "name": {
+                "const": "snapshot"
+              },
+              "domain": {
+                "const": "next"
+              }
+            }
+          }
+        },
+        "required": [
+          "command",
+          "request_independent"
+        ],
+        "not": {
+          "properties": {
+            "request_independent": {
+              "const": true
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "request_independent",
+          "source",
+          "next_request",
+          "next_config"
+        ],
+        "properties": {
+          "request_independent": {
+            "const": false
+          },
+          "run": {
+            "required": [
+              "run_context"
+            ]
+          },
+          "request": {
+            "required": [
+              "projects",
+              "targets",
+              "formats"
+            ],
+            "properties": {
+              "projects": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1000,
+                "items": {
+                  "$ref": "#/$defs/next_root_path"
+                }
+              },
+              "targets": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"
+                }
+              },
+              "formats": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 2
+              }
+            }
+          },
+          "config": {
+            "properties": {
+              "resolved": {
+                "$ref": "#/$defs/next_resolved"
+              },
+              "value_sources": {
+                "$ref": "#/$defs/next_value_sources"
+              }
+            }
+          },
+          "domains": {
+            "prefixItems": [
+              {
+                "$ref": "urn:code-structure-viz:schema:next-domain-manifest-v2"
+              }
+            ]
+          },
+          "artifacts": {
+            "items": {
+              "properties": {
+                "path": {
+                  "enum": [
+                    "next.snapshot.semantic.json",
+                    "next.snapshot.puml"
+                  ]
+                },
+                "domain": {
+                  "const": "next"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "name": {
+                "const": "snapshot"
+              },
+              "domain": {
+                "const": "sqlalchemy"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "domains": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "coverage": {
+                    "$ref": "#/$defs/sqlalchemy_coverage"
+                  },
+                  "artifact_paths": {
+                    "items": {
+                      "enum": [
+                        "sqlalchemy.snapshot.semantic.json",
+                        "sqlalchemy.snapshot.puml"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "artifacts": {
+            "items": {
+              "properties": {
+                "path": {
+                  "enum": [
+                    "sqlalchemy.snapshot.semantic.json",
+                    "sqlalchemy.snapshot.puml"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "name": {
+                "const": "diff"
+              },
+              "domain": {
+                "const": "sqlalchemy"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "domains": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "coverage": {
+                    "$ref": "#/$defs/sqlalchemy_diff_coverage"
+                  },
+                  "artifact_paths": {
+                    "items": {
+                      "enum": [
+                        "sqlalchemy.diff.semantic.json",
+                        "sqlalchemy.diff.puml"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "artifacts": {
+            "items": {
+              "properties": {
+                "path": {
+                  "enum": [
+                    "file-changes.json",
+                    "sqlalchemy.diff.semantic.json",
+                    "sqlalchemy.diff.puml"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "domain": {
+                "enum": [
+                  "python",
+                  "sqlalchemy"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "request": {
+            "properties": {
+              "targets": {
+                "items": {
+                  "$ref": "#/$defs/legacy_target"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "properties": {
+              "domain": {
+                "const": "next"
+              }
+            },
+            "required": [
+              "domain"
+            ]
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "contracts": {
+            "properties": {
+              "semantic": {
+                "const": "code-structure-viz.semantic/v3"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "contracts": {
+            "properties": {
+              "semantic": {
+                "const": "code-structure-viz.semantic/v1"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "next_path": {
+      "$ref": "urn:code-structure-viz:schema:next-path-v1"
+    },
+    "next_root_path": {
+      "anyOf": [
+        {
+          "const": "."
+        },
+        {
+          "$ref": "#/$defs/next_path"
+        }
+      ]
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "code-structure-viz"
+        },
+        "version": {
+          "const": "0.1.0.dev0"
+        }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "config",
+        "diagnostic",
+        "source_view",
+        "semantic",
+        "manifest",
+        "run_summary",
+        "stdout_result",
+        "plantuml"
+      ],
+      "properties": {
+        "config": {
+          "const": "code-structure-viz.config/v1"
+        },
+        "diagnostic": {
+          "const": "code-structure-viz.diagnostic/v1"
+        },
+        "source_view": {
+          "const": "code-structure-viz.source-view/v1"
+        },
+        "semantic": {
+          "enum": [
+            "code-structure-viz.semantic/v1",
+            "code-structure-viz.semantic/v3"
+          ]
+        },
+        "manifest": {
+          "const": "code-structure-viz.run-manifest/v2"
+        },
+        "run_summary": {
+          "const": "code-structure-viz.run-summary/v1"
+        },
+        "stdout_result": {
+          "const": "code-structure-viz.stdout-result/v2"
+        },
+        "plantuml": {
+          "enum": [
+            "code-structure-viz.plantuml/python/v1",
+            "code-structure-viz.plantuml/sqlalchemy/v2",
+            "code-structure-viz.plantuml/next/v1"
+          ]
+        },
+        "file_change_set": {
+          "const": "code-structure-viz.file-change-set/v1"
+        }
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "name",
+        "version"
+      ],
+      "properties": {
+        "domain": {
+          "enum": [
+            "python",
+            "sqlalchemy",
+            "next"
+          ]
+        },
+        "name": {
+          "enum": [
+            "python-ast",
+            "sqlalchemy-ast",
+            "next-typescript"
+          ]
+        },
+        "version": {
+          "const": "1"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "domain": {
+              "const": "python"
+            },
+            "name": {
+              "const": "python-ast"
+            }
+          }
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "sqlalchemy"
+            },
+            "name": {
+              "const": "sqlalchemy-ast"
+            }
+          }
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "next"
+            },
+            "name": {
+              "const": "next-typescript"
+            }
+          }
+        }
+      ]
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "domain",
+        "formats",
+        "stdout_selector"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "snapshot",
+            "diff"
+          ]
+        },
+        "domain": {
+          "enum": [
+            "python",
+            "sqlalchemy",
+            "next"
+          ]
+        },
+        "formats": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "semantic-json",
+              "plantuml"
+            ]
+          }
+        },
+        "stdout_selector": {
+          "enum": [
+            null,
+            "manifest",
+            "python:semantic-json",
+            "python:plantuml",
+            "sqlalchemy:semantic-json",
+            "sqlalchemy:plantuml",
+            "next:semantic-json",
+            "next:plantuml"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "domain": {
+              "const": "python"
+            },
+            "stdout_selector": {
+              "enum": [
+                null,
+                "manifest",
+                "python:semantic-json",
+                "python:plantuml"
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "sqlalchemy"
+            },
+            "stdout_selector": {
+              "enum": [
+                null,
+                "manifest",
+                "sqlalchemy:semantic-json",
+                "sqlalchemy:plantuml"
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "next"
+            },
+            "stdout_selector": {
+              "enum": [
+                null,
+                "manifest",
+                "next:semantic-json",
+                "next:plantuml"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "legacy_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "value"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "path",
+            "module",
+            "class"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "target": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/legacy_target"
+        },
+        {
+          "$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"
+        }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "projects": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "formats": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "semantic-json",
+              "plantuml"
+            ]
+          }
+        },
+        "from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "pr_target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "upstream_depth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "downstream_depth": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "targets",
+            "upstream_depth",
+            "downstream_depth"
+          ],
+          "not": {
+            "required": [
+              "from",
+              "to",
+              "pr_target"
+            ]
+          }
+        },
+        {
+          "required": [
+            "from",
+            "to",
+            "pr_target",
+            "upstream_depth",
+            "downstream_depth"
+          ]
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "head_commit",
+        "fingerprint",
+        "file_count"
+      ],
+      "properties": {
+        "schema": {
+          "const": "code-structure-viz.source-view/v1"
+        },
+        "kind": {
+          "enum": [
+            "working-tree",
+            "commit",
+            "frozen-working-tree",
+            "unavailable"
+          ]
+        },
+        "head_commit": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fingerprint": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "before",
+        "after"
+      ],
+      "properties": {
+        "before": {
+          "$ref": "#/$defs/source"
+        },
+        "after": {
+          "$ref": "#/$defs/source"
+        }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "resolved",
+        "before_kind",
+        "after_kind",
+        "start_head_anchor",
+        "selected_base_candidate",
+        "merge_base",
+        "resolution_method",
+        "candidate_observations"
+      ],
+      "properties": {
+        "requested": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "from",
+            "to"
+          ],
+          "properties": {
+            "from": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            },
+            "to": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            }
+          }
+        },
+        "resolved": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "before",
+            "after"
+          ],
+          "properties": {
+            "before": {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            "after": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "before_kind": {
+          "const": "commit"
+        },
+        "after_kind": {
+          "enum": [
+            "commit",
+            "frozen-working-tree"
+          ]
+        },
+        "start_head_anchor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selected_base_candidate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "merge_base": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolution_method": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidate_observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/candidate_observation"
+          }
+        }
+      }
+    },
+    "candidate_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ordinal",
+        "origin",
+        "reference",
+        "resolved_object",
+        "merge_base",
+        "disposition"
+      ],
+      "properties": {
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "origin": {
+          "enum": [
+            "pr-target",
+            "config-target",
+            "config-upstream",
+            "builtin"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!~)(?![A-Za-z]:)(?!.*://)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+$"
+        },
+        "resolved_object": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "merge_base": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disposition": {
+          "enum": [
+            "unresolved",
+            "no-merge-base",
+            "selected",
+            "not-evaluated"
+          ]
+        }
+      }
+    },
+    "semantic_side": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "domain",
+        "schema",
+        "digest",
+        "head_commit",
+        "file_count"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "real",
+            "canonical-empty-side",
+            "analysis-failed"
+          ]
+        },
+        "domain": {
+          "enum": [
+            "python",
+            "sqlalchemy"
+          ]
+        },
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "head_commit": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "file_change_hunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "old_start",
+        "old_line_count",
+        "new_start",
+        "new_line_count",
+        "ordinal",
+        "hunk_id"
+      ],
+      "properties": {
+        "old_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "old_line_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "new_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "new_line_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hunk_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "file_change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "old_path",
+        "new_path",
+        "hunks"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "A",
+            "M",
+            "D",
+            "R",
+            "C",
+            "T",
+            "U",
+            "?"
+          ]
+        },
+        "old_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "new_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "hunks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/file_change_hunk"
+          }
+        }
+      }
+    },
+    "file_change_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "before",
+        "after",
+        "files"
+      ],
+      "properties": {
+        "schema": {
+          "const": "code-structure-viz.file-change-set/v1"
+        },
+        "before": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "after": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/file_change"
+          }
+        }
+      }
+    },
+    "changed_path_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "requested",
+        "resolved",
+        "actual",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "const": "max_changed_paths"
+        },
+        "requested": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolved": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "actual": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        }
+      }
+    },
+    "resolved_python": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_roots",
+        "include",
+        "exclude"
+      ],
+      "properties": {
+        "source_roots": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "include": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "resolved_traversal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "upstream_depth",
+        "downstream_depth"
+      ],
+      "properties": {
+        "upstream_depth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "downstream_depth": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "resolved_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_entities"
+      ],
+      "properties": {
+        "max_entities": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "resolved_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_ref",
+        "upstream_ref"
+      ],
+      "properties": {
+        "target_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "upstream_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      }
+    },
+    "resolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "python",
+        "traversal",
+        "limits"
+      ],
+      "properties": {
+        "python": {
+          "$ref": "#/$defs/resolved_python"
+        },
+        "traversal": {
+          "$ref": "#/$defs/resolved_traversal"
+        },
+        "limits": {
+          "$ref": "#/$defs/resolved_limits"
+        },
+        "comparison": {
+          "$ref": "#/$defs/resolved_comparison"
+        }
+      }
+    },
+    "next_resolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next",
+        "traversal",
+        "limits"
+      ],
+      "properties": {
+        "next": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projects",
+            "targets",
+            "formats",
+            "trusted_environment_digest"
+          ],
+          "properties": {
+            "projects": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/next_root_path"
+              }
+            },
+            "targets": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"
+              }
+            },
+            "formats": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "semantic-json",
+                  "plantuml"
+                ]
+              }
+            },
+            "trusted_environment_digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "traversal": {
+          "$ref": "#/$defs/resolved_traversal"
+        },
+        "limits": {
+          "$ref": "urn:code-structure-viz:schema:next-limits-v1"
+        },
+        "comparison": {
+          "$ref": "#/$defs/resolved_comparison"
+        }
+      }
+    },
+    "next_resolved_request_independent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next",
+        "traversal",
+        "limits"
+      ],
+      "properties": {
+        "next": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "request_independent",
+            "projects",
+            "targets",
+            "formats",
+            "trusted_environment_digest"
+          ],
+          "properties": {
+            "request_independent": {
+              "const": true
+            },
+            "projects": {
+              "const": []
+            },
+            "targets": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"
+              }
+            },
+            "formats": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "semantic-json",
+                  "plantuml"
+                ]
+              }
+            },
+            "trusted_environment_digest": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "traversal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "upstream_depth",
+            "downstream_depth"
+          ],
+          "properties": {
+            "upstream_depth": {
+              "const": null
+            },
+            "downstream_depth": {
+              "const": null
+            }
+          }
+        },
+        "limits": {
+          "oneOf": [
+            {
+              "$ref": "urn:code-structure-viz:schema:next-limits-v1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comparison": {
+          "$ref": "#/$defs/resolved_comparison"
+        }
+      }
+    },
+    "value_sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "python_source_roots",
+        "python_include",
+        "python_exclude",
+        "upstream_depth",
+        "downstream_depth",
+        "max_entities"
+      ],
+      "properties": {
+        "python_source_roots": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit"
+          ]
+        },
+        "python_include": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit"
+          ]
+        },
+        "python_exclude": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit"
+          ]
+        },
+        "upstream_depth": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        },
+        "downstream_depth": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        },
+        "max_entities": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        }
+      }
+    },
+    "next_value_sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next_projects",
+        "next_targets",
+        "formats",
+        "upstream_depth",
+        "downstream_depth",
+        "limits",
+        "trusted_environment"
+      ],
+      "properties": {
+        "next_projects": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        },
+        "next_targets": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        },
+        "formats": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        },
+        "upstream_depth": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        },
+        "downstream_depth": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        },
+        "limits": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli",
+            "unobserved"
+          ]
+        },
+        "trusted_environment": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli",
+            "unobserved"
+          ]
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "source",
+        "sha256",
+        "resolved",
+        "value_sources"
+      ],
+      "properties": {
+        "schema": {
+          "const": "code-structure-viz.config/v1"
+        },
+        "source": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "resolved": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/resolved"
+            },
+            {
+              "$ref": "#/$defs/next_resolved"
+            },
+            {
+              "$ref": "#/$defs/next_resolved_request_independent"
+            }
+          ]
+        },
+        "value_sources": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/value_sources"
+            },
+            {
+              "$ref": "#/$defs/next_value_sources"
+            }
+          ]
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "exit_code",
+        "fingerprint"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "not_applicable",
+            "incomplete"
+          ]
+        },
+        "exit_code": {
+          "enum": [
+            0,
+            3
+          ]
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "run_context": {
+          "$ref": "urn:code-structure-viz:schema:next-run-context-v1"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "complete",
+                "not_applicable"
+              ]
+            },
+            "exit_code": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "incomplete"
+            },
+            "exit_code": {
+              "const": 3
+            }
+          }
+        }
+      ]
+    },
+    "failed_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "stage",
+        "diagnostic_code"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stage": {
+          "enum": [
+            "read",
+            "path_safety",
+            "encoding",
+            "parse",
+            "module_identity",
+            "module_collision"
+          ]
+        },
+        "diagnostic_code": {
+          "enum": [
+            "CSV-SOURCE-002",
+            "CSV-SOURCE-004",
+            "CSV-PY-001",
+            "CSV-PY-002",
+            "CSV-PY-003",
+            "CSV-PY-004",
+            "CSV-PY-005"
+          ]
+        }
+      }
+    },
+    "frontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "direction",
+        "kind",
+        "reference",
+        "reason"
+      ],
+      "properties": {
+        "direction": {
+          "enum": [
+            "upstream",
+            "downstream",
+            "failure"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "module",
+            "class",
+            "symbol",
+            "file"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "enum": [
+            "depth_limit",
+            "unresolved_reference",
+            "failed_source",
+            "unsupported_scope",
+            "star_import",
+            "identity_collision"
+          ]
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_files",
+        "parsed_files",
+        "failed_files",
+        "selected_modules",
+        "selected_entities",
+        "frontier"
+      ],
+      "properties": {
+        "candidate_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parsed_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/failed_file"
+          }
+        },
+        "selected_modules": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "selected_entities": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frontier": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/frontier"
+          }
+        }
+      }
+    },
+    "sqlalchemy_failed_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "stage",
+        "diagnostic_code"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stage": {
+          "enum": [
+            "read",
+            "path_safety",
+            "encoding",
+            "parse",
+            "module_identity",
+            "module_collision"
+          ]
+        },
+        "diagnostic_code": {
+          "enum": [
+            "CSV-SA-001",
+            "CSV-SA-002",
+            "CSV-SA-003",
+            "CSV-SA-004",
+            "CSV-SA-005"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "stage": {
+              "enum": [
+                "read",
+                "path_safety"
+              ]
+            },
+            "diagnostic_code": {
+              "const": "CSV-SA-001"
+            }
+          }
+        },
+        {
+          "properties": {
+            "stage": {
+              "const": "encoding"
+            },
+            "diagnostic_code": {
+              "const": "CSV-SA-002"
+            }
+          }
+        },
+        {
+          "properties": {
+            "stage": {
+              "const": "parse"
+            },
+            "diagnostic_code": {
+              "const": "CSV-SA-003"
+            }
+          }
+        },
+        {
+          "properties": {
+            "stage": {
+              "const": "module_identity"
+            },
+            "diagnostic_code": {
+              "const": "CSV-SA-004"
+            }
+          }
+        },
+        {
+          "properties": {
+            "stage": {
+              "const": "module_collision"
+            },
+            "diagnostic_code": {
+              "const": "CSV-SA-005"
+            }
+          }
+        }
+      ]
+    },
+    "sqlalchemy_frontier_reference": {
+      "type": "string",
+      "anyOf": [
+        {
+          "pattern": "^sqlalchemy:(?:table|row|relation|occurrence):[0-9a-f]{64}$"
+        },
+        {
+          "pattern": "^(?:module|class):[^\\W\\d]\\w*(?:\\.[^\\W\\d]\\w*)*$"
+        },
+        {
+          "pattern": "^[^\\W\\d]\\w*(?:\\.[^\\W\\d]\\w*)*$"
+        },
+        {
+          "pattern": "^(?!/)(?!~)(?![A-Za-z][A-Za-z0-9+.-]*:)(?!\\.{1,2}/)(?!.*(?:/\\.{1,2}/))(?!.*//)(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f]).+\\.py$"
+        }
+      ]
+    },
+    "sqlalchemy_frontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "direction",
+        "kind",
+        "reference",
+        "reason"
+      ],
+      "properties": {
+        "direction": {
+          "enum": [
+            "upstream",
+            "downstream",
+            "failure"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "module",
+            "class",
+            "table",
+            "row",
+            "relation"
+          ]
+        },
+        "reference": {
+          "$ref": "#/$defs/sqlalchemy_frontier_reference"
+        },
+        "reason": {
+          "enum": [
+            "depth_limit",
+            "failed_source",
+            "unsupported_pattern",
+            "unresolved_reference",
+            "identity_collision",
+            "target_missing",
+            "target_ambiguous"
+          ]
+        }
+      }
+    },
+    "sqlalchemy_redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_version",
+        "redacted_values"
+      ],
+      "properties": {
+        "rule_version": {
+          "const": "code-structure-viz.sqlalchemy-redaction/v1"
+        },
+        "redacted_values": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "sqlalchemy_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_files",
+        "parsed_files",
+        "failed_files",
+        "evidence_files",
+        "selected_modules",
+        "mapped_classes",
+        "association_tables",
+        "selected_entities",
+        "unknown_declarations",
+        "frontier",
+        "redaction"
+      ],
+      "properties": {
+        "candidate_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parsed_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sqlalchemy_failed_file"
+          }
+        },
+        "evidence_files": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "selected_modules": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "mapped_classes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "association_tables": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selected_entities": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown_declarations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frontier": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sqlalchemy_frontier"
+          }
+        },
+        "redaction": {
+          "$ref": "#/$defs/sqlalchemy_redaction"
+        }
+      }
+    },
+    "diff_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "before",
+        "after"
+      ],
+      "properties": {
+        "before": {
+          "$ref": "#/$defs/coverage"
+        },
+        "after": {
+          "$ref": "#/$defs/coverage"
+        }
+      }
+    },
+    "sqlalchemy_diff_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "before",
+        "after"
+      ],
+      "properties": {
+        "before": {
+          "$ref": "#/$defs/sqlalchemy_coverage"
+        },
+        "after": {
+          "$ref": "#/$defs/sqlalchemy_coverage"
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "requested",
+        "resolved",
+        "actual",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "const": "max_entities"
+        },
+        "requested": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolved": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "actual": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "enum": [
+            "builtin",
+            "repository",
+            "explicit",
+            "cli"
+          ]
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "schema",
+        "code",
+        "severity",
+        "domain",
+        "path",
+        "symbol",
+        "line",
+        "recoverable",
+        "message"
+      ],
+      "properties": {
+        "type": {
+          "const": "diagnostic"
+        },
+        "schema": {
+          "const": "code-structure-viz.diagnostic/v1"
+        },
+        "code": {
+          "enum": [
+            "CSV-USAGE-001",
+            "CSV-USAGE-002",
+            "CSV-USAGE-003",
+            "CSV-USAGE-004",
+            "CSV-USAGE-005",
+            "CSV-CONFIG-001",
+            "CSV-CONFIG-002",
+            "CSV-CONFIG-003",
+            "CSV-CONFIG-004",
+            "CSV-ENV-001",
+            "CSV-ENV-002",
+            "CSV-REPO-001",
+            "CSV-REPO-002",
+            "CSV-OUTPUT-001",
+            "CSV-OUTPUT-002",
+            "CSV-SOURCE-001",
+            "CSV-SOURCE-002",
+            "CSV-SOURCE-003",
+            "CSV-SOURCE-004",
+            "CSV-PY-001",
+            "CSV-PY-002",
+            "CSV-PY-003",
+            "CSV-PY-004",
+            "CSV-PY-005",
+            "CSV-PY-006",
+            "CSV-PY-007",
+            "CSV-PY-008",
+            "CSV-PY-009",
+            "CSV-PY-010",
+            "CSV-PY-011",
+            "CSV-PY-012",
+            "CSV-PY-013",
+            "CSV-SA-001",
+            "CSV-SA-002",
+            "CSV-SA-003",
+            "CSV-SA-004",
+            "CSV-SA-005",
+            "CSV-SA-006",
+            "CSV-SA-007",
+            "CSV-SA-008",
+            "CSV-SA-009",
+            "CSV-SA-010",
+            "CSV-SA-011",
+            "CSV-SA-012",
+            "CSV-SA-013",
+            "CSV-NEXT-APPLICABILITY-001",
+            "CSV-NEXT-APPLICABILITY-002",
+            "CSV-NEXT-CONFIG-001",
+            "CSV-NEXT-CONFIG-002",
+            "CSV-NEXT-EXPORT-001",
+            "CSV-NEXT-FLOW-001",
+            "CSV-NEXT-IDENTITY-001",
+            "CSV-NEXT-LIMIT-001",
+            "CSV-NEXT-LIMIT-002",
+            "CSV-NEXT-LIMIT-003",
+            "CSV-NEXT-LIMIT-004",
+            "CSV-NEXT-LIMIT-005",
+            "CSV-NEXT-NODE-001",
+            "CSV-NEXT-NODE-002",
+            "CSV-NEXT-NODE-003",
+            "CSV-NEXT-NODE-004",
+            "CSV-NEXT-PROJECT-001",
+            "CSV-NEXT-PROJECT-002",
+            "CSV-NEXT-PROTOCOL-001",
+            "CSV-NEXT-SOURCE-001",
+            "CSV-NEXT-SOURCE-002",
+            "CSV-NEXT-SOURCE-003",
+            "CSV-NEXT-TARGET-001",
+            "CSV-NEXT-TRUST-001",
+            "CSV-NEXT-TRUST-002",
+            "CSV-NEXT-TRUST-003",
+            "CSV-NEXT-TYPE-001",
+            "CSV-NEXT-UNSUPPORTED-001",
+            "CSV-DIFF-001",
+            "CSV-DIFF-002",
+            "CSV-DIFF-003",
+            "CSV-INTERNAL-001",
+            "CSV-INTERRUPT-001"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "warning",
+            "info"
+          ]
+        },
+        "domain": {
+          "enum": [
+            "python",
+            "sqlalchemy",
+            "next",
+            null
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "symbol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "recoverable": {
+          "type": "boolean"
+        },
+        "scope": {
+          "const": "publication"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "enum": [
+            "missing",
+            "component_only",
+            "duplicate",
+            "out_of_scope",
+            "non_program",
+            "control_context",
+            "project_ambiguity",
+            "selected_taint",
+            "unsupported_export"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "complete",
+            "partial_safe",
+            "payload_unavailable",
+            "not_applicable",
+            "usage",
+            "fatal"
+          ]
+        },
+        "ref_permission": {
+          "enum": [
+            "none",
+            "path",
+            "symbol",
+            "path_or_symbol"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "urn:code-structure-viz:schema:diagnostic-v1"
+        }
+      ]
+    },
+    "domain_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "status",
+        "payload_available",
+        "entity_count",
+        "coverage",
+        "budget",
+        "artifact_paths",
+        "diagnostics"
+      ],
+      "properties": {
+        "domain": {
+          "const": "python"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "not_applicable",
+            "incomplete"
+          ]
+        },
+        "incomplete_kind": {
+          "enum": [
+            "partial_safe",
+            "payload_unavailable"
+          ]
+        },
+        "payload_available": {
+          "type": "boolean"
+        },
+        "entity_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "coverage": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/coverage"
+            },
+            {
+              "$ref": "#/$defs/diff_coverage"
+            }
+          ]
+        },
+        "budget": {
+          "$ref": "#/$defs/budget"
+        },
+        "artifact_paths": {
+          "type": "array",
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "python.snapshot.semantic.json",
+              "python.snapshot.puml",
+              "python.diff.semantic.json",
+              "python.diff.puml"
+            ]
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/diagnostic"
+          }
+        }
+      }
+    },
+    "python_domain": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/domain_base"
+        },
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "status": {
+                  "const": "complete"
+                },
+                "payload_available": {
+                  "const": true
+                },
+                "entity_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "artifact_paths": {
+                  "minItems": 1
+                }
+              },
+              "not": {
+                "required": [
+                  "incomplete_kind"
+                ]
+              }
+            },
+            {
+              "properties": {
+                "status": {
+                  "const": "not_applicable"
+                },
+                "payload_available": {
+                  "const": false
+                },
+                "entity_count": {
+                  "const": 0
+                },
+                "artifact_paths": {
+                  "maxItems": 0
+                },
+                "diagnostics": {
+                  "maxItems": 0
+                }
+              },
+              "not": {
+                "required": [
+                  "incomplete_kind"
+                ]
+              }
+            },
+            {
+              "properties": {
+                "status": {
+                  "const": "incomplete"
+                },
+                "incomplete_kind": {
+                  "const": "partial_safe"
+                },
+                "payload_available": {
+                  "const": true
+                },
+                "entity_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "artifact_paths": {
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "incomplete_kind"
+              ]
+            },
+            {
+              "properties": {
+                "status": {
+                  "const": "incomplete"
+                },
+                "incomplete_kind": {
+                  "const": "payload_unavailable"
+                },
+                "payload_available": {
+                  "const": false
+                },
+                "artifact_paths": {
+                  "maxItems": 0
+                }
+              },
+              "required": [
+                "incomplete_kind"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "sqlalchemy_diagnostic": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/diagnostic"
+        },
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "CSV-SA-001",
+                "CSV-SA-002",
+                "CSV-SA-003",
+                "CSV-SA-004",
+                "CSV-SA-005",
+                "CSV-SA-006",
+                "CSV-SA-007",
+                "CSV-SA-008",
+                "CSV-SA-009",
+                "CSV-SA-010",
+                "CSV-SA-011",
+                "CSV-SA-012",
+                "CSV-SA-013"
+              ]
+            },
+            "domain": {
+              "const": "sqlalchemy"
+            }
+          }
+        }
+      ]
+    },
+    "sqlalchemy_domain_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "status",
+        "payload_available",
+        "entity_count",
+        "coverage",
+        "budget",
+        "artifact_paths",
+        "diagnostics"
+      ],
+      "properties": {
+        "domain": {
+          "const": "sqlalchemy"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "not_applicable",
+            "incomplete"
+          ]
+        },
+        "incomplete_kind": {
+          "enum": [
+            "partial_safe",
+            "payload_unavailable"
+          ]
+        },
+        "payload_available": {
+          "type": "boolean"
+        },
+        "entity_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "coverage": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sqlalchemy_coverage"
+            },
+            {
+              "$ref": "#/$defs/sqlalchemy_diff_coverage"
+            }
+          ]
+        },
+        "budget": {
+          "$ref": "#/$defs/budget"
+        },
+        "artifact_paths": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "sqlalchemy.snapshot.semantic.json",
+              "sqlalchemy.snapshot.puml",
+              "sqlalchemy.diff.semantic.json",
+              "sqlalchemy.diff.puml"
+            ]
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sqlalchemy_diagnostic"
+          }
+        }
+      }
+    },
+    "sqlalchemy_domain": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/sqlalchemy_domain_base"
+        },
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "status": {
+                  "const": "complete"
+                },
+                "payload_available": {
+                  "const": true
+                },
+                "entity_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "artifact_paths": {
+                  "minItems": 1
+                },
+                "diagnostics": {
+                  "maxItems": 0
+                },
+                "coverage": {
+                  "properties": {
+                    "failed_files": {
+                      "maxItems": 0
+                    },
+                    "unknown_declarations": {
+                      "const": 0
+                    },
+                    "frontier": {
+                      "items": {
+                        "allOf": [
+                          {
+                            "$ref": "#/$defs/sqlalchemy_frontier"
+                          },
+                          {
+                            "properties": {
+                              "direction": {
+                                "enum": [
+                                  "upstream",
+                                  "downstream"
+                                ]
+                              },
+                              "reason": {
+                                "const": "depth_limit"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "not": {
+                "required": [
+                  "incomplete_kind"
+                ]
+              }
+            },
+            {
+              "properties": {
+                "status": {
+                  "const": "not_applicable"
+                },
+                "payload_available": {
+                  "const": false
+                },
+                "entity_count": {
+                  "const": 0
+                },
+                "artifact_paths": {
+                  "maxItems": 0
+                },
+                "diagnostics": {
+                  "maxItems": 0
+                }
+              },
+              "not": {
+                "required": [
+                  "incomplete_kind"
+                ]
+              }
+            },
+            {
+              "properties": {
+                "status": {
+                  "const": "incomplete"
+                },
+                "incomplete_kind": {
+                  "const": "partial_safe"
+                },
+                "payload_available": {
+                  "const": true
+                },
+                "entity_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "artifact_paths": {
+                  "minItems": 1
+                },
+                "diagnostics": {
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "incomplete_kind"
+              ]
+            },
+            {
+              "properties": {
+                "status": {
+                  "const": "incomplete"
+                },
+                "incomplete_kind": {
+                  "const": "payload_unavailable"
+                },
+                "payload_available": {
+                  "const": false
+                },
+                "artifact_paths": {
+                  "maxItems": 0
+                },
+                "diagnostics": {
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "incomplete_kind"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "domain": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/python_domain"
+        },
+        {
+          "$ref": "#/$defs/sqlalchemy_domain"
+        },
+        {
+          "$ref": "urn:code-structure-viz:schema:next-domain-manifest-v2"
+        }
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "domain",
+        "format",
+        "media_type",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "enum": [
+            "python.snapshot.semantic.json",
+            "python.snapshot.puml",
+            "sqlalchemy.snapshot.semantic.json",
+            "sqlalchemy.snapshot.puml",
+            "next.snapshot.semantic.json",
+            "next.snapshot.puml",
+            "python.diff.semantic.json",
+            "python.diff.puml",
+            "sqlalchemy.diff.semantic.json",
+            "sqlalchemy.diff.puml",
+            "file-changes.json"
+          ]
+        },
+        "domain": {
+          "enum": [
+            "python",
+            "sqlalchemy",
+            "next"
+          ]
+        },
+        "format": {
+          "enum": [
+            "semantic-json",
+            "plantuml",
+            "file-change-set"
+          ]
+        },
+        "media_type": {
+          "enum": [
+            "application/json",
+            "text/vnd.plantuml; charset=utf-8"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "path": {
+              "const": "python.snapshot.semantic.json"
+            },
+            "domain": {
+              "const": "python"
+            },
+            "format": {
+              "const": "semantic-json"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "python.snapshot.puml"
+            },
+            "domain": {
+              "const": "python"
+            },
+            "format": {
+              "const": "plantuml"
+            },
+            "media_type": {
+              "const": "text/vnd.plantuml; charset=utf-8"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "sqlalchemy.snapshot.semantic.json"
+            },
+            "domain": {
+              "const": "sqlalchemy"
+            },
+            "format": {
+              "const": "semantic-json"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "sqlalchemy.snapshot.puml"
+            },
+            "domain": {
+              "const": "sqlalchemy"
+            },
+            "format": {
+              "const": "plantuml"
+            },
+            "media_type": {
+              "const": "text/vnd.plantuml; charset=utf-8"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "next.snapshot.semantic.json"
+            },
+            "domain": {
+              "const": "next"
+            },
+            "format": {
+              "const": "semantic-json"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "next.snapshot.puml"
+            },
+            "domain": {
+              "const": "next"
+            },
+            "format": {
+              "const": "plantuml"
+            },
+            "media_type": {
+              "const": "text/vnd.plantuml; charset=utf-8"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "python.diff.semantic.json"
+            },
+            "domain": {
+              "const": "python"
+            },
+            "format": {
+              "const": "semantic-json"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "python.diff.puml"
+            },
+            "domain": {
+              "const": "python"
+            },
+            "format": {
+              "const": "plantuml"
+            },
+            "media_type": {
+              "const": "text/vnd.plantuml; charset=utf-8"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "sqlalchemy.diff.semantic.json"
+            },
+            "domain": {
+              "const": "sqlalchemy"
+            },
+            "format": {
+              "const": "semantic-json"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "sqlalchemy.diff.puml"
+            },
+            "domain": {
+              "const": "sqlalchemy"
+            },
+            "format": {
+              "const": "plantuml"
+            },
+            "media_type": {
+              "const": "text/vnd.plantuml; charset=utf-8"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "file-changes.json"
+            },
+            "domain": {
+              "const": "python"
+            },
+            "format": {
+              "const": "file-change-set"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        },
+        {
+          "properties": {
+            "path": {
+              "const": "file-changes.json"
+            },
+            "domain": {
+              "const": "sqlalchemy"
+            },
+            "format": {
+              "const": "file-change-set"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$id": "urn:code-structure-viz:schema:run-manifest-v2"
+}

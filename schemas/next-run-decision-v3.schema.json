@@ -1,0 +1,684 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:code-structure-viz:schema:next-run-decision-v3",
+  "title": "CodeStructureViz request-bound Next run decision v3",
+  "description": "Reference run projection. Owner joins and actual measurements require the independent validator; this is not a final publication or execution certificate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "kind",
+    "status",
+    "outcome",
+    "request_independent",
+    "payload_available",
+    "exit_code",
+    "provenance",
+    "context",
+    "request",
+    "response",
+    "core_measurement"
+  ],
+  "properties": {
+    "schema": {
+      "const": "code-structure-viz.next-run-decision/v3"
+    },
+    "version": {
+      "const": 3
+    },
+    "kind": {
+      "enum": [
+        "request_bound_success",
+        "request_bound_failure"
+      ]
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "incomplete"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "complete",
+        "partial_safe",
+        "payload_unavailable"
+      ]
+    },
+    "request_independent": {
+      "const": false
+    },
+    "payload_available": {
+      "type": "boolean"
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        3
+      ]
+    },
+    "provenance": {
+      "$ref": "urn:code-structure-viz:schema:next-provenance-v3"
+    },
+    "context": {
+      "$ref": "#/$defs/request_bound_context"
+    },
+    "request": {
+      "$ref": "#/$defs/request_descriptor"
+    },
+    "response": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/observed_response_descriptor"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "core_measurement": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/entity_measurement"
+        },
+        {
+          "$ref": "#/$defs/model_record_measurement"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "request_bound_success"
+        },
+        "status": {
+          "const": "complete"
+        },
+        "outcome": {
+          "const": "complete"
+        },
+        "payload_available": {
+          "const": true
+        },
+        "exit_code": {
+          "const": 0
+        },
+        "provenance": {
+          "properties": {
+            "kind": {
+              "const": "request_bound_success"
+            }
+          }
+        },
+        "context": {
+          "properties": {
+            "run_fingerprint": {
+              "$ref": "#/$defs/digest"
+            },
+            "compatibility_id": {
+              "$ref": "#/$defs/digest"
+            }
+          }
+        },
+        "response": {
+          "$ref": "#/$defs/observed_response_descriptor"
+        },
+        "core_measurement": {
+          "$ref": "#/$defs/entity_measurement"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "request_bound_success"
+        },
+        "status": {
+          "const": "incomplete"
+        },
+        "outcome": {
+          "const": "partial_safe"
+        },
+        "payload_available": {
+          "const": true
+        },
+        "exit_code": {
+          "const": 3
+        },
+        "provenance": {
+          "properties": {
+            "kind": {
+              "const": "request_bound_success"
+            }
+          }
+        },
+        "context": {
+          "properties": {
+            "run_fingerprint": {
+              "$ref": "#/$defs/digest"
+            },
+            "compatibility_id": {
+              "$ref": "#/$defs/digest"
+            }
+          }
+        },
+        "response": {
+          "$ref": "#/$defs/observed_response_descriptor"
+        },
+        "core_measurement": {
+          "$ref": "#/$defs/entity_measurement"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "request_bound_failure"
+        },
+        "status": {
+          "const": "incomplete"
+        },
+        "outcome": {
+          "const": "payload_unavailable"
+        },
+        "payload_available": {
+          "const": false
+        },
+        "exit_code": {
+          "const": 3
+        },
+        "provenance": {
+          "properties": {
+            "kind": {
+              "const": "request_bound_failure"
+            },
+            "failure_code": {
+              "enum": [
+                "CSV-NEXT-TARGET-001",
+                "CSV-NEXT-EXPORT-001",
+                "CSV-NEXT-LIMIT-005",
+                "CSV-NEXT-SOURCE-003"
+              ]
+            },
+            "observed": {
+              "properties": {
+                "semantic_payload": {
+                  "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/observed"
+                },
+                "compatibility": {
+                  "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/observed"
+                },
+                "model": {
+                  "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/observed"
+                }
+              }
+            }
+          }
+        },
+        "context": {
+          "properties": {
+            "run_fingerprint": {
+              "$ref": "#/$defs/digest"
+            },
+            "compatibility_id": {
+              "$ref": "#/$defs/digest"
+            }
+          }
+        },
+        "response": {
+          "$ref": "#/$defs/observed_response_descriptor"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provenance": {
+                "properties": {
+                  "failure_code": {
+                    "const": "CSV-NEXT-LIMIT-005"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "core_measurement": {
+                "$ref": "#/$defs/entity_measurement"
+              },
+              "provenance": {
+                "properties": {
+                  "observed": {
+                    "properties": {
+                      "budget": {
+                        "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/observed"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "core_measurement": {
+                "const": null
+              },
+              "provenance": {
+                "properties": {
+                  "observed": {
+                    "properties": {
+                      "budget": {
+                        "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/unobserved"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "request_bound_failure"
+        },
+        "status": {
+          "const": "incomplete"
+        },
+        "outcome": {
+          "const": "payload_unavailable"
+        },
+        "payload_available": {
+          "const": false
+        },
+        "exit_code": {
+          "const": 3
+        },
+        "provenance": {
+          "properties": {
+            "kind": {
+              "const": "request_bound_failure"
+            },
+            "stage": {
+              "enum": [
+                "response_validation",
+                "model_validation"
+              ]
+            },
+            "failure_code": {
+              "enum": [
+                "CSV-NEXT-PROTOCOL-001",
+                "CSV-NEXT-LIMIT-005"
+              ]
+            },
+            "observed": {
+              "$ref": "#/$defs/core_unobserved_suffix"
+            }
+          }
+        },
+        "context": {
+          "properties": {
+            "run_fingerprint": {
+              "$ref": "#/$defs/digest"
+            },
+            "compatibility_id": {
+              "const": null
+            }
+          }
+        },
+        "response": {
+          "$ref": "#/$defs/observed_response_descriptor"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provenance": {
+                "properties": {
+                  "failure_code": {
+                    "const": "CSV-NEXT-LIMIT-005"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "core_measurement": {
+                "$ref": "#/$defs/model_record_measurement"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "core_measurement": {
+                "const": null
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "request_bound_failure"
+        },
+        "status": {
+          "const": "incomplete"
+        },
+        "outcome": {
+          "const": "payload_unavailable"
+        },
+        "payload_available": {
+          "const": false
+        },
+        "exit_code": {
+          "const": 3
+        },
+        "provenance": {
+          "properties": {
+            "kind": {
+              "const": "request_bound_failure"
+            },
+            "stage": {
+              "enum": [
+                "runtime_validation",
+                "response_protocol",
+                "bootstrap",
+                "semantic_analysis",
+                "node_spawn",
+                "node_process",
+                "adapter_stdout_capture",
+                "adapter_stderr_capture",
+                "node_timeout",
+                "response_raw_bytes",
+                "response_decode",
+                "response_schema",
+                "response_validation"
+              ]
+            },
+            "failure_code": {
+              "enum": [
+                "CSV-NEXT-NODE-001",
+                "CSV-NEXT-NODE-002",
+                "CSV-NEXT-NODE-003",
+                "CSV-NEXT-NODE-004",
+                "CSV-NEXT-LIMIT-003",
+                "CSV-NEXT-PROTOCOL-001"
+              ]
+            },
+            "observed": {
+              "$ref": "#/$defs/core_unobserved_suffix"
+            }
+          }
+        },
+        "context": {
+          "properties": {
+            "run_fingerprint": {
+              "const": null
+            },
+            "compatibility_id": {
+              "const": null
+            }
+          }
+        },
+        "core_measurement": {
+          "const": null
+        }
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "response": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "observed": {
+                "properties": {
+                  "node_version": {
+                    "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/unobserved"
+                  },
+                  "control_response": {
+                    "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/unobserved"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "observed": {
+                "properties": {
+                  "process_start": {
+                    "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/observed"
+                  },
+                  "control_response": {
+                    "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/observed"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "core_unobserved_suffix": {
+      "properties": {
+        "semantic_payload": {
+          "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/unobserved"
+        },
+        "compatibility": {
+          "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/unobserved"
+        },
+        "model": {
+          "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/unobserved"
+        },
+        "budget": {
+          "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/unobserved"
+        }
+      }
+    },
+    "digest": {
+      "$ref": "urn:code-structure-viz:schema:next-execution-assets-v1#/$defs/digest"
+    },
+    "nullable_digest": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "request_bound_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "run_fingerprint",
+        "run_context",
+        "analysis_intent",
+        "domain_config_digest",
+        "source_plan_digest",
+        "source_view_fingerprint",
+        "compatibility_id",
+        "observed_prefix"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/digest"
+        },
+        "run_fingerprint": {
+          "$ref": "#/$defs/nullable_digest"
+        },
+        "run_context": {
+          "$ref": "urn:code-structure-viz:schema:next-run-context-v1"
+        },
+        "analysis_intent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targets",
+            "upstream_depth",
+            "downstream_depth"
+          ],
+          "properties": {
+            "targets": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "urn:code-structure-viz:schema:next-config-v1#/$defs/target_key"
+              }
+            },
+            "upstream_depth": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "downstream_depth": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            }
+          }
+        },
+        "domain_config_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "source_plan_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "source_view_fingerprint": {
+          "$ref": "#/$defs/digest"
+        },
+        "compatibility_id": {
+          "$ref": "#/$defs/nullable_digest"
+        },
+        "observed_prefix": {
+          "$ref": "urn:code-structure-viz:schema:next-provenance-v3#/$defs/observation_map"
+        }
+      }
+    },
+    "request_descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "raw_sha256",
+        "byte_length",
+        "canonical_json"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/digest"
+        },
+        "raw_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100663296
+        },
+        "canonical_json": {
+          "const": true
+        }
+      }
+    },
+    "observed_response_descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_sha256",
+        "byte_length",
+        "canonical_json"
+      ],
+      "properties": {
+        "raw_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "canonical_json": {
+          "type": "boolean"
+        }
+      }
+    },
+    "model_record_measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "actual",
+        "limit"
+      ],
+      "properties": {
+        "kind": {
+          "const": "model_record_limit"
+        },
+        "actual": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      }
+    },
+    "entity_measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "actual",
+        "limit"
+      ],
+      "properties": {
+        "kind": {
+          "const": "entity_budget"
+        },
+        "actual": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        }
+      }
+    }
+  }
+}

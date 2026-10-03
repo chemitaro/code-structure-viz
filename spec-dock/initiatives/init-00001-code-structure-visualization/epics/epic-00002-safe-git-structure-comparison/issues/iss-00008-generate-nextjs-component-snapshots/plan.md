@@ -24,6 +24,8 @@ package_sequence_key: "ISSUE-05"
 
 ### A runtime移行の順序
 
+SI-05の元baseはclean/pushed `2efb54c370ac05ac4da0d9b0bfe717a13b62380c`で固定しました。同author Strictブリーフ全1728行を読み、実Coreのcount/partition/compatibility literalとstandalone十四key KATを独立照合して採用しました。証拠と準備の限界は`artifacts/20261003t015026z-02-disc-si05-public-exact-refs-brief-adoption.md`。十closed schemasのexact-ref closureとsame-Core public referencesを一behaviorずつTDDし、元baseからのfresh累積reviewまでSI-05未認定です。旧schema/KAT、report-only P2、未採択ASSET、SI-06の実行可能finalizer、productionは変更しません。
+
 現在のSI gate: **SI-04 full Core referenceはexact `d6bbbcf337ee4008d5925a6294a9065ca167a0e2`で認定済み**です。同じHEAD開始の全Core107、旧五module278、共有52、schema/goldens139、全statics/docs checksがpassし、元caf3832からのfresh累積Code Review Strictもvalid pass/P0P1=0です。残るP2はreport-only。専用analyst followup全462行/11 H1を照合し、P1 closure/既存policyを確認しました。証明範囲とraw provenanceは`artifacts/20261003t010147z-03-disc-si04-cumulative-core-review-pass.md`。次はSI-05 public/exact refsで、全A02/A03/production/Final/Issueは未認定です。以下のSI-04 fail/未認定段階は当時の履歴で、認定範囲を拡張しません。
 
 SI-04初回累積Code Reviewはexact `58864bf0223e35c6cf31ca09b0d9040954e3d9cc`でvalid fail（P1一件/P2一件）でした。別のAnalyze Review Findings Strict / Sol / Proを全読・現物照合し、非program reverse importerが公開Fileに残るP1だけを既存authority内で限定修復しました。first Red二例→Green二例、関連control九例がpassです。File taint/Module/partitionと通常open-edge predicateは不変、P2はreport-onlyです。原回答・probe・判断・検証限界は`artifacts/20261003t001847z-02-disc-si04-locality-p1-adjudication-and-remediation.md`へ保存しました。修正後checkpointのexact HEADで全必須selectionを実行し、元caf3832からのfresh独立累積review passまでSI-04未認定/SI-05禁止を維持します。これは進捗更新だけで、受入正本の意味・元base・実装scopeを変更しません。
@@ -125,7 +127,9 @@ run-level terminalはsemantic/finalizerの前段にある独立した一回限�
 
 ### SIの実装再開順序と出口条件
 
-RequirementのSI-REQ-001〜007、DesignのSI節と三つの新v3契約、accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`とA案補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`を入力とします。SI-03のsource/proof reference三ファイルはexact23072c2でlocal checks/Strict step reviewがpassしました。後続Core/public API/schemaはplannedで、未実装passに数えません。上記diagnostic briefとFile/Module候補の「未採択」は当時の履歴です。full File/Module base、独立Module eligibility、proof source resolution、exact File partition、Project safe projectionを一緒に閉じ、guard一箇所の抑制やSOURCEへのrelabelで再開しません。
+SI-05候補は十physical schemaとsame-Core public/provenance/run/candidatesのreference・独立validatorを追加しました。元job81335の同候補で新family253、source/Core282（large除外無し）、旧v2六module350（large除外無し）、goldens16、pointer1の各selectionがpass、全staticsもpassです。件数は合算しません。consumer censusでnew exact refsとlegacy/leafを分類しました。outer四schemaは`test_next_public_family_v3_schemas.py`のclosed/ref/literal検証で、final single owner・catalog stderr・reader prefixやproductionの認定ではありません。詳細は`artifacts/20261003t025644z-disc-si05-public-family-candidate.md`。元base2efb54cからのclean候補のall-contract/full pytestとfresh累積Strict passまでSI-05は未認定、SI-06へ進みません。
+
+RequirementのSI-REQ-001〜007、DesignのSI節と三つの新v3契約、accepted ADR `artifacts/20261002t001435z-adr-issue8-source-inventory-safe-subset.md`とA案補足ADR `artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`を入力とします。SI-03のsource/proof reference三ファイルはexact23072c2、SI-04 full Coreはexact d6bbbcfで認定済みです。SI-05 public API/schemaは候補が存在しますが、残るgateを未実装passに数えません。上記diagnostic briefとFile/Module候補の「未採択」は当時の履歴です。full File/Module base、独立Module eligibility、proof source resolution、exact File partition、Project safe projectionを一緒に閉じ、guard一箇所の抑制やSOURCEへのrelabelで再開しません。
 
 | unit | 作業と依存 | 出口 / 受入対応 |
 | --- | --- | --- |
