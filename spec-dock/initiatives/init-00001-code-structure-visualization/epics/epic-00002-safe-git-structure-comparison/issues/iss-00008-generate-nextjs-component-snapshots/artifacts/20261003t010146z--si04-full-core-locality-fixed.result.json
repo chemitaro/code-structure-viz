@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "title": "[P2] reverse-only importer の通常 open edge を nonlocal にしない",
+      "body": "parse/read failure の逆 closure にだけ属する importer が正規に taint/exclude されていても、その importer に別の通常 open edge があると、`affected` が forward closure と reverse closure の union なのでこの条件が `open_dependency=True` とし、独立 safe side まで `CSV-NEXT-SOURCE-003` / payload unavailable に落とします。保持対象の `SourceFailureLedger.from_seal` は通常 open edge を failed File からの forward reachability に対してだけ評価し、reverse closure は importer invalidation に使い、`module_plane` のみ graph-global fail-closed とするため、この実装は admission-v3 が要求する retained locality semantics に対する availability regression です。forward/reverse closure を分離し、通常 open edge は forward 側だけで判定し、reverse 側は publication conflict/taint closure に限定しつつ `module_plane` の global 判定を維持する必要があります。",
+      "confidence_score": 0.98,
+      "priority": 2,
+      "code_location": {
+        "repository_relative_path": "tests/contracts/next_semantic_core_v3_validation.py",
+        "line_range": {
+          "start": 1125,
+          "end": 1128
+        }
+      }
+    }
+  ],
+  "overall_correctness": "patch is correct",
+  "overall_explanation": "GitHub connectorで `chemitaro/code-structure-viz` の `iss-00008-generate-nextjs-component-snapshots` を直接確認し、branch tip が expected SHA `d6bbbcf337ee4008d5925a6294a9065ca167a0e2` と完全一致することを確認しました。`caf38329826ae34f8e3cb330b83b97e0357b7dc5..d6bbbcf337ee4008d5925a6294a9065ca167a0e2` は merge-base が固定点そのもので ahead 5 commits です。exact branch の root `AGENTS.md` は GitHub contents API で NOT_FOUND でした。Current Requirement/Design/Plan、accepted ADR、v3 contracts、SI-03 source seam、retained `SourceFailureLedger`、新Core/validator/corpusを独立に照合した結果、d6で追加された reverse-publication conflict は非program reverse importerを偽taintなしで SOURCE-003 に閉じる契約に整合しています。selected missing/component-only/byte-identical duplicate の no-payload path、full proof と TARGET の record cap より前の検証、actual record/entity counter の分離、same-owner decision再検証にもP0/P1相当の破綻は確認できませんでした。一方、通常 open edge の locality 判定には上記P2の過剰fail-closedが残ります。補足実行記録では exact d6 candidate に対して Core 107、旧5 modules 278、shared selectors 52、schema/goldens 139、および Ruff/mypy/SpecDock等の各selectionがpassしたと報告されています attachments-bundle。これらはChatGPT自身が実行したtestではなく、whole A02/A03、production TypeScript/OS/CLI/publication/Final/Issue completionの認定でもありません attachments-bundle。",
+  "review_status": "pass",
+  "review_status_reason": "P0/P1は確認されませんでした。残るP2は、本来availableな独立safe sideをSOURCE-003へ過剰に閉じるavailability regressionですが、unsafe payloadを許可したりSI-04の必須安全gateをfail-openにしたりする欠陥ではないため、review-methodのgate規則ではnon-blockingです。",
+  "overall_confidence_score": 0.98
+}

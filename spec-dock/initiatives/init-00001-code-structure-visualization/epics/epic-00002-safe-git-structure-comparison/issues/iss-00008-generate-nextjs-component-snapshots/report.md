@@ -20,7 +20,11 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 2026-10-02、source inventoryとsafe subset分離の方針をユーザーが採択しました。same-parent所有権/Project二view/File完全partition/予算/版移行をCurrent R/D/Pとaccepted ADRへ具体化し、旧候補は当時の履歴として残しました。exact f8d5c41へのfresh Use Strict GPT-5.6 Sol/Pro設計相談はexit0、両picker verified、全665行をlocal source/schemaへ照合して補正しました。仕様a4efdc3の独立Spec Reviewはfail/P1一件でした。続いてユーザーがowner-closed公開のA案を明示採択し、補足ADR/Current R/D/P/v3契約へ反映しました。bcae954でsame-reviewer仕様再認証pass後、SI-03 source/proof reference seamをTDDで実装。root-originとProp型参照D/M閉包のP1を専用分析に沿って限定修復し、exact `23072c288fc203071c10bfe3305e6ec5d3b055fe`でlocal required checksとfresh累積Code Reviewがともにpass、findings0です。次はSI-04 full Coreで、新public schema/productionは未完了です。ASSET新policyは別の未採択判断です。
 
+2026-10-03、SI-04 full Core referenceはexact d6bbbcfで必須ローカルチェックとfresh累積Strict Reviewがpassし、P0/P1=0です。残るP2はreport-onlyで、SI-04だけを認定しました。次はSI-05 public/exact refs。実TypeScript解析と後続公開面、全A02/A03/Final/Issue全体はまだ未完了です。
+
 ## Verification
+
+- SI-04累積gate: exact `d6bbbcf337ee4008d5925a6294a9065ca167a0e2`の全required jobsと元caf3832からのfresh独立Code Reviewがpassしました。Core107 passed296.86s（large除外無し）、旧五module278 passed410.97s、共有52 passed55.21s、schema/goldens139 passed15.06s、全Ruff/format233・mypy191・SpecDock10・pointer1・current/committed diffがpass。同じcommit後HEADを各processの前後で記録し、選択を合算しません。元21036 exit0/6m28s、Sol/Extra High両picker verified、valid pass/P0P1=0/P2一件です。同analyst followup15772 exit0/6m34sの全462行/11 H1を照合し、R1 closed/P2 report-onlyを採用。要求Sol/Proですがmodel pickerはinherited/skipped/unverified、Proだけverified、freshモデル確認ではありません。原review/分析lossless gzip・可読版/全command記録と証明範囲は`artifacts/20261003t010147z-03-disc-si04-cumulative-core-review-pass.md`。SI-04だけ認定し、次はSI-05。後続unit/全A02/A03/actual TS/OS/CLI/package/Final/Issue全体は未完了です。下段のSI-04未認定記録は当時の履歴として保存します。
 
 - SI-04 locality P1候補: exact58864bfの初回全unit Code Reviewは元84957 exit10、valid fail/P1一件/P2一件、Sol/Extra Highの両picker verifiedでした。別analystの指摘分析Strictは元51481 exit0、Sol/Proの両picker verified、全409行/11 H1をローカルへ照合。実same-seal context逆importのparse/readを再現し、P1だけを公開Fileと全root逆closureの残存交差でSOURCE-003へ閉じました。意図したRed2 failed（1.69s）→同じ二例Green2 passed（2.02s）、control selection9 passed（7.88s）とfocused Ruff/format/diffがpass。P2はreport-only、open-edge predicate/taint/Module/partition/仕様意味は不変です。原review/分析/probe四観測と判断は`artifacts/20261003t001847z-02-disc-si04-locality-p1-adjudication-and-remediation.md`。新checkpoint exact HEADの全必須aggregateと元caf3832からのfresh累積レビューはまだ未実施です。SI-04/以降/production/全Issueのpassではありません。
 
@@ -88,7 +92,7 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 
 ## Residual Risks / Follow-ups
 
-- source inventoryとowner-closed A案は採択済みで、bcae954の仕様再認証とexact23072c2のwhole SI-03 step gateはpassです。次はSI-04 full Coreで、局所root/型参照のpassをfull mandatory seed/causal/taint/type/selection/budget認定へ拡張しません。新public schemaはSI-05以降です。補足accepted ADRは`artifacts/20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`。元candidate/旧failは原履歴として保持し、旧748 testsや仕様passを新class認定へ流用しません。
+- source inventory/owner-closed A案は採択済みで、bcae954の仕様、exact23072c2のSI-03、exactd6bbbcfのSI-04はそれぞれの範囲だけpassです。次はSI-05 public/exact refsで、新公開schema/consumer全closureは未認定です。P2 availabilityの過剰fail-closedリスクとcompound実行未実証はSI-04 certificateへ保持し、自動修復条件にしません。元candidate/旧failは履歴として残し、旧748 testsや仕様passを後続認定へ流用しません。
 - A-02の新version schema/reference/compatibility/provenance closure、A-03のfresh独立Strict、production TDD、両OS実CLI/offline package、Final Quality Gateが残っています。
 - 新asset failure policyはdecision-candidateのままです。採択前に実装せず、通常I/Oと立証済みpackage破損のdomain/run-level境界を固定してからsource prefix/public closureへ進みます。
 - Darwinの終了済みgroup確認は公開libproc APIを使った試作候補です。製品cleanupの全条件・全対応OS/architectureを認定したものではありません。
