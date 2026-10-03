@@ -451,10 +451,16 @@
       ],
       "properties": {
         "adapter_stdout": {
-          "$ref": "#/$defs/measurement"
+          "anyOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/measurement"}
+          ]
         },
         "adapter_stderr": {
-          "$ref": "#/$defs/measurement"
+          "anyOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/measurement"}
+          ]
         },
         "public_stderr": {
           "$ref": "#/$defs/measurement"
@@ -462,7 +468,21 @@
         "selected_stdout": {
           "$ref": "#/$defs/measurement"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "adapter_stdout": {"type": "null"},
+            "adapter_stderr": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "adapter_stdout": {"$ref": "#/$defs/measurement"},
+            "adapter_stderr": {"$ref": "#/$defs/measurement"}
+          }
+        }
+      ]
     },
     "seal": {
       "type": "object",

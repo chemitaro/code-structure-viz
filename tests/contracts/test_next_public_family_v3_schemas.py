@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 
+from tests.contracts.next_final_publication_v2_fixtures import stage_failed_candidates_v3
 from tests.contracts.next_public_semantic_v3_reference import project_public_semantic_document_v3
 from tests.contracts.next_public_semantic_v3_validation import validate_semantic_dispatcher_v3
 from tests.contracts.next_publication_candidates_v3_reference import (
@@ -281,6 +282,52 @@ def outer_vectors(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[st
         "run-manifest-v2": root,
         "stdout-result-v2": stdout,
     }
+
+
+def test_publication_v2_accepts_unobserved_capture_null_pair(
+    tmp_path: Path, outer_vectors: dict[str, dict[str, Any]]
+) -> None:
+    """Shape-only vector from actual stage failure, not a final-owner certificate."""
+    candidates = stage_failed_candidates_v3(tmp_path)
+    assert candidates.record()["capture_measurements"] == {
+        "adapter_stdout": None,
+        "adapter_stderr": None,
+    }
+    value = deepcopy(outer_vectors["next-publication-decision-v2"])
+    value.update(
+        semantic_decision=candidates.run_decision().record(),
+        candidates=candidates.record(),
+        response=None,
+        artifacts=[],
+        exit_code=3,
+    )
+    value["measurements"].update(adapter_stdout=None, adapter_stderr=None)
+    value["stdout"].update(
+        availability=False,
+        copy_status="not_attempted",
+        candidate=None,
+        result_bytes_base64="",
+        result_size_bytes=0,
+        result_sha256=hashlib.sha256(b"").hexdigest(),
+    )
+    value["measurements"]["selected_stdout"] = {
+        "allowed": True,
+        "measured_bytes": 0,
+        "retained_bytes": 0,
+    }
+    _validator("next-publication-decision-v2.schema.json").validate(value)
+
+
+@pytest.mark.parametrize(
+    "field", ["adapter_stdout", "adapter_stderr", "public_stderr", "selected_stdout"]
+)
+def test_publication_v2_rejects_one_sided_or_public_null_measurement(
+    outer_vectors: dict[str, dict[str, Any]], field: str
+) -> None:
+    value = deepcopy(outer_vectors["next-publication-decision-v2"])
+    value["measurements"][field] = None
+    with pytest.raises(ValidationError):
+        _validator("next-publication-decision-v2.schema.json").validate(value)
 
 
 @pytest.mark.parametrize("name", FAMILY[-4:])
