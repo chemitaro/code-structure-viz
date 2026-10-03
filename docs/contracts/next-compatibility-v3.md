@@ -1,6 +1,6 @@
 # Next.js semantic compatibility v3 — accepted target
 
-新source admission profileを区別する親所有のdescriptorです。Core/referenceはSI-04 exact d6bbbcfで認定済み、物理schemaはSI-05候補として追加し独立step reviewは未認定です。旧[compatibility v2](next-compatibility-v2.md)を遡及変更しません。
+新source admission profileを区別する親所有のdescriptorです。Core/referenceはSI-04 exact d6bbbcf、物理schemaとpublic/exact-ref referenceはSI-05 exact 6d52ff7でそれぞれ認定済みです。productionは未実装で、SI-06のfinal-owner認定とは別です。旧[compatibility v2](next-compatibility-v2.md)を遡及変更しません。
 
 descriptorは`schema=code-structure-viz.next-semantic-compatibility/v3`、下記preimage十keys、`compatibility_id`のexact十二keysです。
 

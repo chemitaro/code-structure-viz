@@ -1,6 +1,6 @@
 # Next.js public semantic v3 — accepted target
 
-公開する安全subsetと取得一覧を混同しない新document世代です。[admission v3](next-semantic-admission-v3.md)と[compatibility v3](next-compatibility-v3.md)に依存します。2026-10-03にSI-05のschema/reference候補を追加しましたが、必須aggregateと独立step reviewは未認定です。actual productionは未実装です。旧[semantic v2](next-semantic-v2.md)のpassやKATは新仕様のpassではありません。
+公開する安全subsetと取得一覧を混同しない新document世代です。[admission v3](next-semantic-admission-v3.md)と[compatibility v3](next-compatibility-v3.md)に依存します。SI-05のschema/public/exact-ref referenceは、2026-10-03のexact 6d52ff7で必須aggregateとfresh独立step reviewがpassしました。SI-06 final-ownerとactual productionは未認定/未実装です。旧[semantic v2](next-semantic-v2.md)のpassやKATは新仕様のpassではありません。
 
 ## Closed public record
 
@@ -38,7 +38,7 @@ semantic bytesはCJ15＋末尾LF一つ、同じCore ownerから一度保持。�
 
 ## Exact-ref migration closure
 
-次はSI-05で追加するpaths/URN suffixです。十schemaは物理候補として追加済みですが、schema shape/refの通過だけをowner・finalizer・productionの成功証拠に数えず、既存schemaを上書きしません。以下の「未作成」は採択時点の呼称です。
+次はSI-05で追加したpaths/URN suffixです。十schemaとbounded public/exact-ref referencesはexact 6d52ff7で認定済みですが、outer四schemaのshape/ref通過をfinal-owner・finalizer・productionの成功証拠に数えず、既存schemaを上書きしません。以下の「未作成」は採択時点の呼称です。
 
 | owner / planned target | 変更と接続先 |
 | --- | --- |

@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "title": "[P1] run-manifest-v2 から schema URN が欠落して family gate が失敗する",
+      "body": "Current の exact-ref closure は十個すべての schema に `urn:code-structure-viz:schema:<target>` の `$id` を要求し、今回追加された `test_outer_v2_contracts_complete_the_closed_offline_v3_family` も各 schema について `schema[\"$id\"] == f\"urn:code-structure-viz:schema:{name}\"` を必須確認しています。しかし `run-manifest-v2.schema.json` だけは `$schema` の直後が `title` で `$id` が存在しないため、この verified SHA では FAMILY の `run-manifest-v2` 到達時に当該 gate が失敗し、SI-05 の十-schema URN/exact-ref closure を満たしません。最小訂正は他の九 schema と同様に `$id`: `urn:code-structure-viz:schema:run-manifest-v2` を追加することです。",
+      "confidence_score": 0.99,
+      "priority": 1,
+      "code_location": {
+        "repository_relative_path": "schemas/run-manifest-v2.schema.json",
+        "line_range": {
+          "start": 2,
+          "end": 3
+        }
+      }
+    }
+  ],
+  "overall_correctness": "patch is incorrect",
+  "overall_explanation": "GitHub connector で `chemitaro/code-structure-viz` の `iss-00008-generate-nextjs-component-snapshots` tip が expected SHA `6d52ff7949d64e747235eef870631cd8cc29b273` と完全一致すること、固定点・merge-base が `2efb54c370ac05ac4da0d9b0bfe717a13b62380c` であること、および範囲が1 commit・38変更pathであることを確認しました。その範囲について Current Requirement/Design/Plan、二つの採択ADR、十schema、五組のreference/independent validator、新規tests、source/Core lower owners、outer/root/stdout と Python/SQLAlchemy legacy consumer を照合しました。source inventory と safe subset の分離、program File の独立Module eligibility、実count/partition、十key・十四key preimage、same-Core JSON/PlantUML、native-number・foreign-owner・rehashed-cache・privacy controls、whole-Next downgrade拒否については追加の blocker を確認していません。一方、`run-manifest-v2` の `$id` 欠落は変更内のtestとCurrent contractから直接決定できる P1 です。補助添付は同候補について contract 1995 passed、full pytest 3064 passed 等を記録しています attachments-bundle が、verified GitHub SHA 上の schema と同SHA上のtestの静的照合結果と矛盾するため、その実測記録を repository fact より優先して gate を通すことはできません。実際のtestコマンドは本レビューでは実行していません。",
+  "review_status": "fail",
+  "review_status_reason": "SI-05 の必須 exact-ref/schema family gate を直接破る P1 が1件あります。十schemaの一つである `run-manifest-v2` が契約上必須の schema URN `$id` を持たず、同変更内の明示的なfamily testにも適合しません。",
+  "overall_confidence_score": 0.99
+}

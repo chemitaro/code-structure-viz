@@ -2,7 +2,7 @@
 
 ## Authorityと現在地
 
-Issue #8 Current Requirement/Design/Planとaccepted ADR `20261002t001435z-adr-issue8-source-inventory-safe-subset.md`、A案補足ADR `20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`に基づく**accepted target**です。2026-10-02のA案採択で、untainted File全件公開をowner-closed公開条件へ変更しました。source seamはSI-03、full CoreはSI-04 exact d6bbbcfでreference認定済み、public/schemaはSI-05候補で独立step review未認定、productionは未実装です。旧[admission v2](next-semantic-admission-v2.md)の通過証拠は旧referenceのままです。
+Issue #8 Current Requirement/Design/Planとaccepted ADR `20261002t001435z-adr-issue8-source-inventory-safe-subset.md`、A案補足ADR `20261002t041350z-adr-issue8-owner-closed-file-module-publication.md`に基づく**accepted target**です。2026-10-02のA案採択で、untainted File全件公開をowner-closed公開条件へ変更しました。source seamはSI-03、full CoreはSI-04 exact d6bbbcf、public/schema referenceはSI-05 exact 6d52ff7でそれぞれ認定済みです。SI-06 final-ownerとproductionは未認定/未実装です。旧[admission v2](next-semantic-admission-v2.md)の通過証拠は旧referenceのままです。
 
 新profileは`next-source-inventory-safe-subset-v1`です。typed transport candidate v2、同じcomplete `SourceAcquisitionSeal`、同じretained execution assetsを入力とし、nominal `ValidatedSemanticDecisionV3`または`RejectedSemanticDecisionV3`を生成します。これらはreference APIとして実在し、製品APIや実TypeScript実行の認定ではありません。free request/model/status/countや別exchangeのownerは認めません。
 
