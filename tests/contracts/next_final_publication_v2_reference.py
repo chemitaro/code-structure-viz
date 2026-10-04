@@ -8,10 +8,13 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from code_structure_viz import __version__
 from tests.contracts.next_final_publication_v2_validation import (
     validate_domain_manifest_v2,
     validate_final_publication_v2,
     validate_parent_configuration_v2,
+    validate_run_manifest_v2,
+    validate_run_summary_v1,
 )
 from tests.contracts.next_public_diagnostic_v3_reference import derive_public_diagnostics_v3
 from tests.contracts.next_public_diagnostic_v3_validation import validate_public_diagnostics_v3
@@ -107,6 +110,105 @@ class RetainedFinalPublicationV2:
         value = _domain_manifest_v2(self)
         validate_domain_manifest_v2(value, self)
         return value
+
+    def run_manifest(self) -> dict[str, Any]:
+        value = _run_manifest_v2(self, _domain_manifest_v2(self))
+        validate_run_manifest_v2(value, self)
+        return value
+
+    def run_summary(self) -> dict[str, Any]:
+        value = _run_summary_v1(self)
+        validate_run_summary_v1(value, self)
+        return value
+
+
+def _run_summary_v1(owner: RetainedFinalPublicationV2) -> dict[str, Any]:
+    publication = owner.record()
+    outcome = (
+        "payload_unavailable"
+        if publication["publication_outcome"] == "payload_unavailable"
+        else owner.candidates().run_decision().record()["outcome"]
+    )
+    domain = {"domain": "next", "status": "complete" if outcome == "complete" else "incomplete"}
+    if outcome != "complete":
+        domain["incomplete_kind"] = outcome
+    return {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": "complete" if publication["exit_code"] == 0 else "incomplete",
+        "exit_code": publication["exit_code"],
+        "domains": [domain],
+        "manifest": "run-manifest.json",
+    }
+
+
+def _run_manifest_v2(owner: RetainedFinalPublicationV2, domain: dict[str, Any]) -> dict[str, Any]:
+    parent = owner.parent_configuration()
+    config = parent.analysis_context().domain_config()
+    context = parent.analysis_context().run_context()
+    publication = owner.record()
+    roots = [row["root"] for row in config["projects"]]
+    root_config = {
+        "schema": "code-structure-viz.config/v1",
+        "source": parent.source,
+        "resolved": {
+            "next": {
+                "projects": roots,
+                "targets": config["targets"],
+                "formats": context["requested_formats"],
+                "trusted_environment_digest": config["trusted_environment_digest"],
+            },
+            "traversal": {key: config[key] for key in ("upstream_depth", "downstream_depth")},
+            "limits": config["limits"],
+        },
+        "value_sources": {key: row["source"] for key, row in parent.selections().items()},
+    }
+    root_config["sha256"] = digest(root_config)
+    return {
+        "type": "run_manifest",
+        "schema": "code-structure-viz.run-manifest/v2",
+        "tool": {"name": "code-structure-viz", "version": __version__},
+        "contracts": {
+            "config": "code-structure-viz.config/v1",
+            "diagnostic": "code-structure-viz.diagnostic/v1",
+            "source_view": "code-structure-viz.source-view/v1",
+            "semantic": "code-structure-viz.semantic/v3",
+            "manifest": "code-structure-viz.run-manifest/v2",
+            "run_summary": "code-structure-viz.run-summary/v1",
+            "stdout_result": "code-structure-viz.stdout-result/v2",
+            "plantuml": "code-structure-viz.plantuml/next/v1",
+        },
+        "adapters": [{"domain": "next", "name": "next-typescript", "version": "1"}],
+        "command": {
+            "name": "snapshot",
+            "domain": "next",
+            "formats": context["requested_formats"],
+            "stdout_selector": context["stdout_selector"],
+        },
+        "request_independent": False,
+        "request": {
+            "projects": roots,
+            "targets": config["targets"],
+            "formats": context["requested_formats"],
+            "upstream_depth": config["upstream_depth"],
+            "downstream_depth": config["downstream_depth"],
+        },
+        "next_request": domain["request"],
+        "next_config": config,
+        "next_decision": owner.candidates().run_decision().record(),
+        "next_publication": publication,
+        "source": domain["source"],
+        "config": root_config,
+        "run": {
+            "status": "complete" if publication["exit_code"] == 0 else "incomplete",
+            "exit_code": publication["exit_code"],
+            "fingerprint": domain["run_fingerprint"],
+            "run_context": context,
+        },
+        "domains": [domain],
+        "artifacts": [row["descriptor"] for row in publication["artifacts"]],
+        "diagnostics": domain["diagnostics"],
+    }
 
 
 def _domain_manifest_v2(owner: RetainedFinalPublicationV2) -> dict[str, Any]:

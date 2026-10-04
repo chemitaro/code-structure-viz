@@ -81,6 +81,109 @@ def validate_parent_configuration_v2(
             raise ValueError("parent selected value differs from the analysis context")
 
 
+def validate_run_summary_v1(value: Mapping[str, Any], owner: RetainedFinalPublicationV2) -> None:
+    from tests.contracts.next_final_publication_v2_reference import RetainedFinalPublicationV2
+
+    if type(owner) is not RetainedFinalPublicationV2:
+        raise TypeError("summary validation requires a nominal final owner")
+    publication = owner.record()
+    validate_final_publication_v2(publication, owner, candidates=owner.candidates())
+    _validate_schema("run-summary-v1", value)
+    run = owner.candidates().run_decision().record()
+    outcome = run["outcome"]
+    for name in ("adapter_stdout", "adapter_stderr", "public_stderr"):
+        measured = publication["measurements"][name]
+        if measured is not None and measured["allowed"] is False:
+            outcome = "payload_unavailable"
+    domain = {"domain": "next", "status": "complete" if outcome == "complete" else "incomplete"}
+    if outcome != "complete":
+        domain["incomplete_kind"] = outcome
+    expected = {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": "complete" if publication["exit_code"] == 0 else "incomplete",
+        "exit_code": publication["exit_code"],
+        "domains": [domain],
+        "manifest": "run-manifest.json",
+    }
+    if not _same(dict(value), expected):
+        raise ValueError("summary differs from the same semantic and publication outcomes")
+
+
+def validate_run_manifest_v2(value: Mapping[str, Any], owner: RetainedFinalPublicationV2) -> None:
+    _validate_schema("run-manifest-v2", value)
+    validate_domain_manifest_v2(value["domains"][0], owner)
+    parent = owner.parent_configuration()
+    context = parent.analysis_context()
+    config, run_context = context.domain_config(), context.run_context()
+    expected_config = {
+        "schema": "code-structure-viz.config/v1",
+        "source": parent.source,
+        "resolved": {
+            "next": {
+                "projects": [row["root"] for row in config["projects"]],
+                "targets": config["targets"],
+                "formats": run_context["requested_formats"],
+                "trusted_environment_digest": config["trusted_environment_digest"],
+            },
+            "traversal": {
+                "upstream_depth": config["upstream_depth"],
+                "downstream_depth": config["downstream_depth"],
+            },
+            "limits": config["limits"],
+        },
+        "value_sources": {name: row["source"] for name, row in parent.selections().items()},
+    }
+    expected_config["sha256"] = digest(expected_config)
+    if not _same(value["config"], expected_config):
+        raise ValueError("root config differs from the retained parent selection")
+    run = owner.candidates().run_decision().record()
+    publication = owner.record()
+    domain = value["domains"][0]
+    expected = {
+        "request_independent": False,
+        "command": {
+            "name": "snapshot",
+            "domain": "next",
+            "formats": run_context["requested_formats"],
+            "stdout_selector": run_context["stdout_selector"],
+        },
+        "request": {
+            "projects": [row["root"] for row in config["projects"]],
+            "targets": config["targets"],
+            "formats": run_context["requested_formats"],
+            "upstream_depth": config["upstream_depth"],
+            "downstream_depth": config["downstream_depth"],
+        },
+        "next_request": domain["request"],
+        "next_config": config,
+        "next_decision": run,
+        "next_publication": publication,
+        "source": domain["source"],
+        "run": {
+            "status": "complete" if publication["exit_code"] == 0 else "incomplete",
+            "exit_code": publication["exit_code"],
+            "fingerprint": run["context"]["run_fingerprint"],
+            "run_context": run_context,
+        },
+        "artifacts": [row["descriptor"] for row in publication["artifacts"]],
+        "diagnostics": list(owner.manifest_diagnostics()),
+    }
+    if value.keys() != expected.keys() | {
+        "type",
+        "schema",
+        "tool",
+        "contracts",
+        "adapters",
+        "domains",
+        "config",
+    }:
+        raise ValueError("root manifest contains fields outside the Next snapshot projection")
+    for name, row in expected.items():
+        if not _same(value.get(name), row):
+            raise ValueError(f"root {name} differs from the retained run/publication")
+
+
 def validate_domain_manifest_v2(
     value: Mapping[str, Any],
     owner: RetainedFinalPublicationV2,

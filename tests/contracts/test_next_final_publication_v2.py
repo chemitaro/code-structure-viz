@@ -42,6 +42,216 @@ def _literal_sha(value: object) -> str:
     return hashlib.sha256(_literal_json(value)).hexdigest()
 
 
+def test_stage_failure_root_retains_null_fingerprint_and_actual_parent_selections(
+    tmp_path: Path,
+) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    context = candidates.run_decision().runtime_result().request_frame().analysis_context()
+    selections = explicit_parent_selections_v2(context)
+    selections["next_targets"]["source"] = "cli"
+    selections["formats"]["source"] = "repository"
+    parent = reference.retain_parent_configuration_v2(
+        context, source="repository", selections=selections
+    )
+    owner = reference.retain_final_publication_v2(candidates, parent_configuration=parent)
+    assert hasattr(owner, "run_manifest"), "final owner has no root manifest projection"
+    root = owner.run_manifest()
+    _validator("run-manifest-v2.schema.json").validate(root)
+    domain = owner.domain_manifest()
+    assert root["domains"] == [domain]
+    assert root["next_request"] == domain["request"]
+    assert "run_fingerprint" not in root["next_request"]
+    assert root["next_config"] == context.domain_config()
+    assert root["run"] == {
+        "status": "incomplete",
+        "exit_code": 3,
+        "fingerprint": None,
+        "run_context": context.run_context(),
+    }
+    assert root["request"] == {
+        "projects": ["."],
+        "targets": [],
+        "formats": ["semantic-json"],
+        "upstream_depth": 1,
+        "downstream_depth": 1,
+    }
+    assert root["config"]["source"] == "repository"
+    assert root["config"]["value_sources"] == {
+        "next_projects": "explicit",
+        "next_targets": "cli",
+        "formats": "repository",
+        "upstream_depth": "explicit",
+        "downstream_depth": "explicit",
+        "limits": "explicit",
+        "trusted_environment": "explicit",
+    }
+    assert root["config"]["resolved"] == {
+        "next": {
+            "projects": ["."],
+            "targets": [],
+            "formats": ["semantic-json"],
+            "trusted_environment_digest": context.domain_config()["trusted_environment_digest"],
+        },
+        "traversal": {"upstream_depth": 1, "downstream_depth": 1},
+        "limits": context.domain_config()["limits"],
+    }
+    assert root["config"]["sha256"] == _literal_sha(
+        {k: v for k, v in root["config"].items() if k != "sha256"}
+    )
+    assert root["next_decision"] == candidates.run_decision().record()
+    assert root["next_publication"] == owner.record()
+    assert root["artifacts"] == []
+    assert root["diagnostics"] == domain["diagnostics"]
+
+
+def test_root_validation_rejects_rehashed_origins_that_differ_from_parent_input(
+    tmp_path: Path,
+) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    validation = import_module("tests.contracts.next_final_publication_v2_validation")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    root = owner.run_manifest()
+    root["config"]["value_sources"]["next_projects"] = "builtin"
+    root["config"]["sha256"] = _literal_sha(
+        {k: v for k, v in root["config"].items() if k != "sha256"}
+    )
+    _validator("run-manifest-v2.schema.json").validate(root)
+    assert hasattr(validation, "validate_run_manifest_v2"), "root has no independent parent join"
+    with pytest.raises(ValueError, match=r"root.*config"):
+        validation.validate_run_manifest_v2(root, owner)
+
+
+def test_root_validation_rejects_detached_request_source_and_run_fields(tmp_path: Path) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    validation = import_module("tests.contracts.next_final_publication_v2_validation")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    original = owner.run_manifest()
+    for path, replacement in [
+        (("run", "fingerprint"), "0" * 64),
+        (("request", "upstream_depth"), 9),
+        (("next_request", "downstream_depth"), 9),
+        (("next_config", "domain_config_digest"), "0" * 64),
+        (("source", "fingerprint"), "0" * 64),
+        (("command", "stdout_selector"), "manifest"),
+        (("run", "run_context", "budget_resolved"), 99),
+        (("diagnostics",), original["diagnostics"] * 2),
+    ]:
+        changed = json.loads(_literal_json(original))
+        parent = changed
+        for key in path[:-1]:
+            parent = parent[key]
+        parent[path[-1]] = replacement
+        errors = list(_validator("run-manifest-v2.schema.json").iter_errors(changed))
+        assert not errors, (path, [list(error.path) for error in errors])
+        with pytest.raises(ValueError, match="root"):
+            validation.validate_run_manifest_v2(changed, owner)
+
+
+@pytest.mark.parametrize("case", ["complete", "rejected", "partial"])
+def test_root_nonnull_identity_and_artifacts_come_from_the_same_final_owner(
+    tmp_path: Path, case: str
+) -> None:
+    if case == "partial":
+        candidates = source_failure_candidates_v3(
+            tmp_path, "parse_file", isolated=True, selector="next:semantic-json"
+        )
+    else:
+        candidates = (complete_candidates_v3 if case == "complete" else rejected_candidates_v3)(
+            tmp_path, selector="next:semantic-json"
+        )
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    validation = import_module("tests.contracts.next_final_publication_v2_validation")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    root = owner.run_manifest()
+    run = candidates.run_decision().record()
+    assert isinstance(root["run"]["fingerprint"], str)
+    assert (
+        root["run"]["fingerprint"]
+        == root["next_request"]["run_fingerprint"]
+        == run["context"]["run_fingerprint"]
+    )
+    assert root["run"]["status"] == ("complete" if case == "complete" else "incomplete")
+    assert root["run"]["exit_code"] == (0 if case == "complete" else 3)
+    assert root["artifacts"] == [row["descriptor"] for row in owner.record()["artifacts"]]
+    summary = owner.run_summary()
+    expected_domain = {"domain": "next", "status": root["run"]["status"]}
+    if case != "complete":
+        expected_domain["incomplete_kind"] = (
+            "partial_safe" if case == "partial" else "payload_unavailable"
+        )
+    assert summary == {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": root["run"]["status"],
+        "exit_code": root["run"]["exit_code"],
+        "domains": [expected_domain],
+        "manifest": "run-manifest.json",
+    }
+    if root["artifacts"]:
+        root = json.loads(_literal_json(root))
+        root["artifacts"][0]["sha256"] = "0" * 64
+        with pytest.raises(ValueError, match="root artifacts"):
+            validation.validate_run_manifest_v2(root, owner)
+
+
+def test_summary_reports_the_same_failed_run_and_manifest_availability(tmp_path: Path) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    assert hasattr(owner, "run_summary"), "final owner has no summary projection"
+    summary = owner.run_summary()
+    _validator("run-summary-v1.schema.json").validate(summary)
+    assert summary == {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": "incomplete",
+        "exit_code": 3,
+        "domains": [
+            {"domain": "next", "status": "incomplete", "incomplete_kind": "payload_unavailable"}
+        ],
+        "manifest": "run-manifest.json",
+    }
+
+
+def test_summary_validation_rejects_schema_valid_status_and_native_number_substitution(
+    tmp_path: Path,
+) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    validation = import_module("tests.contracts.next_final_publication_v2_validation")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    original = owner.run_summary()
+    assert hasattr(validation, "validate_run_summary_v1"), "summary lacks its same-owner validation"
+    for change in ("success", "partial", "native"):
+        value = json.loads(_literal_json(original))
+        if change == "success":
+            value.update(
+                run_status="complete",
+                exit_code=0,
+                domains=[{"domain": "next", "status": "complete"}],
+            )
+        elif change == "partial":
+            value["domains"][0]["incomplete_kind"] = "partial_safe"
+        else:
+            value["exit_code"] = 3.0
+        _validator("run-summary-v1.schema.json").validate(value)
+        with pytest.raises(ValueError, match="summary"):
+            validation.validate_run_summary_v1(value, owner)
+
+
 def test_stage_failure_domain_retains_request_without_inventing_semantic_observations(
     tmp_path: Path,
 ) -> None:
@@ -311,6 +521,15 @@ def test_stderr_overflow_downgrades_domain_without_rewriting_its_semantic_decisi
     assert len(domain["coverage"]["failed_files"]) == 80
     assert [row["code"] for row in domain["diagnostics"]] == ["CSV-NEXT-LIMIT-003"]
     assert domain["run_fingerprint"] == domain["decision"]["context"]["run_fingerprint"]
+
+    root = owner.run_manifest()
+    assert root["domains"] == [domain]
+    assert root["artifacts"] == []
+    assert root["run"]["status"] == "incomplete" and root["run"]["exit_code"] == 3
+    assert root["run"]["fingerprint"] == domain["run_fingerprint"]
+    assert owner.run_summary()["domains"] == [
+        {"domain": "next", "status": "incomplete", "incomplete_kind": "payload_unavailable"}
+    ]
 
 
 def test_parent_configuration_retains_explicit_selections_without_inferring_defaults(
@@ -681,7 +900,14 @@ def test_partial_safe_final_projection_keeps_private_proof_and_source_bytes_priv
     ]
     stderr_rows = [json.loads(row) for row in owner.stderr_bytes().splitlines()]
     assert stderr_rows[0]["path"] == "src/value.ts"  # Catalog-authorized ref stays public.
-    public_values = [value, json.loads(owner.stdout_bytes()), *stderr_rows, *artifact_documents]
+    public_values = [
+        value,
+        owner.run_manifest(),
+        owner.run_summary(),
+        json.loads(owner.stdout_bytes()),
+        *stderr_rows,
+        *artifact_documents,
+    ]
     private_keys = {
         "proof",
         "content_base64",
@@ -1102,4 +1328,16 @@ def test_configured_selected_stdout_boundary_retains_the_original_candidate_meas
         assert json.loads(owner.stderr_bytes())["code"] == "CSV-NEXT-LIMIT-003"
         assert json.loads(owner.stderr_bytes())["scope"] == "publication"
         _validator("stdout-result-v2.schema.json").validate(replacement)
+    root = owner.run_manifest()
+    summary = owner.run_summary()
+    assert (
+        root["run"]["status"]
+        == summary["run_status"]
+        == ("complete" if delta == 0 else "incomplete")
+    )
+    assert root["run"]["exit_code"] == summary["exit_code"] == (0 if delta == 0 else 3)
+    assert root["domains"][0]["status"] == "complete"
+    assert summary["domains"] == [{"domain": "next", "status": "complete"}]
+    assert root["artifacts"] == [artifact.descriptor()]
+    assert root["run"]["fingerprint"] == value["semantic_decision"]["context"]["run_fingerprint"]
     _validator("next-publication-decision-v2.schema.json").validate(value)
