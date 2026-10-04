@@ -30,6 +30,8 @@ SI-06では原author briefを同会話で回収し、独立指摘分析とactual
 
 ## Verification
 
+- 親設定入力の最小接続: 既存final reference/validator内へimmutableな選択入力を追加し、既存factoryの必須引数として同じanalysis contextへ結合しました。新module/public schema/hash/resolverは追加していません。値の不一致、選択元の不正・欠落、同値別context、nominal owner、入力不足を順次Red→Greenで確認。元74564はfinal/public familyの85 passed/2 deselected/398.00sで、configured stderr64KiB exact/+1・既存seal KAT・cache/native/privacyも含みます。除外2件は16MiBの高コスト境界で、全SI-06の必須gateでは後日必ず実行します。Ruff/format256/mypy214、SpecDock10、diff-checkはpass。現段階は入力保持までで、root/domain/summary投影、全selector、全required suite、累積Strict Code Reviewは未完了です。
+
 - root限定訂正の最初のTDD: 元96972でactual stage failureの`run.fingerprint=null`が旧string制約に拒否されるRed（1 failed/20.98s）。続くfixtureの公開Node failure名を既存`spawn_failed`へ訂正し、元7662は同test 1 passed/19.61s。Next snapshotだけnullable、その他はnonnullの最小schema変更後、元8014はpublic family25 passed/20.77s（全Python/SQLAlchemy goldenの旧v1・新v2でnull拒否を追加）。Ruff/format256/mypy214、SpecDock10、diff-checkもpass。これはschema境界だけで、親設定・domain/root final owner・全SI-06は未完了です。仕様レビューの原logは[lossless gzip](artifacts/20261004t041409z--si06-root-correction-oracle.log.gz)へ保存しました。
 
 - SI-06 root/config契約の独立advisory: clean/pushed exact `fca99a91c11f33de5199e67996be1be671e10298`へfresh Use Strict / GPT-5.6 Sol / Pro、元87072はterminal0 / 20m27s、model/thinking両UI picker verifiedです。原778行とtranscript/logを照合し、null対root必須digestは確認、誤14-key列挙・到達不能capture/Core正例等は不採用です。raw/logはlossless gzip、lineageと採否・A/B条件は[判断候補](artifacts/20261003t195656z-decision-candidate-si06-root-fingerprint-and-config-origin.md)へ保存しました。人間向けHTMLは1/1 PlantUML描画、zoom/keyboard/focus gateがpassです。新root仕様の採択、Spec/Code Review、全SI-06のpassではありません。

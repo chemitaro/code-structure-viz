@@ -10,7 +10,10 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 
-from tests.contracts.next_final_publication_v2_fixtures import stage_failed_candidates_v3
+from tests.contracts.next_final_publication_v2_fixtures import (
+    parent_configuration_fixture_v2,
+    stage_failed_candidates_v3,
+)
 from tests.contracts.next_final_publication_v2_reference import retain_final_publication_v2
 from tests.contracts.next_public_semantic_v3_reference import project_public_semantic_document_v3
 from tests.contracts.next_public_semantic_v3_validation import validate_semantic_dispatcher_v3
@@ -290,7 +293,9 @@ def test_root_v2_accepts_the_actual_stage_failure_null_fingerprint(
 ) -> None:
     """Full schema vector; parent config/root projection is not certified here."""
     candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
-    final = retain_final_publication_v2(candidates)
+    final = retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     run = candidates.run_decision().record()
     assert run["context"]["run_fingerprint"] is None
     root = deepcopy(outer_vectors["run-manifest-v2"])

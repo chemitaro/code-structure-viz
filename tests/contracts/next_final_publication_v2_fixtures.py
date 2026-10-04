@@ -7,6 +7,10 @@ from typing import Any
 
 from code_structure_viz.adapters.next.source_acquisition import SourceAcquisitionSeal
 from tests.contracts import next_runtime_v2_reference as runtime_reference
+from tests.contracts.next_final_publication_v2_reference import (
+    RetainedParentConfigurationV2,
+    retain_parent_configuration_v2,
+)
 from tests.contracts.next_publication_candidates_v2_fixtures import _long_case_inputs
 from tests.contracts.next_publication_candidates_v3_reference import (
     RetainedRequestBoundPublicationCandidatesV3,
@@ -36,6 +40,32 @@ from tests.contracts.test_next_semantic_core_v3 import (
 )
 from tests.contracts.test_next_source_inventory_v3 import refresh_wire
 from tests.contracts.test_next_trusted_environment_v2 import profile_members
+
+
+def explicit_parent_selections_v2(
+    context: runtime_reference.RetainedNextAnalysisContextV2,
+) -> dict[str, Any]:
+    """Explicit reference inputs; no inference of real CLI/filesystem origins."""
+    config = context.domain_config()
+    values = {
+        "next_projects": [row["root"] for row in config["projects"]],
+        "next_targets": config["targets"],
+        "formats": config["formats"],
+        "upstream_depth": config["upstream_depth"],
+        "downstream_depth": config["downstream_depth"],
+        "limits": config["limits"],
+        "trusted_environment": config["trusted_environment_digest"],
+    }
+    return {name: {"value": value, "source": "explicit"} for name, value in values.items()}
+
+
+def parent_configuration_fixture_v2(
+    candidates: RetainedRequestBoundPublicationCandidatesV3,
+) -> RetainedParentConfigurationV2:
+    context = candidates.run_decision().runtime_result().request_frame().analysis_context()
+    return retain_parent_configuration_v2(
+        context, source="explicit", selections=explicit_parent_selections_v2(context)
+    )
 
 
 def stage_failed_candidates_v3(

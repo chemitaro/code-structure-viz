@@ -6,6 +6,7 @@ import json
 from copy import copy
 from importlib import import_module, util
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -15,9 +16,11 @@ from tests.contracts.next_final_publication_v2_fixtures import (
     capture_overflow_candidates_v3,
     complete_candidates_v3,
     entity_budget_candidates_v3,
+    explicit_parent_selections_v2,
     export_failure_candidates_v3,
     large_selected_stdout_candidates_v3,
     observed_zero_capture_candidates_v3,
+    parent_configuration_fixture_v2,
     rejected_candidates_v3,
     source_failure_candidates_v3,
     stage_failed_candidates_v3,
@@ -26,7 +29,7 @@ from tests.contracts.next_final_publication_v2_fixtures import (
 )
 from tests.contracts.test_json_schemas import _validator
 from tests.contracts.test_next_public_diagnostic_v3 import NODE_002_JSONL
-from tests.contracts.test_next_semantic_core_v3 import MODULE_IDS, SOURCE_BYTES
+from tests.contracts.test_next_semantic_core_v3 import MODULE_IDS, SOURCE_BYTES, core_inputs_v3
 
 
 def _literal_json(value: object) -> bytes:
@@ -35,6 +38,176 @@ def _literal_json(value: object) -> bytes:
 
 def _literal_sha(value: object) -> str:
     return hashlib.sha256(_literal_json(value)).hexdigest()
+
+
+def test_parent_configuration_retains_explicit_selections_without_inferring_defaults(
+    tmp_path: Path,
+) -> None:
+    _, _, request, _, _ = core_inputs_v3(tmp_path)
+    context = request.analysis_context()
+    config = context.domain_config()
+    selections: dict[str, Any] = {
+        "next_projects": {"value": ["."], "source": "explicit"},
+        "next_targets": {"value": [], "source": "cli"},
+        "formats": {"value": ["semantic-json"], "source": "repository"},
+        "upstream_depth": {"value": 1, "source": "builtin"},
+        "downstream_depth": {"value": 1, "source": "explicit"},
+        "limits": {"value": config["limits"], "source": "builtin"},
+        "trusted_environment": {"value": config["trusted_environment_digest"], "source": "builtin"},
+    }
+    original = _literal_json(selections)
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    assert hasattr(reference, "retain_parent_configuration_v2"), "parent choices are not retained"
+    parent = reference.retain_parent_configuration_v2(
+        context, source="explicit", selections=selections
+    )
+    assert parent.analysis_context() is context
+    assert parent.source == "explicit"
+    assert _literal_json(parent.selections()) == original
+    selections["next_targets"]["source"] = "builtin"
+    parent.selections()["next_projects"]["value"].append("other")
+    assert _literal_json(parent.selections()) == original
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("next_projects", ["elsewhere"]),
+        ("next_targets", ["path:src/button.tsx"]),
+        ("formats", ["plantuml"]),
+        ("upstream_depth", 2),
+        ("downstream_depth", 0),
+        ("limits", {}),
+        ("trusted_environment", "0" * 64),
+    ],
+)
+def test_parent_selected_values_must_match_the_analysis_context(
+    tmp_path: Path, name: str, value: Any
+) -> None:
+    _, _, request, _, _ = core_inputs_v3(tmp_path)
+    context = request.analysis_context()
+    selections = explicit_parent_selections_v2(context)
+    selections[name]["value"] = value
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    with pytest.raises(ValueError, match="selected value"):
+        reference.retain_parent_configuration_v2(context, source="explicit", selections=selections)
+
+
+@pytest.mark.parametrize(
+    "case", ["extra", "missing", "invalid_origin", "unobserved", "overall_cli", "extra_row"]
+)
+def test_parent_configuration_accepts_only_the_closed_observed_selection_input(
+    tmp_path: Path, case: str
+) -> None:
+    _, _, request, _, _ = core_inputs_v3(tmp_path)
+    context = request.analysis_context()
+    selections = explicit_parent_selections_v2(context)
+    source = "explicit"
+    if case == "extra":
+        selections["unrelated"] = {"value": None, "source": "builtin"}
+    elif case == "missing":
+        del selections["formats"]
+    elif case == "invalid_origin":
+        selections["formats"]["source"] = "tsconfig.json"
+    elif case == "unobserved":
+        selections["limits"]["source"] = "unobserved"
+    elif case == "overall_cli":
+        source = "cli"
+    else:
+        selections["formats"]["path"] = "/private/config.json"
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    with pytest.raises(ValueError, match="parent selection"):
+        reference.retain_parent_configuration_v2(context, source=source, selections=selections)
+
+
+def test_parent_configuration_rejects_equal_content_foreign_context(tmp_path: Path) -> None:
+    (tmp_path / "original").mkdir()
+    (tmp_path / "foreign").mkdir()
+    _, _, request, _, _ = core_inputs_v3(tmp_path / "original")
+    _, _, foreign_request, _, _ = core_inputs_v3(tmp_path / "foreign")
+    context, foreign = request.analysis_context(), foreign_request.analysis_context()
+    assert context is not foreign and context.domain_config() == foreign.domain_config()
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    parent = reference.retain_parent_configuration_v2(
+        context, source="explicit", selections=explicit_parent_selections_v2(context)
+    )
+    validation = import_module("tests.contracts.next_final_publication_v2_validation")
+    with pytest.raises(ValueError, match="same analysis context"):
+        validation.validate_parent_configuration_v2(parent, context=foreign)
+
+
+def test_parent_configuration_requires_nominal_input_owners(tmp_path: Path) -> None:
+    _, _, request, _, _ = core_inputs_v3(tmp_path)
+    context = request.analysis_context()
+    selections = explicit_parent_selections_v2(context)
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    foreign = SimpleNamespace(domain_config=context.domain_config, run_context=context.run_context)
+    with pytest.raises(TypeError, match="nominal"):
+        reference.retain_parent_configuration_v2(foreign, source="explicit", selections=selections)
+    parent = reference.retain_parent_configuration_v2(
+        context, source="explicit", selections=selections
+    )
+    forged = SimpleNamespace(
+        analysis_context=lambda: context, source="explicit", selections=parent.selections
+    )
+    validation = import_module("tests.contracts.next_final_publication_v2_validation")
+    with pytest.raises(TypeError, match="nominal"):
+        validation.validate_parent_configuration_v2(forged, context=context)
+
+
+@pytest.mark.parametrize("source", ["builtin", "repository", "explicit"])
+@pytest.mark.parametrize("origin", ["builtin", "repository", "explicit", "cli"])
+def test_parent_configuration_preserves_every_legal_origin(
+    tmp_path: Path, source: str, origin: str
+) -> None:
+    _, _, request, _, _ = core_inputs_v3(tmp_path)
+    context = request.analysis_context()
+    selections = explicit_parent_selections_v2(context)
+    for row in selections.values():
+        row["source"] = origin
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    parent = reference.retain_parent_configuration_v2(context, source=source, selections=selections)
+    assert parent.source == source
+    assert parent.selections() == selections
+
+
+@pytest.mark.parametrize("value", [True, 1.0])
+def test_parent_configuration_does_not_coerce_selected_numbers(tmp_path: Path, value: Any) -> None:
+    _, _, request, _, _ = core_inputs_v3(tmp_path)
+    context = request.analysis_context()
+    selections = explicit_parent_selections_v2(context)
+    selections["upstream_depth"]["value"] = value
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    with pytest.raises(ValueError, match="selected value"):
+        reference.retain_parent_configuration_v2(context, source="explicit", selections=selections)
+
+
+def test_final_publication_requires_the_parent_configuration_input(tmp_path: Path) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    with pytest.raises(TypeError, match="parent_configuration"):
+        reference.retain_final_publication_v2(candidates)
+
+
+def test_final_publication_rejects_foreign_parent_configuration_even_with_equal_values(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "original").mkdir()
+    (tmp_path / "foreign").mkdir()
+    candidates = stage_failed_candidates_v3(tmp_path / "original", selector="next:semantic-json")
+    foreign = stage_failed_candidates_v3(tmp_path / "foreign", selector="next:semantic-json")
+    parent = parent_configuration_fixture_v2(candidates)
+    foreign_parent = parent_configuration_fixture_v2(foreign)
+    assert parent.selections() == foreign_parent.selections()
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    with pytest.raises(ValueError, match="same analysis context"):
+        reference.retain_final_publication_v2(candidates, parent_configuration=foreign_parent)
+    owner = reference.retain_final_publication_v2(candidates, parent_configuration=parent)
+    assert owner.parent_configuration() is parent
+    forged = copy(owner)
+    object.__setattr__(forged, "_parent_configuration", foreign_parent)
+    with pytest.raises(ValueError, match="same analysis context"):
+        reference.project_final_publication_v2(forged)
 
 
 def _aligned_unavailable_cache(owner: Any, value: dict[str, Any]) -> Any:
@@ -115,7 +288,9 @@ def test_aligned_resealed_cache_cannot_coerce_native_counts_or_version(
         else stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
     )
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     reference.project_final_publication_v2(owner)
     value = owner.record()
     location = value if group is None else value["measurements"][group]
@@ -144,7 +319,9 @@ def test_equal_content_foreign_candidates_and_run_do_not_replace_the_actual_owne
     validate = import_module(
         "tests.contracts.next_final_publication_v2_validation"
     ).validate_final_publication_v2
-    owner = reference.retain_final_publication_v2(original)
+    owner = reference.retain_final_publication_v2(
+        original, parent_configuration=parent_configuration_fixture_v2(original)
+    )
     value = reference.project_final_publication_v2(owner)
     _validator("next-publication-decision-v2.schema.json").validate(value)
     with pytest.raises(ValueError, match="same candidates owner"):
@@ -158,7 +335,9 @@ def test_complete_final_owner_publishes_the_same_artifact_and_catalog_stderr(
     module = "tests.contracts.next_final_publication_v2_reference"
     assert util.find_spec(module) is not None, "actual candidates have no final publication owner"
     reference = import_module(module)
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     assert owner.candidates() is candidates
     artifact = candidates.artifacts()[0]
@@ -219,7 +398,9 @@ def test_partial_safe_final_projection_keeps_private_proof_and_source_bytes_priv
     transport = core.transport_candidate()
     assert transport.semantic_payload()["proof"]["failure_roots"]
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     assert value["semantic_decision"]["outcome"] == "partial_safe"
     artifact_documents = [
@@ -268,7 +449,9 @@ def test_partial_safe_final_projection_keeps_private_proof_and_source_bytes_priv
 def test_target_unavailable_stdout_retains_the_actual_failed_target(tmp_path: Path) -> None:
     candidates = target_failure_candidates_v3(tmp_path, selector="next:semantic-json")
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     assert value["publication_outcome"] == "published" and value["exit_code"] == 3
     assert value["response"] is not None and value["artifacts"] == []
@@ -293,7 +476,9 @@ def test_observed_zero_capture_is_not_replaced_by_unobserved_null(tmp_path: Path
     validate = import_module(
         "tests.contracts.next_final_publication_v2_validation"
     ).validate_final_publication_v2
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     assert value["publication_outcome"] == "published" and value["exit_code"] == 3
     assert value["semantic_decision"]["provenance"]["failure_code"] == "CSV-NEXT-NODE-003"
@@ -318,7 +503,9 @@ def test_unobserved_capture_cannot_be_zero_filled_in_aligned_metadata(tmp_path: 
     validate = import_module(
         "tests.contracts.next_final_publication_v2_validation"
     ).validate_final_publication_v2
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = owner.record()
     for name in ("adapter_stdout", "adapter_stderr"):
         value["measurements"][name] = {
@@ -337,7 +524,9 @@ def test_stage_failure_final_owner_preserves_unobserved_capture_and_publishes_th
 ) -> None:
     candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     expected_stdout = (
         b'{"artifact":null,"availability":false,"domain_status":"incomplete",'
@@ -412,7 +601,9 @@ def test_source_unavailable_is_published_with_its_same_validated_response(
 ) -> None:
     candidates = source_failure_candidates_v3(tmp_path, kind, selector="next:semantic-json")
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     run = candidates.run_decision()
     core = run.semantic_decision()
@@ -446,7 +637,9 @@ def test_rejected_core_can_publish_the_failure_but_not_an_eligible_response_link
 ) -> None:
     candidates = rejected_candidates_v3(tmp_path, selector="next:semantic-json")
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     assert value["semantic_decision"]["provenance"]["failure_code"] == "CSV-NEXT-PROTOCOL-001"
     assert value["publication_outcome"] == "published" and value["exit_code"] == 3
@@ -473,7 +666,9 @@ def test_other_validated_failures_preserve_their_semantic_axis_and_eligible_resp
         )
         expected_code = "CSV-NEXT-SOURCE-001"
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     run = candidates.run_decision()
     core = run.semantic_decision()
@@ -501,7 +696,9 @@ def test_actual_adapter_capture_overflow_is_a_publication_failure_not_null_captu
 ) -> None:
     candidates = capture_overflow_candidates_v3(tmp_path, stream)
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     assert value["publication_outcome"] == "payload_unavailable" and value["exit_code"] == 3
     assert value["response"] is None and value["artifacts"] == []
@@ -563,7 +760,9 @@ def test_configured_public_stderr_boundary_keeps_all_or_no_bytes(
         else "c9373a44926510bbf4508a8702e0f8f9b217764ea4f1f7979f342c61b3e3a08b"
     )
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     assert value["measurements"]["public_stderr"] == {
         "allowed": delta == 0,
@@ -602,7 +801,9 @@ def test_configured_selected_stdout_boundary_retains_the_original_candidate_meas
         == 16_777_216
     )
     reference = import_module("tests.contracts.next_final_publication_v2_reference")
-    owner = reference.retain_final_publication_v2(candidates)
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
     value = reference.project_final_publication_v2(owner)
     assert value["measurements"]["selected_stdout"] == {
         "allowed": delta == 0,

@@ -8,7 +8,10 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from tests.contracts.next_final_publication_v2_validation import validate_final_publication_v2
+from tests.contracts.next_final_publication_v2_validation import (
+    validate_final_publication_v2,
+    validate_parent_configuration_v2,
+)
 from tests.contracts.next_public_diagnostic_v3_reference import derive_public_diagnostics_v3
 from tests.contracts.next_public_diagnostic_v3_validation import validate_public_diagnostics_v3
 from tests.contracts.next_publication_candidates_v3_reference import (
@@ -24,6 +27,7 @@ from tests.contracts.next_reference_validation import (
     copy_selected_stdout,
     digest,
 )
+from tests.contracts.next_runtime_v2_reference import RetainedNextAnalysisContextV2
 from tests.contracts.next_semantic_core_v3_reference import (
     RejectedSemanticDecisionV3,
     ValidatedSemanticDecisionV3,
@@ -31,10 +35,43 @@ from tests.contracts.next_semantic_core_v3_reference import (
 
 
 @dataclass(frozen=True, slots=True, init=False)
+class RetainedParentConfigurationV2:
+    """Trusted parent selection input, not evidence of real CLI or file reads."""
+
+    _context: RetainedNextAnalysisContextV2 = field(repr=False)
+    source: str
+    _selections_bytes: bytes = field(repr=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("parent configuration requires the selection factory")
+
+    def analysis_context(self) -> RetainedNextAnalysisContextV2:
+        return self._context
+
+    def selections(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._selections_bytes))
+
+
+def retain_parent_configuration_v2(
+    context: RetainedNextAnalysisContextV2,
+    *,
+    source: str,
+    selections: dict[str, Any],
+) -> RetainedParentConfigurationV2:
+    owner = object.__new__(RetainedParentConfigurationV2)
+    object.__setattr__(owner, "_context", context)
+    object.__setattr__(owner, "source", source)
+    object.__setattr__(owner, "_selections_bytes", canonical_json_bytes(selections))
+    validate_parent_configuration_v2(owner, context=context)
+    return owner
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class RetainedFinalPublicationV2:
     """Same candidates owner plus immutable final public bytes and metadata."""
 
     _candidates: RetainedRequestBoundPublicationCandidatesV3 = field(repr=False)
+    _parent_configuration: RetainedParentConfigurationV2 = field(repr=False)
     _stdout_bytes: bytes = field(repr=False)
     _stderr_bytes: bytes = field(repr=False)
     _diagnostic_input_bytes: bytes = field(repr=False)
@@ -42,10 +79,13 @@ class RetainedFinalPublicationV2:
     _record_bytes: bytes = field(repr=False)
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
-        raise TypeError("final publications are created by the candidates-only factory")
+        raise TypeError("final publications require candidates and parent configuration")
 
     def candidates(self) -> RetainedRequestBoundPublicationCandidatesV3:
         return self._candidates
+
+    def parent_configuration(self) -> RetainedParentConfigurationV2:
+        return self._parent_configuration
 
     def stdout_bytes(self) -> bytes:
         return self._stdout_bytes
@@ -62,6 +102,8 @@ class RetainedFinalPublicationV2:
 
 def retain_final_publication_v2(
     candidates: RetainedRequestBoundPublicationCandidatesV3,
+    *,
+    parent_configuration: RetainedParentConfigurationV2,
 ) -> RetainedFinalPublicationV2:
     """Only the same validated candidates supply status, bytes and measurements."""
 
@@ -78,6 +120,7 @@ def retain_final_publication_v2(
         raise ValueError("unavailable final-publication branches are not admitted here yet")
     runtime = run.runtime_result()
     request = runtime.request_frame()
+    validate_parent_configuration_v2(parent_configuration, context=request.analysis_context())
     limits = request.record()["limits"]
     selector = request.analysis_context().run_context()["stdout_selector"]
     if selector not in {"next:semantic-json", "next:plantuml"}:
@@ -289,6 +332,7 @@ def retain_final_publication_v2(
     }
     instance = object.__new__(RetainedFinalPublicationV2)
     object.__setattr__(instance, "_candidates", candidates)
+    object.__setattr__(instance, "_parent_configuration", parent_configuration)
     object.__setattr__(instance, "_stdout_bytes", stdout_bytes)
     object.__setattr__(instance, "_stderr_bytes", stderr)
     object.__setattr__(instance, "_diagnostic_input_bytes", diagnostic_input)

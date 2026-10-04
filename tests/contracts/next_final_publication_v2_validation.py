@@ -28,11 +28,57 @@ from tests.contracts.next_semantic_core_v3_reference import (
 )
 
 if TYPE_CHECKING:
-    from tests.contracts.next_final_publication_v2_reference import RetainedFinalPublicationV2
+    from tests.contracts.next_final_publication_v2_reference import (
+        RetainedFinalPublicationV2,
+        RetainedParentConfigurationV2,
+    )
+    from tests.contracts.next_runtime_v2_reference import RetainedNextAnalysisContextV2
 
 
 def _same(value: Any, expected: Any) -> bool:
     return canonical_json_bytes(value) == canonical_json_bytes(expected)
+
+
+def validate_parent_configuration_v2(
+    owner: RetainedParentConfigurationV2, *, context: RetainedNextAnalysisContextV2
+) -> None:
+    from tests.contracts.next_final_publication_v2_reference import RetainedParentConfigurationV2
+    from tests.contracts.next_runtime_v2_reference import RetainedNextAnalysisContextV2
+
+    if (
+        type(owner) is not RetainedParentConfigurationV2
+        or type(context) is not RetainedNextAnalysisContextV2
+    ):
+        raise TypeError("parent selection requires nominal configuration/context owners")
+    if owner.analysis_context() is not context:
+        raise ValueError("parent selection requires the same analysis context")
+    config = context.domain_config()
+    expected = {
+        "next_projects": [row["root"] for row in config["projects"]],
+        "next_targets": config["targets"],
+        "formats": context.run_context()["requested_formats"],
+        "upstream_depth": config["upstream_depth"],
+        "downstream_depth": config["downstream_depth"],
+        "limits": config["limits"],
+        "trusted_environment": config["trusted_environment_digest"],
+    }
+    selections = owner.selections()
+    if (
+        owner.source not in ("builtin", "repository", "explicit")
+        or type(selections) is not dict
+        or selections.keys() != expected.keys()
+    ):
+        raise ValueError("parent selection input is not closed")
+    for name, value in expected.items():
+        row = selections[name]
+        if (
+            type(row) is not dict
+            or row.keys() != {"source", "value"}
+            or row["source"] not in ("builtin", "repository", "explicit", "cli")
+        ):
+            raise ValueError("parent selection origin is not an observed configuration source")
+        if not _same(row["value"], value):
+            raise ValueError("parent selected value differs from the analysis context")
 
 
 def validate_final_publication_v2(
@@ -70,6 +116,7 @@ def validate_final_publication_v2(
     }:
         raise ValueError("unavailable final-publication validation is not admitted here yet")
     frame = run.runtime_result().request_frame()
+    validate_parent_configuration_v2(owner.parent_configuration(), context=frame.analysis_context())
     limits = frame.record()["limits"]
     selector = frame.analysis_context().run_context()["stdout_selector"]
     if selector not in {"next:semantic-json", "next:plantuml"}:
