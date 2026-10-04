@@ -1189,10 +1189,14 @@ def test_equal_content_foreign_candidates_and_run_do_not_replace_the_actual_owne
         validate(value, owner, candidates=foreign)
 
 
+@pytest.mark.parametrize("artifact_format", ["semantic-json", "plantuml"])
 def test_complete_final_owner_publishes_the_same_artifact_and_catalog_stderr(
     tmp_path: Path,
+    artifact_format: str,
 ) -> None:
-    candidates = complete_candidates_v3(tmp_path)
+    candidates = complete_candidates_v3(
+        tmp_path, selector="next:" + artifact_format, requested_formats=[artifact_format]
+    )
     module = "tests.contracts.next_final_publication_v2_reference"
     assert util.find_spec(module) is not None, "actual candidates have no final publication owner"
     reference = import_module(module)
@@ -1202,6 +1206,7 @@ def test_complete_final_owner_publishes_the_same_artifact_and_catalog_stderr(
     value = reference.project_final_publication_v2(owner)
     assert owner.candidates() is candidates
     artifact = candidates.artifacts()[0]
+    assert artifact.descriptor()["format"] == artifact_format
     assert value["semantic_decision"] == candidates.run_decision().record()
     assert value["candidates"] == candidates.record()
     assert value["publication_outcome"] == "published" and value["exit_code"] == 0
