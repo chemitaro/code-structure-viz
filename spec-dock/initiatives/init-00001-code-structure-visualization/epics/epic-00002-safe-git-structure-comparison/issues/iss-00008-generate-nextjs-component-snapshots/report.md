@@ -14,7 +14,7 @@ ID: "iss-00008"
 
 ## Outcome
 
-2026-10-04、ユーザーがroot指紋の推奨A案を採択し、最小限でシンプルな実装を要求しました。accepted ADR `artifacts/20261004t033836z-adr-si06-root-fingerprint-current-v2.md`とCurrent R/D/P/public semantic-v3へ反映しました。現在はroot訂正の先行仕様gateを準備中で、root実装や新review passはまだありません。先行判断資料の未採択表示は当時の履歴です。
+2026-10-04、ユーザーがroot指紋の推奨A案を採択し、最小限でシンプルな実装を要求しました。accepted ADR `artifacts/20261004t033836z-adr-si06-root-fingerprint-current-v2.md`とCurrent R/D/P/public semantic-v3へ反映しました。exact `3eb6d4a9a3f37b355e7b66e6c5f2a4e2af4de355`の同objective Spec Review Strictはpass/findings0で、root訂正の仕様gateを通過しました。原JSONは[レビュー結果](artifacts/20261004t040908z--si06-root-correction-result.json)。元33391はexit0/10m29s、duplicate key無し/installed schema適合、GitHub connector exact SHA確認を含みます。Sol/Proを明示し、同reviewer会話を継承したためモデルのfresh UI検証はなく、Proのみpicker verifiedです。これは仕様gateだけで、root実装・全SI-06・コードレビューのpassではありません。先行判断資料の未採択表示は当時の履歴です。
 
 Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非productionのpublic-spawn feasibilityを両OSで確認しました。採択はADR/R/D/P、実験結果とコードはArtifactへ保存しました。製品のTypeScript解析、Next CLI公開、package同梱、新runtime契約のStrict認定はまだ完了していません。
 
@@ -29,6 +29,8 @@ Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非produ
 SI-06では原author briefを同会話で回収し、独立指摘分析とactual-owner probeでpaired-null captureの公開schema表現欠落を確認しました。2026-10-03にユーザーが現v2限定訂正を明示採択したため、`artifacts/20261003t142223z-adr-si06-capture-observation-current-v2.md`とCurrent R/D/P/public semantic-v3へ先行反映しました。旧判断候補は採択前の履歴として保持します。exact26d3ce1の同reviewer Spec Reviewはpass/findings0となり、仕様gateを通過しました。exactc0a1dd2の改訂briefを全読・採用し、物理schemaのpaired-null訂正、catalog-owned診断、artifact-selectorのsingle final ownerをTDD中です。改訂brief/raw lineageは`artifacts/20261003t163442z-disc-si06-capture-brief-adoption.md`、実装・検証の限定範囲とroot fingerprint確認点は`artifacts/20261003t181426z-disc-si06-publication-progress-root-fingerprint.md`です。全selector/domain/root、native/foreign/cache/privacyの残controls、必須aggregateとfresh Code Reviewが未完了で、SI-06実装gateは未通過です。応答情報の保持に関する第二の懸念は、解析結果と公開処理結果を分ける既存仕様内の説明訂正です。
 
 ## Verification
+
+- root限定訂正の最初のTDD: 元96972でactual stage failureの`run.fingerprint=null`が旧string制約に拒否されるRed（1 failed/20.98s）。続くfixtureの公開Node failure名を既存`spawn_failed`へ訂正し、元7662は同test 1 passed/19.61s。Next snapshotだけnullable、その他はnonnullの最小schema変更後、元8014はpublic family25 passed/20.77s（全Python/SQLAlchemy goldenの旧v1・新v2でnull拒否を追加）。Ruff/format256/mypy214、SpecDock10、diff-checkもpass。これはschema境界だけで、親設定・domain/root final owner・全SI-06は未完了です。仕様レビューの原logは[lossless gzip](artifacts/20261004t041409z--si06-root-correction-oracle.log.gz)へ保存しました。
 
 - SI-06 root/config契約の独立advisory: clean/pushed exact `fca99a91c11f33de5199e67996be1be671e10298`へfresh Use Strict / GPT-5.6 Sol / Pro、元87072はterminal0 / 20m27s、model/thinking両UI picker verifiedです。原778行とtranscript/logを照合し、null対root必須digestは確認、誤14-key列挙・到達不能capture/Core正例等は不採用です。raw/logはlossless gzip、lineageと採否・A/B条件は[判断候補](artifacts/20261003t195656z-decision-candidate-si06-root-fingerprint-and-config-origin.md)へ保存しました。人間向けHTMLは1/1 PlantUML描画、zoom/keyboard/focus gateがpassです。新root仕様の採択、Spec/Code Review、全SI-06のpassではありません。
 

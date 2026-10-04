@@ -11,6 +11,7 @@ import pytest
 from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 
 from tests.contracts.next_final_publication_v2_fixtures import stage_failed_candidates_v3
+from tests.contracts.next_final_publication_v2_reference import retain_final_publication_v2
 from tests.contracts.next_public_semantic_v3_reference import project_public_semantic_document_v3
 from tests.contracts.next_public_semantic_v3_validation import validate_semantic_dispatcher_v3
 from tests.contracts.next_publication_candidates_v3_reference import (
@@ -284,6 +285,45 @@ def outer_vectors(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[st
     }
 
 
+def test_root_v2_accepts_the_actual_stage_failure_null_fingerprint(
+    tmp_path: Path, outer_vectors: dict[str, dict[str, Any]]
+) -> None:
+    """Full schema vector; parent config/root projection is not certified here."""
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    final = retain_final_publication_v2(candidates)
+    run = candidates.run_decision().record()
+    assert run["context"]["run_fingerprint"] is None
+    root = deepcopy(outer_vectors["run-manifest-v2"])
+    root["run"].update(status="incomplete", exit_code=3, fingerprint=None)
+    root.update(
+        next_decision=run,
+        next_publication=final.record(),
+        artifacts=[],
+        diagnostics=list(final.manifest_diagnostics()),
+    )
+    domain = root["domains"][0]
+    domain.update(
+        status="incomplete",
+        incomplete_kind="payload_unavailable",
+        payload_available=False,
+        entity_count=None,
+        run_fingerprint=None,
+        semantic_compatibility_id=None,
+        compatibility_descriptor=None,
+        identity_versions=None,
+        artifact_paths=[],
+        diagnostics=list(final.manifest_diagnostics()),
+        decision=run,
+        publication=final.record(),
+    )
+    domain["budget"].update(actual=None, outcome="payload_unavailable")
+    domain["toolchain"]["node_version"] = None
+    domain["toolchain"]["node"].update(
+        status="unavailable", version=None, failure_kind="spawn_failed"
+    )
+    _validator("run-manifest-v2.schema.json").validate(root)
+
+
 def test_publication_v2_accepts_unobserved_capture_null_pair(
     tmp_path: Path, outer_vectors: dict[str, dict[str, Any]]
 ) -> None:
@@ -398,6 +438,10 @@ def test_legacy_python_sqlalchemy_dispatcher_and_root_branch_meanings_are_unchan
             sibling["contracts"]["manifest"] = "code-structure-viz.run-manifest/v2"
             sibling["contracts"]["stdout_result"] = "code-structure-viz.stdout-result/v2"
             _validator("run-manifest-v2.schema.json").validate(sibling)
+            for version, value in ((1, original), (2, sibling)):
+                value["run"]["fingerprint"] = None
+                with pytest.raises(ValidationError):
+                    _validator(f"run-manifest-v{version}.schema.json").validate(value)
 
 
 @pytest.mark.parametrize(

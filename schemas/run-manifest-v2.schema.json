@@ -470,6 +470,35 @@
   "allOf": [
     {
       "if": {
+        "not": {
+          "properties": {
+            "command": {
+              "properties": {
+                "name": {
+                  "const": "snapshot"
+                },
+                "domain": {
+                  "const": "next"
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "run": {
+            "properties": {
+              "fingerprint": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
         "properties": {
           "command": {
             "properties": {
@@ -2404,7 +2433,10 @@
           ]
         },
         "fingerprint": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^[0-9a-f]{64}$"
         },
         "run_context": {
