@@ -111,8 +111,19 @@ def validate_run_summary_v1(value: Mapping[str, Any], owner: RetainedFinalPublic
 
 
 def validate_run_manifest_v2(value: Mapping[str, Any], owner: RetainedFinalPublicationV2) -> None:
+    from tests.contracts.next_final_publication_v2_reference import RetainedFinalPublicationV2
+
+    if type(owner) is not RetainedFinalPublicationV2:
+        raise TypeError("root validation requires a nominal final owner")
+    validate_final_publication_v2(owner.record(), owner, candidates=owner.candidates())
+    _validate_run_manifest_fields(value, owner, pre_copy=False)
+
+
+def _validate_run_manifest_fields(
+    value: Mapping[str, Any], owner: RetainedFinalPublicationV2, *, pre_copy: bool
+) -> None:
     _validate_schema("run-manifest-v2", value)
-    validate_domain_manifest_v2(value["domains"][0], owner)
+    _validate_domain_manifest_fields(value["domains"][0], owner, pre_copy=pre_copy)
     parent = owner.parent_configuration()
     context = parent.analysis_context()
     config, run_context = context.domain_config(), context.run_context()
@@ -139,6 +150,7 @@ def validate_run_manifest_v2(value: Mapping[str, Any], owner: RetainedFinalPubli
         raise ValueError("root config differs from the retained parent selection")
     run = owner.candidates().run_decision().record()
     publication = owner.record()
+    exit_code = run["exit_code"] if pre_copy else publication["exit_code"]
     domain = value["domains"][0]
     expected = {
         "request_independent": False,
@@ -158,17 +170,23 @@ def validate_run_manifest_v2(value: Mapping[str, Any], owner: RetainedFinalPubli
         "next_request": domain["request"],
         "next_config": config,
         "next_decision": run,
-        "next_publication": publication,
         "source": domain["source"],
         "run": {
-            "status": "complete" if publication["exit_code"] == 0 else "incomplete",
-            "exit_code": publication["exit_code"],
+            "status": "complete" if exit_code == 0 else "incomplete",
+            "exit_code": exit_code,
             "fingerprint": run["context"]["run_fingerprint"],
             "run_context": run_context,
         },
-        "artifacts": [row["descriptor"] for row in publication["artifacts"]],
-        "diagnostics": list(owner.manifest_diagnostics()),
+        "artifacts": sorted(
+            (item.descriptor() for item in owner.candidates().artifacts()),
+            key=lambda row: row["path"],
+        )
+        if pre_copy
+        else [row["descriptor"] for row in publication["artifacts"]],
+        "diagnostics": domain["diagnostics"],
     }
+    if not pre_copy:
+        expected["next_publication"] = publication
     if value.keys() != expected.keys() | {
         "type",
         "schema",
@@ -193,6 +211,12 @@ def validate_domain_manifest_v2(
     if type(owner) is not RetainedFinalPublicationV2:
         raise TypeError("domain validation requires a nominal final publication owner")
     validate_final_publication_v2(owner.record(), owner, candidates=owner.candidates())
+    _validate_domain_manifest_fields(value, owner, pre_copy=False)
+
+
+def _validate_domain_manifest_fields(
+    value: Mapping[str, Any], owner: RetainedFinalPublicationV2, *, pre_copy: bool
+) -> None:
     _validate_schema("next-domain-manifest-v2", value)
     run = owner.candidates().run_decision()
     fingerprint = run.record()["context"]["run_fingerprint"]
@@ -234,8 +258,13 @@ def validate_domain_manifest_v2(
         "limits": request["limits"],
         "trusted_environment": trusted["environment_descriptor"],
         "decision": run.record(),
-        "publication": owner.record(),
-        "diagnostics": list(owner.manifest_diagnostics()),
+        "diagnostics": [
+            row
+            for line in owner._diagnostic_input_bytes.splitlines()
+            if "scope" not in (row := json.loads(line))
+        ]
+        if pre_copy
+        else list(owner.manifest_diagnostics()),
         "source": {
             "schema": seal.source_view.schema,
             "kind": seal.source_view.kind,
@@ -244,6 +273,11 @@ def validate_domain_manifest_v2(
             "file_count": len(seal.source_view.files),
         },
     }
+    if pre_copy:
+        if "publication" in value:
+            raise ValueError("pre-copy domain cannot contain its own publication")
+    else:
+        expected["publication"] = owner.record()
     core = run.semantic_decision()
     if type(core) is ValidatedSemanticDecisionV3:
         gate = core.gate()
@@ -299,7 +333,7 @@ def validate_domain_manifest_v2(
     outcome = run.record()["outcome"]
     available = run.record()["payload_available"]
     measurements = owner.record()["measurements"]
-    if any(
+    if not pre_copy and any(
         row is not None and row["allowed"] is False
         for name in ("adapter_stdout", "adapter_stderr", "public_stderr")
         for row in (measurements[name],)
@@ -317,7 +351,9 @@ def validate_domain_manifest_v2(
             "source": run_context["budget_source"],
             "outcome": outcome,
         },
-        artifact_paths=[row["descriptor"]["path"] for row in owner.record()["artifacts"]],
+        artifact_paths=sorted(item.descriptor()["path"] for item in owner.candidates().artifacts())
+        if pre_copy
+        else [row["descriptor"]["path"] for row in owner.record()["artifacts"]],
     )
     if value.get("incomplete_kind") != (None if outcome == "complete" else outcome):
         raise ValueError("domain incomplete kind differs from its outcome")
@@ -387,8 +423,6 @@ def validate_final_publication_v2(
     validate_parent_configuration_v2(owner.parent_configuration(), context=frame.analysis_context())
     limits = frame.record()["limits"]
     selector = frame.analysis_context().run_context()["stdout_selector"]
-    if selector not in {"next:semantic-json", "next:plantuml"}:
-        raise ValueError("summary/manifest final-publication validation is not admitted here yet")
     held = candidates.record()["capture_measurements"]
     capture_failed = False
     for stream in ("stdout", "stderr"):
@@ -414,6 +448,44 @@ def validate_final_publication_v2(
         None,
     )
     raw = selected_artifact.wire_bytes() if selected_artifact is not None else b""
+    selected_descriptor = selected_artifact.descriptor() if selected_artifact is not None else None
+    if selector != "manifest" and owner._manifest_input_bytes is not None:
+        raise ValueError("non-manifest selection cannot retain manifest candidate bytes")
+    if selector is None:
+        run_record = run.record()
+        summary_domain = {"domain": "next", "status": run_record["status"]}
+        if run_record["status"] == "incomplete":
+            summary_domain["incomplete_kind"] = run_record["outcome"]
+        raw = (
+            canonical_json_bytes(
+                {
+                    "type": "run_summary",
+                    "schema": "code-structure-viz.run-summary/v1",
+                    "run_status": run_record["status"],
+                    "exit_code": run_record["exit_code"],
+                    "domains": [summary_domain],
+                    "manifest": "run-manifest.json",
+                }
+            )
+            + b"\n"
+        )
+    elif selector == "manifest":
+        if type(owner._manifest_input_bytes) is not bytes:
+            raise ValueError("manifest selection requires the original pre-copy bytes")
+        raw = owner._manifest_input_bytes
+        manifest = json.loads(raw)
+        if raw != canonical_json_bytes(manifest) + b"\n":
+            raise ValueError("manifest candidate is not canonical JSONL")
+        _validate_run_manifest_fields(manifest, owner, pre_copy=True)
+        selected_descriptor = {
+            "path": "run-manifest.json",
+            "domain": "next",
+            "format": "semantic-json",
+            "media_type": "application/json",
+            "size_bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+    selected_available = selector is None or selected_descriptor is not None
     selected_sha = hashlib.sha256(raw).hexdigest()
     selected_failed = len(raw) > limits["max_selected_stdout_bytes"]
     expected_outcome = (
@@ -452,7 +524,23 @@ def validate_final_publication_v2(
     if not _same(value["response"], response):
         raise ValueError("published response link differs from the same validated Core receipt")
     stdout_bytes = raw
-    if selected_artifact is None or publication_failed:
+    if selector is None and (publication_failed or selected_failed):
+        stdout_bytes = (
+            canonical_json_bytes(
+                {
+                    "type": "stdout_result",
+                    "schema": "code-structure-viz.stdout-result/v2",
+                    "selector": None,
+                    "availability": False,
+                    "run_status": "incomplete",
+                    "stable_reason": "run_summary",
+                    "selected_stdout_unavailable": True,
+                    "artifact": None,
+                }
+            )
+            + b"\n"
+        )
+    elif not selected_available or publication_failed:
         unavailable: dict[str, Any] = {
             "type": "stdout_result",
             "schema": "code-structure-viz.stdout-result/v2",
@@ -485,31 +573,27 @@ def validate_final_publication_v2(
             "domain_status": run.record()["status"],
             "stable_reason": "selected_artifact_unavailable",
             "selected_stdout_unavailable": True,
-            "artifact": selected_artifact.descriptor(),
+            "artifact": selected_descriptor,
         }
         if run.record()["status"] == "incomplete":
             replacement["incomplete_kind"] = run.record()["incomplete_kind"]
         stdout_bytes = canonical_json_bytes(replacement) + b"\n"
     stdout = {
         "selector": selector,
-        "availability": selected_artifact is not None
-        and not publication_failed
-        and not selected_failed,
+        "availability": selected_available and not publication_failed and not selected_failed,
         "copy_status": (
             "not_attempted"
-            if selected_artifact is None or publication_failed
+            if not selected_available or publication_failed
             else "unavailable"
             if selected_failed
             else "published"
         ),
-        "candidate": selected_artifact.descriptor()
-        if selected_artifact is not None and not publication_failed
-        else None,
+        "candidate": selected_descriptor if not publication_failed else None,
         "result_bytes_base64": base64.b64encode(stdout_bytes).decode("ascii"),
         "result_size_bytes": len(stdout_bytes),
         "result_sha256": hashlib.sha256(stdout_bytes).hexdigest(),
     }
-    if selected_artifact is not None:
+    if selected_available:
         stdout.update(selected_size_bytes=len(raw), selected_sha256=selected_sha)
     if owner.stdout_bytes() != stdout_bytes or not _same(value["stdout"], stdout):
         raise ValueError("final stdout differs from its actual pre-copy candidate bytes")

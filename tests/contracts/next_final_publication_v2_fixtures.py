@@ -145,11 +145,11 @@ def runtime_control_failure_candidates_v3(
 def capture_overflow_candidates_v3(
     tmp_path: Path,
     stream: str,
+    *,
+    selector: str | None = "next:semantic-json",
 ) -> RetainedRequestBoundPublicationCandidatesV3:
     assert stream in {"stdout", "stderr"}
-    seal, assets, request, policy, _wire = core_inputs_v3(
-        tmp_path, stdout_selector="next:semantic-json"
-    )
+    seal, assets, request, policy, _wire = core_inputs_v3(tmp_path, stdout_selector=selector)
     evidence = complete_evidence(policy)
     evidence.update(response=None, exit_code=-15, terminal_cause=stream + "_limit")
     evidence["capture"].update(
@@ -208,6 +208,8 @@ def stderr_boundary_candidates_v3(
 
 def partial_stderr_overflow_candidates_v3(
     tmp_path: Path,
+    *,
+    selector: str | None = "next:semantic-json",
 ) -> RetainedRequestBoundPublicationCandidatesV3:
     """Actual isolated failed files produce more than the configured 64 KiB JSONL."""
     failed_paths = ["src/" + ("a" * 150 + "/") * 4 + f"failed-{n:02d}.ts" for n in range(80)]
@@ -215,7 +217,7 @@ def partial_stderr_overflow_candidates_v3(
         tmp_path,
         sources={**SOURCE_BYTES, **dict.fromkeys(failed_paths, b"export {}; const broken = (\n")},
         targets=["path:src/button.tsx"],
-        stdout_selector="next:semantic-json",
+        stdout_selector=selector,
     )
     model, proof = wire["semantic_payload"]["model"], wire["semantic_payload"]["proof"]
     failed = [row for row in request.record()["files"] if row["path"] in failed_paths]
@@ -538,9 +540,14 @@ def entity_budget_candidates_v3(
 
 
 def complete_candidates_v3(
-    tmp_path: Path, *, selector: str | None = "next:semantic-json"
+    tmp_path: Path,
+    *,
+    selector: str | None = "next:semantic-json",
+    requested_formats: list[str] | None = None,
 ) -> RetainedRequestBoundPublicationCandidatesV3:
-    seal, assets, request, policy, wire = core_inputs_v3(tmp_path, stdout_selector=selector)
+    seal, assets, request, policy, wire = core_inputs_v3(
+        tmp_path, stdout_selector=selector, requested_formats=requested_formats
+    )
     runtime = runtime_for_core_wire(seal, assets, request, policy, wire)
     candidate = runtime.transport_candidate()
     assert candidate is not None

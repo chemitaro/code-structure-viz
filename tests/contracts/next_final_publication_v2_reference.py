@@ -84,6 +84,7 @@ class RetainedFinalPublicationV2:
     _diagnostic_input_bytes: bytes = field(repr=False)
     _manifest_diagnostics_bytes: bytes = field(repr=False)
     _record_bytes: bytes = field(repr=False)
+    _manifest_input_bytes: bytes | None = field(repr=False)
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         raise TypeError("final publications require candidates and parent configuration")
@@ -107,46 +108,52 @@ class RetainedFinalPublicationV2:
         return cast(dict[str, Any], json.loads(self._record_bytes))
 
     def domain_manifest(self) -> dict[str, Any]:
-        value = _domain_manifest_v2(self)
+        value = _domain_manifest_v2(self.candidates(), self.manifest_diagnostics(), self.record())
         validate_domain_manifest_v2(value, self)
         return value
 
     def run_manifest(self) -> dict[str, Any]:
-        value = _run_manifest_v2(self, _domain_manifest_v2(self))
+        publication = self.record()
+        domain = _domain_manifest_v2(self.candidates(), self.manifest_diagnostics(), publication)
+        value = _run_manifest_v2(self.parent_configuration(), domain, publication)
         validate_run_manifest_v2(value, self)
         return value
 
     def run_summary(self) -> dict[str, Any]:
-        value = _run_summary_v1(self)
+        publication = self.record()
+        outcome = (
+            "payload_unavailable"
+            if publication["publication_outcome"] == "payload_unavailable"
+            else self.candidates().run_decision().record()["outcome"]
+        )
+        value = _run_summary_v1(outcome, publication["exit_code"])
         validate_run_summary_v1(value, self)
         return value
 
 
-def _run_summary_v1(owner: RetainedFinalPublicationV2) -> dict[str, Any]:
-    publication = owner.record()
-    outcome = (
-        "payload_unavailable"
-        if publication["publication_outcome"] == "payload_unavailable"
-        else owner.candidates().run_decision().record()["outcome"]
-    )
+def _run_summary_v1(outcome: str, exit_code: int) -> dict[str, Any]:
     domain = {"domain": "next", "status": "complete" if outcome == "complete" else "incomplete"}
     if outcome != "complete":
         domain["incomplete_kind"] = outcome
     return {
         "type": "run_summary",
         "schema": "code-structure-viz.run-summary/v1",
-        "run_status": "complete" if publication["exit_code"] == 0 else "incomplete",
-        "exit_code": publication["exit_code"],
+        "run_status": "complete" if exit_code == 0 else "incomplete",
+        "exit_code": exit_code,
         "domains": [domain],
         "manifest": "run-manifest.json",
     }
 
 
-def _run_manifest_v2(owner: RetainedFinalPublicationV2, domain: dict[str, Any]) -> dict[str, Any]:
-    parent = owner.parent_configuration()
+def _run_manifest_v2(
+    parent: RetainedParentConfigurationV2,
+    domain: dict[str, Any],
+    publication: dict[str, Any] | None,
+) -> dict[str, Any]:
     config = parent.analysis_context().domain_config()
     context = parent.analysis_context().run_context()
-    publication = owner.record()
+    run = domain["decision"]
+    exit_code = run["exit_code"] if publication is None else publication["exit_code"]
     roots = [row["root"] for row in config["projects"]]
     root_config = {
         "schema": "code-structure-viz.config/v1",
@@ -164,7 +171,7 @@ def _run_manifest_v2(owner: RetainedFinalPublicationV2, domain: dict[str, Any]) 
         "value_sources": {key: row["source"] for key, row in parent.selections().items()},
     }
     root_config["sha256"] = digest(root_config)
-    return {
+    value = {
         "type": "run_manifest",
         "schema": "code-structure-viz.run-manifest/v2",
         "tool": {"name": "code-structure-viz", "version": __version__},
@@ -195,24 +202,31 @@ def _run_manifest_v2(owner: RetainedFinalPublicationV2, domain: dict[str, Any]) 
         },
         "next_request": domain["request"],
         "next_config": config,
-        "next_decision": owner.candidates().run_decision().record(),
-        "next_publication": publication,
+        "next_decision": run,
         "source": domain["source"],
         "config": root_config,
         "run": {
-            "status": "complete" if publication["exit_code"] == 0 else "incomplete",
-            "exit_code": publication["exit_code"],
+            "status": "complete" if exit_code == 0 else "incomplete",
+            "exit_code": exit_code,
             "fingerprint": domain["run_fingerprint"],
             "run_context": context,
         },
         "domains": [domain],
-        "artifacts": [row["descriptor"] for row in publication["artifacts"]],
+        "artifacts": [],
         "diagnostics": domain["diagnostics"],
     }
+    if publication is not None:
+        value["next_publication"] = publication
+        value["artifacts"] = [row["descriptor"] for row in publication["artifacts"]]
+    return value
 
 
-def _domain_manifest_v2(owner: RetainedFinalPublicationV2) -> dict[str, Any]:
-    run = owner.candidates().run_decision()
+def _domain_manifest_v2(
+    candidates: RetainedRequestBoundPublicationCandidatesV3,
+    diagnostics: tuple[dict[str, Any], ...],
+    publication: dict[str, Any] | None,
+) -> dict[str, Any]:
+    run = candidates.run_decision()
     runtime = run.runtime_result()
     frame = runtime.request_frame()
     request = frame.record()
@@ -313,9 +327,8 @@ def _domain_manifest_v2(owner: RetainedFinalPublicationV2) -> dict[str, Any]:
             "target_completeness": [],
         },
         "artifact_paths": [],
-        "diagnostics": list(owner.manifest_diagnostics()),
+        "diagnostics": list(diagnostics),
         "decision": run.record(),
-        "publication": owner.record(),
     }
     core = run.semantic_decision()
     domain["toolchain"]["node"]["failure_kind"] = {
@@ -351,14 +364,16 @@ def _domain_manifest_v2(owner: RetainedFinalPublicationV2) -> dict[str, Any]:
             identity_versions=payload["identity_versions"],
             projects=payload["model"]["projects"],
             coverage=payload["model"]["coverage"],
-            artifact_paths=[row["descriptor"]["path"] for row in owner.record()["artifacts"]],
+            artifact_paths=sorted(item.descriptor()["path"] for item in candidates.artifacts()),
         )
         domain["budget"].update(actual=gate["actual"], outcome=gate["outcome"])
         if domain["status"] == "complete":
             del domain["incomplete_kind"]
         else:
             domain["incomplete_kind"] = gate["outcome"]
-    if owner.record()["publication_outcome"] == "payload_unavailable":
+    if publication is not None:
+        domain["publication"] = publication
+    if publication is not None and publication["publication_outcome"] == "payload_unavailable":
         domain.update(
             status="incomplete",
             incomplete_kind="payload_unavailable",
@@ -393,8 +408,6 @@ def retain_final_publication_v2(
     validate_parent_configuration_v2(parent_configuration, context=request.analysis_context())
     limits = request.record()["limits"]
     selector = request.analysis_context().run_context()["stdout_selector"]
-    if selector not in {"next:semantic-json", "next:plantuml"}:
-        raise ValueError("summary/manifest final-publication branches are not admitted here yet")
     selected_artifact = next(
         (
             item
@@ -403,12 +416,33 @@ def retain_final_publication_v2(
         ),
         None,
     )
-    selected = copy_selected_stdout(
-        selected_artifact.wire_bytes() if selected_artifact is not None else b"",
-        limit=limits["max_selected_stdout_bytes"],
-    )
+    run_record = run.record()
     diagnostics = derive_public_diagnostics_v3(run)
     validate_public_diagnostics_v3(diagnostics, run)
+    selected_descriptor = selected_artifact.descriptor() if selected_artifact is not None else None
+    raw = selected_artifact.wire_bytes() if selected_artifact is not None else b""
+    if selector is None:
+        raw = (
+            canonical_json_bytes(_run_summary_v1(run_record["outcome"], run_record["exit_code"]))
+            + b"\n"
+        )
+    elif selector == "manifest":
+        domain = _domain_manifest_v2(candidates, diagnostics, None)
+        manifest = _run_manifest_v2(parent_configuration, domain, None)
+        manifest["artifacts"] = sorted(
+            (item.descriptor() for item in candidates.artifacts()), key=lambda row: row["path"]
+        )
+        raw = canonical_json_bytes(manifest) + b"\n"
+        selected_descriptor = {
+            "path": "run-manifest.json",
+            "domain": "next",
+            "format": "semantic-json",
+            "media_type": "application/json",
+            "size_bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+    selected = copy_selected_stdout(raw, limit=limits["max_selected_stdout_bytes"])
+    selected_available = selector is None or selected_descriptor is not None
     if not selected["allowed"]:
         diagnostics = tuple(
             sorted(
@@ -467,7 +501,23 @@ def retain_final_publication_v2(
         else sorted(candidates.artifacts(), key=lambda item: item.descriptor()["path"])
     )
     stdout_bytes = selected["retained"]
-    if selected_artifact is None or publication_failed:
+    if selector is None and (publication_failed or not selected["allowed"]):
+        stdout_bytes = (
+            canonical_json_bytes(
+                {
+                    "type": "stdout_result",
+                    "schema": "code-structure-viz.stdout-result/v2",
+                    "selector": None,
+                    "availability": False,
+                    "run_status": "incomplete",
+                    "stable_reason": "run_summary",
+                    "selected_stdout_unavailable": True,
+                    "artifact": None,
+                }
+            )
+            + b"\n"
+        )
+    elif not selected_available or publication_failed:
         unavailable: dict[str, Any] = {
             "type": "stdout_result",
             "schema": "code-structure-viz.stdout-result/v2",
@@ -500,33 +550,28 @@ def retain_final_publication_v2(
             "domain_status": run.record()["status"],
             "stable_reason": "selected_artifact_unavailable",
             "selected_stdout_unavailable": True,
-            "artifact": selected_artifact.descriptor(),
+            "artifact": selected_descriptor,
         }
         if run.record()["status"] == "incomplete":
             replacement["incomplete_kind"] = run.record()["incomplete_kind"]
         stdout_bytes = canonical_json_bytes(replacement) + b"\n"
     stdout = {
         "selector": selector,
-        "availability": selected_artifact is not None
-        and not publication_failed
-        and selected["allowed"],
+        "availability": selected_available and not publication_failed and selected["allowed"],
         "copy_status": (
             "not_attempted"
-            if selected_artifact is None or publication_failed
+            if not selected_available or publication_failed
             else "published"
             if selected["allowed"]
             else "unavailable"
         ),
-        "candidate": selected_artifact.descriptor()
-        if selected_artifact is not None and not publication_failed
-        else None,
+        "candidate": selected_descriptor if not publication_failed else None,
         "result_bytes_base64": base64.b64encode(stdout_bytes).decode("ascii"),
         "result_size_bytes": len(stdout_bytes),
         "result_sha256": hashlib.sha256(stdout_bytes).hexdigest(),
     }
-    if selected_artifact is not None:
+    if selected_available:
         stdout.update(selected_size_bytes=selected["bytes"], selected_sha256=selected["sha256"])
-    run_record = run.record()
     artifact_rows = [
         {
             "descriptor": item.descriptor(),
@@ -610,6 +655,7 @@ def retain_final_publication_v2(
         instance, "_manifest_diagnostics_bytes", canonical_json_bytes(list(manifest_diagnostics))
     )
     object.__setattr__(instance, "_record_bytes", canonical_json_bytes(record))
+    object.__setattr__(instance, "_manifest_input_bytes", raw if selector == "manifest" else None)
     validate_final_publication_v2(record, instance, candidates=candidates)
     return instance
 

@@ -42,6 +42,312 @@ def _literal_sha(value: object) -> str:
     return hashlib.sha256(_literal_json(value)).hexdigest()
 
 
+def test_manifest_selector_publishes_a_finite_same_run_candidate_on_stage_failure(
+    tmp_path: Path,
+) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="manifest")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    raw = owner.stdout_bytes()
+    manifest = json.loads(raw)
+    _validator("run-manifest-v2.schema.json").validate(manifest)
+    assert raw == _literal_json(manifest) + b"\n"
+    assert "next_publication" not in manifest
+    assert "publication" not in manifest["domains"][0]
+    assert manifest["command"]["stdout_selector"] == "manifest"
+    assert manifest["run"]["fingerprint"] is None
+    assert "run_fingerprint" not in manifest["next_request"]
+    assert manifest["run"]["status"] == "incomplete" and manifest["run"]["exit_code"] == 3
+    assert manifest["config"]["source"] == "explicit"
+    assert set(manifest["config"]["value_sources"].values()) == {"explicit"}
+    assert manifest["artifacts"] == []
+    assert manifest["next_decision"] == candidates.run_decision().record()
+    final_manifest = owner.run_manifest()
+    assert final_manifest.pop("next_publication") == owner.record()
+    assert final_manifest["domains"][0].pop("publication") == owner.record()
+    assert final_manifest == manifest
+    value = owner.record()
+    assert value["publication_outcome"] == "published" and value["exit_code"] == 3
+    assert value["stdout"]["availability"] is True
+    assert value["stdout"]["copy_status"] == "published"
+    assert value["stdout"]["candidate"] == {
+        "path": "run-manifest.json",
+        "domain": "next",
+        "format": "semantic-json",
+        "media_type": "application/json",
+        "size_bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    assert value["stdout"]["selected_size_bytes"] == len(raw)
+    assert value["stdout"]["selected_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert value["measurements"]["selected_stdout"] == {
+        "allowed": True,
+        "measured_bytes": len(raw),
+        "retained_bytes": len(raw),
+    }
+    assert owner.stderr_bytes() == NODE_002_JSONL
+
+
+def test_manifest_selector_keeps_both_requested_artifacts_in_public_path_order(
+    tmp_path: Path,
+) -> None:
+    candidates = complete_candidates_v3(
+        tmp_path, selector="manifest", requested_formats=["semantic-json", "plantuml"]
+    )
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    manifest = json.loads(owner.stdout_bytes())
+    assert manifest["run"]["status"] == "complete" and manifest["run"]["exit_code"] == 0
+    assert (
+        manifest["run"]["fingerprint"]
+        == candidates.run_decision().record()["context"]["run_fingerprint"]
+    )
+    assert manifest["next_request"]["run_fingerprint"] == manifest["run"]["fingerprint"]
+    assert manifest["domains"][0]["artifact_paths"] == [
+        "next.snapshot.puml",
+        "next.snapshot.semantic.json",
+    ]
+    assert manifest["domains"][0]["formats"] == ["semantic-json", "plantuml"]
+    expected = sorted(
+        (item.descriptor() for item in candidates.artifacts()), key=lambda row: row["path"]
+    )
+    assert manifest["artifacts"] == expected
+    assert owner.run_manifest()["artifacts"] == expected
+    assert owner.domain_manifest()["artifact_paths"] == [row["path"] for row in expected]
+    assert [row["descriptor"] for row in owner.record()["artifacts"]] == expected
+    assert owner.record()["stdout"]["candidate"]["path"] == "run-manifest.json"
+
+
+def test_no_selector_publishes_a_measured_summary_even_when_analysis_failed(tmp_path: Path) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path)
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    expected = {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": "incomplete",
+        "exit_code": 3,
+        "domains": [
+            {"domain": "next", "status": "incomplete", "incomplete_kind": "payload_unavailable"}
+        ],
+        "manifest": "run-manifest.json",
+    }
+    raw = _literal_json(expected) + b"\n"
+    assert owner.stdout_bytes() == raw
+    assert owner.run_summary() == expected
+    value = owner.record()
+    assert value["publication_outcome"] == "published" and value["exit_code"] == 3
+    assert value["stdout"] == {
+        "selector": None,
+        "availability": True,
+        "copy_status": "published",
+        "candidate": None,
+        "selected_size_bytes": len(raw),
+        "selected_sha256": hashlib.sha256(raw).hexdigest(),
+        "result_bytes_base64": base64.b64encode(raw).decode("ascii"),
+        "result_size_bytes": len(raw),
+        "result_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    assert value["measurements"]["selected_stdout"] == {
+        "allowed": True,
+        "measured_bytes": len(raw),
+        "retained_bytes": len(raw),
+    }
+    assert value["measurements"]["adapter_stdout"] is None
+    assert owner.stderr_bytes() == NODE_002_JSONL
+    assert owner.run_manifest()["run"]["fingerprint"] is None
+
+
+@pytest.mark.parametrize("selector", [None, "manifest"])
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_metadata_selector_capture_failure_returns_typed_unavailable_without_remeasurement(
+    tmp_path: Path,
+    selector: str | None,
+    stream: str,
+) -> None:
+    candidates = capture_overflow_candidates_v3(tmp_path, stream, selector=selector)
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    summary = owner.run_summary()
+    measured = _literal_json(summary) + b"\n"
+    replacement = {
+        "type": "stdout_result",
+        "schema": "code-structure-viz.stdout-result/v2",
+        "selector": None,
+        "availability": False,
+        "run_status": "incomplete",
+        "stable_reason": "run_summary",
+        "selected_stdout_unavailable": True,
+        "artifact": None,
+    }
+    if selector == "manifest":
+        manifest = owner.run_manifest()
+        del manifest["next_publication"]
+        del manifest["domains"][0]["publication"]
+        measured = _literal_json(manifest) + b"\n"
+        replacement = {
+            "type": "stdout_result",
+            "schema": "code-structure-viz.stdout-result/v2",
+            "selector": "manifest",
+            "availability": False,
+            "domain_status": "incomplete",
+            "stable_reason": "domain_payload_unavailable",
+            "artifact": None,
+        }
+    assert owner.stdout_bytes() == _literal_json(replacement) + b"\n"
+    _validator("stdout-result-v2.schema.json").validate(replacement)
+    value = owner.record()
+    assert value["publication_outcome"] == "payload_unavailable" and value["exit_code"] == 3
+    assert value["response"] is None and value["artifacts"] == []
+    assert value["stdout"]["availability"] is False
+    assert value["stdout"]["copy_status"] == "not_attempted"
+    assert value["stdout"]["selected_sha256"] == hashlib.sha256(measured).hexdigest()
+    assert value["measurements"]["selected_stdout"] == {
+        "allowed": True,
+        "measured_bytes": len(measured),
+        "retained_bytes": len(measured),
+    }
+    assert value["stdout"]["result_sha256"] == hashlib.sha256(owner.stdout_bytes()).hexdigest()
+    assert owner.stdout_bytes() != measured
+
+
+@pytest.mark.parametrize("case", ["complete", "partial", "rejected"])
+@pytest.mark.parametrize("selector", [None, "manifest"])
+def test_metadata_selectors_preserve_the_same_semantic_outcome_and_all_artifacts(
+    tmp_path: Path,
+    case: str,
+    selector: str | None,
+) -> None:
+    if case == "partial":
+        candidates = source_failure_candidates_v3(
+            tmp_path, "parse_file", isolated=True, selector=selector
+        )
+    else:
+        candidates = (complete_candidates_v3 if case == "complete" else rejected_candidates_v3)(
+            tmp_path, selector=selector
+        )
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    expected_domain = {
+        "domain": "next",
+        "status": "complete" if case == "complete" else "incomplete",
+    }
+    if case != "complete":
+        expected_domain["incomplete_kind"] = (
+            "partial_safe" if case == "partial" else "payload_unavailable"
+        )
+    expected = {
+        "type": "run_summary",
+        "schema": "code-structure-viz.run-summary/v1",
+        "run_status": expected_domain["status"],
+        "exit_code": 0 if case == "complete" else 3,
+        "domains": [expected_domain],
+        "manifest": "run-manifest.json",
+    }
+    raw = _literal_json(expected) + b"\n"
+    if selector == "manifest":
+        manifest = owner.run_manifest()
+        del manifest["next_publication"]
+        del manifest["domains"][0]["publication"]
+        raw = _literal_json(manifest) + b"\n"
+    assert owner.stdout_bytes() == raw and owner.run_summary() == expected
+    value = owner.record()
+    assert value["publication_outcome"] == "published"
+    assert value["stdout"]["availability"] is True
+    if selector is None:
+        assert value["stdout"]["candidate"] is None
+    else:
+        assert value["stdout"]["candidate"]["path"] == "run-manifest.json"
+    assert value["measurements"]["selected_stdout"] == {
+        "allowed": True,
+        "measured_bytes": len(raw),
+        "retained_bytes": len(raw),
+    }
+    assert value["artifacts"] == [
+        {
+            "descriptor": item.descriptor(),
+            "bytes_base64": base64.b64encode(item.wire_bytes()).decode("ascii"),
+        }
+        for item in candidates.artifacts()
+    ]
+    assert value["semantic_decision"] == candidates.run_decision().record()
+
+
+@pytest.mark.parametrize("selector", [None, "manifest"])
+def test_metadata_selector_stderr_failure_keeps_the_original_partial_measurement(
+    tmp_path: Path,
+    selector: str | None,
+) -> None:
+    candidates = partial_stderr_overflow_candidates_v3(tmp_path, selector=selector)
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    original = (
+        _literal_json(
+            {
+                "type": "run_summary",
+                "schema": "code-structure-viz.run-summary/v1",
+                "run_status": "incomplete",
+                "exit_code": 3,
+                "domains": [
+                    {"domain": "next", "status": "incomplete", "incomplete_kind": "partial_safe"}
+                ],
+                "manifest": "run-manifest.json",
+            }
+        )
+        + b"\n"
+    )
+    value = owner.record()
+    assert value["publication_outcome"] == "payload_unavailable"
+    assert value["semantic_decision"]["outcome"] == "partial_safe"
+    assert value["measurements"]["public_stderr"]["measured_bytes"] > 65_536
+    assert owner.stderr_bytes() == b""
+    measured = value["measurements"]["selected_stdout"]
+    if selector is None:
+        assert measured == {
+            "allowed": True,
+            "measured_bytes": len(original),
+            "retained_bytes": len(original),
+        }
+        assert value["stdout"]["selected_sha256"] == hashlib.sha256(original).hexdigest()
+    else:
+        assert measured["allowed"] is True
+        assert measured["measured_bytes"] == measured["retained_bytes"] > 65_536
+        assert value["stdout"]["selected_size_bytes"] == measured["measured_bytes"]
+        root = owner.run_manifest()
+        assert (
+            root["artifacts"] == []
+            and root["domains"][0]["incomplete_kind"] == "payload_unavailable"
+        )
+        assert (
+            root["run"]["fingerprint"] == value["semantic_decision"]["context"]["run_fingerprint"]
+        )
+    replacement = json.loads(owner.stdout_bytes())
+    _validator("stdout-result-v2.schema.json").validate(replacement)
+    assert replacement["availability"] is False
+    if selector is None:
+        assert replacement["stable_reason"] == "run_summary"
+        assert replacement["selected_stdout_unavailable"] is True
+    else:
+        assert replacement["stable_reason"] == "domain_payload_unavailable"
+        assert replacement["artifact"] is None
+    assert owner.run_summary()["domains"] == [
+        {"domain": "next", "status": "incomplete", "incomplete_kind": "payload_unavailable"}
+    ]
+    assert value["stdout"]["result_sha256"] != value["stdout"]["selected_sha256"]
+
+
 def test_stage_failure_root_retains_null_fingerprint_and_actual_parent_selections(
     tmp_path: Path,
 ) -> None:
@@ -703,11 +1009,14 @@ def test_final_publication_rejects_foreign_parent_configuration_even_with_equal_
 
 
 def _aligned_unavailable_cache(owner: Any, value: dict[str, Any]) -> Any:
-    """Attacker reseals a claim; actual candidate/run/byte owners stay unchanged."""
+    """Attacker reseals a claim; actual candidate/run authorities stay unchanged."""
     assert owner.candidates().run_decision().semantic_decision() is None
     assert owner.candidates().artifacts() == ()
     assert value["response"] is None and value["artifacts"] == []
-    assert value["stdout"]["selector"] == "next:semantic-json"
+    selector = value["stdout"]["selector"]
+    assert selector in {"next:semantic-json", "manifest"}
+    selected_raw = owner._manifest_input_bytes if selector == "manifest" else b""
+    assert isinstance(selected_raw, bytes)
     stdout = base64.b64decode(value["stdout"]["result_bytes_base64"])
     stderr = base64.b64decode(value["stderr"]["bytes_base64"])
     boundary = {
@@ -718,13 +1027,13 @@ def _aligned_unavailable_cache(owner: Any, value: dict[str, Any]) -> Any:
         "response_model_digest": None,
         "artifact_bytes": {},
         "artifact_descriptors": {},
-        "selector": "next:semantic-json",
+        "selector": selector,
         "selected_stdout": {
             "allowed": True,
-            "bytes": 0,
-            "sha256": hashlib.sha256(b"").hexdigest(),
-            "retained": {"__bytes_hex__": ""},
-            "retained_bytes": 0,
+            "bytes": len(selected_raw),
+            "sha256": hashlib.sha256(selected_raw).hexdigest(),
+            "retained": {"__bytes_hex__": selected_raw.hex()},
+            "retained_bytes": len(selected_raw),
             "partial_disposed": False,
             "publication_outcome": "published_artifact",
             "diagnostic_code": None,
@@ -750,6 +1059,66 @@ def _aligned_unavailable_cache(owner: Any, value: dict[str, Any]) -> Any:
     forged = copy(owner)
     object.__setattr__(forged, "_record_bytes", _literal_json(value))
     return forged
+
+
+def test_resealed_manifest_candidate_must_still_match_original_parent_and_run(
+    tmp_path: Path,
+) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="manifest")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    original = owner.record()
+    control = _aligned_unavailable_cache(owner, owner.record())
+    assert control.record() == original
+    assert reference.project_final_publication_v2(control) == original
+    for mutation, expected_error in [
+        ("origin", "root config"),
+        ("fingerprint", "root run"),
+        ("native", "domain source"),
+        ("sidecar", "outside"),
+        ("encoding", "canonical"),
+    ]:
+        manifest = json.loads(owner.stdout_bytes())
+        if mutation == "origin":
+            manifest["config"]["value_sources"]["next_projects"] = "builtin"
+            manifest["config"]["sha256"] = _literal_sha(
+                {key: value for key, value in manifest["config"].items() if key != "sha256"}
+            )
+        elif mutation == "fingerprint":
+            manifest["run"]["fingerprint"] = "0" * 64
+        elif mutation == "native":
+            source = manifest["domains"][0]["source"]
+            source["file_count"] = float(source["file_count"])
+        elif mutation == "sidecar":
+            manifest["next_publication"] = original
+        _validator("run-manifest-v2.schema.json").validate(manifest)
+        raw = (
+            json.dumps(manifest, indent=2).encode()
+            if mutation == "encoding"
+            else _literal_json(manifest)
+        ) + b"\n"
+        forged = copy(owner)
+        object.__setattr__(forged, "_manifest_input_bytes", raw)
+        object.__setattr__(forged, "_stdout_bytes", raw)
+        value = owner.record()
+        raw_sha = hashlib.sha256(raw).hexdigest()
+        value["stdout"].update(
+            selected_size_bytes=len(raw),
+            selected_sha256=raw_sha,
+            result_size_bytes=len(raw),
+            result_sha256=raw_sha,
+            result_bytes_base64=base64.b64encode(raw).decode("ascii"),
+        )
+        value["stdout"]["candidate"].update(size_bytes=len(raw), sha256=raw_sha)
+        value["measurements"]["selected_stdout"].update(
+            measured_bytes=len(raw), retained_bytes=len(raw)
+        )
+        forged = _aligned_unavailable_cache(forged, value)
+        _validator("next-publication-decision-v2.schema.json").validate(forged.record())
+        with pytest.raises(ValueError, match=expected_error):
+            reference.project_final_publication_v2(forged)
 
 
 @pytest.mark.parametrize(
@@ -879,11 +1248,13 @@ def test_complete_final_owner_publishes_the_same_artifact_and_catalog_stderr(
     _validator("next-publication-decision-v2.schema.json").validate(value)
 
 
+@pytest.mark.parametrize("selector", ["next:semantic-json", "manifest"])
 def test_partial_safe_final_projection_keeps_private_proof_and_source_bytes_private(
     tmp_path: Path,
+    selector: str,
 ) -> None:
     candidates = source_failure_candidates_v3(
-        tmp_path, "parse_file", isolated=True, selector="next:semantic-json"
+        tmp_path, "parse_file", isolated=True, selector=selector
     )
     core = candidates.run_decision().semantic_decision()
     assert core is not None
