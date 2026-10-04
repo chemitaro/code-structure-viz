@@ -206,6 +206,14 @@ stderr overflowはselected failureより後でも最終公開failureを優先し
 
 `schema=code-structure-viz.next-publication-decision/v2`、version2、既存URN/exact refs、outer keys/hash preimagesは維持します。旧v1、旧admission/public/runtime-v2 leaf、lower owner、ASSET policyは変更しません。訂正済みschema/producer/validator/vectorsを同時に切り替え、旧object-only consumerへ新null recordを送らず、rollbackも同じ集合で行います。外部/永続consumerのv2不変要件が判明したら切替を止めて再判断します。旧SI-05 certificateは原SHAの履歴であり、このcapture契約だけを新candidateの証拠でsupersedeします。
 
+### SI-06: root指紋と親設定の最小接続
+
+2026-10-04の[accepted ADR](artifacts/20261004t033836z-adr-si06-root-fingerprint-current-v2.md)により、現root-v2のNext枝だけにsemantic指紋nullを許します。具体的なroot/domain/request join、親設定の保持境界、互換性は[public semantic-v3のroot節](../../../../../../../docs/contracts/next-semantic-v3.md)を正本にします。
+
+既存`RetainedFinalPublicationV2`と独立validatorを拡張します。runtime/Core/run/candidatesから既に導出できる値はそのまま使います。唯一不足するroot設定の由来は、親の設定選択を保持する小さい内部入力として同じanalysis contextへbindします。完成するfinal factoryでは全selectorで必須とし、既存artifact-selectorのfixtureも親の選択入力とともに更新します。架空のbuiltin入力で埋めません。これは旧candidates-only入力からの限定的な追加であり、final ownerを二つに分裂させません。
+
+新public field、public receipt schema、root version、hash family、汎用resolver/registryを作りません。内部型/関数は既存final reference/validator内へ収まる構成を優先し、新moduleや抽象化には独立した責務上の必要性を要求します。別context、自由origin、cached root値による検証の自己一致を拒否します。実CLIの選択元を取得するproduction経路はA04で同じ境界へ接続し、reference入力だけで実CLI観測を認定しません。
+
 ## Canonical design index and historical evidence boundary (G10)
 
 ### 設計の選択規則

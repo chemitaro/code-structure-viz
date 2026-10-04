@@ -14,6 +14,8 @@ ID: "iss-00008"
 
 ## Outcome
 
+2026-10-04、ユーザーがroot指紋の推奨A案を採択し、最小限でシンプルな実装を要求しました。accepted ADR `artifacts/20261004t033836z-adr-si06-root-fingerprint-current-v2.md`とCurrent R/D/P/public semantic-v3へ反映しました。現在はroot訂正の先行仕様gateを準備中で、root実装や新review passはまだありません。先行判断資料の未採択表示は当時の履歴です。
+
 Issue #8は未完了です。2026-10-01にA runtime modelを採択し、非productionのpublic-spawn feasibilityを両OSで確認しました。採択はADR/R/D/P、実験結果とコードはArtifactへ保存しました。製品のTypeScript解析、Next CLI公開、package同梱、新runtime契約のStrict認定はまだ完了していません。
 
 採択・実測checkpointは`710eb49a2a3143e31b8a91580700d16839d9070d`でcommit/push済みです。このexact SHAへGPT-5.6 Sol / Proのfresh ChatGPT Use Strict分析を完了し、同一SHAと実pickerのverified結果を確認しました。助言をローカルref/hashへ照合し、必要なstdout/generic semantic/trusted descriptorの版移行を補正しました。A02を小さい契約から進めていますが、A03独立コードレビューは未通過です。

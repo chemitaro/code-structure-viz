@@ -16,6 +16,8 @@ package_sequence_key: "ISSUE-05"
 
 ## Current normative authority
 
+2026-10-04の追加採択: ユーザーはroot指紋の推奨A案（現v2・Next枝の限定訂正）を採択し、最小限でシンプルな実装を要求しました。`artifacts/20261004t033836z-adr-si06-root-fingerprint-current-v2.md`と下記SI-06 root節を現在の追加authorityとします。先行candidate/Reportのroot判断待ちは採択前の履歴です。元SI-06 baseは変更せず、仕様gate後に同unitを続けます。
+
 この節が唯一の現在の実装順序・受入正本です。後続の`Round N`節はhistorical evidence（非normative）として保存し、実装計画を上書きしません。2026-10-01のユーザーはA runtime model一式を採択しました。accepted ADR `artifacts/20261001t024645z-adr-issue8-trusted-toolchain-launch-model.md`とRequirement/DesignのA節を入力とし、下記runtime移行順序を既存`I05-PLAN-002`再開の前提へ追加します。過去のpackage-only/identity resolver/S1のreview passは各固定SHA/範囲の証拠であり、新runtime契約のpassではありません。R23専用authority registryは使用しません。
 
 2026-10-02、ユーザーはsource inventoryとsafe subsetの先行整合方針を採択し、仕様修正/チェック後の実装再開を指示しました。下記SI計画をA02内のdiagnostic/stderr unitより前へ挿入します。旧candidateの「人間判断待ち」は当時の履歴で、現在のsource方針は採択済みです。別のASSET failure policyは未採択のままです。
@@ -159,6 +161,14 @@ SI-01のdirect checksは、SpecDock sync/validate、Current pointers、追加Mar
 5. **現v2訂正の受入れ**: 同じ候補の旧object/object vectorsとouter exact refs/closed fieldsを維持し、configured stderr64KiB/selected16MiB exact/+1、pre-copyと置換stdoutの分離、privacy/partial-write0/一回計測、関連regression、全必須unit checksを閉じる。通常commit/push、元af6fからのfresh独立Code Review Strict / Sol / Extra HighまでSI-06を認定しない。旧SI-05 passは原SHAのままで、capture契約だけを新候補の証拠でsupersedeする。
 
 切替/rollbackは訂正済みschema/producer/validator/vectorsの組で行い、未更新object-only consumerへ新null recordを送らない。外部/永続consumerのv2不変要求が判明したら切替を停止し、人間判断へ戻す。現v2採択で新ASSET、後継URN、dual reader/write、lower owner変更、reader-prefix/production/全A02/A03/Finalのgateを省略しない。docs checkpointは元SI-06 review baseを移動しない。
+
+#### SI-06 root限定訂正の実施順序（2026-10-04採択）
+
+1. **仕様先行**: root採択ADR、SI-REQ-009/010、Designとpublic semantic-v3のroot節を整合する。新versionやgeneric/failure hashを設計しない。文書links/field集合/Current pointer、SpecDock、Ruff/format/mypy、diff-checkを確認し、docs-only checkpointを通常commit/pushする。
+2. **仕様gate**: 同一`iss-00008 / source-inventory-safe-subset-specification / R-D-P and required contract closure`の記録済みSpec Review Strict reviewerへ、Sol/Proで現仕様全体を再レビューする。今回のroot補足と最小実装条件を含め、valid passまでroot code/schemaを変更しない。新しい採択済み意味に対応するレビューで、旧capture passを流用しない。
+3. **最小briefとTDD**: この具体化済み仕様からscope/input/正負casesを抽出する。まずNext stage failureのroot指紋nullをschemaが拒否するRedからNext枝だけGreenにし、旧非Next null拒否を保つ。次に親選択結果の必要な由来だけを同じcontextへ保持・結合し、既存final owner/独立validatorへroot/domain/request/summaryを一behaviorずつ追加する。既存resolverの再実装、新receipt wire、registry、別final ownerは作らない。
+4. **同じownerの受入れ**: SI-P09/P10/N17/N18、全selector、元failure分類/十四key、native数値/privacy、親origin/cache改変、same-content foreign owner、既存非Next bytesを確認する。nullと観測済み0のcapture受入れも保つ。全SI-06 closure後、configured64KiB/16MiB exact/+1を含むall-contract/full pytestとrequired statics/docsを閉じる。
+5. **累積コードgate**: clean/pushed exact candidateへ元`af6f5d33f9487a33dabf2ddfe41df85b3d8267fb`からfresh Code Review Strict / Sol / Extra High。passまでSI-06を完了にしない。以後SI-07/08の順序・Finalの必要性は維持する。
 
 各unitの元baseは着手時のclean full SHAで固定し、briefにはscope/exclusions、同じownerから受ける入力、観測可能な出口、正負cases、必要checksを記述します。主担当が具体化済み仕様から機械的抽出できる場合は新consultを必須にしません。意味が不足した場合だけfresh/current purposeのStrict briefで補い、製品/セキュリティの新判断は人間へ戻します。current implementerのモデル設定はこの文書やskillでは変更・認証しません。
 

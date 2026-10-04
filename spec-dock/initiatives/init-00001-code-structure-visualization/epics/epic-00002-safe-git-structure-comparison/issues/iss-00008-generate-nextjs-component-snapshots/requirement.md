@@ -81,13 +81,25 @@ SI-P07: `module_relation`/`export_binding`/`boundary_derivation`の正規nonFile
 
 ユーザーは「現v2への限定訂正を採用します。タスク再開して下さい」と明示しました。[accepted ADR](artifacts/20261003t142223z-adr-si06-capture-observation-current-v2.md)に基づき、同じcandidates-v3がcaptureを保持していない場合だけ、publication-v2のadapter stdout/stderr計測を両方nullとします。観測済みは従来の計測objectで、0 bytesも観測済みです。public stderr/selected stdoutの計測は実測objectのままです。未観測をfalse/0/overflowで補完せず、正規stage failureの公開coverageを維持します。
 
-これは上記の旧v1/v2不変宣言に対する**現publication-v2のcapture二fieldだけの例外**です。既存schema identity/version/URN/outer exact refs、lower owner、semantic意味、予算/一回計測、diagnostic catalog、旧leaf/旧KAT、Python/SQLAlchemyは変更しません。新ASSET policyを同時採択しません。
+この採択が訂正した範囲は**現publication-v2のcapture二field**です。root指紋の追加訂正は次節の2026-10-04採択で別に定めます。既存schema identity/version/URN/outer exact refs、lower owner、semantic意味、予算/一回計測、diagnostic catalog、旧leaf/旧KAT、Python/SQLAlchemyは変更しません。新ASSET policyを同時採択しません。
 
 SI-P08: 正規stage failureの両nullと、実capture済み0の両objectは、ともに同じownerから正直に公開できる。nullだけを公開失敗/overflowの根拠にせず、元のstage/code/semantic outcomeを保持する。SI-N16: 片側null、capture有無と不一致のnull/object、未観測のzero-fill、public stderr/selected stdoutのnull、別ownerの値を拒否する。shape通過だけではowner/実測の受入れにならない。
 
 既存object/object recordは訂正後もvalidですが、旧object-only consumerは新null recordを拒否します。schema/producer/validatorを同じcandidateで切り替え、未更新consumerへの新record送信を承認しません。外部/永続consumerの不存在は未確認です。既存v2不変が必要と判明した場合は切替を止め、同時更新または後継版を再判断します。
 
 原SI-05 passは当時のSHA/scopeとして保持し、訂正後契約の証明にしません。先行仕様チェックとSpec Review Strict pass後にSI-06を再開し、新candidateで両null/観測済み0/負例、responseとpublication outcomeの独立軸、configured stderr/selected-copy exact/+1、全必須gateを証明します。
+
+### SI-06: root指紋の現v2限定訂正（2026-10-04採択）
+
+ユーザー採択A案を[accepted ADR](artifacts/20261004t033836z-adr-si06-root-fingerprint-current-v2.md)へ固定します。目的を達成する最小限の変更として、現root-v2のNext snapshot枝に、同じrun-v3が保持するsemantic指紋のnullを表現します。新しいversion/指紋/移行機構を作りません。
+
+SI-REQ-009 / I05-REQ-004・005・007: matching transport/Core無しの正規failureではroot/domainの指紋をnullとし、requestのoptional指紋fieldを省略します。matching Coreがある場合はrejection/unavailableを含め既存十四key digestを保持します。公開処理の失敗だけで指紋を変えず、failure専用hash、generic fallback、zero-fill、manifest抑止で代用しません。既存非Next枝のnonnull制約を保ちます。
+
+SI-REQ-010 / I05-REQ-002・004: root設定の値とその選択元を同じ親の設定解決に結びます。必要な由来のみ保持し、final projectionで推測・再解決しません。builtin固定やTypeScript config宣言元の流用を拒否します。request-bound ownerで観測済みのlimits/trustをunobservedにしません。
+
+SI-P09: stage failure/timeoutのnull、Core rejectionとvalidated unavailableの非null、complete/partial-safeの非nullを同じownerから全selectorへ投影できます。SI-N17: root/domain/requestの指紋不一致、任意/ゼロ/generic hash、同内容の別owner、非Next枝のnullを拒否します。SI-P10/SI-N18: 親の設定選択元の各合法値を保持し、偽origin・値不一致・別context・cached recordの同時改変を拒否します。
+
+詳細は[public semantic-v3のroot節](../../../../../../../docs/contracts/next-semantic-v3.md)です。仕様チェックとSpec Review pass後に実装します。旧v1/KAT、lower owner/hash、他domainは維持し、既存v2不変義務の発見時だけ切替を止めて再判断します。
 
 ## Canonical index and historical evidence boundary (G10)
 
