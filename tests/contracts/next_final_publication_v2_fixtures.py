@@ -16,6 +16,7 @@ from tests.contracts.next_publication_candidates_v3_reference import (
     RetainedRequestBoundPublicationCandidatesV3,
     retain_request_bound_publication_candidates_v3,
 )
+from tests.contracts.next_reference_validation import recompute_record_id
 from tests.contracts.next_run_decision_v3_reference import retain_request_bound_run_decision_v3
 from tests.contracts.next_runtime_v2_reference import (
     reference_process_observation_v2,
@@ -27,10 +28,12 @@ from tests.contracts.next_semantic_core_v3_reference import (
     inspect_semantic_candidate_v3,
 )
 from tests.contracts.test_next_core_failure_v2 import runtime_for_core_wire
-from tests.contracts.test_next_exchange_v2 import shape_wire
+from tests.contracts.test_next_exchange_v2 import exchange_evidence, shape_wire
 from tests.contracts.test_next_process_observation_v2 import complete_evidence, policy_fixture
 from tests.contracts.test_next_request_frame_v2 import run_context
 from tests.contracts.test_next_semantic_core_v3 import (
+    BUTTON_ID,
+    MODULE_IDS,
     SOURCE_BYTES,
     compatibility_preimage_literal_v3,
     core_inputs_v3,
@@ -38,7 +41,7 @@ from tests.contracts.test_next_semantic_core_v3 import (
     omit_selected_button_module_v3,
     unknown_value_export_v3,
 )
-from tests.contracts.test_next_source_inventory_v3 import refresh_wire
+from tests.contracts.test_next_source_inventory_v3 import exclude_record, refresh_wire
 from tests.contracts.test_next_trusted_environment_v2 import profile_members
 
 
@@ -107,6 +110,38 @@ def observed_zero_capture_candidates_v3(
     return retain_request_bound_publication_candidates_v3(run)
 
 
+def runtime_control_failure_candidates_v3(
+    tmp_path: Path,
+    failure: str,
+) -> RetainedRequestBoundPublicationCandidatesV3:
+    seal, assets, request, policy, wire = core_inputs_v3(
+        tmp_path, stdout_selector="next:semantic-json"
+    )
+    wire["semantic_payload"] = None
+    wire["control"]["result_kind"] = failure
+    if failure == "unsupported_runtime":
+        wire["control"]["runtime"].update(
+            version_raw="20.19.0", version="20.19.0", eligibility="unsupported"
+        )
+    elif failure != "semantic_failure":
+        wire["control"].update(runtime=None, binding={"state": "unbound", "request_id": None})
+    response = runtime_reference.retain_response_frame_v2(
+        json.dumps(wire).encode(), limits=request.record()["limits"]
+    )
+    evidence = exchange_evidence(policy, request, response)
+    evidence["exit_code"] = {
+        "unsupported_runtime": 66,
+        "protocol_failure": 65,
+        "bootstrap_failure": 67,
+        "semantic_failure": 68,
+    }[failure]
+    observation = reference_process_observation_v2(policy, evidence)
+    runtime = retain_runtime_result_v2(seal, assets, request, policy, observation, response)
+    return retain_request_bound_publication_candidates_v3(
+        retain_request_bound_run_decision_v3(runtime)
+    )
+
+
 def capture_overflow_candidates_v3(
     tmp_path: Path,
     stream: str,
@@ -169,6 +204,104 @@ def stderr_boundary_candidates_v3(
     assert core.gate()["diagnostic_code"] == "CSV-NEXT-TARGET-001"
     run = retain_request_bound_run_decision_v3(runtime, semantic_decision=core)
     return retain_request_bound_publication_candidates_v3(run)
+
+
+def partial_stderr_overflow_candidates_v3(
+    tmp_path: Path,
+) -> RetainedRequestBoundPublicationCandidatesV3:
+    """Actual isolated failed files produce more than the configured 64 KiB JSONL."""
+    failed_paths = ["src/" + ("a" * 150 + "/") * 4 + f"failed-{n:02d}.ts" for n in range(80)]
+    seal, assets, request, policy, wire = core_inputs_v3(
+        tmp_path,
+        sources={**SOURCE_BYTES, **dict.fromkeys(failed_paths, b"export {}; const broken = (\n")},
+        targets=["path:src/button.tsx"],
+        stdout_selector="next:semantic-json",
+    )
+    model, proof = wire["semantic_payload"]["model"], wire["semantic_payload"]["proof"]
+    failed = [row for row in request.record()["files"] if row["path"] in failed_paths]
+    for row in failed:
+        exclude_record(wire, "files", row["id"], reason="tainted", taints=["parse_file"])
+        module = {
+            "kind": "module",
+            "project_id": row["project_id"],
+            "path": row["path"],
+            "router_context": "none",
+            "client_entry": False,
+            "derived_roles": [],
+        }
+        module["id"] = recompute_record_id(module)
+        proof["discovered_records"].append(
+            {
+                "collection": "modules",
+                "record_id": module["id"],
+                "taints": ["parse_file"],
+                "record": module,
+            }
+        )
+        proof["excluded"].append(
+            {"collection": "modules", "record_id": module["id"], "reason": "tainted"}
+        )
+        fact = {"kind": "router_context", "owner_id": module["id"], "value": "none"}
+        fact["id"] = recompute_record_id(fact)
+        proof["discovered_records"].append(
+            {
+                "collection": "facts",
+                "record_id": fact["id"],
+                "taints": ["parse_file"],
+                "record": fact,
+            }
+        )
+        proof["excluded"].append(
+            {"collection": "facts", "record_id": fact["id"], "reason": "tainted"}
+        )
+        root_id = "next:failure:" + hashlib.sha256(row["path"].encode()).hexdigest()
+        proof["failed"].append(
+            {"collection": "files", "record_id": row["id"], "reason": "parse_file"}
+        )
+        proof["failure_roots"].append(
+            {
+                "id": root_id,
+                "collection": "files",
+                "kind": "parse_file",
+                "path_ref": row["path"],
+                "record_ids": sorted([row["id"], module["id"], fact["id"]]),
+            }
+        )
+        proof["causal_edges"].extend(
+            {"source_id": root_id, "record_id": record_id, "rule": "file_all_records"}
+            for record_id in (row["id"], module["id"], fact["id"])
+        )
+        proof["causal_edges"].append(
+            {
+                "source_id": module["id"],
+                "record_id": fact["id"],
+                "rule": "identity_dependency",
+            }
+        )
+    failed_ids = {row["id"] for row in failed}
+    proof["excluded"] = [row for row in proof["excluded"] if row["record_id"] not in failed_ids]
+    model["coverage"]["failed_files"] = [
+        {"path": path, "reason": "parse_file"} for path in sorted(failed_paths)
+    ]
+    button_file = next(
+        row["id"] for row in request.record()["files"] if row["path"] == "src/button.tsx"
+    )
+    target = {
+        "target_key": "path:src/button.tsx",
+        "status": "resolved",
+        "record_ids": sorted([button_file, MODULE_IDS["src/button.tsx"], BUTTON_ID]),
+    }
+    proof["target_resolutions"] = [target]
+    model["coverage"]["target_completeness"] = [{**target, "status": "complete"}]
+    refresh_wire(wire)
+    runtime = runtime_for_core_wire(seal, assets, request, policy, wire)
+    candidate = runtime.transport_candidate()
+    assert candidate is not None
+    core = decide_semantic_candidate_v3(candidate, seal, assets)
+    assert core.gate()["outcome"] == "partial_safe" and core.gate()["actual"] == 4
+    return retain_request_bound_publication_candidates_v3(
+        retain_request_bound_run_decision_v3(runtime, semantic_decision=core)
+    )
 
 
 def _independent_bytes(value: Any) -> bytes:

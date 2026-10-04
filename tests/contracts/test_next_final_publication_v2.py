@@ -21,7 +21,9 @@ from tests.contracts.next_final_publication_v2_fixtures import (
     large_selected_stdout_candidates_v3,
     observed_zero_capture_candidates_v3,
     parent_configuration_fixture_v2,
+    partial_stderr_overflow_candidates_v3,
     rejected_candidates_v3,
+    runtime_control_failure_candidates_v3,
     source_failure_candidates_v3,
     stage_failed_candidates_v3,
     stderr_boundary_candidates_v3,
@@ -38,6 +40,277 @@ def _literal_json(value: object) -> bytes:
 
 def _literal_sha(value: object) -> str:
     return hashlib.sha256(_literal_json(value)).hexdigest()
+
+
+def test_stage_failure_domain_retains_request_without_inventing_semantic_observations(
+    tmp_path: Path,
+) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    assert hasattr(owner, "domain_manifest"), "final owner has no domain projection"
+    domain = owner.domain_manifest()
+    _validator("next-domain-manifest-v2.schema.json").validate(domain)
+    runtime = candidates.run_decision().runtime_result()
+    context = runtime.request_frame().analysis_context()
+    assert domain["config"] == context.domain_config()
+    assert domain["run_context"] == context.run_context()
+    assert domain["request_independent"] is False
+    assert domain["request"]["projects"] == context.domain_config()["projects"]
+    assert domain["run_fingerprint"] is None
+    assert "run_fingerprint" not in domain["request"]
+    assert (domain["status"], domain["incomplete_kind"], domain["payload_available"]) == (
+        "incomplete",
+        "payload_unavailable",
+        False,
+    )
+    assert domain["entity_count"] is domain["budget"]["actual"] is None
+    assert domain["semantic_compatibility_id"] is domain["compatibility_descriptor"] is None
+    assert domain["identity_versions"] is None
+    assert domain["toolchain"]["node"] == {
+        "status": "unavailable",
+        "version": None,
+        "failure_kind": "spawn_failed",
+    }
+    assert domain["coverage"]["target_completeness"] == []
+    assert domain["coverage"]["counts"]["internal_entities"] == 0
+    assert domain["artifact_paths"] == []
+    assert domain["decision"] == candidates.run_decision().record()
+    assert domain["publication"] == owner.record()
+    assert domain["diagnostics"] == list(owner.manifest_diagnostics())
+    domain["request"]["projects"].clear()
+    assert owner.domain_manifest()["request"]["projects"]
+
+
+def test_complete_domain_uses_the_same_admitted_semantic_result(tmp_path: Path) -> None:
+    candidates = complete_candidates_v3(tmp_path)
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    domain = owner.domain_manifest()
+    _validator("next-domain-manifest-v2.schema.json").validate(domain)
+    semantic = json.loads(candidates.artifacts()[0].wire_bytes())
+    assert domain["status"] == "complete"
+    assert "incomplete_kind" not in domain
+    assert domain["payload_available"] is True
+    assert domain["entity_count"] == domain["budget"]["actual"] == 4
+    assert domain["budget"]["outcome"] == "complete"
+    for key in (
+        "projects",
+        "coverage",
+        "source",
+        "request",
+        "compatibility_descriptor",
+        "semantic_compatibility_id",
+        "identity_versions",
+    ):
+        assert domain[key] == semantic[key]
+    assert domain["run_fingerprint"] == semantic["request"]["run_fingerprint"]
+    assert (
+        domain["run_fingerprint"]
+        == candidates.run_decision().record()["context"]["run_fingerprint"]
+    )
+    assert domain["toolchain"]["node"] == {
+        "status": "available",
+        "version": "22.10.0",
+        "failure_kind": None,
+    }
+    assert domain["toolchain"]["node_version"] == "22.10.0"
+    assert domain["artifact_paths"] == [
+        item.descriptor()["path"] for item in candidates.artifacts()
+    ]
+
+
+def test_rejected_core_domain_keeps_fingerprint_but_not_unvalidated_model(tmp_path: Path) -> None:
+    candidates = rejected_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    domain = owner.domain_manifest()
+    _validator("next-domain-manifest-v2.schema.json").validate(domain)
+    fingerprint = candidates.run_decision().record()["context"]["run_fingerprint"]
+    assert isinstance(fingerprint, str)
+    assert domain["run_fingerprint"] == domain["request"]["run_fingerprint"] == fingerprint
+    assert domain["toolchain"]["node_version"] == "22.10.0"
+    assert domain["entity_count"] is domain["budget"]["actual"] is None
+    assert domain["compatibility_descriptor"] is domain["identity_versions"] is None
+    assert domain["coverage"]["counts"]["internal_entities"] == 0
+    assert domain["coverage"]["target_completeness"] == []
+    assert domain["artifact_paths"] == []
+
+
+def test_timeout_domain_does_not_claim_spawn_failure_or_runtime_observation(tmp_path: Path) -> None:
+    candidates = observed_zero_capture_candidates_v3(tmp_path)
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    domain = owner.domain_manifest()
+    assert domain["toolchain"]["node"] == {
+        "status": "unavailable",
+        "version": None,
+        "failure_kind": "timeout",
+    }
+    assert domain["run_fingerprint"] is None
+    assert "run_fingerprint" not in domain["request"]
+
+
+@pytest.mark.parametrize(
+    "failure,node",
+    [
+        (
+            "unsupported_runtime",
+            {"status": "unavailable", "version": None, "failure_kind": "unsupported_version"},
+        ),
+        ("semantic_failure", {"status": "available", "version": "22.10.0", "failure_kind": None}),
+        (
+            "protocol_failure",
+            {"status": "unavailable", "version": None, "failure_kind": "process_failed"},
+        ),
+        (
+            "bootstrap_failure",
+            {"status": "unavailable", "version": None, "failure_kind": "process_failed"},
+        ),
+    ],
+)
+def test_domain_runtime_metadata_uses_observed_control_without_claiming_core_admission(
+    tmp_path: Path, failure: str, node: dict[str, Any]
+) -> None:
+    candidates = runtime_control_failure_candidates_v3(tmp_path, failure)
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    domain = owner.domain_manifest()
+    _validator("next-domain-manifest-v2.schema.json").validate(domain)
+    assert domain["toolchain"]["node"] == node
+    assert domain["toolchain"]["node_version"] == node["version"]
+    assert domain["run_fingerprint"] is domain["compatibility_descriptor"] is None
+    assert "run_fingerprint" not in domain["request"]
+    assert domain["coverage"]["target_completeness"] == []
+
+
+def test_domain_validation_rejects_a_schema_valid_invented_fingerprint(tmp_path: Path) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    validation = import_module("tests.contracts.next_final_publication_v2_validation")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    domain = owner.domain_manifest()
+    domain["run_fingerprint"] = "0" * 64
+    domain["request"]["run_fingerprint"] = "0" * 64
+    _validator("next-domain-manifest-v2.schema.json").validate(domain)
+    assert hasattr(validation, "validate_domain_manifest_v2"), (
+        "domain has no owner-bound validation"
+    )
+    with pytest.raises(ValueError, match="fingerprint"):
+        validation.validate_domain_manifest_v2(domain, owner)
+
+
+def test_domain_validation_rejects_schema_valid_drift_from_retained_context(tmp_path: Path) -> None:
+    candidates = stage_failed_candidates_v3(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    validation = import_module("tests.contracts.next_final_publication_v2_validation")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    original = owner.domain_manifest()
+    mutations = [
+        (("request", "upstream_depth"), 9),
+        (("config", "downstream_depth"), 9),
+        (("source", "fingerprint"), "0" * 64),
+        (("source", "file_count"), float(original["source"]["file_count"])),
+        (("run_context", "budget_resolved"), 99),
+        (("budget", "actual"), 0),
+        (("limits", "max_entities"), 99),
+        (("toolchain", "node", "failure_kind"), "timeout"),
+        (("trusted_environment", "sha256"), "0" * 64),
+        (("coverage", "counts", "internal_entities"), 1),
+        (("projects", 0, "file_ids"), []),
+        (("diagnostics",), original["diagnostics"] * 2),
+        (("domain_config_digest",), "0" * 64),
+        (("source_plan_digest",), "0" * 64),
+    ]
+    for path, replacement in mutations:
+        changed = json.loads(_literal_json(original))
+        parent = changed
+        for key in path[:-1]:
+            parent = parent[key]
+        parent[path[-1]] = replacement
+        errors = list(_validator("next-domain-manifest-v2.schema.json").iter_errors(changed))
+        assert not errors, (path, [list(error.path) for error in errors])
+        with pytest.raises(ValueError, match="domain"):
+            validation.validate_domain_manifest_v2(changed, owner)
+
+
+@pytest.mark.parametrize("case", ["partial", "source", "target", "export", "entity"])
+def test_domain_retains_only_same_core_coverage_and_entity_measurement(
+    tmp_path: Path, case: str
+) -> None:
+    if case in {"partial", "source"}:
+        candidates = source_failure_candidates_v3(
+            tmp_path, "parse_file", isolated=case == "partial", selector="next:semantic-json"
+        )
+    else:
+        factory = {
+            "target": target_failure_candidates_v3,
+            "export": export_failure_candidates_v3,
+            "entity": entity_budget_candidates_v3,
+        }[case]
+        candidates = factory(tmp_path, selector="next:semantic-json")
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    validation = import_module("tests.contracts.next_final_publication_v2_validation")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    domain = owner.domain_manifest()
+    core = candidates.run_decision().semantic_decision()
+    assert core is not None
+    model = core.transport_candidate().semantic_payload()["model"]
+    assert domain["projects"] == model["projects"]
+    assert domain["coverage"] == model["coverage"]
+    assert domain["status"] == "incomplete"
+    assert domain["incomplete_kind"] == (
+        "partial_safe" if case == "partial" else "payload_unavailable"
+    )
+    assert domain["payload_available"] is (case == "partial")
+    assert domain["entity_count"] == (3 if case == "partial" else None)
+    assert domain["budget"]["actual"] == (
+        3 if case == "partial" else 4 if case == "entity" else None
+    )
+    assert bool(domain["artifact_paths"]) is (case == "partial")
+    assert domain["run_fingerprint"] == domain["request"]["run_fingerprint"]
+    domain["coverage"]["counts"]["files"] += 1
+    with pytest.raises(ValueError, match="domain coverage"):
+        validation.validate_domain_manifest_v2(domain, owner)
+
+
+def test_stderr_overflow_downgrades_domain_without_rewriting_its_semantic_decision(
+    tmp_path: Path,
+) -> None:
+    candidates = partial_stderr_overflow_candidates_v3(tmp_path)
+    reference = import_module("tests.contracts.next_final_publication_v2_reference")
+    owner = reference.retain_final_publication_v2(
+        candidates, parent_configuration=parent_configuration_fixture_v2(candidates)
+    )
+    assert owner.record()["measurements"]["public_stderr"]["measured_bytes"] > 65_536
+    assert owner.record()["publication_outcome"] == "payload_unavailable"
+    domain = owner.domain_manifest()
+    assert domain["status"] == "incomplete" and domain["incomplete_kind"] == "payload_unavailable"
+    assert domain["payload_available"] is False
+    assert domain["entity_count"] is domain["budget"]["actual"] is None
+    assert domain["budget"]["outcome"] == "payload_unavailable"
+    assert domain["artifact_paths"] == []
+    assert domain["decision"]["outcome"] == "partial_safe"
+    assert domain["decision"]["core_measurement"]["actual"] == 4
+    assert len(domain["coverage"]["failed_files"]) == 80
+    assert [row["code"] for row in domain["diagnostics"]] == ["CSV-NEXT-LIMIT-003"]
+    assert domain["run_fingerprint"] == domain["decision"]["context"]["run_fingerprint"]
 
 
 def test_parent_configuration_retains_explicit_selections_without_inferring_defaults(

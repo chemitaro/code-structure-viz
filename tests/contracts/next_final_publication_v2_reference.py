@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from tests.contracts.next_final_publication_v2_validation import (
+    validate_domain_manifest_v2,
     validate_final_publication_v2,
     validate_parent_configuration_v2,
 )
@@ -27,7 +28,10 @@ from tests.contracts.next_reference_validation import (
     copy_selected_stdout,
     digest,
 )
-from tests.contracts.next_runtime_v2_reference import RetainedNextAnalysisContextV2
+from tests.contracts.next_runtime_v2_reference import (
+    RetainedNextAnalysisContextV2,
+    trusted_environment_manifest_v2,
+)
 from tests.contracts.next_semantic_core_v3_reference import (
     RejectedSemanticDecisionV3,
     ValidatedSemanticDecisionV3,
@@ -98,6 +102,170 @@ class RetainedFinalPublicationV2:
 
     def record(self) -> dict[str, Any]:
         return cast(dict[str, Any], json.loads(self._record_bytes))
+
+    def domain_manifest(self) -> dict[str, Any]:
+        value = _domain_manifest_v2(self)
+        validate_domain_manifest_v2(value, self)
+        return value
+
+
+def _domain_manifest_v2(owner: RetainedFinalPublicationV2) -> dict[str, Any]:
+    run = owner.candidates().run_decision()
+    runtime = run.runtime_result()
+    frame = runtime.request_frame()
+    request = frame.record()
+    context = frame.analysis_context()
+    config, run_context = context.domain_config(), context.run_context()
+    seal = runtime.source_seal()
+    trusted = trusted_environment_manifest_v2(runtime.execution_assets())
+    public_request = {
+        "schema": "code-structure-viz.next-snapshot-request/v1",
+        **{
+            key: config[key]
+            for key in (
+                "projects",
+                "targets",
+                "upstream_depth",
+                "downstream_depth",
+                "formats",
+                "limits",
+                "trusted_environment_digest",
+                "source_plan",
+                "source_plan_digest",
+                "domain_config_digest",
+            )
+        },
+    }
+    counts = dict.fromkeys(
+        (
+            "modules",
+            "components",
+            "members",
+            "relations",
+            "facts",
+            "internal_entities",
+            "excluded",
+            "failed",
+        ),
+        0,
+    )
+    counts.update(projects=len(request["projects"]), files=len(request["files"]))
+    counts.update(
+        discovered=counts["projects"] + counts["files"],
+        published=counts["projects"] + counts["files"],
+    )
+    domain: dict[str, Any] = {
+        "schema": "code-structure-viz.next-domain-manifest/v2",
+        "domain": "next",
+        "request_independent": False,
+        "status": "incomplete",
+        "incomplete_kind": "payload_unavailable",
+        "payload_available": False,
+        "entity_count": None,
+        "budget": {
+            "name": "max_entities",
+            "requested": run_context["budget_requested"],
+            "resolved": run_context["budget_resolved"],
+            "actual": None,
+            "source": run_context["budget_source"],
+            "outcome": "payload_unavailable",
+        },
+        "run_context": run_context,
+        "semantic_compatibility_id": None,
+        "compatibility_descriptor": None,
+        "identity_versions": None,
+        "source_plan_digest": seal.plan_digest,
+        "domain_config_digest": config["domain_config_digest"],
+        "run_fingerprint": None,
+        "source": {
+            "schema": seal.source_view.schema,
+            "kind": seal.source_view.kind,
+            "head_commit": seal.source_view.head_commit,
+            "fingerprint": seal.source_view_fingerprint,
+            "file_count": len(seal.source_view.files),
+        },
+        "request": public_request,
+        "config": config,
+        "projects": request["projects"],
+        "targets": config["targets"],
+        "formats": run_context["requested_formats"],
+        "toolchain": {
+            "node": {"status": "unavailable", "version": None, "failure_kind": "spawn_failed"},
+            "node_version": None,
+            "typescript_version": trusted["typescript_version"],
+            "adapter_version": request["adapter_version"],
+            "protocol": request["protocol"],
+        },
+        "trusted_environment": trusted["environment_descriptor"],
+        "limits": request["limits"],
+        "coverage": {
+            "counts": counts,
+            "failed_files": [],
+            "affected_ids": [],
+            "taint_frontier": [],
+            "opaque_reason_counts": {},
+            "unknown_relation_count": 0,
+            "correlation_losses": [],
+            "non_component_value_export_count": 0,
+            "type_only_export_count": 0,
+            "target_completeness": [],
+        },
+        "artifact_paths": [],
+        "diagnostics": list(owner.manifest_diagnostics()),
+        "decision": run.record(),
+        "publication": owner.record(),
+    }
+    core = run.semantic_decision()
+    domain["toolchain"]["node"]["failure_kind"] = {
+        "stage_failed": "spawn_failed",
+        "spawn_failed": "spawn_failed",
+        "timeout": "timeout",
+    }.get(runtime.observation()["terminal_cause"], "process_failed")
+    control = runtime.control()
+    node_observation = control["runtime"] if control is not None else None
+    if node_observation is not None:
+        if node_observation["eligibility"] == "supported":
+            node_version = node_observation["version"]
+            domain["toolchain"].update(
+                node={"status": "available", "version": node_version, "failure_kind": None},
+                node_version=node_version,
+            )
+        else:
+            domain["toolchain"]["node"]["failure_kind"] = "unsupported_version"
+    fingerprint = run.record()["context"]["run_fingerprint"]
+    if fingerprint is not None:
+        domain["run_fingerprint"] = fingerprint
+        domain["request"]["run_fingerprint"] = fingerprint
+    if type(core) is ValidatedSemanticDecisionV3:
+        payload = core.transport_candidate().semantic_payload()
+        gate = core.gate()
+        compatibility = core.compatibility_descriptor()
+        domain.update(
+            status=run.record()["status"],
+            payload_available=gate["payload_available"],
+            entity_count=gate["actual"] if gate["payload_available"] else None,
+            compatibility_descriptor=compatibility,
+            semantic_compatibility_id=compatibility["compatibility_id"],
+            identity_versions=payload["identity_versions"],
+            projects=payload["model"]["projects"],
+            coverage=payload["model"]["coverage"],
+            artifact_paths=[row["descriptor"]["path"] for row in owner.record()["artifacts"]],
+        )
+        domain["budget"].update(actual=gate["actual"], outcome=gate["outcome"])
+        if domain["status"] == "complete":
+            del domain["incomplete_kind"]
+        else:
+            domain["incomplete_kind"] = gate["outcome"]
+    if owner.record()["publication_outcome"] == "payload_unavailable":
+        domain.update(
+            status="incomplete",
+            incomplete_kind="payload_unavailable",
+            payload_available=False,
+            entity_count=None,
+            artifact_paths=[],
+        )
+        domain["budget"].update(actual=None, outcome="payload_unavailable")
+    return domain
 
 
 def retain_final_publication_v2(

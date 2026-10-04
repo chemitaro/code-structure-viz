@@ -81,6 +81,171 @@ def validate_parent_configuration_v2(
             raise ValueError("parent selected value differs from the analysis context")
 
 
+def validate_domain_manifest_v2(
+    value: Mapping[str, Any],
+    owner: RetainedFinalPublicationV2,
+) -> None:
+    from tests.contracts.next_final_publication_v2_reference import RetainedFinalPublicationV2
+
+    if type(owner) is not RetainedFinalPublicationV2:
+        raise TypeError("domain validation requires a nominal final publication owner")
+    validate_final_publication_v2(owner.record(), owner, candidates=owner.candidates())
+    _validate_schema("next-domain-manifest-v2", value)
+    run = owner.candidates().run_decision()
+    fingerprint = run.record()["context"]["run_fingerprint"]
+    if not _same(value["run_fingerprint"], fingerprint) or (
+        "run_fingerprint" in value["request"]
+        if fingerprint is None
+        else value["request"].get("run_fingerprint") != fingerprint
+    ):
+        raise ValueError("domain/request fingerprint differs from the same run")
+    from tests.contracts.next_runtime_v2_reference import trusted_environment_manifest_v2
+
+    runtime = run.runtime_result()
+    request = runtime.request_frame().record()
+    context = runtime.request_frame().analysis_context()
+    config, run_context = context.domain_config(), context.run_context()
+    seal = runtime.source_seal()
+    trusted = trusted_environment_manifest_v2(runtime.execution_assets())
+    for key in (
+        "projects",
+        "targets",
+        "upstream_depth",
+        "downstream_depth",
+        "formats",
+        "limits",
+        "trusted_environment_digest",
+        "source_plan",
+        "source_plan_digest",
+        "domain_config_digest",
+    ):
+        if not _same(value["request"][key], config[key]):
+            raise ValueError("domain request differs from the retained configuration")
+    expected = {
+        "config": config,
+        "run_context": run_context,
+        "source_plan_digest": seal.plan_digest,
+        "domain_config_digest": config["domain_config_digest"],
+        "targets": config["targets"],
+        "formats": run_context["requested_formats"],
+        "limits": request["limits"],
+        "trusted_environment": trusted["environment_descriptor"],
+        "decision": run.record(),
+        "publication": owner.record(),
+        "diagnostics": list(owner.manifest_diagnostics()),
+        "source": {
+            "schema": seal.source_view.schema,
+            "kind": seal.source_view.kind,
+            "head_commit": seal.source_view.head_commit,
+            "fingerprint": seal.source_view_fingerprint,
+            "file_count": len(seal.source_view.files),
+        },
+    }
+    core = run.semantic_decision()
+    if type(core) is ValidatedSemanticDecisionV3:
+        gate = core.gate()
+        payload = core.transport_candidate().semantic_payload()
+        compatibility = core.compatibility_descriptor()
+        expected.update(
+            projects=payload["model"]["projects"],
+            coverage=payload["model"]["coverage"],
+            compatibility_descriptor=compatibility,
+            semantic_compatibility_id=compatibility["compatibility_id"],
+            identity_versions=payload["identity_versions"],
+        )
+        actual = gate["actual"]
+    else:
+        actual = None
+        counts = {
+            name: 0
+            for name in (
+                "projects",
+                "files",
+                "modules",
+                "components",
+                "members",
+                "relations",
+                "facts",
+                "internal_entities",
+                "discovered",
+                "published",
+                "excluded",
+                "failed",
+            )
+        }
+        counts["projects"], counts["files"] = len(request["projects"]), len(request["files"])
+        counts["discovered"] = counts["published"] = counts["projects"] + counts["files"]
+        expected.update(
+            projects=request["projects"],
+            compatibility_descriptor=None,
+            semantic_compatibility_id=None,
+            identity_versions=None,
+            coverage={
+                "counts": counts,
+                "failed_files": [],
+                "affected_ids": [],
+                "taint_frontier": [],
+                "opaque_reason_counts": {},
+                "unknown_relation_count": 0,
+                "correlation_losses": [],
+                "non_component_value_export_count": 0,
+                "type_only_export_count": 0,
+                "target_completeness": [],
+            },
+        )
+    outcome = run.record()["outcome"]
+    available = run.record()["payload_available"]
+    measurements = owner.record()["measurements"]
+    if any(
+        row is not None and row["allowed"] is False
+        for name in ("adapter_stdout", "adapter_stderr", "public_stderr")
+        for row in (measurements[name],)
+    ):
+        outcome, available, actual = "payload_unavailable", False, None
+    expected.update(
+        status="complete" if outcome == "complete" else "incomplete",
+        payload_available=available,
+        entity_count=actual if available else None,
+        budget={
+            "name": "max_entities",
+            "requested": run_context["budget_requested"],
+            "resolved": run_context["budget_resolved"],
+            "actual": actual,
+            "source": run_context["budget_source"],
+            "outcome": outcome,
+        },
+        artifact_paths=[row["descriptor"]["path"] for row in owner.record()["artifacts"]],
+    )
+    if value.get("incomplete_kind") != (None if outcome == "complete" else outcome):
+        raise ValueError("domain incomplete kind differs from its outcome")
+    control = runtime.control()
+    node = control["runtime"] if control is not None else None
+    if node is not None and node["eligibility"] == "supported":
+        public_node = {"status": "available", "version": node["version"], "failure_kind": None}
+    else:
+        cause = runtime.observation()["terminal_cause"]
+        failure = (
+            "unsupported_version"
+            if node is not None
+            else "timeout"
+            if cause == "timeout"
+            else "spawn_failed"
+            if cause in {"stage_failed", "spawn_failed"}
+            else "process_failed"
+        )
+        public_node = {"status": "unavailable", "version": None, "failure_kind": failure}
+    expected["toolchain"] = {
+        "node": public_node,
+        "node_version": public_node["version"],
+        "typescript_version": trusted["typescript_version"],
+        "adapter_version": request["adapter_version"],
+        "protocol": request["protocol"],
+    }
+    for name, row in expected.items():
+        if not _same(value.get(name), row):
+            raise ValueError(f"domain {name} differs from its retained authority")
+
+
 def validate_final_publication_v2(
     value: Mapping[str, Any],
     owner: RetainedFinalPublicationV2,

@@ -30,6 +30,8 @@ SI-06では原author briefを同会話で回収し、独立指摘分析とactual
 
 ## Verification
 
+- domain投影の参照実装: 既存final ownerに`domain_manifest()`と独立照合を追加しました。別owner/cache/schema/hashやproduction解析器は追加していません。stage/timeoutのnull指紋とrequest field省略、Core拒否の指紋保持・未検証model非公開、complete/partial-safe/SOURCE/TARGET/EXPORT/entityの同一Core投影、観測済みNode情報を確認しました。schema-validな設定・件数・診断等の改変も拒否します。実source/proofを持つ80件の局所parse failureでconfigured64KiBを超える診断を生成し、公開domainだけを利用不可へ変更、元Coreのpartial-safe/actual=4/coverage/指紋を保持するRed→Greenを確認しました。元36914の関連回帰は18 passed/60 deselected/394.88s、Ruff/format256/mypy214/diff-checkはpass。既存artifact bytes/sealの確認を含みますが、root/summary/all-selector、configured16MiBを含む全SI-06 gate、累積Strict Code Review、製品CLIの完了を意味しません。
+
 - 親設定入力の最小接続: 既存final reference/validator内へimmutableな選択入力を追加し、既存factoryの必須引数として同じanalysis contextへ結合しました。新module/public schema/hash/resolverは追加していません。値の不一致、選択元の不正・欠落、同値別context、nominal owner、入力不足を順次Red→Greenで確認。元74564はfinal/public familyの85 passed/2 deselected/398.00sで、configured stderr64KiB exact/+1・既存seal KAT・cache/native/privacyも含みます。除外2件は16MiBの高コスト境界で、全SI-06の必須gateでは後日必ず実行します。Ruff/format256/mypy214、SpecDock10、diff-checkはpass。現段階は入力保持までで、root/domain/summary投影、全selector、全required suite、累積Strict Code Reviewは未完了です。
 
 - root限定訂正の最初のTDD: 元96972でactual stage failureの`run.fingerprint=null`が旧string制約に拒否されるRed（1 failed/20.98s）。続くfixtureの公開Node failure名を既存`spawn_failed`へ訂正し、元7662は同test 1 passed/19.61s。Next snapshotだけnullable、その他はnonnullの最小schema変更後、元8014はpublic family25 passed/20.77s（全Python/SQLAlchemy goldenの旧v1・新v2でnull拒否を追加）。Ruff/format256/mypy214、SpecDock10、diff-checkもpass。これはschema境界だけで、親設定・domain/root final owner・全SI-06は未完了です。仕様レビューの原logは[lossless gzip](artifacts/20261004t041409z--si06-root-correction-oracle.log.gz)へ保存しました。
